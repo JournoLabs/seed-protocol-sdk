@@ -38,6 +38,20 @@ import { AmbiguousModelError } from '@/Model/errors'
 
 const logger = debug('seedSdk:helpers:db')
 
+/**
+ * Posts one message and closes the channel. A message already posted is still delivered after its
+ * sender closes, and an open BroadcastChannel keeps a Node process alive (each was a MessagePort
+ * handle that stopped scripts exiting).
+ */
+const postBroadcast = (channelName: string, message: unknown): void => {
+  const channel = new BroadcastChannel(channelName)
+  try {
+    channel.postMessage(message)
+  } finally {
+    channel.close()
+  }
+}
+
 type PropertyStorageColumns = Pick<NewPropertyRecord, 'storageType' | 'localStorageDir' | 'filenameSuffix'>
 
 /**
@@ -885,7 +899,7 @@ export const addSchemaToDb = async (
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       await new Promise((r) => setTimeout(r, 10))
-      new BroadcastChannel('seed-schemas-invalidate').postMessage({})
+      postBroadcast('seed-schemas-invalidate', {})
     } catch (_) {}
   }
 
@@ -2119,7 +2133,7 @@ export async function writeModelToDb(
         await new Promise((r) => setTimeout(r, 10))
         const row = schemaCheck[0]
         try {
-          new BroadcastChannel('seed-models-invalidate').postMessage({
+          postBroadcast('seed-models-invalidate', {
             schemaName: row.name ?? undefined,
             schemaFileId: row.schemaFileId ?? undefined,
           })

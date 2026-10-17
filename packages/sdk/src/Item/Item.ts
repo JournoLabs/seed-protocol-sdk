@@ -440,16 +440,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
-  private static releaseItemInstanceCacheHold(instance: Item<any>): void {
+  /** Drops one holder's reference. Returns true while other holders still have the instance. */
+  private static releaseItemInstanceCacheHold(instance: Item<any>): boolean {
     const keys = this.collectInstanceCacheKeysForInstance(instance)
-    if (keys.length === 0) return
+    if (keys.length === 0) return false
     const entry = this.instanceCache.get(keys[0])!
     entry.refCount -= 1
     if (entry.refCount <= 0) {
       for (const k of keys) {
         this.instanceCache.delete(k)
       }
+      return false
     }
+    return true
   }
 
   /**
@@ -2323,9 +2326,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
+  /**
+   * Releases this holder's reference. Item.create, Item.find and createById return the same cached
+   * instance to every caller, so the instance is stopped only when the last holder unloads it.
+   */
   unload(): void {
     try {
-      Item.releaseItemInstanceCacheHold(this)
+      // Others (e.g. another hook showing the same item) still use it: keep it running.
+      if (Item.releaseItemInstanceCacheHold(this)) return
       unloadEntity(this, {
         getCacheKeys: () => [],
         caches: [],

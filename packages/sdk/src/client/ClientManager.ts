@@ -47,21 +47,26 @@ type ModelDefObj = {
   }
 }
 
-export const clientManager = createActor(clientManagerMachine, {
-  input: {
-    isInitialized: false,
-    addressesSet: false,
-    isSaving: false,
-    syncFromEasOnAddressChange: false,
-  }
-})
+const createClientManager = () => {
+  const actor = createActor(clientManagerMachine, {
+    input: {
+      isInitialized: false,
+      addressesSet: false,
+      isSaving: false,
+      syncFromEasOnAddressChange: false,
+    }
+  })
+  const actorSubscription = actor.subscribe(( snapshot ) => {
+    logger('ClientManager snapshot.value:', snapshot.value)
+    logger('ClientManager snapshot.context.isInitialized:', snapshot.context.isInitialized)
+  })
+  actor.start()
+  return { actor, actorSubscription }
+}
 
-const subscription         = clientManager.subscribe(( snapshot ) => {
-  logger('ClientManager snapshot.value:', snapshot.value)
-  logger('ClientManager snapshot.context.isInitialized:', snapshot.context.isInitialized)
-})
-
-clientManager.start()
+// Replaced when init runs after stop(): an xstate actor can't be started again once stopped.
+let { actor: clientManager, actorSubscription: subscription } = createClientManager()
+export { clientManager }
 
 /** Config of the init that is running or has succeeded; cleared when init fails or the client stops. */
 let activeInitConfig: SeedConstructorOptions['config'] | undefined
@@ -84,19 +89,14 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
   const isStopped = snapshot.status === 'stopped'
   
   if (isStopped) {
-    logger('Client manager was stopped, restarting...')
-    clientManager.start()
-    // Wait for the actor to be ready
-    try {
-      await waitFor(clientManager, (snapshot) => snapshot.status !== 'stopped', { timeout: 1000 })
-    } catch (e) {
-      logger('Timeout waiting for actor to restart, continuing anyway...')
-    }
+    // stop() (or a failed test) stopped it: start over with a new actor and a clean context.
+    logger('Client manager was stopped, creating a new one')
+    ;({ actor: clientManager, actorSubscription: subscription } = createClientManager())
   }
-  
+
   // Clear any stale context from previous failed initializations
   // This ensures we start with a clean slate before the new init updates it
-  if (currentState !== 'uninitialized') {
+  if (!isStopped && currentState !== 'uninitialized') {
     logger(`Client manager is in state ${currentState}, clearing stale context before re-init...`)
     clientManager.send({ 
       type: 'updateContext', 
@@ -155,7 +155,9 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
   registerSeedQueryLocalSource({ force: true })
 }, () => {
   const snapshot = clientManager.getSnapshot()
+  // A stopped client keeps its last state and context: init must run again, not be skipped.
   return (
+    snapshot.status === 'active' &&
     snapshot.value === ClientManagerState.IDLE &&
     snapshot.context.isInitialized === true &&
     !snapshot.context.initError
@@ -166,7 +168,8 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
 // ES modules cache exports, ensuring all imports get the same instance
 const clientInstance = {
   isInitialized: () => {
-    return clientManager.getSnapshot().context.isInitialized
+    const snapshot = clientManager.getSnapshot()
+    return snapshot.status === 'active' && snapshot.context.isInitialized
   },
   getService: () => {
     // ensureInitialized();

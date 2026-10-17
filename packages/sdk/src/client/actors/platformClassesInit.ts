@@ -130,12 +130,10 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     if (isNode() && !isBrowser() && normalizedFilesDir) {
       const path = (await import('node:path')).default
       const fs = (await import('node:fs')).default
+      // Not created here: prepareDb creates filesDir (under .seed when it's relative), so an absolute
+      // filesDir works from a read-only working directory (e.g. a packaged Electron app's cwd `/`).
       const dotSeedDir = BasePathResolver.getDotSeedDir()
-      
-      // Ensure .seed directory exists
-      if (!fs.existsSync(dotSeedDir)) {
-        fs.mkdirSync(dotSeedDir, { recursive: true })
-      }
+
       
       // Check if filesDir is a browser OPFS-style path (absolute path starting with '/'
       // that is a simple single-level path like '/app-files', not a real filesystem path)
