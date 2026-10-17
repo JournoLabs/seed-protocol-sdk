@@ -82,14 +82,15 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       throw new Error('Config must include endpoints with filePaths and files')
     }
 
-    // Prefer the condition-resolved factory when available; fall back to explicit
-    // platform imports so source/vitest resolution stays reliable.
     const { configurePlatform } = await import('../../platform/configurePlatform')
     if (isBrowser()) {
       const { createPlatformServices } = await import('../../platform/index.browser')
       configurePlatform(createPlatformServices())
     } else if (isNode()) {
-      const { createPlatformServices } = await import('../../platform/index.node')
+      // `#seed-node-platform` (package.json `imports`) maps to the browser platform under
+      // the `browser` condition, so browser bundles never contain the Node platform
+      // (libsql, node:fs). A relative import here would ship it to every browser app.
+      const { createPlatformServices } = await import('#seed-node-platform')
       configurePlatform(createPlatformServices())
     } else {
       throw new Error(
@@ -128,8 +129,10 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     // jsdom (and any env with both Node + window) is "browser" for SDK: PathResolver is OPFS/virtual.
     // Do not run real fs against those paths (e.g. mkdir '/.seed').
     if (isNode() && !isBrowser() && normalizedFilesDir) {
-      const path = (await import('node:path')).default
-      const fs = (await import('node:fs')).default
+      // Bare specifiers, not `node:`: browser bundles still see these imports, and webpack
+      // fails on the `node:` scheme where it resolves bare `fs` / `path` to the app's aliases.
+      const path = (await import('path')).default
+      const fs = (await import('fs')).default
       const dotSeedDir = BasePathResolver.getDotSeedDir()
       
       // Ensure .seed directory exists

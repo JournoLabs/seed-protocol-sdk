@@ -69,6 +69,11 @@ const workspaceSourceAliases = (platform) => {
     exact('@seedprotocol/query/node', 'query/src/node/index.ts'),
     exact('@seedprotocol/query', platform === 'browser' ? 'query/src/index.ts' : 'query/src/index.node.ts'),
     exact('@seedprotocol/react', 'react/src/index.ts'),
+    // The SDK's package.json `imports` entry points at dist; tests load the matching source.
+    {
+      find: /^#seed-node-platform$/,
+      replacement: src(platform === 'browser' ? 'sdk/src/platform/index.browser.ts' : 'sdk/src/platform/index.node.ts'),
+    },
   ]
 }
 

@@ -152,6 +152,12 @@
     "./node-eas-lodash": "./src/node/easLodashRegister.js",
     "./package.json": "./package.json"
   },
+  "imports": {
+    "#seed-node-platform": {
+      "browser": "./dist/platform.browser.js",
+      "default": "./dist/platform.node.js"
+    }
+  },
   "devDependencies": {
     "@rollup/plugin-alias": "^6.0.0",
     "@rollup/plugin-commonjs": "^29.0.0",
