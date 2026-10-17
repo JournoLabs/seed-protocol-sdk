@@ -485,10 +485,7 @@ function expandRelationProperties(ctx: AssembleContext, expandRelations: boolean
 /** A record still being assembled (hydration fills in its data); read-only once returned. */
 type AssembledRecord = Omit<SeedRecord, 'data'> & { data: Record<string, unknown> }
 
-function toSeedRecords(
-  ctx: AssembleContext,
-  schemaName: string,
-): AssembledRecord[] {
+function toSeedRecords(ctx: AssembleContext, schemaName?: string): AssembledRecord[] {
   return requestedItems(ctx).map(([seedUid, item]) => {
     const versionUid = ctx.latestVersionUidsBySeedUid.get(seedUid) ?? ''
     if (versionUid) {
@@ -505,7 +502,7 @@ function toSeedRecords(
           : undefined
     return {
       seedUid,
-      schemaName,
+      schemaName: schemaName ?? ctx.seedUidToModelType.get(seedUid) ?? 'unknown',
       attester,
       timeCreated,
       versionUid,
@@ -533,6 +530,13 @@ function dependenciesOf(ctx: AssembleContext, seedUid: string): SeedDependencies
   return { refUIDs: [...seedUids, ...headVersionUids], ids: seedUids }
 }
 
+export type AssembleRequest = {
+  /** The schema name every record gets. Default: each seed's own (its first schema name). */
+  schemaName?: string
+  /** Versions of the seeds already fetched with `includeRevoked: true` (see getSeed). */
+  versions?: AttestationLike[]
+}
+
 /**
  * Like assembleSeeds, plus each record's dependencies by seedUid (see SeedDependencies).
  */
@@ -544,6 +548,23 @@ export async function assembleSeedsWithDependencies(
   /** Versions of `seeds` already fetched with `includeRevoked: true` (see getSeed). */
   prefetched?: { versions?: AttestationLike[] },
 ): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
+  return assembleSeedRecords(seeds, options, dataSource, {
+    schemaName,
+    versions: prefetched?.versions,
+  })
+}
+
+/**
+ * Records for `seeds`, in order, which may be of different schemas, with each record's
+ * dependencies by seedUid. One set of requests for all of them: seeds and versions, properties,
+ * related seeds and their versions, related properties, then storage bodies.
+ */
+export async function assembleSeedRecords(
+  seeds: AttestationLike[],
+  options: AssembleOptions | undefined,
+  dataSource: QueryDataSource,
+  request: AssembleRequest = {},
+): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
   const expandRelations = options?.expandRelations !== false
   const hydrateStorage = options?.hydrateStorage !== false
 
@@ -552,7 +573,7 @@ export async function assembleSeedsWithDependencies(
 
   await processSeeds(ctx, seeds, dataSource, {
     dropSeedsWithOnlyRevokedVersions: true,
-    versions: prefetched?.versions,
+    versions: request.versions,
   })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
@@ -571,7 +592,7 @@ export async function assembleSeedsWithDependencies(
   resolveRelationPropertiesToUrls(ctx)
   expandRelationProperties(ctx, expandRelations)
 
-  const records = toSeedRecords(ctx, schemaName)
+  const records = toSeedRecords(ctx, request.schemaName)
 
   if (hydrateStorage) {
     await hydrateArweaveRichTextInItems(

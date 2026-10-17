@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assembleSeedsWithDependencies } from '../src/assembleSeeds'
+import { assembleSeedRecords, assembleSeedsWithDependencies } from '../src/assembleSeeds'
 import type { QueryDataSource } from '../src/source/types'
 import type { AttestationLike } from '../src/types'
 
@@ -8,13 +8,16 @@ const A_V = '0x' + 'b'.repeat(64)
 const B = '0x' + 'c'.repeat(64)
 const B_V = '0x' + 'd'.repeat(64)
 
-const seed = (id: string): AttestationLike => ({
+const C = '0x' + 'e'.repeat(64)
+const C_V = '0x' + 'f'.repeat(64)
+
+const seed = (id: string, schemaName = 'post'): AttestationLike => ({
   id,
   refUID: '0x0',
-  schemaId: '0xseedschema',
+  schemaId: `0xseedschema-${schemaName}`,
   timeCreated: 10,
   decodedDataJson: '',
-  schema: { schemaNames: [{ name: 'post' }] },
+  schema: { schemaNames: [{ name: schemaName }] },
 })
 
 const version = (id: string, seedUid: string): AttestationLike => ({
@@ -33,17 +36,20 @@ const prop = (id: string, versionUid: string, name: string, value: unknown, type
   decodedDataJson: JSON.stringify([{ value: { name, value, type } }]),
 })
 
-/** Post A relates to post B: same schema, B not requested. */
+/** Post A relates to post B (same schema); author C relates to post B. */
 function makeSource(): QueryDataSource {
   const seeds = new Map([
     [A, seed(A)],
     [B, seed(B)],
+    [C, seed(C, 'author')],
   ])
-  const versions = [version(A_V, A), version(B_V, B)]
+  const versions = [version(A_V, A), version(B_V, B), version(C_V, C)]
   const props = [
     prop('0xp1', A_V, 'title', 'A'),
     prop('0xp2', A_V, 'related_post_id', B, 'bytes32'),
     prop('0xp3', B_V, 'title', 'B'),
+    prop('0xp4', C_V, 'name', 'Ada'),
+    prop('0xp5', C_V, 'featured_post_id', B, 'bytes32'),
   ]
   return {
     kind: 'remote',
@@ -82,5 +88,22 @@ describe('a related seed with the requested schema', () => {
       makeSource(),
     )
     expect(records.map((r) => r.seedUid)).toEqual([A, B])
+  })
+})
+
+describe('assembleSeedRecords', () => {
+  it('assembles seeds of different schemas together, each with its own schema name', async () => {
+    const { records, dependencies } = await assembleSeedRecords(
+      [seed(C, 'author'), seed(A)],
+      { hydrateStorage: false },
+      makeSource(),
+    )
+    expect(records.map((r) => [r.seedUid, r.schemaName])).toEqual([
+      [C, 'author'],
+      [A, 'post'],
+    ])
+    expect((records[0]!.data.featured_post as Record<string, unknown>).title).toBe('B')
+    expect((records[1]!.data.related_post as Record<string, unknown>).title).toBe('B')
+    expect(dependencies.get(C)!.ids).toEqual([C, B])
   })
 })
