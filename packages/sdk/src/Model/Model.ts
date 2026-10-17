@@ -221,6 +221,29 @@ export class Model {
   }
 
   /**
+   * Gives an idle, valid model the row someone else wrote for its id, the way its own write would
+   * (writeSuccess with the row's id, which goes on to create its properties from their rows).
+   * Returns false when there is no such row, so the model writes it.
+   */
+  private static async adoptPersistedRow(instance: Model): Promise<boolean> {
+    const snapshot = instance.getService().getSnapshot()
+    if (snapshot.value !== 'idle' || snapshot.context._validationErrors?.length || !snapshot.context.id) {
+      return false
+    }
+    const db = BaseDb.getAppDb()
+    if (!db) return false
+    const [row] = await db
+      .select({ id: modelsTable.id })
+      .from(modelsTable)
+      .where(eq(modelsTable.schemaFileId, snapshot.context.id))
+      .limit(1)
+    if (!row || isActorStopped(instance.getService())) return false
+    logger(`Model "${snapshot.context.modelName}" adopts model row ${row.id} written by its schema import`)
+    instance.getService().send({ type: 'writeSuccess', output: { _dbId: row.id } })
+    return true
+  }
+
+  /**
    * True when a name-cached instance belongs to a different model than the requested modelFileId.
    * A schema re-imported under the same name can give its models new ids while the previous
    * instances are still cached by name; Model.create must not hand those back for the new id.
@@ -337,6 +360,8 @@ export class Model {
       properties?: { [propertyName: string]: any }
       registerWithSchema?: boolean
       waitForReady: false
+      /** @internal Schema import: see the implementation signature */
+      persistedBy?: Promise<unknown>
     },
   ): Model
   static create(
@@ -359,6 +384,12 @@ export class Model {
       modelFileId?: string // Pre-existing model file ID (preferred)
       properties?: { [propertyName: string]: any }
       registerWithSchema?: boolean
+      /**
+       * @internal Settles once the caller has written this model's rows itself (schema import runs
+       * addModelsToDb). A new instance waits for it and adopts its model row instead of writing; with no
+       * row for its id by then, it writes as usual.
+       */
+      persistedBy?: Promise<unknown>
     } & CreateWaitOptions,
   ): Model | Promise<Model> {
     if (!modelName) {
@@ -784,9 +815,16 @@ export class Model {
             })
           })
           
+          // The caller writes this model's rows; wait for that so two writers don't write them at once
+          if (options?.persistedBy) {
+            await options.persistedBy.catch(() => {})
+          }
           // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
           if (isActorStopped(proxiedInstance._service)) {
             failPropertyCreation('the model was unloaded')
+            return
+          }
+          if (options?.persistedBy && (await Model.adoptPersistedRow(proxiedInstance))) {
             return
           }
           // Only write if validation passed (model is in idle state, not error)

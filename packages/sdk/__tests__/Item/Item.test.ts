@@ -1100,16 +1100,12 @@ testDescribe('Item Integration Tests', () => {
       // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
       // a deleted DB id (no properties) while the other schema's Model is still cached.
       // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
-      // Let both Models' own writes finish first, or one can fail or recreate rows after the deletes.
-      // Check writeStatus, not the state: `success` returns to `idle` after 2s, so on a slow run the
-      // first model's write has often finished before we look, and waiting for the state never ends.
+      // Let both Models finish creating their properties first (they adopt the rows the import wrote),
+      // or one can recreate rows after the deletes.
       for (const m of [otherModel, model]) {
-        const writeProcess = (
-          await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess, { timeout: WAIT_TIMEOUT_MS })
-        ).context.writeProcess!
         await waitFor(
-          writeProcess,
-          (snapshot) => snapshot.context.writeStatus === 'success' || snapshot.context.writeStatus === 'error',
+          m.getService(),
+          (snapshot) => snapshot.value === 'idle' && !snapshot.context._pendingPropertyDefinitions,
           { timeout: WAIT_TIMEOUT_MS },
         )
       }
