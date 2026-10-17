@@ -2,7 +2,7 @@
 
 Use `seedVitePlugin()` in Vite/Electron renderer configs so browser apps can import `@seedprotocol/sdk` without per-app CJS/ESM workarounds.
 
-`@seedprotocol/sdk/vite` re-exports this package for backward compatibility.
+`@seedprotocol/sdk/vite` re-exports this package for backward compatibility. The SDK lists this package as an optional peer, so it must be installed in your app either way.
 
 ## Quick start
 

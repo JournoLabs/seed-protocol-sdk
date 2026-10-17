@@ -11,7 +11,12 @@ export default defineConfig({
     },
     target: 'node20',
     rollupOptions: {
-      external: (id) => !id.startsWith('.') && !id.startsWith('/') && !id.startsWith('\0'),
+      // Bare imports stay external, except the private bundler-core, which is inlined.
+      external: (id) =>
+        id !== '@seedprotocol/bundler-core' &&
+        !id.startsWith('.') &&
+        !id.startsWith('/') &&
+        !id.startsWith('\0'),
     },
     sourcemap: true,
   },

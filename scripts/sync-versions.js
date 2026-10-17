@@ -14,7 +14,7 @@ const rootDir = join(__dirname, '..')
 
 /**
  * Supported packages synced to the SDK version. Experimental packages
- * (cli, webpack, ghost) are private and intentionally excluded.
+ * (cli, ghost) are private and intentionally excluded.
  */
 const SYNC_PACKAGES = [
   'sdk',
@@ -28,6 +28,9 @@ const SYNC_PACKAGES = [
   'arweave',
   'vite',
   'mapping',
+  'next',
+  // Private, but published manifests list it in devDependencies (workspace refs become this version).
+  'bundler-core',
 ]
 
 /**

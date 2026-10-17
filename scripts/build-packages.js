@@ -18,6 +18,8 @@ import { fileURLToPath } from 'url'
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const BUILD_ORDER = [
+  // Inlined into vite and next at build time, so it builds first.
+  'bundler-core',
   'eas',
   'arweave',
   'query',
@@ -25,6 +27,7 @@ const BUILD_ORDER = [
   'feed-hyper',
   'gateway-hyper',
   'vite',
+  'next',
   'sdk',
   'react',
   'publish',

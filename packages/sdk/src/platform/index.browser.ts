@@ -17,5 +17,13 @@ export function createPlatformServices(): PlatformServices {
   }
 }
 
+/**
+ * The browser keeps filesDir as given (an OPFS path). Exported to match the Node platform:
+ * bundlers substitute this module for `#seed-node-platform` in browser builds.
+ */
+export function resolveFilesDir(filesDir: string): string {
+  return filesDir
+}
+
 export { configurePlatform } from './configurePlatform'
 export type { PlatformServices } from './types'
