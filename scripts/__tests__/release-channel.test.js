@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import {
   channelIdForBranch,
   cleanBranchName,
@@ -10,6 +11,7 @@ import {
   isValidSemver,
   nextPatch,
   previousReleasedTag,
+  AWAITING_FIRST_PUBLISH,
   PUBLISH_ORDER,
   releaseVersionProblems,
   retryProblems,
@@ -377,5 +379,16 @@ describe('retryUntil', () => {
       ),
     )
     assert.equal(attempts, 1)
+  })
+})
+
+describe('AWAITING_FIRST_PUBLISH', () => {
+  it('with PUBLISH_ORDER, lists every public package exactly once', () => {
+    const packagesDir = new URL('../../packages/', import.meta.url)
+    const publicDirs = readdirSync(packagesDir)
+      .filter((dir) => existsSync(new URL(`${dir}/package.json`, packagesDir)))
+      .filter((dir) => !JSON.parse(readFileSync(new URL(`${dir}/package.json`, packagesDir), 'utf8')).private)
+    const listed = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
+    assert.deepEqual([...listed].sort(), publicDirs.sort())
   })
 })
