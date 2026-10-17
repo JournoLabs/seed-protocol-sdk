@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Bundler and Turbo uploads no longer use the `Buffer` global, so publishing from a browser works without Node polyfills.
+
 ## 0.7.5 (2026-10-17)
 
 ### Breaking

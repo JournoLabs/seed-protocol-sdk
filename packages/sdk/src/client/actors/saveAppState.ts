@@ -3,6 +3,7 @@ import { EventObject } from "xstate";
 import debug from "debug";
 import { appState } from "@/seedSchema";
 import { BaseDb } from '@/db/Db/BaseDb'
+import { isTestOrSeedDev } from '@/helpers/environment'
 
 const logger = debug('seedSdk:client:writeToDb')
 
@@ -22,7 +23,7 @@ SaveAppStateInput
         const appDb = BaseDb.getAppDb()
         if (!appDb) {
           // In test environments, continue anyway
-          if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+          if (isTestOrSeedDev()) {
             logger('[client/actors] [saveAppState] App DB not found, but continuing in test environment')
             return
           }
@@ -45,7 +46,7 @@ SaveAppStateInput
       } catch (error: any) {
         logger('[client/actors] [saveAppState] Error saving app state:', error)
         // In test environments, continue anyway
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+        if (isTestOrSeedDev()) {
           logger('[client/actors] [saveAppState] Continuing despite error in test environment')
           return
         }
@@ -64,7 +65,7 @@ SaveAppStateInput
       .catch((error: any) => {
         logger('[client/actors] [saveAppState] Error in promise chain:', error)
         // In test environments, still send success to allow state machine to progress
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+        if (isTestOrSeedDev()) {
           logger('[client/actors] [saveAppState] Sending success despite error in test environment')
           sendBack({
             type: 'saveAppStateSuccess',
