@@ -2,6 +2,19 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.5 (2026-10-17)
+
+### Commits
+
+#### Fixes
+
+- packages: top-level types for legacy resolvers; query main -> Node build (12c51228)
+
+#### Other
+
+- packages: add READMEs for react, vite, arweave, eas (baf86652)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
+
 ## 0.7.4 (2026-10-15)
 
 ### Commits

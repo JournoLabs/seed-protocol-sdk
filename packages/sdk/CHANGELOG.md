@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.5 (2026-10-17)
 
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
 - **Breaking: Number properties publish as `string <name>` instead of `uint8 <name>`** (ADR 0010), so values above 255, negatives and decimals publish; before, they failed with `Failed to encode property`. A stored value that isn't a finite number fails publish validation with `publish_invalid_number`. Published Number values are under a new EAS schema UID. Items published before keep their `uint8` attestations until the property changes, and sync still reads `uint8`, other integer and numeric string attestations into Number properties.
@@ -25,6 +25,36 @@ All notable changes to this package are documented in this file.
 - Property rows written by an edit or an ItemStorage save store the model's EAS name as their model type (`blog_post` for BlogPost), like the rest of the DB. Before, they stored the lowercased name until the next `canonicalizeModelTypes` run.
 - `getEasSchemaUidForModel` asks EAS for the model's EAS name (`blog_post`), the name publish registers. Before, it asked for `blogpost` and missed multi-word and acronym models when no `model_uids` row covered them.
 - `applyArweaveL1TransactionIdLocal` is deprecated: it made local storage ids differ from the attested ones. `restoreDataItemIdsOverwrittenByL1` undoes it.
+
+### Commits
+
+#### Breaking
+
+- a File property's value stays its content URL (4cb17801)
+- drafts with no publisher belong to the next connection; rows follow their seed (db96967e)
+- sync decodes numeric values and checks property types (ebae8bfc)
+- publish Number properties as string <name> (84a53414)
+
+#### Features
+
+- nameMatch sets how strictly EAS names match models and properties (504ad1f7)
+
+#### Fixes
+
+- ModelProperty.unload releases the caller's hold; models own their properties (a6539934)
+- Node processes exit after client.stop(); init works after stop (53be3817)
+- Item.unload releases one holder instead of stopping a shared item (31850c42)
+- a rejected Item.create leaves no draft behind (b4ef23b5)
+- an unchanged value doesn't add a draft row over a published one (42e12d58)
+- keep Html-embedded image bytes in a file, not storageTransactionId (4cc00200)
+- a new draft gets the owned address when it is the only one (e7f64ede)
+- type the synced property value as a string (bd11f8e7)
+- publish: local storage ids stay the attested data item ids (50818a6d)
+- publish: Arweave and testnet gas estimates; upload docs (b5873c52)
+
+#### Other
+
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
 
 ## 0.7.4 (2026-10-15)
 
