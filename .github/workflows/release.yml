@@ -107,10 +107,7 @@ jobs:
       # Tests ran in the test job on this SHA; this job only runs after it passes.
       SKIP_TESTS: '1'
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
-      RELEASE_DIST_TAG: ${{ needs.version.outputs.dist_tag }}
       RELEASE_STAGING_TAG: ${{ needs.version.outputs.staging_tag }}
-      RELEASE_CHANNEL: ${{ needs.version.outputs.channel }}
-      RELEASE_BRANCH: ${{ needs.version.outputs.branch }}
     steps:
       - uses: actions/checkout@v6
 
@@ -136,12 +133,40 @@ jobs:
       - name: Publish under the staging tag
         run: node scripts/publish-package.js -y all --tag "$RELEASE_STAGING_TAG" --provenance
 
+  # Its own job so a failure (npm reads and writes can lag a publish by minutes) is re-run
+  # without rebuilding or re-checking every package.
+  promote:
+    name: Move dist-tag
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    # npm's trusted publisher for dist-tag writes is matched on workflow file and environment.
+    environment: ${{ needs.version.outputs.channel }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_DIST_TAG: ${{ needs.version.outputs.dist_tag }}
+      RELEASE_STAGING_TAG: ${{ needs.version.outputs.staging_tag }}
+      RELEASE_CHANNEL: ${{ needs.version.outputs.channel }}
+      RELEASE_BRANCH: ${{ needs.version.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install -g "npm@$NPM_VERSION"
+
       - name: Move dist-tag and remove staging tags
         run: node scripts/promote-dist-tag.js
 
   github-release:
     name: GitHub Release
-    needs: [version, publish]
+    needs: [version, promote]
     if: needs.version.outputs.channel == 'release'
     runs-on: ubuntu-latest
     permissions:
