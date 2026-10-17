@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Client init's "continue in a test environment" checks read `IS_SEED_DEV` only where a `process` global exists. In a browser without Node polyfills, a missing app DB or a failed config save threw `process is not defined` instead of its own error.
 - The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
 
 ## 0.7.5 (2026-10-17)

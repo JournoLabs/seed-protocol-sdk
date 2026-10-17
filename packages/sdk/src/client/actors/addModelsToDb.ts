@@ -3,6 +3,7 @@ import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq, inArray } from 'drizzle-orm'
 import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { isTestOrSeedDev } from '@/helpers/environment'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
@@ -183,7 +184,7 @@ export const addModelsToDb = fromCallback<
           logger('[client/actors] [addModelsToDb] No schemas found from EAS, but continuing')
         }
       } catch (error: any) {
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+        if (isTestOrSeedDev()) {
           logger('[client/actors] [addModelsToDb] Warning: Could not fetch schemas from EAS (background):', error.message)
         } else {
           logger('[client/actors] [addModelsToDb] Error fetching schemas (background):', error.message)
@@ -207,7 +208,7 @@ export const addModelsToDb = fromCallback<
     .catch((error) => {
       logger('[client/actors] [addModelsToDb] Error:', error)
       // In test environments, still send success to allow initialization to complete
-      if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+      if (isTestOrSeedDev()) {
         logger('[client/actors] [addModelsToDb] Continuing despite error in test environment')
         sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
       } else {
