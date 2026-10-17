@@ -100,6 +100,10 @@ testDescribe('same-name models across schemas', () => {
     expect(postAAfter._getSnapshotContext()._dbId).toBe(rowA.id)
     expect(postB).not.toBe(postA)
     expect(postB.id).toBe(postIdB)
+    // Ready means ready with its own properties: before schema B's row existed, B's Post took schema
+    // A's row from a name-only lookup and briefly listed A's properties, which items created then used.
+    expect(postB._getSnapshotContext()._dbId).toBe(rowB.id)
+    expect(postB.properties.map((p) => p.name).sort()).toEqual(['author', 'headline', 'summary'])
 
     expect((await ModelProperty.all(postIdA, { waitForReady: true })).map((p) => p.name).sort()).toEqual([
       'body',

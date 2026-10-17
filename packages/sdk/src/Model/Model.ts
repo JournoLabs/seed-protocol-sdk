@@ -2204,6 +2204,12 @@ export class Model {
             if (!modelRecord?.id) {
               return undefined
             }
+            // Until this model's own row is written, the lookup falls back to the name and can find a
+            // same-named model in another schema. Taking that row would load its properties into this
+            // model; wait for the row with this model's id instead (the caller retries).
+            if (context.id && modelRecord.schemaFileId !== context.id) {
+              return undefined
+            }
 
             dbId = modelRecord.id
 
