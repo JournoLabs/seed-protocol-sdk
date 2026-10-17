@@ -18,9 +18,9 @@ export interface SeedNextOptions {
     headersSource?: string;
     /**
      * Modules aliased to ZenFS in browser builds (`@zenfs/core`, or `@zenfs/core/promises` for
-     * ids containing "promises"). Server builds keep Node's `fs`. The list replaces the default;
-     * to add a module, pass the defaults plus yours.
-     * @default ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']
+     * ids containing "promises"), for app code or dependencies that import Node's `fs` in the
+     * browser. The SDK's browser build doesn't. Server builds keep Node's `fs`.
+     * @default []
      */
     fsModules?: string[];
 }
@@ -28,9 +28,10 @@ type NextConfigFunction = (phase: string, context: {
     defaultConfig: NextConfig;
 }) => NextConfig | Promise<NextConfig>;
 /**
- * Add the config @seedprotocol/sdk needs in the browser to a Next.js config: `fs` aliased to
- * ZenFS in browser builds (Turbopack and webpack) and cross-origin isolation headers. Your
- * own aliases, `webpack` function and headers are kept, and win where they overlap.
+ * Add the config @seedprotocol/sdk needs in the browser to a Next.js config: its browser
+ * entries in every graph and cross-origin isolation headers, plus any `fsModules` aliased to
+ * ZenFS in browser builds. Your own aliases, `webpack` function and headers are kept, and win
+ * where they overlap.
  *
  * Accepts a config object or a config function, and returns the same kind.
  */

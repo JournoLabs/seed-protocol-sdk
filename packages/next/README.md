@@ -48,7 +48,6 @@ Pass `SeedClientGate` an `onInitError` callback from a client component; a serve
 
 ## What it configures
 
-- **`fs` aliased to ZenFS in browser builds**: `fs`, `fs/promises`, `node:fs` and `node:fs/promises` resolve to `@zenfs/core` / `@zenfs/core/promises` in `turbopack.resolveAlias` (under the `browser` condition) and in webpack's client compiler. Server builds keep Node's `fs`.
 - **Browser entries in every graph**: Next.js also bundles client components for server rendering, where Node conditions would pick the SDK's Node platform (libsql and native bindings) and `@seedprotocol/query`'s Node entry. `withSeed` points both at their browser builds in server and client graphs, so server builds don't bundle libsql or trace the whole project.
 - **Cross-origin isolation headers** through `headers()`: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: credentialless` and `Cross-Origin-Resource-Policy: same-origin` on `/:path*`. They apply under `next dev` and `next start`.
 
@@ -60,7 +59,7 @@ Your own aliases, `webpack` function and headers are kept. Where they set the sa
 withSeed(nextConfig, {
   isolationHeaders: true,
   headersSource: '/:path*',
-  fsModules: ['fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
+  fsModules: [],
 })
 ```
 
@@ -68,7 +67,7 @@ withSeed(nextConfig, {
 |--------|---------|-------------|
 | `isolationHeaders` | `true` | `false` adds no headers; `{ coop, coep, corp }` overrides individual values. |
 | `headersSource` | `'/:path*'` | Path pattern the headers apply to, in `headers()` `source` syntax. |
-| `fsModules` | the four `fs` specifiers above | Modules aliased to ZenFS in browser builds. Your list replaces the default. |
+| `fsModules` | `[]` | Modules aliased to ZenFS (`@zenfs/core`, or `@zenfs/core/promises` for ids containing "promises") in browser builds, for app code or other dependencies that import `fs` in the browser. The SDK doesn't. For example `['fs', 'fs/promises', 'node:fs', 'node:fs/promises']`. Server builds keep Node's `fs`. |
 
 The options type is exported as `SeedNextOptions`.
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NextConfig } from 'next'
 import { withSeed } from '../src/index'
 
+const FS_MODULES = ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']
 const ZENFS_ALIASES = {
   fs: '@zenfs/core',
   'fs/promises': '@zenfs/core/promises',
@@ -46,8 +47,12 @@ afterEach(() => {
 })
 
 describe('withSeed turbopack aliases', () => {
-  it('aliases fs to ZenFS for the browser condition only', () => {
-    expect(withSeed({}).turbopack?.resolveAlias).toEqual({
+  it('adds no fs aliases by default', () => {
+    expect(withSeed({}).turbopack?.resolveAlias).toEqual({})
+  })
+
+  it('aliases fsModules to ZenFS for the browser condition only', () => {
+    expect(withSeed({}, { fsModules: FS_MODULES }).turbopack?.resolveAlias).toEqual({
       fs: { browser: '@zenfs/core' },
       'fs/promises': { browser: '@zenfs/core/promises' },
       'node:fs': { browser: '@zenfs/core' },
@@ -56,9 +61,10 @@ describe('withSeed turbopack aliases', () => {
   })
 
   it("keeps the user's turbopack config and lets their aliases win", () => {
-    const config = withSeed({
-      turbopack: { root: '/repo', resolveAlias: { fs: './my-fs.js', underscore: 'lodash' } },
-    })
+    const config = withSeed(
+      { turbopack: { root: '/repo', resolveAlias: { fs: './my-fs.js', underscore: 'lodash' } } },
+      { fsModules: FS_MODULES },
+    )
     expect(config.turbopack?.root).toBe('/repo')
     expect(config.turbopack?.resolveAlias).toMatchObject({
       fs: './my-fs.js',
@@ -67,20 +73,19 @@ describe('withSeed turbopack aliases', () => {
     })
   })
 
-  it('uses fsModules in place of the defaults', () => {
-    expect(withSeed({}, { fsModules: ['fs'] }).turbopack?.resolveAlias).toEqual({
-      fs: { browser: '@zenfs/core' },
-    })
-  })
 })
 
 describe('withSeed webpack', () => {
-  it('aliases fs to ZenFS in the client compiler', () => {
-    expect(runWebpack(withSeed({}), false).resolve.alias).toEqual(ZENFS_ALIASES)
+  it('adds no fs aliases by default', () => {
+    expect(runWebpack(withSeed({}), false).resolve.alias).toEqual({})
+  })
+
+  it('aliases fsModules to ZenFS in the client compiler', () => {
+    expect(runWebpack(withSeed({}, { fsModules: FS_MODULES }), false).resolve.alias).toEqual(ZENFS_ALIASES)
   })
 
   it('leaves the server compiler alone', () => {
-    expect(runWebpack(withSeed({}), true).resolve.alias).toEqual({})
+    expect(runWebpack(withSeed({}, { fsModules: FS_MODULES }), true).resolve.alias).toEqual({})
   })
 
   it("calls the user's webpack function and keeps their aliases", () => {
@@ -89,7 +94,7 @@ describe('withSeed webpack', () => {
       config.marker = true
       return config
     })
-    const result = runWebpack(withSeed({ webpack: userWebpack }), false)
+    const result = runWebpack(withSeed({ webpack: userWebpack }, { fsModules: FS_MODULES }), false)
     expect(userWebpack).toHaveBeenCalledOnce()
     expect(result.marker).toBe(true)
     expect(result.resolve.alias.fs).toBe('./my-fs.js')
@@ -97,7 +102,7 @@ describe('withSeed webpack', () => {
   })
 
   it('creates resolve.alias when the config has none', () => {
-    expect(runWebpack(withSeed({}), false, {}).resolve.alias).toEqual(ZENFS_ALIASES)
+    expect(runWebpack(withSeed({}, { fsModules: FS_MODULES }), false, {}).resolve.alias).toEqual(ZENFS_ALIASES)
   })
 })
 
@@ -185,7 +190,7 @@ describe('withSeed headers', () => {
 describe('withSeed config function', () => {
   it('wraps a config function and passes phase and context through', async () => {
     const userFn = vi.fn(async (phase: string) => ({ basePath: phase === 'phase-production-build' ? '/prod' : '' }))
-    const wrapped = withSeed(userFn)
+    const wrapped = withSeed(userFn, { fsModules: ['fs'] })
     const config = await wrapped('phase-production-build', { defaultConfig: {} })
     expect(userFn).toHaveBeenCalledWith('phase-production-build', { defaultConfig: {} })
     expect(config.basePath).toBe('/prod')
