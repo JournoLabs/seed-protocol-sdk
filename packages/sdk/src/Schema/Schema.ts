@@ -1329,21 +1329,22 @@ export class Schema {
     
     // Wait for reload to complete
     return new Promise((resolve, reject) => {
+      // Cleared once the reload settles: a pending timer kept Node scripts alive for 10 s.
+      const timer = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timeout waiting for schema reload'))
+      }, 10000)
       const subscription = this._service.subscribe((snapshot) => {
         if (snapshot.value === 'idle') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           resolve()
         } else if (snapshot.value === 'error') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           reject(new Error('Failed to reload schema from database'))
         }
       })
-      
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        subscription.unsubscribe()
-        reject(new Error('Timeout waiting for schema reload'))
-      }, 10000)
     })
   }
 

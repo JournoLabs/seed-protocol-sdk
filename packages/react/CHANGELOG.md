@@ -2,6 +2,24 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- The package is marked `'use client'`, so a React Server Components app (Next.js App Router) can import `SeedProvider` and the components into a server component such as `app/layout.tsx`. Before, that failed with `createContext is not a function`.
+
+## 0.7.5 (2026-10-17)
+
+### Commits
+
+#### Fixes
+
+- packages: internal peers use workspace:*, published as the exact version (d2730d9a)
+- peer @seedprotocol/sdk ^0.7.0; sync-versions keeps internal peers current (efa789e7)
+
+#### Other
+
+- packages: add READMEs for react, vite, arweave, eas (baf86652)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
+
 ## 0.7.4 (2026-10-15)
 
 ### Commits

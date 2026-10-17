@@ -9,7 +9,7 @@ Package: [`packages/mapping`](../packages/mapping)
 - **Headless:** `SourceNode`, `FieldMapping`, `MappingDocument`, `applyMapping`, `autoMap`
 - **Adapters:** `markdownToSources`, `rssItemToSources`, `rssXmlToSources` (`rss-parser`, field set aligned with `@seedprotocol/feed` `parseRssString`)
 - **UI:** props-driven `FieldMapper` via `@seedprotocol/mapping/react` (no `useCreateItem`, no router); default entry is headless-only
-- **Monorepo:** `build:mapping`, `publish:mapping`, sync-versions / publish-package wiring
+- **Monorepo:** in `scripts/build-packages.js` build order, sync-versions / publish-package wiring
 - **Done (UI):** PermaPress Feed Map uses shared `FieldMapper` property rows — see [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOFF.md)
 - **Published:** the redesign shipped in `0.6.0`; mapping now releases with the other packages (npm `latest` 0.7.3 as of 2026-10-14)
 - **Not done:** desktop `/import/map` migration

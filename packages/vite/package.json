@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Vite plugin for browser apps using @seedprotocol/sdk: Node polyfills, ZenFS aliases, CJS interop fixes and cross-origin isolation headers",
   "keywords": [
     "seed-protocol",
@@ -53,6 +53,7 @@
     }
   },
   "devDependencies": {
+    "@seedprotocol/bundler-core": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-react": "^6.0.0",

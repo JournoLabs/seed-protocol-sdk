@@ -18,4 +18,5 @@ export function createPlatformServices(): PlatformServices {
 }
 
 export { configurePlatform } from './configurePlatform'
+export { resolveFilesDir } from '@/node/helpers/resolveFilesDir'
 export type { PlatformServices } from './types'

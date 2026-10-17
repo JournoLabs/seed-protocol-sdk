@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/arweave",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Arweave gateway client for Seed Protocol: transaction reads, read-gateway selection with health probing, and gateway endpoint resolution",
   "keywords": [
     "seed-protocol",
@@ -42,7 +42,9 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
     "test": "vitest run --reporter=default",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js",
+    "codegen": "graphql-codegen --config codegen.ts && node ../../scripts/fix-graphql-codegen-imports.js",
+    "codegen:watch": "graphql-codegen -w --config codegen.ts"
   },
   "dependencies": {
     "@graphql-typed-document-node/core": "^3.2.0",
@@ -52,6 +54,9 @@
     "graphql-request": "^7.3.5"
   },
   "devDependencies": {
+    "@graphql-codegen/cli": "^6.0.1",
+    "@graphql-codegen/client-preset": "^5.2.2",
+    "@graphql-codegen/introspection": "5.0.0",
     "@types/bun": "latest",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",

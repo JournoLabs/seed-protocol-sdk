@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Official TypeScript SDK for Seed Protocol — local-first ORM with SQLite/OPFS, syncing via Ethereum Attestation Service (EAS) and Arweave.",
   "keywords": [
     "seed-protocol",
@@ -37,10 +37,7 @@
     "build:watch": "tsc -w -p tsconfig.json",
     "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
     "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
-    "compile": "graphql-codegen --config codegen.ts",
-    "watch": "graphql-codegen -w",
     "test": "vitest run --reporter=default",
-    "test:ui": "vitest --ui --reporter=default",
     "test:watch": "vitest",
     "test:browser": "vitest --project=browser"
   },
@@ -62,6 +59,7 @@
     "fsevents": "^2.3.3"
   },
   "peerDependencies": {
+    "@seedprotocol/vite": "workspace:*",
     "@tanstack/react-query": "^5.102.0",
     "@zenfs/core": "2.5.6",
     "@zenfs/dom": "1.2.9",
@@ -69,6 +67,9 @@
     "xstate": "^5.28.0"
   },
   "peerDependenciesMeta": {
+    "@seedprotocol/vite": {
+      "optional": true
+    },
     "@tanstack/react-query": {
       "optional": true
     },
@@ -85,7 +86,6 @@
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
     "@seedprotocol/query": "workspace:*",
-    "@seedprotocol/vite": "workspace:*",
     "@sinclair/typebox": "^0.34.45",
     "@sqlite.org/sqlite-wasm": "^3.51.1-build2",
     "arweave": "^1.15.5",
@@ -152,11 +152,18 @@
     "./node-eas-lodash": "./src/node/easLodashRegister.js",
     "./package.json": "./package.json"
   },
+  "imports": {
+    "#seed-node-platform": {
+      "browser": "./dist/platform.browser.js",
+      "default": "./dist/platform.node.js"
+    }
+  },
   "devDependencies": {
     "@rollup/plugin-alias": "^6.0.0",
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-typescript": "^12.1.2",
+    "@seedprotocol/vite": "workspace:*",
     "better-sqlite3": "^12.5.0",
     "drizzle-orm": "^0.44.3",
     "eventemitter3": "^5.0.1",

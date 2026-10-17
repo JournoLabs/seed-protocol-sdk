@@ -2,9 +2,21 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.5 (2026-10-17)
 
 - Values from `uint*` and `int*` property attestations come back as decimal strings. Before, `uint256` and other wide integers came back as the indexer's `{"type":"BigNumber","hex":…}` JSON (ADR 0010).
+
+### Commits
+
+#### Fixes
+
+- decode integer property values to decimal strings (e8ca5d94)
+- packages: top-level types for legacy resolvers; query main -> Node build (12c51228)
+
+#### Other
+
+- packages: audit feed, feed-hyper, gateway-hyper, mapping, publish, query READMEs (1a5d7ee4)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
 
 ## 0.7.4 (2026-10-15)
 

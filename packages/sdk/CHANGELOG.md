@@ -2,8 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.5 (2026-10-17)
 
+- Browser bundles no longer include the Node platform. It shipped as an unused lazy chunk of about 150 KB gzipped (libsql and its migrator), and broke webpack and Next.js server builds. The Node platform now loads through `#seed-node-platform`, a `package.json` `imports` entry that maps to the browser platform under the `browser` condition. Platform selection at runtime is unchanged, so jsdom still gets the browser platform.
+- **Breaking: `@seedprotocol/vite` is an optional peer dependency** instead of a dependency, so installing the SDK no longer installs Vite, Rolldown and `vite-plugin-node-polyfills`. Apps that import `@seedprotocol/sdk/vite` must install `@seedprotocol/vite` themselves.
+- `withSeed` from `@seedprotocol/sdk/node` is deprecated in favor of `@seedprotocol/next`, which covers Turbopack and sets the cross-origin isolation headers.
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
 - **Breaking: Number properties publish as `string <name>` instead of `uint8 <name>`** (ADR 0010), so values above 255, negatives and decimals publish; before, they failed with `Failed to encode property`. A stored value that isn't a finite number fails publish validation with `publish_invalid_number`. Published Number values are under a new EAS schema UID. Items published before keep their `uint8` attestations until the property changes, and sync still reads `uint8`, other integer and numeric string attestations into Number properties.
 - **Breaking: sync skips a property attestation whose EAS type doesn't fit the local property's type** (ADR 0008, ADR 0010), with a warning. A Number takes integer types and numeric strings; other types take the type publish writes for them. Before, any attestation with a matching name was stored.
@@ -11,6 +14,13 @@ All notable changes to this package are documented in this file.
 - `getPublishPayload` attests `0` and `false`; only a missing or empty value is skipped.
 - `summarizePublishWork` returns `uploadSizes`, the size of each upload, next to `uploadCount` and `uploadBytes`. `@seedprotocol/publish` uses it to price Arweave uploads per transaction.
 - **A new draft gets the owned address when it is the only one.** With owned addresses set and no publisher getter (or one that returns nothing), a new draft with exactly one owned address is now that address's. With several it has no publisher until the next wallet connects (see the ownership entry above); register `setGetPublisherForNewSeeds` to give it one at creation.
+- **Breaking: a File property's value is its content URL**, a blob URL in browsers and a `file://` URL in Node, after a save and after a reload. Before, it was that URL right after a save or load and then turned into the file's text a moment later. Read the file through the URL (`fetch` in browsers, `fs` in Node) for its contents.
+- `modelProperty.unload()` releases the caller's hold. A model's properties are owned by the model and keep running until it's evicted; a property only the app holds is stopped when its last holder unloads it. Before, unload stopped the shared instance for every holder, including its model.
+- `item.unload()` releases one holder. `Item.create`, `Item.find` and `createById` give every caller the same cached instance, and unloading it stopped it for all of them (another hook showing the same item stopped updating). It's stopped once the last holder unloads it.
+- **Node processes exit on their own after `client.stop()`.** Two invalidation `BroadcastChannel`s were left open after posting (10 `MessagePort` handles), and the 10 s fallback timers in `Model.create` and the model and schema reloads weren't cleared when the wait finished first. Scripts no longer need `process.exit()`.
+- `client.init` after `client.stop()` initialises again, with the new config. Before, it resolved without doing anything (the stopped client still reported itself initialised), and with that fixed it would have hung, since a stopped client can't restart; init now starts a new one. `client.isInitialized()` is false after `stop()`.
+- `client.init` no longer creates `<cwd>/.seed`. It was created on every Node init even with an absolute `filesDir`, so init failed with `EACCES` from a read-only working directory, such as a packaged Electron app's `/`. A relative `filesDir` still resolves under `.seed`, and is created when the database is prepared.
+- A `dbConfig.dbUrl` whose folder doesn't exist yet works: the folder is created. Before, init failed with `Unable to open connection to local database …: 14`.
 - **`Item.create` leaves nothing behind when it rejects.** File, Image, Html and ItemStorage values are saved after the item's rows are written, and a failure there (a rule the value breaks, an ownership refusal, the item not loading in time) used to leave a draft holding the other values, so a retry made a duplicate and `useCreateItem` reported an error for an item that existed. Now the draft, the storage seeds it points at and their files are removed before the error is thrown. A value that breaks its property's rules rejects with `ItemCreateValidationError` and its `problems`, like the other values; before, Html rule failures were a plain `Error`. `createNewItem` also removes its rows when one of its inserts fails.
 - **Breaking: a draft that has never had a publisher is owned whatever the owned addresses are.** It was made with no wallet connected and belongs to no wallet yet: it's editable, `addressFilter: 'owned'` lists it, and the next wallet to connect becomes its publisher (`claimUnpublishedDrafts`, which `@seedprotocol/publish`'s `setPublishWallet` calls). A draft with a publisher keeps it: it's owned only while that address is, so it's hidden and read-only while another wallet is connected and back when its own reconnects. Before, a draft with no publisher was read-only and left out of owned lists whenever any owned address was set, as after a reload before the wallet reconnects, or in a Node script whose config lists several owned addresses. `isSeedRowOwned`, `ownedSeedsSql` and `isItemOwned` follow the new rule.
 - Version and property rows take their seed's publisher. Before, versions and new property rows took the publisher getter's address, and rows written by an edit had none, so connecting another wallet claimed them although their seed belonged to someone else. `claimUnpublishedDrafts` now claims versions and property rows only with their seed. On first init after upgrading, a one-time fix gives existing rows without a stored attestation their seed's publisher. Before it, `@seedprotocol/query`'s local reads, which use a row's publisher as its attester, could leave out a published value whose row another wallet had claimed.
@@ -18,6 +28,36 @@ All notable changes to this package are documented in this file.
 - Property rows written by an edit or an ItemStorage save store the model's EAS name as their model type (`blog_post` for BlogPost), like the rest of the DB. Before, they stored the lowercased name until the next `canonicalizeModelTypes` run.
 - `getEasSchemaUidForModel` asks EAS for the model's EAS name (`blog_post`), the name publish registers. Before, it asked for `blogpost` and missed multi-word and acronym models when no `model_uids` row covered them.
 - `applyArweaveL1TransactionIdLocal` is deprecated: it made local storage ids differ from the attested ones. `restoreDataItemIdsOverwrittenByL1` undoes it.
+
+### Commits
+
+#### Breaking
+
+- a File property's value stays its content URL (4cb17801)
+- drafts with no publisher belong to the next connection; rows follow their seed (db96967e)
+- sync decodes numeric values and checks property types (ebae8bfc)
+- publish Number properties as string <name> (84a53414)
+
+#### Features
+
+- nameMatch sets how strictly EAS names match models and properties (504ad1f7)
+
+#### Fixes
+
+- ModelProperty.unload releases the caller's hold; models own their properties (a6539934)
+- Node processes exit after client.stop(); init works after stop (53be3817)
+- Item.unload releases one holder instead of stopping a shared item (31850c42)
+- a rejected Item.create leaves no draft behind (b4ef23b5)
+- an unchanged value doesn't add a draft row over a published one (42e12d58)
+- keep Html-embedded image bytes in a file, not storageTransactionId (4cc00200)
+- a new draft gets the owned address when it is the only one (e7f64ede)
+- type the synced property value as a string (bd11f8e7)
+- publish: local storage ids stay the attested data item ids (50818a6d)
+- publish: Arweave and testnet gas estimates; upload docs (b5873c52)
+
+#### Other
+
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
 
 ## 0.7.4 (2026-10-15)
 

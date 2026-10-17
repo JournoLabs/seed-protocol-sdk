@@ -32,7 +32,7 @@
  *
  * Without a terminal (CI), any prompt fails instead of waiting for input.
  *
- * Experimental packages (cli, webpack, ghost) are private and not publishable via this script.
+ * Experimental packages (cli, ghost) are private and not publishable via this script.
  */
 
 import { readFileSync } from 'fs'
@@ -48,7 +48,7 @@ const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
 const VALID_PACKAGES = [...PUBLISH_ORDER]
-const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
+const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'next']
 
 /** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
 const npmPublishOptions = { tag: null, provenance: false }

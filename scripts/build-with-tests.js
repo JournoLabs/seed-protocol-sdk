@@ -5,12 +5,11 @@
  *
  * Examples:
  *   node scripts/build-with-tests.js "tsc -p tsconfig.json"
- *   node scripts/build-with-tests.js -f "bun run clean && tsc -p tsconfig.json"
  *   node scripts/build-with-tests.js "rm -rf dist && NODE_ENV=production rollup -c"
- *   bun run build:all -f   # -f is forwarded; nested build:* scripts also skip tests
+ *   bun run build:all -f   # -f is forwarded; nested package builds also skip tests
  *
  * SKIP_TESTS=1 is set when -f/--force is used so nested build-with-tests invocations
- * (e.g. build:query inside build:all) also skip tests.
+ * (e.g. the sdk build inside build:all) also skip tests.
  */
 
 import { spawn } from 'child_process'
@@ -50,7 +49,7 @@ if (buildCommandArgs.length === 0) {
 // Join remaining args to form the build command (handles commands with && and spaces)
 const buildCommand = buildCommandArgs.join(' ')
 
-// Propagate skip to nested build-with-tests.js (e.g. build:all → build:query)
+// Propagate skip to nested build-with-tests.js (e.g. build:all → sdk build:dev)
 if (forceFlag) {
   process.env.SKIP_TESTS = '1'
 }
@@ -85,14 +84,14 @@ function runCommand(command, options = {}) {
 async function main() {
   try {
     // Under an active monorepo build lock, never start another full test suite
-    // (integration tests can re-enter build:sdk and deadlock on the lock).
+    // (integration tests can re-enter the build and deadlock on the lock).
     const underBuildLock = process.env.SEED_MONOREPO_BUILD_LOCK === '1'
     if (!forceFlag && !underBuildLock) {
       console.log('Running tests before build...')
       console.log('(Use --force or -f to skip tests)\n')
       await runCommand('bun run test')
       console.log('\n✅ All tests passed! Proceeding with build...\n')
-      // Nested build:* scripts (e.g. build:query inside build:all) must not re-run tests.
+      // Nested package builds (e.g. the sdk inside build:all) must not re-run tests.
       process.env.SKIP_TESTS = '1'
     } else if (underBuildLock) {
       console.log('⚠️  Nested build under monorepo lock — skipping tests...\n')
@@ -101,7 +100,7 @@ async function main() {
     }
 
     console.log(`Executing build command: ${buildCommand}\n`)
-    // Serialize package builds that rimraf dist so concurrent build:sdk/build:all
+    // Serialize package builds that rimraf dist so concurrent build/build:all
     // cannot delete a dependency's types while another package's tsc is resolving them.
     const lockScript = join(rootDir, 'scripts/with-monorepo-build-lock.js')
     await runCommand(`node ${JSON.stringify(lockScript)} ${JSON.stringify(buildCommand)}`)

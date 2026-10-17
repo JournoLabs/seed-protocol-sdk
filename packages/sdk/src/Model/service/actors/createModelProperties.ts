@@ -105,7 +105,7 @@ export const createModelProperties = fromCallback<
       // The property should already be in DB from writeModelToDb
       // Note: propertyFileId is the schemaFileId (string), not the database ID (number)
       // We pass it as _propertyFileId so getById() can find the instance
-      await ModelProperty.create({
+      const property = await ModelProperty.create({
         name: propName,
         modelName,
         modelId: _dbId,
@@ -126,6 +126,8 @@ export const createModelProperties = fromCallback<
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
         _dbId: propertyRecord?.schemaFileId === propertyFileId ? propertyRecord.id : undefined, // Already persisted: skip the write
       } as any, { schemaName }) // Use 'as any' because _propertyFileId is not in TProperty type
+      // The model keeps its properties; an app's unload of the same instance doesn't stop them.
+      ModelProperty.adoptForModel(property)
     }
     
     logger(`Successfully created all properties for model "${modelName}"`)

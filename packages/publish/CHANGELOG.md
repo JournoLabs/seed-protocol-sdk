@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.5 (2026-10-17)
 
 ### Breaking
 
@@ -25,6 +25,30 @@ All notable changes to this project will be documented in this file.
 - **Local storage ids stay the attested data item ids.** The L1-finalize worker no longer replaces them with the bundle's L1 id; ids it replaced are set back where the bundle has one file per version (`restoreDataItemIdsOverwrittenByL1`).
 - **Html with embedded images gets its second pass on the direct-EAS route, and on L1 it's funded** (its own reimbursement request) instead of needing AR in the user's key.
 - **EIP-7702 wallets attest directly after their first publish too:** a delegated EOA's code no longer counts as a deployed contract.
+
+### Commits
+
+#### Fixes
+
+- a new user's smart wallet is deployed on its first publish (ef3090bb)
+- EIP-7702 wallets keep attesting directly after their first publish (8880e2a8)
+- Html with embedded images gets its second pass, funded (30f176ea)
+- sdk: local storage ids stay the attested data item ids (50818a6d)
+- data items are signed by an EOA, never a smart account (39d09be9)
+- a resumed bundler or Turbo publish can't skip its upload (b72e3425)
+- packages: internal peers use workspace:*, published as the exact version (d2730d9a)
+- direct EAS only for wallets that say they are EOAs (c8605311)
+- sdk: Arweave and testnet gas estimates; upload docs (b5873c52)
+- provider init order, useCanPublishItem, dead config and hook (8a4b34f2)
+- ensure*ThenPublish report started only once a publish spawned (a7a74ced)
+- connect sync, query, confirmation polling and uploadApiBaseUrl (176de73c)
+- packages: top-level types for legacy resolvers; query main -> Node build (12c51228)
+- make @seedprotocol/sdk and @seedprotocol/react peer dependencies (09ce9e2d)
+
+#### Other
+
+- packages: audit feed, feed-hyper, gateway-hyper, mapping, publish, query READMEs (1a5d7ee4)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
 
 ## 0.7.4 (2026-10-15)
 

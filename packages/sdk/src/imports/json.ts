@@ -839,8 +839,15 @@ export async function importJsonSchema(
       }
     }
 
-    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-    const modelDefinitions = await createModelsFromJson(importDataForInternal, modelFileIds, propertyFileIds)
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+    // addModelsToDb below writes their rows; the models adopt them once it has run.
+    const rowsWritten = createRowsWrittenSignal()
+    const modelDefinitions = await createModelsFromJson(
+      importDataForInternal,
+      modelFileIds,
+      propertyFileIds,
+      rowsWritten.promise,
+    )
 
     logger('loadSchemaFromFile (internal) - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -984,6 +991,8 @@ export async function importJsonSchema(
     } catch (dbError) {
       // Database not available - log warning but continue
       logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    } finally {
+      rowsWritten.settle()
     }
 
     // Models are now Model instances, no registration needed
@@ -1298,8 +1307,10 @@ export const loadSchemaFromFile = async (
       }
     }
 
-    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-    const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+    // applySchemaToDb below writes their rows; the models adopt them once it has run.
+    const rowsWritten = createRowsWrittenSignal()
+    const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds, rowsWritten.promise)
 
     logger('loadSchemaFromFile - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -1322,7 +1333,7 @@ export const loadSchemaFromFile = async (
           modelFileIds,
           propertyFileIds,
           propertyDefinitions,
-        )
+        ).finally(rowsWritten.settle)
           
           // Query the database to get model IDs that were just created
           const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
@@ -1457,6 +1468,8 @@ export const loadSchemaFromFile = async (
     } catch (dbError) {
       // Database not available - log warning but continue
       logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    } finally {
+      rowsWritten.settle()
     }
 
     // Models are now Model instances, no registration needed
@@ -1559,6 +1572,19 @@ export const jsonPropertiesToSchemaProperties = (
 }
 
 /**
+ * For callers of createModelsFromJson that write the models with addModelsToDb: pass `promise` as its
+ * persistedBy and call `settle` once addModelsToDb has run or failed (in a finally). The new models wait
+ * for it, then adopt the rows addModelsToDb wrote; any model it didn't write writes itself.
+ */
+export const createRowsWrittenSignal = (): { promise: Promise<void>; settle: () => void } => {
+  let settle!: () => void
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+  return { promise, settle }
+}
+
+/**
  * Create a Model class from a JSON model definition
  * @param modelName - The name of the model
  * @param modelDef - The JSON model definition
@@ -1571,6 +1597,7 @@ export const createModelFromJson = async (
   schemaName: string,
   modelFileId?: string, // Optional modelFileId from JSON file
   propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
+  persistedBy?: Promise<unknown>, // Settles once the caller's addModelsToDb has run; see createRowsWrittenSignal
 ): Promise<any> => {
   const modelMod = await import('../Model/Model')
   const { Model } = modelMod
@@ -1590,6 +1617,7 @@ export const createModelFromJson = async (
     id: modelFileId, // Also pass as id for backward compatibility
     properties: convertedProperties,
     waitForReady: false,
+    persistedBy,
   }) as import('@/Model/Model').Model
 
   return modelInstance
@@ -1600,12 +1628,15 @@ export const createModelFromJson = async (
  * @param importData - The JSON import data
  * @param modelFileIds - Optional map of model names to their file IDs from the JSON file
  * @param propertyFileIds - Optional map of model names to maps of property names to their file IDs from the JSON file
+ * @param persistedBy - When the caller writes the models with addModelsToDb: a promise that settles once
+ *   that has run (see createRowsWrittenSignal). New models then adopt those rows instead of writing them too.
  * @returns ModelDefinitions object with Model classes
  */
 export const createModelsFromJson = async (
   importData: JsonImportSchema,
   modelFileIds?: Map<string, string>,
   propertyFileIds?: Map<string, Map<string, string>>,
+  persistedBy?: Promise<unknown>,
 ): Promise<ModelDefinitions> => {
   const modelDefinitions: ModelDefinitions = {}
   const schemaName = importData.name
@@ -1620,7 +1651,14 @@ export const createModelsFromJson = async (
     }
     // Get propertyFileIds for this model if available
     const modelPropertyFileIds = propertyFileIds?.get(modelName)
-    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName, finalModelFileId, modelPropertyFileIds)
+    const ModelClass = await createModelFromJson(
+      modelName,
+      modelDef,
+      schemaName,
+      finalModelFileId,
+      modelPropertyFileIds,
+      persistedBy,
+    )
     
     modelDefinitions[modelName] = ModelClass as unknown as ModelClassType
   }

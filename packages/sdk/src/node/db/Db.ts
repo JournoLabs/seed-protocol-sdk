@@ -89,6 +89,15 @@ function copyDirRecursive(sourceDir: string, targetDir: string) {
   }
 }
 
+
+/** The file a local libsql `file:` URL opens; undefined for `:memory:` and remote URLs. */
+const localDbFilePath = (dbUrl: string): string | undefined => {
+  if (!dbUrl.startsWith('file:')) return undefined
+  const filePath = dbUrl.slice('file:'.length).split('?')[0]
+  if (!filePath || filePath === ':memory:') return undefined
+  return filePath.startsWith('//') ? filePath.replace(/^\/\/(localhost)?/, '') : filePath
+}
+
 export class NodeDb implements IDb {
   db: any
 
@@ -131,6 +140,12 @@ export class NodeDb implements IDb {
     const dbUrl = config?.dbUrl
       ? (config.dbUrl.startsWith('file:') ? config.dbUrl : `file:${path.resolve(config.dbUrl)}`)
       : `file:${path.resolve(dbPath)}`
+
+    // libsql won't create the database's folder ("Unable to open connection … 14").
+    const dbFilePath = localDbFilePath(dbUrl)
+    if (dbFilePath) {
+      fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
+    }
 
     const client = createClient({ url: dbUrl })
     const db = drizzle(client, { schema })

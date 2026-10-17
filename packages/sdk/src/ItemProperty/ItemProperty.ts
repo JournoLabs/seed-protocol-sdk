@@ -427,7 +427,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               }
             }
             if (exists && isFile) {
-              renderValue = await BaseFileManager.readFileAsString(filePath,)
+              // A File's value is its content URL (a blob URL in browsers, file:// in Node), as saveFile
+              // and hydrateFromDb set it. Reading the text here made the value change from the URL to
+              // the file's contents a moment after every save or load.
+              renderValue =
+                context.refResolvedDisplayValue ?? (await BaseFileManager.getContentUrlFromPath(filePath))
             }
             if (!exists) {
               // Keep filename for display when File object is present but not yet saved to disk

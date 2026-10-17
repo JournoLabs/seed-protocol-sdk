@@ -21,6 +21,7 @@ export const PUBLISH_ORDER = [
   'eas',
   'arweave',
   'vite',
+  'next',
   'query',
   'sdk',
   'feed',
@@ -382,4 +383,84 @@ export function npmWrite(args) {
  */
 export function getDistTags(packageName) {
   return JSON.parse(npm(['view', packageName, 'dist-tags', '--json', '--prefer-online'], { capture: true }))
+}
+
+/**
+ * Current dist-tags for a package from the registry's dist-tags endpoint, the one
+ * `npm dist-tag` itself reads. Unlike the packument behind `npm view` (CDN-cached for
+ * up to 5 minutes, and it lagged publishes by 3–8 minutes in v0.7.2 and #65), it
+ * isn't served from the CDN cache, and it answers whether or not this version is
+ * visible yet.
+ * @param {string} packageName - e.g. @seedprotocol/sdk
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<Record<string, string>>}
+ */
+export async function fetchDistTags(packageName, fetchImpl = fetch) {
+  const url = `https://registry.npmjs.org/-/package/${packageName.replace('/', '%2f')}/dist-tags`
+  const res = await fetchImpl(url, { cache: 'no-store', headers: { 'cache-control': 'no-cache' } })
+  if (!res.ok) throw new Error(`npm registry returned ${res.status} for ${packageName} dist-tags`)
+  const { _etag, ...tags } = await res.json()
+  return tags
+}
+
+/**
+ * Whether a release may move `latest` to `version`: only forward.
+ * @param {string} version
+ * @param {string | undefined} current - `latest` now
+ * @returns {{ move: boolean, reason: string }}
+ */
+export function decideLatest(version, current) {
+  if (!current) return { move: true, reason: 'no current latest' }
+  if (compareStable(version, current) >= 0) return { move: true, reason: `current latest is ${current}` }
+  return { move: false, reason: `latest is already newer (${current})` }
+}
+
+/**
+ * Staging tags to remove from a package once its real tag points at `version`: this
+ * run's own (named outright, since a lagging read may not show it yet) and any other
+ * staging tag the read shows on `version`.
+ * @param {{ tags: Record<string, string>, version: string, stagingTag?: string }} input
+ * @returns {string[]}
+ */
+export function stagingTagsToRemove({ tags, version, stagingTag }) {
+  const remove = new Set(stagingTag ? [stagingTag] : [])
+  for (const [tag, tagged] of Object.entries(tags)) {
+    if (tag.startsWith(STAGING_TAG_PREFIX) && tagged === version) remove.add(tag)
+  }
+  return [...remove]
+}
+
+/**
+ * Call `fn` until it doesn't throw. Once another wait would pass `deadline`, the
+ * last error is rethrown.
+ * @template T
+ * @param {(attempt: number) => T | Promise<T>} fn
+ * @param {{
+ *   deadline: number,
+ *   intervalMs: number,
+ *   onRetry?: (error: Error, attempt: number) => void,
+ *   now?: () => number,
+ *   sleep?: (ms: number) => Promise<void>,
+ * }} options
+ * @returns {Promise<T>}
+ */
+export async function retryUntil(
+  fn,
+  {
+    deadline,
+    intervalMs,
+    onRetry = () => {},
+    now = Date.now,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  },
+) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn(attempt)
+    } catch (error) {
+      if (now() + intervalMs > deadline) throw error
+      onRetry(error, attempt)
+      await sleep(intervalMs)
+    }
+  }
 }

@@ -2,10 +2,27 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.5 (2026-10-17)
 
 - `decodeEasNumber(value)` turns an indexer value (JSON number, decimal or hex string, bigint, or `{ type: 'BigNumber', hex }`) into its decimal string, and `isNumericEasType` says whether an EAS type is `uint*` or `int*` (ADR 0010).
 - **`getCanonicalItemPropertiesFromEas` checks attesters by default:** a version counts only if its seed's attester made it, and a property only if its version's attester did. It makes two more requests (the versions and their seeds); pass `checkAttesters: false` when the versions are already trusted.
+
+### Commits
+
+#### Features
+
+- decodeEasNumber reads uint, int, string and BigNumber hex values (cf998ae1)
+- nameMatch level helpers; exact means the published name (ac8b8c07)
+
+#### Fixes
+
+- getCanonicalItemPropertiesFromEas checks attesters by default (e2fbdba3)
+- packages: top-level types for legacy resolvers; query main -> Node build (12c51228)
+
+#### Other
+
+- packages: add READMEs for react, vite, arweave, eas (baf86652)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
 
 ## 0.7.4 (2026-10-15)
 

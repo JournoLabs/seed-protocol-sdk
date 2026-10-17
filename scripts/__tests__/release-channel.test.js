@@ -4,6 +4,8 @@ import {
   channelIdForBranch,
   cleanBranchName,
   compareStable,
+  decideLatest,
+  fetchDistTags,
   findCollidingBranches,
   isValidSemver,
   nextPatch,
@@ -13,7 +15,9 @@ import {
   retryProblems,
   unreleasedTags,
   resolveRelease,
+  retryUntil,
   stagingTag,
+  stagingTagsToRemove,
   tagCommitFromLsRemote,
 } from '../release-channel.js'
 
@@ -266,5 +270,112 @@ describe('retryProblems', () => {
   it('waits for a running tag run and refuses a successful one', () => {
     assert.match(retryProblems({ ...ok, tagRunState: 'in_progress' }).join(), /still in_progress/)
     assert.match(retryProblems({ ...ok, tagRunState: 'success' }).join(), /succeeded/)
+  })
+})
+
+describe('decideLatest', () => {
+  it('moves latest forward or onto the same version', () => {
+    assert.equal(decideLatest('0.7.5', undefined).move, true)
+    assert.equal(decideLatest('0.7.5', '0.7.4').move, true)
+    assert.equal(decideLatest('0.7.5', '0.7.5').move, true)
+  })
+
+  it('never moves latest back', () => {
+    assert.deepEqual(decideLatest('0.7.4', '0.7.5'), { move: false, reason: 'latest is already newer (0.7.5)' })
+  })
+})
+
+describe('stagingTagsToRemove', () => {
+  const version = '0.7.5-next.850.g9ab585b'
+
+  it("names this run's staging tag even when the read doesn't show it yet", () => {
+    assert.deepEqual(stagingTagsToRemove({ tags: { next: '0.7.4-next.793.g6dd83dd' }, version, stagingTag: 'ci-g9ab585b' }), [
+      'ci-g9ab585b',
+    ])
+  })
+
+  it('adds other staging tags on this version, once each, and leaves the rest', () => {
+    const tags = {
+      next: version,
+      'ci-g9ab585b': version,
+      'ci-gaaaaaaa': version,
+      'ci-g6dd83dd': '0.7.4-next.793.g6dd83dd',
+    }
+    assert.deepEqual(stagingTagsToRemove({ tags, version, stagingTag: 'ci-g9ab585b' }), ['ci-g9ab585b', 'ci-gaaaaaaa'])
+  })
+
+  it('works without a staging tag in the environment', () => {
+    assert.deepEqual(stagingTagsToRemove({ tags: { 'ci-g9ab585b': version }, version }), ['ci-g9ab585b'])
+  })
+})
+
+describe('fetchDistTags', () => {
+  it('reads the dist-tags endpoint uncached and drops _etag', async () => {
+    let request
+    const fakeFetch = async (url, init) => {
+      request = { url, init }
+      return { ok: true, status: 200, json: async () => ({ latest: '0.7.4', _etag: '"abc"' }) }
+    }
+    assert.deepEqual(await fetchDistTags('@seedprotocol/publish', fakeFetch), { latest: '0.7.4' })
+    assert.equal(request.url, 'https://registry.npmjs.org/-/package/@seedprotocol%2fpublish/dist-tags')
+    assert.equal(request.init.cache, 'no-store')
+  })
+
+  it('throws on an error response instead of reporting no tags', async () => {
+    const fakeFetch = async () => ({ ok: false, status: 503, json: async () => ({}) })
+    await assert.rejects(fetchDistTags('@seedprotocol/sdk', fakeFetch), /returned 503/)
+  })
+})
+
+describe('retryUntil', () => {
+  /** A clock that only moves when the code under test sleeps. */
+  function fakeClock() {
+    let time = 0
+    return { now: () => time, sleep: async (ms) => void (time += ms) }
+  }
+
+  it('returns the first success', async () => {
+    const clock = fakeClock()
+    const retries = []
+    const result = await retryUntil(
+      (attempt) => {
+        if (attempt < 3) throw new Error(`no ${attempt}`)
+        return 'done'
+      },
+      { deadline: 60_000, intervalMs: 15_000, onRetry: (e, attempt) => retries.push(attempt), ...clock },
+    )
+    assert.equal(result, 'done')
+    assert.deepEqual(retries, [1, 2])
+    assert.equal(clock.now(), 30_000)
+  })
+
+  it('rethrows the last error once another wait would pass the deadline', async () => {
+    const clock = fakeClock()
+    let attempts = 0
+    await assert.rejects(
+      retryUntil(
+        () => {
+          attempts++
+          throw new Error(`attempt ${attempts}`)
+        },
+        { deadline: 40_000, intervalMs: 15_000, ...clock },
+      ),
+      /attempt 3/,
+    )
+    assert.equal(clock.now(), 30_000)
+  })
+
+  it('tries once when the deadline has passed', async () => {
+    let attempts = 0
+    await assert.rejects(
+      retryUntil(
+        () => {
+          attempts++
+          throw new Error('no')
+        },
+        { deadline: 0, intervalMs: 15_000, ...fakeClock() },
+      ),
+    )
+    assert.equal(attempts, 1)
   })
 })

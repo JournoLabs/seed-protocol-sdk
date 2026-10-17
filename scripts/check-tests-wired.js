@@ -2,8 +2,8 @@
 /**
  * Fails if tests exist that `bun run test` (what CI runs) never runs.
  *
- * - Every workspace package with a `test` script must be run by the root
- *   `test` script (`bun run --filter <name> test`), unless the root
+ * - Every workspace package with a `test` script must be in PACKAGE_TESTS in
+ *   scripts/test-all.js (the root `test` script), unless the root
  *   vite.config.js already includes its __tests__ or the script runs that
  *   config. arweave, feed-hyper, gateway-hyper, publish and webpack went
  *   unrun this way.
@@ -19,6 +19,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PACKAGE_TESTS } from './test-all.js'
 
 const rootDir = path.join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const publishDir = path.join(rootDir, 'packages', 'publish')
@@ -39,7 +40,6 @@ const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'))
 const bunScript = readJson(path.join(publishDir, 'package.json')).scripts.test
 const bunListed = new Set(bunScript.match(/\S+\.test\.tsx?/g) ?? [])
 const viteConfig = readFileSync(path.join(rootDir, 'vite.config.js'), 'utf8')
-const rootTest = readJson(path.join(rootDir, 'package.json')).scripts.test
 
 let hadViolation = false
 
@@ -53,11 +53,11 @@ for (const dir of readdirSync(packagesDir)) {
   }
   const script = pkg.scripts?.test
   if (!script) continue
-  const runByRoot = rootTest.includes(`--filter ${pkg.name} test`)
+  const runByRoot = PACKAGE_TESTS.includes(pkg.name)
   const inRootVitest = viteConfig.includes(`'packages/${dir}/__tests__/`)
   const runsRootVitest = script.includes('--config vite.config.js')
   if (!runByRoot && !inRootVitest && !runsRootVitest) {
-    console.error(`[check-tests-wired] ${pkg.name} has a test script that the root "test" script never runs`)
+    console.error(`[check-tests-wired] ${pkg.name} has a test script that scripts/test-all.js never runs`)
     hadViolation = true
   }
 }
