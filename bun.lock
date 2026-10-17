@@ -68,7 +68,7 @@
     },
     "packages/bundler-core": {
       "name": "@seedprotocol/bundler-core",
-      "version": "0.7.4",
+      "version": "0.7.5",
       "devDependencies": {
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -198,7 +198,7 @@
     },
     "packages/next": {
       "name": "@seedprotocol/next",
-      "version": "0.7.4",
+      "version": "0.7.5",
       "devDependencies": {
         "@seedprotocol/bundler-core": "workspace:*",
         "@seedprotocol/react": "workspace:*",
@@ -384,7 +384,6 @@
       "version": "0.7.5",
       "dependencies": {
         "@rollup/pluginutils": "^5.1.0",
-        "debug": "^4.4.1",
         "vite-plugin-node-polyfills": "^0.27.0",
       },
       "devDependencies": {
