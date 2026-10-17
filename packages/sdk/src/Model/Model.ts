@@ -769,18 +769,19 @@ export class Model {
         try {
           // Wait for model to reach idle state (validation complete)
           await new Promise<void>((resolve) => {
+            // Cleared once the model settles: a pending timer kept Node scripts alive for 10 s.
+            const timer = setTimeout(() => {
+              subscription.unsubscribe()
+              resolve()
+            }, 10000)
             const subscription = proxiedInstance._service.subscribe((snapshot) => {
               // Wait for idle state (validation complete) or error state
               if (snapshot.value === 'idle' || snapshot.value === 'error') {
+                clearTimeout(timer)
                 subscription.unsubscribe()
                 resolve()
               }
             })
-            // Timeout after 10 seconds
-            setTimeout(() => {
-              subscription.unsubscribe()
-              resolve()
-            }, 10000)
           })
           
           // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
@@ -1959,21 +1960,22 @@ export class Model {
     
     // Wait for reload to complete
     return new Promise((resolve, reject) => {
+      // Cleared once the reload settles: a pending timer kept Node scripts alive for 10 s.
+      const timer = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timeout waiting for model reload'))
+      }, 10000)
       const subscription = this._service.subscribe((snapshot) => {
         if (snapshot.value === 'idle') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           resolve()
         } else if (snapshot.value === 'error') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           reject(new Error('Failed to reload model from database'))
         }
       })
-      
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        subscription.unsubscribe()
-        reject(new Error('Timeout waiting for model reload'))
-      }, 10000)
     })
   }
 
