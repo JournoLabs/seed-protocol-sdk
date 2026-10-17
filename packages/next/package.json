@@ -1,0 +1,72 @@
+{
+  "name": "@seedprotocol/next",
+  "version": "0.7.4",
+  "description": "Next.js config helper for apps that use @seedprotocol/sdk in the browser: ZenFS fs aliases for Turbopack and webpack, and cross-origin isolation headers",
+  "keywords": [
+    "seed-protocol",
+    "nextjs",
+    "next",
+    "turbopack",
+    "webpack",
+    "zenfs",
+    "opfs",
+    "sqlite-wasm",
+    "cross-origin-isolation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+  },
+  "peerDependencies": {
+    "next": ">=15.5.0"
+  },
+  "devDependencies": {
+    "@seedprotocol/bundler-core": "workspace:*",
+    "@seedprotocol/react": "workspace:*",
+    "@seedprotocol/sdk": "workspace:*",
+    "@types/node": "^24.10.1",
+    "@zenfs/core": "2.5.6",
+    "@zenfs/dom": "1.2.9",
+    "next": "16.4.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/next"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/next#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

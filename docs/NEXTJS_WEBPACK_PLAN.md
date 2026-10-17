@@ -1,6 +1,7 @@
 # Next.js and webpack support: plan
 
-Status: spike and SDK fixes done 2026-10-16 on `feat/next-integration`, not merged or released.
+Status: spike, SDK fixes, shared core and `@seedprotocol/next` done 2026-10-17 on
+`feat/next-integration`; not merged or released. Docs and release wiring (step 6) are partly done.
 Spike apps and how to rerun them are in [spikes/README.md](../spikes/README.md).
 
 ## Decisions
@@ -102,46 +103,54 @@ wrong: the wrap only applies to `http(s)` module worker URLs, and Turbopack's wo
   Chromium is fine. Use Playwright for this kind of check.
 - The plain webpack 5 plugin (outside Next) and Rspack were not tested.
 
-## Package shape
+## Packages (built)
 
-Recommended: `@seedprotocol/next` with `withSeed`, and a shared core with the Vite plugin.
+- **`@seedprotocol/next`** (`packages/next`): `withSeed(nextConfig, options)` takes a config object
+  or function and returns the same kind. It adds the browser-only `fs` → ZenFS aliases to
+  `turbopack.resolveAlias` and to webpack's client compiler, points `#seed-node-platform` and
+  `@seedprotocol/query` at their browser builds in every graph (server rendering included), and
+  wraps `headers()` with the isolation headers. The user's aliases, `webpack` function and headers
+  are kept and win where they overlap. It warns under Next 15 with Turbopack (Next 15 sets
+  `TURBOPACK=1` before loading the config). Peer `next >=15.5`. Options: `isolationHeaders`,
+  `headersSource`, `fsModules`.
+  The browser-entry aliases came out of building the integration fixture inside the monorepo:
+  bun's store layout made webpack's server build try to bundle libsql's native binaries, and
+  Turbopack warned that `@seedprotocol/query`'s Node disk cache made it trace the whole project.
+  With the aliases, both bundlers build the fixture with no warnings.
+- **`@seedprotocol/bundler-core`** (`packages/bundler-core`, private): isolation header defaults and
+  merge helpers, and the `fs` module list. Built with `tsc`; the Vite and Next builds inline it, so
+  it's never a runtime dependency. Synced to the release version because published manifests list
+  it in `devDependencies`.
+- **Plain webpack**: no separate package. Outside Next, the client config is the two `fs` aliases.
+- The private `packages/webpack` is removed, and `withSeed` from `@seedprotocol/sdk/node` is marked
+  deprecated in favor of `@seedprotocol/next`.
 
-- **`@seedprotocol/next`**: `withSeed(nextConfig, options)` returning a new `NextConfig`. It adds
-  the browser-only `fs` aliases to `turbopack.resolveAlias` and to the client compiler in a
-  composed `webpack` function (calling the user's), and wraps `headers()` so the user's own
-  COOP/COEP/CORP values win, as the Vite plugin does. Option names match Vite where they mean the
-  same thing (`isolationHeaders`, `fsModules`, `debug`). Peer `next >=15.5`. On Next 15 with
-  Turbopack it should warn that SQLite won't load and point at webpack.
-- **Plain webpack**: the client-side config is now two aliases, so a separate
-  `@seedprotocol/webpack` package isn't worth it yet. Export the webpack function from
-  `@seedprotocol/next`, or document the aliases, and split it out only if someone asks for
-  non-Next webpack support.
-- **Shared core**: isolation header defaults and the `fs` module list, moved out of
-  `packages/vite/src/index.ts` so the integrations can't drift. Small enough that a module inlined
-  into both packages at build time is enough; check that `scripts/check-internal-deps.js` and
-  `check-browser-entry-graph.js` accept it.
+Also in this round, the SDK's Node-only `filesDir` resolution moved from `platformClassesInit.ts`
+into the Node platform (`resolveFilesDir`, exported by both platform entries; the browser one
+returns its input). It used `fs` with computed paths, which made Next trace the whole project.
 
-Retire the old helpers: deprecate `withSeed` from `@seedprotocol/sdk/node` for one release, and
-replace the contents of the private `packages/webpack`.
+Tests: 19 unit tests for config composition, and an integration test that builds
+`packages/next/__tests__/fixtures/next-app` with Turbopack and with webpack, checks the headers on a
+page and a static chunk, and runs the create-reload round trip in Playwright (about 30 seconds).
 
 ## Steps
 
 1. ~~Spike~~ (done).
 2. ~~SDK and React fixes~~ (done; see above).
 3. ~~Rerun the spike~~ (done; the table above is the rerun).
-4. **Extract the shared core** from the Vite plugin, with no behavior change.
-5. **`@seedprotocol/next`**: `withSeed` with unit tests for config composition (user `webpack`
-   function still called, user headers win, user aliases not shadowed) and an integration test that
-   turns the spike app into a fixture: build under both bundlers, check the response headers, run
-   the probe's create-reload round trip in Playwright.
-6. **Docs and release**: package README, a Next section in `docs/GETTING_STARTED.md` that states
-   the browser-only recommendation and the Next 15 webpack requirement, production hosting notes
-   (static export needs host headers; Safari doesn't support `COEP: credentialless`), changelog
-   entries including the `@seedprotocol/vite` peer change, and the release pipeline's package list.
+4. ~~Extract the shared core~~ (done).
+5. ~~`@seedprotocol/next`~~ (done).
+6. **Docs and release**: done so far: package README, a Next.js section in
+   `docs/GETTING_STARTED.md`, `## Unreleased` changelog notes for next, sdk and react, and the
+   package added to version sync, publish order, the tier-1 check, root build/test scripts and both
+   CI workflows. Left: a first publish of `@seedprotocol/next` through the release pipeline (it has
+   never been on npm, so check `scripts/release.js` handles a package with no prior version).
 
 ## Open questions
 
 - Rspack: test it, or leave it unclaimed?
+- Safari and `COEP: credentialless`: the hosting docs should say what Safari users need, once
+  verified.
 - `packages/vite/README.md` tells users to call `configure({ mounts: { '/': IndexedDB } })` in
   their entry, while `VITE_RENDERER.md` and the `autoInit` docstring say `client.init()` mounts OPFS
   itself. The spike app never configured ZenFS and persistence worked, which supports

@@ -75,7 +75,7 @@ See the [Getting Started guide](https://github.com/JournoLabs/seed-protocol-sdk/
 | Import | Use |
 | --- | --- |
 | `@seedprotocol/sdk` | Main API: `client`, `Schema`, `Model`, `Item`, `ItemProperty`, query helpers |
-| `@seedprotocol/sdk/node` | Node entry: `client`, `Item`, `FileManager`, `Db`, and `withSeed` for webpack configs |
+| `@seedprotocol/sdk/node` | Node entry: `client`, `Item`, `FileManager`, `Db`, and the deprecated webpack `withSeed` (use `@seedprotocol/next`) |
 | `@seedprotocol/sdk/platform` | Platform services: `configurePlatform`, `createPlatformServices` |
 | `@seedprotocol/sdk/vite` | Re-export of `seedVitePlugin` from `@seedprotocol/vite`, which you install yourself (optional peer) |
 

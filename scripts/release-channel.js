@@ -21,6 +21,7 @@ export const PUBLISH_ORDER = [
   'eas',
   'arweave',
   'vite',
+  'next',
   'query',
   'sdk',
   'feed',

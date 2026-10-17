@@ -53,6 +53,7 @@
     }
   },
   "devDependencies": {
+    "@seedprotocol/bundler-core": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-react": "^6.0.0",

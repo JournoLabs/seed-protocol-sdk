@@ -35,7 +35,7 @@ jobs:
         env:
           SKIP_TESTS: '1'
         run: |
-          for pkg in eas arweave query feed vite sdk react; do
+          for pkg in bundler-core eas arweave query feed vite sdk react next; do
             (cd "packages/$pkg" && bun run build)
           done
 

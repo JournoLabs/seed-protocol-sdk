@@ -1,0 +1,25 @@
+{
+  "name": "@seedprotocol/bundler-core",
+  "version": "0.7.4",
+  "private": true,
+  "description": "Internal: settings shared by @seedprotocol/vite and @seedprotocol/next. Inlined into both at build time; never published.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "test": "vitest run --reporter=default"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "license": "MIT"
+}
