@@ -11,6 +11,14 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 /** Default limit for opening the HyperDHT connection. */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
 
+/**
+ * Default number of streams a session opens to the operator. Streams open only when every
+ * open one is busy, and each costs a DHT lookup and handshake plus an upstream request on
+ * the operator, so a small pool keeps that cost down. Four leaves room for a page's burst of
+ * gateway reads after one or two requests hang until their timeout.
+ */
+export const DEFAULT_MAX_STREAMS = 4
+
 export type TunnelSessionOptions = {
   /** Operator public key (z32 or hex) */
   key: string
@@ -18,12 +26,17 @@ export type TunnelSessionOptions = {
   storePath?: string
   /**
    * Abandon a request once the stream has sent and received nothing for this long, then
-   * reconnect for the next request. Counts from when the request reaches the front of the
-   * queue. Default 60 000; 0 disables.
+   * reconnect for the next request. Counts from when the request gets a stream.
+   * Default 60 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
   connectTimeoutMs?: number
+  /**
+   * Most HyperDHT streams open to the operator at once; each carries one request at a time.
+   * Default 4.
+   */
+  maxStreams?: number
 }
 
 export type TunnelRequestOptions = {
@@ -143,31 +156,153 @@ export function createTunnelQueue(
   }
 }
 
+type PoolSlot = {
+  run: TunnelSession['runOnTunnel']
+  socket: Duplex | null
+  busy: boolean
+}
+
+type PoolWaiter = {
+  resolve: (slot: PoolSlot) => void
+  reject: (err: Error) => void
+}
+
+export type TunnelPoolOptions = {
+  /** Most streams open at once. Default `DEFAULT_MAX_STREAMS`. */
+  maxStreams?: number
+  /** Idle limit for each request, as in `createTunnelQueue`. */
+  requestTimeoutMs?: number
+}
+
+export type TunnelPool = {
+  runOnTunnel: TunnelSession['runOnTunnel']
+  /** Reject queued requests and destroy every stream. */
+  close: () => void
+}
+
+function closedError(): Error {
+  return new Error('Tunnel session is closed')
+}
+
 /**
- * Dial the operator HyperDHT key and expose a serialized request/response forwarder.
+ * Run each transaction alone on one of up to `maxStreams` sockets from `openStream`. A request
+ * takes an idle open stream if there is one, else opens a new stream while fewer than
+ * `maxStreams` exist, else waits for the first stream to come free. Each stream is a
+ * `createTunnelQueue`, so a request that is abandoned destroys only its own stream, and that
+ * stream reopens for the next request it takes.
+ */
+export function createTunnelPool(
+  openStream: () => Promise<Duplex>,
+  options: TunnelPoolOptions = {},
+): TunnelPool {
+  const maxStreams = Math.max(1, Math.floor(options.maxStreams ?? DEFAULT_MAX_STREAMS))
+  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  const slots: PoolSlot[] = []
+  const waiting: PoolWaiter[] = []
+  let closed = false
+
+  const addSlot = (): PoolSlot => {
+    const slot: PoolSlot = { run: null as never, socket: null, busy: false }
+    // The slot runs one request at a time, so there is never a second open in progress.
+    slot.run = createTunnelQueue(async () => {
+      if (closed) throw closedError()
+      if (slot.socket && !slot.socket.destroyed) return slot.socket
+      const socket = await openStream()
+      if (closed) {
+        socket.destroy()
+        throw closedError()
+      }
+      slot.socket = socket
+      return socket
+    }, requestTimeoutMs)
+    slots.push(slot)
+    return slot
+  }
+
+  const takeSlot = (): PoolSlot | null => {
+    const idle = slots.filter((slot) => !slot.busy)
+    // An idle slot whose stream died reopens it, same as a new slot would.
+    const slot =
+      idle.find((s) => s.socket !== null && !s.socket.destroyed) ??
+      idle[0] ??
+      (slots.length < maxStreams ? addSlot() : undefined)
+    if (!slot) return null
+    slot.busy = true
+    return slot
+  }
+
+  const release = (slot: PoolSlot) => {
+    const next = waiting.shift()
+    if (next) next.resolve(slot)
+    else slot.busy = false
+  }
+
+  const acquire = (signal: AbortSignal | undefined): Promise<PoolSlot> => {
+    const slot = takeSlot()
+    if (slot) return Promise.resolve(slot)
+    return new Promise<PoolSlot>((resolve, reject) => {
+      const onAbort = () => {
+        const index = waiting.indexOf(waiter)
+        if (index >= 0) waiting.splice(index, 1)
+        reject(abortError(signal as AbortSignal))
+      }
+      const waiter: PoolWaiter = {
+        resolve: (s) => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve(s)
+        },
+        reject: (err) => {
+          signal?.removeEventListener('abort', onAbort)
+          reject(err)
+        },
+      }
+      waiting.push(waiter)
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  const runOnTunnel = async <T>(
+    fn: (socket: Duplex) => Promise<T>,
+    opts: TunnelRequestOptions = {},
+  ): Promise<T> => {
+    if (opts.signal?.aborted) throw abortError(opts.signal)
+    if (closed) throw closedError()
+    const slot = await acquire(opts.signal)
+    try {
+      return await slot.run(fn, opts)
+    } finally {
+      release(slot)
+    }
+  }
+
+  return {
+    runOnTunnel,
+    close: () => {
+      closed = true
+      for (const waiter of waiting.splice(0)) waiter.reject(closedError())
+      for (const slot of slots) slot.socket?.destroy()
+    },
+  }
+}
+
+/**
+ * Dial the operator HyperDHT key and expose a request/response forwarder.
  *
- * Requests share one stream, one at a time. The framing has no request ids, so a request
- * that is abandoned mid-flight (timeout, abort, or error) destroys the stream; the next
- * request opens a new one.
+ * Requests run on a pool of up to `maxStreams` streams to the operator, one request per
+ * stream at a time (see `createTunnelPool`). The framing has no request ids, so a request
+ * that is abandoned mid-flight (timeout, abort, or error) destroys its stream; the next
+ * request on that stream opens a new one.
  */
 export async function createTunnelSession(options: TunnelSessionOptions): Promise<TunnelSession> {
   const remotePublicKey = decodePublicKey(options.key)
   const clientKey = createEphemeralClientKeypair()
-  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
 
   const dht = new HyperDHT()
-  let activeSocket: Duplex | null = null
-  let connecting: Promise<Duplex> | null = null
 
-  const getSocket = async (): Promise<Duplex> => {
-    if (activeSocket && !activeSocket.destroyed) {
-      return activeSocket
-    }
-    if (connecting) {
-      return connecting
-    }
-    connecting = new Promise<Duplex>((resolve, reject) => {
+  // Without a `pool` option, each connect is its own handshake and encrypted stream.
+  const openStream = () =>
+    new Promise<Duplex>((resolve, reject) => {
       const socket = dht.connect(remotePublicKey, {
         keyPair: { publicKey: clientKey.publicKey, secretKey: clientKey.secretKey },
       }) as Duplex
@@ -180,7 +315,6 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
         if (settled) return
         settled = true
         if (timer) clearTimeout(timer)
-        connecting = null
         socket.destroy()
         reject(err)
       }
@@ -188,24 +322,21 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
         if (settled) return
         settled = true
         if (timer) clearTimeout(timer)
-        activeSocket = socket
-        connecting = null
         resolve(socket)
       }
       // Keep a listener for the socket's whole life so a late error never goes unhandled;
       // the frame reader sees errors through its own listener.
       socket.on('error', (err: Error) => fail(err))
-      socket.once('close', () => {
-        if (activeSocket === socket) activeSocket = null
-        fail(new Error('Tunnel connection closed before it opened'))
-      })
+      socket.once('close', () => fail(new Error('Tunnel connection closed before it opened')))
       socket.once('open', onReady)
       socket.once('connect', onReady)
     })
-    return connecting
-  }
 
-  const runOnTunnel = createTunnelQueue(getSocket, requestTimeoutMs)
+  const pool = createTunnelPool(openStream, {
+    maxStreams: options.maxStreams,
+    requestTimeoutMs: options.requestTimeoutMs,
+  })
+  const { runOnTunnel } = pool
 
   const forwardHttp = async (
     meta: TunnelMeta,
@@ -223,9 +354,7 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
     runOnTunnel,
     forwardHttp,
     close: async () => {
-      if (activeSocket && !activeSocket.destroyed) {
-        activeSocket.destroy()
-      }
+      pool.close()
       await dht.destroy()
     },
   }

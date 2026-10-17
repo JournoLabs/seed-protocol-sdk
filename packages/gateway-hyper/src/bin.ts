@@ -15,7 +15,8 @@ const USAGE = `Usage:
 
   seed-gateway connect <key> [--host 127.0.0.1] [--port 1984] [--request-timeout-ms 60000]
       Client: dial an operator key and expose a localhost HTTP sidecar.
-      Abandons a request and reconnects when the tunnel is idle for --request-timeout-ms.`
+      Abandons a request and reconnects when the tunnel is idle for --request-timeout-ms.
+      [--max-streams 4] opens up to that many streams to the operator, one request each.`
 
 function fail(message: string): never {
   console.error(`[Seed Protocol] ${message}`)
@@ -28,6 +29,13 @@ function parseMs(value: string | undefined, flag: string): number | undefined {
   const ms = Number(value)
   if (!Number.isInteger(ms) || ms < 0) fail(`${flag} must be a whole number of milliseconds`)
   return ms
+}
+
+function parseCount(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined
+  const count = Number(value)
+  if (!Number.isInteger(count) || count < 1) fail(`${flag} must be a whole number of at least 1`)
+  return count
 }
 
 function waitForSignal(): Promise<void> {
@@ -62,6 +70,7 @@ async function main(argv: string[]): Promise<void> {
       port: { type: 'string', default: '1984' },
       'upstream-timeout-ms': { type: 'string' },
       'request-timeout-ms': { type: 'string' },
+      'max-streams': { type: 'string' },
     },
   })
 
@@ -95,6 +104,7 @@ async function main(argv: string[]): Promise<void> {
       host: values.host,
       port: parseInt(values.port, 10) || 1984,
       requestTimeoutMs: parseMs(values['request-timeout-ms'], '--request-timeout-ms'),
+      maxStreams: parseCount(values['max-streams'], '--max-streams'),
     })
     console.log(`[Seed Protocol] Local sidecar: ${session.baseUrl}`)
     console.log(

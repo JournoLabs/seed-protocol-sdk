@@ -15,6 +15,7 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
     storePath: options.storePath,
     requestTimeoutMs: options.requestTimeoutMs,
     connectTimeoutMs: options.connectTimeoutMs,
+    maxStreams: options.maxStreams,
   })
 
   const server = http.createServer((req, res) => {

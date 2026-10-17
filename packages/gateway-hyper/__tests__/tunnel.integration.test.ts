@@ -167,6 +167,28 @@ describe.runIf(runDhtTests)('gateway-hyper DHT tunnel integration', () => {
       }
     }, 120_000)
 
+    it('answers /info on another stream while /hang is in flight', async () => {
+      const stack = await startStack({ upstreamTimeoutMs: 0 }, 0)
+      const hangAbort = new AbortController()
+      let hangSettled = false
+      const hung = fetch(`${stack.client.baseUrl}/hang`, { signal: hangAbort.signal }).finally(
+        () => {
+          hangSettled = true
+        },
+      )
+      hung.catch(() => {})
+      try {
+        const info = await fetch(`${stack.client.baseUrl}/info`)
+        expect(info.status).toBe(200)
+        expect(await info.json()).toEqual({ ok: true })
+        expect(hangSettled).toBe(false)
+      } finally {
+        hangAbort.abort()
+        await hung.catch(() => {})
+        await stack.close()
+      }
+    }, 120_000)
+
     it('carries a response larger than one secret-stream write', async () => {
       const stack = await startStack({ upstreamTimeoutMs: 30_000 }, 60_000)
       try {
