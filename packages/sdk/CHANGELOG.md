@@ -18,6 +18,7 @@ All notable changes to this package are documented in this file.
 - Client init's "continue in a test environment" checks read `IS_SEED_DEV` only where a `process` global exists. In a browser without Node polyfills, a missing app DB or a failed config save threw `process is not defined` instead of its own error.
 - The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
 - `item.publish()` works on the direct-EAS (EOA) path. It failed every time with `Creating attestations for … failed: Cannot set property seedUid of #<Item> which has only a getter`, because it handed `@seedprotocol/publish` the item's raw instance, where `seedUid` can't be assigned, instead of the item it was called on. `publishItem(item)` was not affected.
+- **A property edited after its seed is published attests on the next patch `publish()`.** The edit went into a new draft row, but the property kept the published row's `localId` and `uid`, so patch Publish skipped it as already attested and the edit never reached EAS. Basic, Relation, List, Image, File, Html and ItemStorage properties were affected. Each later edit also added another draft row, and setting the published value back left the draft in place. Publish now also points a property at its newest draft row when its context still names a published one (another tab's edit, or a metadata update the browser's live query dropped while the property was saving).
 
 ## 0.7.5 (2026-10-17)
 

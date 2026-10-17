@@ -12,6 +12,7 @@ import { toMetadataPropertyName } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
+import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
@@ -211,8 +212,9 @@ export const saveFile = fromCallback<
       }
     }
 
+    let writtenRow: Partial<PropertyMachineContext> = {}
     if (localId) {
-      await updateItemPropertyValue({
+      writtenRow = rowContext(await updateItemPropertyValue({
         localId,
         propertyName,
         newValue: newFileSeedLocalId,
@@ -227,12 +229,13 @@ export const saveFile = fromCallback<
         localStorageDir: '/files',
         easDataType: 'bytes32',
         dataType: 'File',
-      } as any)
+      } as any))
     }
 
     sendBack({
       type: 'updateContext',
       localId: newLocalId || localId,
+      ...writtenRow,
       propertyValue: newFileSeedLocalId,
       refSeedType: 'file',
       refSchemaUid: fileSchemaUid,

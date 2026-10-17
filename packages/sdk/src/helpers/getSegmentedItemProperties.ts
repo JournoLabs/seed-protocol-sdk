@@ -8,6 +8,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models, properties } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
 import { camelCase, upperFirst } from 'lodash-es'
+import { reconcilePropertyDraftRows } from '@/helpers/reconcilePropertyDraftRows'
 
 const matchesDataType = (
   actual: string | undefined,
@@ -71,6 +72,9 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
   const itemStorageProperties = []
   let itemStorageTransactionProperty: UploadProperty | undefined
   let itemScope: ModelScope | undefined
+
+  // Publish decides from each property's uid; it must name the property's newest row.
+  await reconcilePropertyDraftRows(item)
 
   for (const itemProperty of item.properties) {
     let propertyDef = itemProperty.propertyDef
