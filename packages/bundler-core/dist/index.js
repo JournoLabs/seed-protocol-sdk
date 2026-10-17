@@ -2,8 +2,6 @@
  * Settings shared by the Seed bundler integrations (@seedprotocol/vite, @seedprotocol/next).
  * Each package inlines this module at build time, so keep it dependency-free.
  */
-/** Node `fs` specifiers the browser build aliases to ZenFS. */
-export const DEFAULT_FS_MODULES = ['fs', 'fs/promises', 'node:fs', 'node:fs/promises'];
 /** The ZenFS module an aliased `fs` specifier resolves to. */
 export function zenfsModuleFor(fsModule) {
     return fsModule.includes('promises') ? '@zenfs/core/promises' : '@zenfs/core';

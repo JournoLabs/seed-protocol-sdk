@@ -2,8 +2,6 @@
  * Settings shared by the Seed bundler integrations (@seedprotocol/vite, @seedprotocol/next).
  * Each package inlines this module at build time, so keep it dependency-free.
  */
-/** Node `fs` specifiers the browser build aliases to ZenFS. */
-export declare const DEFAULT_FS_MODULES: readonly string[];
 /** The ZenFS module an aliased `fs` specifier resolves to. */
 export declare function zenfsModuleFor(fsModule: string): '@zenfs/core' | '@zenfs/core/promises';
 /** Cross-origin isolation headers SQLite WASM, SharedArrayBuffer and OPFS need. */
