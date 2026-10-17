@@ -1668,6 +1668,57 @@ export const loadModelsFromDbForSchema = async (
 }
 
 /**
+ * Merges the models {@link loadModelsFromDbForSchema} read from the database into a schema's
+ * models. The database decides which models and properties exist and their stored fields; the
+ * schema keeps what only it holds (nameMatch, description, validation, ...), found by id first so
+ * a property renamed in the database keeps them. A schema property whose id a database property
+ * has is dropped under its old name.
+ */
+export const mergeDbModelsIntoSchemaModels = (
+  schemaModels: { [modelName: string]: any } | undefined,
+  dbModels: { [modelName: string]: any },
+): { [modelName: string]: any } => {
+  const merged: { [modelName: string]: any } = { ...(schemaModels ?? {}) }
+  for (const [modelName, dbModel] of Object.entries(dbModels)) {
+    const schemaModel = schemaModels?.[modelName]
+    if (!schemaModel) {
+      merged[modelName] = dbModel
+      continue
+    }
+    const schemaProps: { [name: string]: any } = schemaModel.properties ?? {}
+    const dbProps: { [name: string]: any } = dbModel.properties ?? {}
+    const schemaNameById = new Map<string, string>()
+    for (const [name, prop] of Object.entries(schemaProps)) {
+      const id = prop?.id ?? prop?.schemaFileId
+      if (id) schemaNameById.set(id, name)
+    }
+    const properties: { [name: string]: any } = {}
+    const matched = new Set<string>()
+    for (const [name, dbProp] of Object.entries(dbProps)) {
+      const byId = dbProp?.schemaFileId ? schemaNameById.get(dbProp.schemaFileId) : undefined
+      const byName = schemaProps[name]
+      const byNameId = byName?.id ?? byName?.schemaFileId
+      // By name only when the ids don't say it's another property.
+      const schemaName =
+        byId ?? (byName && !(byNameId && dbProp?.schemaFileId && byNameId !== dbProp.schemaFileId) ? name : undefined)
+      const schemaProp = schemaName ? schemaProps[schemaName] : undefined
+      if (schemaName && schemaProp) matched.add(schemaName)
+      // The database's dataType and ref replace the file's type and model.
+      const { type, model, ...fromSchema } = schemaProp ?? {}
+      properties[name] = {
+        ...fromSchema,
+        ...(dbProp?.dataType === undefined && type !== undefined ? { type } : {}),
+        ...(dbProp?.ref === undefined && model !== undefined ? { model } : {}),
+        ...dbProp,
+      }
+    }
+    const unmatched = Object.fromEntries(Object.entries(schemaProps).filter(([name]) => !matched.has(name)))
+    merged[modelName] = { ...schemaModel, ...dbModel, properties: { ...unmatched, ...properties } }
+  }
+  return merged
+}
+
+/**
  * Returns model name by database model ID.
  */
 export async function getModelNameByModelId(modelId: number): Promise<string | undefined> {
