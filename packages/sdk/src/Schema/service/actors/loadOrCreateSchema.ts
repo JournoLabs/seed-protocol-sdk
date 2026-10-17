@@ -4,7 +4,7 @@ import { SchemaMachineContext } from '../schemaMachine'
 import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schema'
 import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { BaseFileManager, generateId, } from '@/helpers'
-import { addModelsToDb, addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
+import { addModelsToDb, addSchemaToDb, loadModelsFromDbForSchema, mergeDbModelsIntoSchemaModels } from '@/helpers/db'
 import { createModelsFromJson, getRefValueType } from '@/imports/json'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -781,43 +781,7 @@ export const loadOrCreateSchema = fromCallback<
             if (Object.keys(dbModels).length > 0) {
               logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
               // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-              mergedModels = {
-                ...mergedModels,
-                ...dbModels,
-              }
-              // For models that exist in both, merge properties (database properties override)
-              // When a property was renamed in DB, schemaData has old name and DB has new name (same schemaFileId).
-              // Remove schemaData properties whose id matches a DB property's schemaFileId to avoid duplicates.
-              for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (mergedModels[modelName]) {
-                  const schemaDataProps = mergedModels[modelName].properties || {}
-                  const dbProps = dbModel.properties || {}
-
-                  const dbSchemaFileIds = new Set<string>()
-                  for (const dbProp of Object.values(dbProps)) {
-                    if ((dbProp as any).schemaFileId) {
-                      dbSchemaFileIds.add((dbProp as any).schemaFileId)
-                    }
-                  }
-
-                  const filteredSchemaDataProps: Record<string, any> = {}
-                  for (const [propName, prop] of Object.entries(schemaDataProps)) {
-                    const propId = (prop as any).id || (prop as any).schemaFileId
-                    if (propId && dbSchemaFileIds.has(propId)) {
-                      continue
-                    }
-                    filteredSchemaDataProps[propName] = prop
-                  }
-
-                  mergedModels[modelName] = {
-                    ...mergedModels[modelName],
-                    properties: {
-                      ...filteredSchemaDataProps,
-                      ...dbProps,
-                    },
-                  }
-                }
-              }
+              mergedModels = mergeDbModelsIntoSchemaModels(mergedModels, dbModels)
             }
           }
           
@@ -894,43 +858,7 @@ export const loadOrCreateSchema = fromCallback<
                 logger(`Found ${Object.keys(dbModels).length} models in database for draft schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
                 // Merge: database models take precedence for properties, but preserve schemaData models for full structure
                 let mergedModels = { ...(schemaFile.models || {}) }
-                mergedModels = {
-                  ...mergedModels,
-                  ...dbModels,
-                }
-                // For models that exist in both, merge properties (database properties override)
-                // When a property was renamed in DB, schemaData has old name and DB has new name (same schemaFileId).
-                // Remove schemaData properties whose id matches a DB property's schemaFileId to avoid duplicates.
-                for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                  if (mergedModels[modelName]) {
-                    const schemaDataProps = mergedModels[modelName].properties || {}
-                    const dbProps = dbModel.properties || {}
-
-                    const dbSchemaFileIds = new Set<string>()
-                    for (const dbProp of Object.values(dbProps)) {
-                      if ((dbProp as any).schemaFileId) {
-                        dbSchemaFileIds.add((dbProp as any).schemaFileId)
-                      }
-                    }
-
-                    const filteredSchemaDataProps: Record<string, any> = {}
-                    for (const [propName, prop] of Object.entries(schemaDataProps)) {
-                      const propId = (prop as any).id || (prop as any).schemaFileId
-                      if (propId && dbSchemaFileIds.has(propId)) {
-                        continue
-                      }
-                      filteredSchemaDataProps[propName] = prop
-                    }
-
-                    mergedModels[modelName] = {
-                      ...mergedModels[modelName],
-                      properties: {
-                        ...filteredSchemaDataProps,
-                        ...dbProps,
-                      },
-                    }
-                  }
-                }
+                mergedModels = mergeDbModelsIntoSchemaModels(mergedModels, dbModels)
                 // Update schemaFile with merged models
                 schemaFile.models = mergedModels
               }
@@ -1038,43 +966,7 @@ export const loadOrCreateSchema = fromCallback<
             if (Object.keys(dbModels).length > 0) {
               logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
               // Merge: database models take precedence for properties, but preserve file models for full structure
-              mergedModels = {
-                ...mergedModels,
-                ...dbModels,
-              }
-              // For models that exist in both, merge properties (database properties override)
-              // When a property was renamed in DB, schemaData has old name and DB has new name (same schemaFileId).
-              // Remove schemaData properties whose id matches a DB property's schemaFileId to avoid duplicates.
-              for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (mergedModels[modelName]) {
-                  const schemaDataProps = mergedModels[modelName].properties || {}
-                  const dbProps = dbModel.properties || {}
-
-                  const dbSchemaFileIds = new Set<string>()
-                  for (const dbProp of Object.values(dbProps)) {
-                    if ((dbProp as any).schemaFileId) {
-                      dbSchemaFileIds.add((dbProp as any).schemaFileId)
-                    }
-                  }
-
-                  const filteredSchemaDataProps: Record<string, any> = {}
-                  for (const [propName, prop] of Object.entries(schemaDataProps)) {
-                    const propId = (prop as any).id || (prop as any).schemaFileId
-                    if (propId && dbSchemaFileIds.has(propId)) {
-                      continue
-                    }
-                    filteredSchemaDataProps[propName] = prop
-                  }
-
-                  mergedModels[modelName] = {
-                    ...mergedModels[modelName],
-                    properties: {
-                      ...filteredSchemaDataProps,
-                      ...dbProps,
-                    },
-                  }
-                }
-              }
+              mergedModels = mergeDbModelsIntoSchemaModels(mergedModels, dbModels)
             }
           }
           
@@ -1140,43 +1032,7 @@ export const loadOrCreateSchema = fromCallback<
               if (Object.keys(dbModels).length > 0) {
                 logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
                 // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-                mergedModels = {
-                  ...mergedModels,
-                  ...dbModels,
-                }
-                // For models that exist in both, merge properties (database properties override)
-                // When a property was renamed in DB, schemaData has old name and DB has new name (same schemaFileId).
-                // Remove schemaData properties whose id matches a DB property's schemaFileId to avoid duplicates.
-                for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                  if (mergedModels[modelName]) {
-                    const schemaDataProps = mergedModels[modelName].properties || {}
-                    const dbProps = dbModel.properties || {}
-
-                    const dbSchemaFileIds = new Set<string>()
-                    for (const dbProp of Object.values(dbProps)) {
-                      if ((dbProp as any).schemaFileId) {
-                        dbSchemaFileIds.add((dbProp as any).schemaFileId)
-                      }
-                    }
-
-                    const filteredSchemaDataProps: Record<string, any> = {}
-                    for (const [propName, prop] of Object.entries(schemaDataProps)) {
-                      const propId = (prop as any).id || (prop as any).schemaFileId
-                      if (propId && dbSchemaFileIds.has(propId)) {
-                        continue
-                      }
-                      filteredSchemaDataProps[propName] = prop
-                    }
-
-                    mergedModels[modelName] = {
-                      ...mergedModels[modelName],
-                      properties: {
-                        ...filteredSchemaDataProps,
-                        ...dbProps,
-                      },
-                    }
-                  }
-                }
+                mergedModels = mergeDbModelsIntoSchemaModels(mergedModels, dbModels)
               }
             }
             

@@ -111,6 +111,36 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     expect(saved.models.NmSaveNote.nameMatch).toBeUndefined()
   }, 60000)
 
+  it('keeps nameMatch when the schema loads with its model rows already in the database', async () => {
+    const schemaName = 'Test Schema Save File Name Match Reload'
+    const now = new Date().toISOString()
+    const file: SchemaFileFormat = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: generateId(),
+      metadata: { name: schemaName, createdAt: now, updatedAt: now },
+      models: {
+        NmReloadPost: {
+          id: generateId(),
+          nameMatch: 'exact',
+          properties: { title: { id: generateId(), type: 'Text', nameMatch: 'fuzzy' } },
+        },
+      },
+      enums: {},
+      migrations: [],
+    }
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    // A fresh load reads the model rows the import wrote and merges them into the file's models.
+    Schema.clearCache()
+    const schema = (await Schema.create(schemaName)) as Schema
+
+    await addModel(schema, 'NmReloadNote', { text: { dataType: 'Text' } })
+    const saved = await readSaved(await schema.saveNewVersion())
+
+    expect(saved.models.NmReloadPost.nameMatch).toBe('exact')
+    expect(saved.models.NmReloadPost.properties.title.nameMatch).toBe('fuzzy')
+  }, 60000)
+
   it('saves a schema created only in code', async () => {
     const schemaName = 'Test Schema Save File Code Only'
     const schema = await Schema.create(schemaName)
