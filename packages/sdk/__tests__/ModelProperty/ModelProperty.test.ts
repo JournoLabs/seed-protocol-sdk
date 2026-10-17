@@ -1081,19 +1081,33 @@ testDescribe('ModelProperty Integration Tests', () => {
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
+        // The model's own property: the model owns it, so the app's unload releases only its hold.
         const property = ModelProperty.create(propertyData, { waitForReady: false })
+        const other = ModelProperty.create(propertyData, { waitForReady: false })
+        expect(other).toBe(property)
         await waitForModelPropertyIdle(property)
-        
-        // Verify service is running
-        const snapshotBefore = property.getService().getSnapshot()
-        expect(snapshotBefore.status).toBe('active')
-        
-        // Unload
+        expect(property.getService().getSnapshot().status).toBe('active')
+
         property.unload()
-        
-        // Verify service is stopped
-        const snapshotAfter = property.getService().getSnapshot()
-        expect(snapshotAfter.status).toBe('stopped')
+        other.unload()
+        expect(property.getService().getSnapshot().status).toBe('active')
+        expect(ModelProperty.getById(property.id!)).toBe(property)
+
+        // A property only the app holds: stopped once its last holder unloads it.
+        const appOnly = ModelProperty.create(
+          { ...propertyData, name: 'appOnly', id: generateId(), _propertyFileId: undefined } as any,
+          { waitForReady: false },
+        )
+        const appOnlyAgain = ModelProperty.create(
+          { ...propertyData, name: 'appOnly', id: appOnly.id, _propertyFileId: undefined } as any,
+          { waitForReady: false },
+        )
+        expect(appOnlyAgain).toBe(appOnly)
+        await waitForModelPropertyIdle(appOnly)
+        appOnly.unload()
+        expect(appOnly.getService().getSnapshot().status).toBe('active')
+        appOnlyAgain.unload()
+        expect(appOnly.getService().getSnapshot().status).toBe('stopped')
       }
     })
   })

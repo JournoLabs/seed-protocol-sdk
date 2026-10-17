@@ -48,9 +48,14 @@ const TPropertyKeys = [
 ] as const
 
 export class ModelProperty {
+  /**
+   * `refCount` counts app holders (ModelProperty.create callers that haven't unloaded). `modelOwned`
+   * marks an instance its model created or loaded: the model keeps it until the model is evicted,
+   * so it isn't stopped when the app's holders unload it.
+   */
   protected static instanceCache: Map<
     string,
-    { instance: ModelProperty; refCount: number }
+    { instance: ModelProperty; refCount: number; modelOwned?: boolean }
   > = new Map()
 
   /**
@@ -626,7 +631,8 @@ export class ModelProperty {
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
-      const { instance, refCount } = this.instanceCache.get(cacheKey)!
+      const cachedEntry = this.instanceCache.get(cacheKey)!
+      const { instance, refCount } = cachedEntry
       const cachedContext = instance._getSnapshotContext()
       
       // Update cached instance if new property data has fields that the cached instance doesn't have
@@ -658,7 +664,7 @@ export class ModelProperty {
       }
       
       this.instanceCache.set(cacheKey, {
-        instance,
+        ...cachedEntry,
         refCount: refCount + 1,
       })
       if (!waitForReady) return instance
@@ -906,6 +912,18 @@ export class ModelProperty {
   }
 
   /**
+   * Turns the caller's hold from the create call just made into model ownership: the instance stays
+   * cached and running for its model, and app holders' unload calls don't stop it.
+   * @internal Used by the model's property loading.
+   */
+  static adoptForModel(instance: ModelProperty): void {
+    for (const [key, entry] of this.instanceCache) {
+      if (entry.instance._service !== instance._service) continue
+      this.instanceCache.set(key, { ...entry, refCount: Math.max(0, entry.refCount - 1), modelOwned: true })
+    }
+  }
+
+  /**
    * Get ModelProperty instance by propertyFileId from static cache
    */
   static getById(propertyFileId: string): ModelProperty | undefined {
@@ -1037,6 +1055,8 @@ export class ModelProperty {
 
     // Create ModelProperty instance (sync for createById so we can send updateContext)
     const instance = this.create(propertyData, { waitForReady: false })
+    // Loaded for its model (Model's property list, the model machine), not held by a caller.
+    this.adoptForModel(instance)
     
     // Set isEdited from database after creation
     if (isEditedFromDb) {
@@ -1409,9 +1429,24 @@ export class ModelProperty {
     }
   }
 
+  /**
+   * Releases this caller's hold. The instance is shared: it keeps running while other callers hold
+   * it, or while its model owns it (a model's properties are stopped when the model is evicted).
+   * An instance nobody else holds is stopped and leaves the cache.
+   */
   unload(): void {
-    // ModelProperty doesn't have liveQuery subscriptions or complex cache management
-    // Just stop the service
+    const entries = [...ModelProperty.instanceCache.entries()].filter(
+      ([, entry]) => entry.instance._service === this._service,
+    )
+    if (entries.length > 0) {
+      const [, first] = entries[0]
+      const refCount = Math.max(0, first.refCount - 1)
+      if (refCount > 0 || first.modelOwned) {
+        for (const [key, entry] of entries) ModelProperty.instanceCache.set(key, { ...entry, refCount })
+        return
+      }
+      for (const [key] of entries) ModelProperty.instanceCache.delete(key)
+    }
     try {
       this._service.stop()
     } catch (error) {
