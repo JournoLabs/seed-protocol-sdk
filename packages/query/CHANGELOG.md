@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.
+- `getSeed(seedUid, { versionUid, asOf })` reads a seed at one of its versions, with relations expanded and storage hydrated as for the latest, and returns null when the seed has no such version. `asOf` leaves out attestations made after it; a `patch` publish adds property attestations to the current version, so a version uid alone shows later patches (ADR 0011).
 - `queryBySchema`, `queryBySchemaForMonth` and `getSeed` return only the seeds asked for. Before, a seed related to one of them that had the same schema (a post linking to another post) came back as an extra record, past `limit`, with its own relations unexpanded, and that record went into the item cache.
 
 ## 0.7.5 (2026-10-17)
