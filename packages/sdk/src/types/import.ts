@@ -99,3 +99,19 @@ export type SchemaFileFormat = {
     changes: any[]
   }>
 }
+
+/**
+ * A schema as `SeedConfig.schema` accepts it: a {@link SchemaFileFormat} whose bookkeeping fields
+ * may be left out. Only `metadata.name` and `models` are required; `version` defaults to 1.
+ */
+export type SchemaFileInput = Omit<SchemaFileFormat, '$schema' | 'version' | 'metadata' | 'enums' | 'migrations'> & {
+  $schema?: string
+  version?: number
+  metadata: {
+    name: string
+    createdAt?: string
+    updatedAt?: string
+  }
+  enums?: SchemaFileFormat['enums']
+  migrations?: SchemaFileFormat['migrations']
+}

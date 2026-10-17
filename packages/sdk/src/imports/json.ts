@@ -1,7 +1,7 @@
 import { BaseFileManager } from '../helpers/FileManager/BaseFileManager'
 import { isNode } from '../helpers/environment'
 import { isInternalSchema, INTERNAL_SCHEMA_IDS } from '../helpers/constants'
-import { JsonImportSchema, SchemaFileFormat } from '../types/import'
+import { JsonImportSchema, SchemaFileFormat, SchemaFileInput } from '../types/import'
 import { Static } from '@sinclair/typebox'
 import { ModelPropertyDataTypes, normalizeDataType, TProperty } from '@/helpers/property'
 import { ModelDefinitions, ModelClassType } from '@/types'
@@ -353,17 +353,11 @@ export const parseJsonImportContent = (
   try {
     const data = JSON.parse(content) as any
 
-    // Determine the format and extract name
-    let schemaName: string | undefined
-    
-    // Check if it's a complete schema format (has $schema field)
-    if (data.$schema) {
-      // Complete schema format: name is in metadata.name
-      schemaName = data.metadata?.name
-    } else {
-      // Minimal format: name is at top level
-      schemaName = data.name
-    }
+    // Complete schema format keeps the name in metadata.name, minimal format at the top level.
+    // A schema file without $schema (SchemaFileInput) still has metadata.name.
+    const schemaName: string | undefined = data.$schema
+      ? data.metadata?.name
+      : (data.name ?? data.metadata?.name)
 
     if (!schemaName) {
       throw new Error('Schema name is required (either at top level or in metadata.name)')
@@ -1161,7 +1155,7 @@ async function applySchemaToDb(
  * @param source - File path (string) or complete SchemaFileFormat object
  */
 export async function syncSchemaFromSource(
-  source: string | SchemaFileFormat,
+  source: string | SchemaFileInput,
 ): Promise<void> {
   if (typeof source === 'string') {
     const path = BaseFileManager.getPathModule()
@@ -1175,7 +1169,7 @@ export async function syncSchemaFromSource(
     const version = parsed?.version ?? 1
     await importJsonSchema({ contents: content }, version)
   } else {
-    const version = (source as SchemaFileFormat).version ?? 1
+    const version = source.version ?? 1
     await importJsonSchema({ contents: JSON.stringify(source) }, version)
   }
 }

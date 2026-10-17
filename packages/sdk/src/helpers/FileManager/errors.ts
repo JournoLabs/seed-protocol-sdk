@@ -16,3 +16,24 @@ export class FileSystemLockedError extends Error {
     this.name = 'FileSystemLockedError'
   }
 }
+
+/**
+ * Thrown by client init in the browser when SQLite can't store the database in OPFS. SQLite's OPFS
+ * storage needs `SharedArrayBuffer`, which browsers only expose on cross-origin isolated pages
+ * (COOP `same-origin` and COEP `require-corp` or `credentialless` response headers). Without it,
+ * SQLocal falls back to an in-memory database and every reload would lose the app's data, so init
+ * fails instead. Hosts can check `code === 'DB_NOT_PERSISTENT'`.
+ */
+export class DatabaseNotPersistentError extends Error {
+  readonly code = 'DB_NOT_PERSISTENT' as const
+
+  constructor(detail: string) {
+    super(
+      `SQLite can't store the Seed database in the browser's private file system: ${detail}. ` +
+        `Serve the app with Cross-Origin-Opener-Policy: same-origin and ` +
+        `Cross-Origin-Embedder-Policy: require-corp (or credentialless). ` +
+        `@seedprotocol/vite sets these on the Vite dev and preview servers; production hosting has to set them too.`,
+    )
+    this.name = 'DatabaseNotPersistentError'
+  }
+}

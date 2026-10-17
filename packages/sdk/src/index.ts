@@ -69,7 +69,7 @@ export {
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'
 export type { ValidationError, ValidationResult } from './Schema/validation'
-export { FileSystemLockedError } from './helpers/FileManager/errors'
+export { DatabaseNotPersistentError, FileSystemLockedError } from './helpers/FileManager/errors'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
@@ -401,7 +401,7 @@ export {
   syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './imports'
-export type { SchemaFileFormat, SchemaNameMatch } from './imports'
+export type { SchemaFileFormat, SchemaFileInput, SchemaNameMatch } from './imports'
 
 
 export { client } from './client'

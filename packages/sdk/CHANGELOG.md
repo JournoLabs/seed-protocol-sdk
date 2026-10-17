@@ -2,6 +2,17 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.
+
+- The SDK has no peer dependencies. `@zenfs/core` (2.5.6), `@zenfs/dom` (1.2.9), `xstate` and `drizzle-orm` are regular dependencies, so installing `@seedprotocol/sdk` installs them; apps don't need to add them or match the ZenFS versions. The SDK no longer depends on `@tanstack/react-query` (its browser query cache uses `@tanstack/query-core`); `@seedprotocol/react` still declares React Query as a peer. `fsevents` is gone from the optional dependencies; nothing used it.
+
+- New `@seedprotocol/sdk/drizzle` entry re-exports `drizzle-orm` (`eq`, `and`, `like`, `sql`, ...) from the copy the SDK uses. Import query operators from there to query the SDK's tables without installing `drizzle-orm` or keeping it on the SDK's 0.44 range.
+
+- `client.init({ config: { schema } })` is enough. `filesDir` defaults to `endpoints.files`, then `'.seed'`, and `endpoints` defaults to `filesDir`, in the browser too. Before, browser init failed with `Config must include endpoints with filePaths and files`, and Node init did unless `filesDir` was set.
+- `SeedConfig.schema` takes a `SchemaFileInput`: a schema file whose `$schema`, `version`, `metadata.createdAt`, `metadata.updatedAt`, `enums` and `migrations` may be left out. `version` defaults to 1. A schema object without `$schema` used to fail with `Schema name is required` although `metadata.name` was set.
+
 ## 0.7.5 (2026-10-17)
 
 - Browser bundles no longer include the Node platform. It shipped as an unused lazy chunk of about 150 KB gzipped (libsql and its migrator), and broke webpack and Next.js server builds. The Node platform now loads through `#seed-node-platform`, a `package.json` `imports` entry that maps to the browser platform under the `browser` condition. Platform selection at runtime is unchanged, so jsdom still gets the browser platform.
