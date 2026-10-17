@@ -77,7 +77,7 @@ See the [Getting Started guide](https://github.com/JournoLabs/seed-protocol-sdk/
 | `@seedprotocol/sdk` | Main API: `client`, `Schema`, `Model`, `Item`, `ItemProperty`, query helpers |
 | `@seedprotocol/sdk/node` | Node entry: `client`, `Item`, `FileManager`, `Db`, and `withSeed` for webpack configs |
 | `@seedprotocol/sdk/platform` | Platform services: `configurePlatform`, `createPlatformServices` |
-| `@seedprotocol/sdk/vite` | Re-export of `seedVitePlugin` from `@seedprotocol/vite` |
+| `@seedprotocol/sdk/vite` | Re-export of `seedVitePlugin` from `@seedprotocol/vite`, which you install yourself (optional peer) |
 
 ESM is recommended. CommonJS also works: `const { Schema, Model, Item } = require('@seedprotocol/sdk')`.
 
