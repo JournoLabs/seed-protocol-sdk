@@ -39,13 +39,14 @@ import { fileURLToPath } from 'url'
 import { spawn, execSync } from 'child_process'
 import * as readline from 'readline'
 import { withPublishableWorkspaceManifest } from './workspace-publish-manifest.js'
-import { PUBLISH_ORDER } from './release-channel.js'
+import { AWAITING_FIRST_PUBLISH, PUBLISH_ORDER } from './release-channel.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = [...PUBLISH_ORDER]
+// AWAITING_FIRST_PUBLISH packages can only be published one at a time, by hand.
+const VALID_PACKAGES = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
 const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'next']
 
 /** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
