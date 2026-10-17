@@ -148,7 +148,7 @@ export const modelPropertyMachine = setup({
       target: '.validating',
     },
     validationSuccess: {
-      actions: assign(({ context, event }) => ({
+      actions: assign(({ context }) => ({
         ...context,
         _validationErrors: [],
       })),

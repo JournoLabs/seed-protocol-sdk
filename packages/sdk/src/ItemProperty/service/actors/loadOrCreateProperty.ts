@@ -201,7 +201,6 @@ export const loadOrCreateProperty = fromCallback<
     }
 
     // Fix 1: Fallback to in-memory Model when DB doesn't have model/properties yet (e.g. runtime-created model)
-    const fromDbBeforeFallback = !!propertyRecordSchema
     if (!propertyRecordSchema && modelName) {
       try {
         const { Model } = await import('../../../Model/Model')

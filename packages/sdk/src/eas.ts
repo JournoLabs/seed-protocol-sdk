@@ -22,7 +22,6 @@ export type {
 
 import { easNamesToFetch } from '@seedprotocol/eas'
 import { nameMatchLevels } from '@/db/read/nameMatchLevels'
-import { withExcludeRevokedFilter } from '@seedprotocol/eas'
 import { BaseEasClient } from '@seedprotocol/eas'
 import { BaseQueryClient } from '@seedprotocol/eas'
 import { GET_SCHEMAS } from '@seedprotocol/eas'

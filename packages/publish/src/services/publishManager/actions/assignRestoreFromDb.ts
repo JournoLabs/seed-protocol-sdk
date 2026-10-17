@@ -1,6 +1,6 @@
 import { assign } from 'xstate'
 
-export const assignRestoreFromDb = assign(({ context, event }) => {
+export const assignRestoreFromDb = assign(({ event }) => {
   const ev = event as {
     publishProcesses?: Map<string, unknown>
     subscriptions?: Map<string, unknown>

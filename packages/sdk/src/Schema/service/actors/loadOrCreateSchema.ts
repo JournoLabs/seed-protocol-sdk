@@ -1078,11 +1078,6 @@ export const loadOrCreateSchema = fromCallback<
             }
           }
           
-          // Create new schemaFile object with merged models (read-only approach)
-          const finalSchemaFile: SchemaFileFormat = {
-            ...schemaFile,
-            models: mergedModels,
-          }
 
           logger(`Found existing schema ${schemaName} v${schemaFile.version} from file`)
           // Debug: Log what we're sending
@@ -1180,11 +1175,6 @@ export const loadOrCreateSchema = fromCallback<
               }
             }
             
-            // Create new schemaFile object with merged models (read-only approach)
-            const finalSchemaFile: SchemaFileFormat = {
-              ...schemaFile,
-              models: mergedModels,
-            }
             
             // Query model IDs from database to populate _liveQueryModelIds immediately
             let modelIds: string[] = []
@@ -1292,7 +1282,7 @@ export const loadOrCreateSchema = fromCallback<
               logger(`Found matching draft in database (DB name: "${draftDbName}", metadata.name: "${draftMetadataName}") - preferring it over file with old name "${schemaName}"`)
               break
             }
-          } catch (error) {
+          } catch {
             continue
           }
         }

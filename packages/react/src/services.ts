@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ActorRef, InspectedEventEvent } from 'xstate'
-import { orderBy } from 'lodash-es'
-import { produce } from 'immer'
-import { eventEmitter } from '@seedprotocol/sdk'
+import { ActorRef } from 'xstate'
 import pluralize from 'pluralize'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
-import { MachineIds, ClientManagerState, getClient } from '@seedprotocol/sdk'
+import { ClientManagerState, getClient } from '@seedprotocol/sdk'
 import { isDbReadyState } from './db'
 
 const logger = debug('seedSdk:react:services')
@@ -116,7 +113,6 @@ export const useService = (service: ActorRef<any, any>) => {
 
   const updateTime = useCallback(
     (interval: ReturnType<typeof setInterval>) => {
-      const context = service.getSnapshot().context
       const status = service.getSnapshot().value
       if (
         status === 'done' ||

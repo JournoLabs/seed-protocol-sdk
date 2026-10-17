@@ -3,7 +3,7 @@ import { ModelSchema, ModelValues, PropertyData } from '@/types'
 import { VersionsType } from '@/seedSchema'
 import { IItemProperty } from './IItemProperty'
 
-export interface IItem<T extends ModelValues<ModelSchema>> {
+export interface IItem<_T extends ModelValues<ModelSchema>> {
 
   subscribe(callback: (itemProps: any) => void): Subscription
   getService(): ActorRefFrom<any>

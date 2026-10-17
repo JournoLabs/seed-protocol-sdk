@@ -11,7 +11,7 @@ import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
 import { ClientManagerState } from '@/client/constants'
 import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
-import { appState, models } from '@/seedSchema'
+import { models } from '@/seedSchema'
 import { eq }               from 'drizzle-orm'
 import {
   getOwnedAddressesFromDb,
@@ -132,7 +132,7 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
     await waitFor(clientManager, (snapshot) => {
       return snapshot.value === 'platformClassesInit' || snapshot.context.isInitialized
     }, { timeout: 1000 })
-  } catch (e) {
+  } catch {
     // If we can't transition, continue anyway - the waitFor below will catch any errors
     logger('Timeout waiting for state transition, continuing...')
   }

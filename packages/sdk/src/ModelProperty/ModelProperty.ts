@@ -19,7 +19,6 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
-import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
@@ -295,7 +294,7 @@ export class ModelProperty {
       if (propertyRecords.length > 0) {
         return propertyRecords[0].isEdited ?? false
       }
-    } catch (error) {
+    } catch {
       // Ignore errors - use fallback value
     }
 
@@ -431,7 +430,7 @@ export class ModelProperty {
       }
 
       return originalValues
-    } catch (error) {
+    } catch {
       return undefined
     }
   }
@@ -471,7 +470,7 @@ export class ModelProperty {
               schemaName = modelSchemaRecords[0].schemaName
             }
           }
-        } catch (error) {
+        } catch {
           // Database lookup failed, continue to file-based lookup
         }
       }
@@ -488,7 +487,7 @@ export class ModelProperty {
           schemaName,
         })
       }
-    } catch (error) {
+    } catch {
       // If we can't get schema name, that's okay - it will be set later if needed
     }
   }
@@ -1449,7 +1448,7 @@ export class ModelProperty {
     }
     try {
       this._service.stop()
-    } catch (error) {
+    } catch {
       // Service might already be stopped
     }
   }

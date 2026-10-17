@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:actors:verifyPropertiesInDb')

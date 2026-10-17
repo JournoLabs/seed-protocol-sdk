@@ -758,7 +758,7 @@ export const publishMachine = setup({
       type : 'final',
     },
     [FAILURE] : {
-      entry: ({ context }: { context: Partial<PublishMachineContext> }) => {
+      entry: () => {
       },
       type : 'final',
     },

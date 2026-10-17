@@ -1,8 +1,7 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { modelMachine, ModelMachineContext } from './service/modelMachine'
-import { createReactiveProxy, getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
+import { getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
 import { Item } from '@/Item/Item'
-import { ModelValues } from '@/types'
 import type { CreateWaitOptions } from '@/types'
 import { ItemData } from '@/types/item'
 import { generateId } from '@/helpers'
@@ -36,7 +35,7 @@ import {
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
 import { currentNameMatchLevels } from '@/db/read/nameMatchLevels'
-import { and, desc, eq, or } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { Subscription } from 'rxjs'
@@ -251,7 +250,7 @@ export class Model {
     const existingNumbers = new Set<number>()
     
     // Check name-based cache
-    for (const [nameKey, modelFileId] of this.instanceCacheByName.entries()) {
+    for (const nameKey of this.instanceCacheByName.keys()) {
       const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
       if (cachedSchemaName === schemaName && cachedModelName) {
         const lowerCachedName = cachedModelName.toLowerCase()
@@ -415,7 +414,7 @@ export class Model {
     if (!resolvedId) {
       const cachedId = this.instanceCacheByName.get(originalNameKey)
       if (cachedId && this.instanceCacheById.has(cachedId)) {
-        const { instance, refCount } = this.instanceCacheById.get(cachedId)!
+        const { instance } = this.instanceCacheById.get(cachedId)!
         const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean }
         if (ctx._idFromSchema) {
           resolvedId = undefined
@@ -1539,7 +1538,7 @@ export class Model {
             seen.add(id)
           }
         }
-        for (const [nameKey, entry] of this.instanceCache.entries()) {
+        for (const entry of this.instanceCache.values()) {
           const context = entry.instance._getSnapshotContext()
           const id = context.id
           if (id && !seen.has(id)) {
@@ -1675,7 +1674,6 @@ export class Model {
         return { hasConflict: false } // No DB record, no conflict
       }
       
-      const dbRecord = dbModels[0]
       
       // Check if DB was updated after we loaded
       // Note: models table doesn't have updatedAt, so we can't do timestamp comparison

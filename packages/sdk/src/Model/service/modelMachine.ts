@@ -144,7 +144,7 @@ export const modelMachine = setup({
           return newContext
         }),
         // Verify the context was updated and create property instances if needed
-        ({ context, event, self }) => {
+        ({ event, self }) => {
           if ((event as any)._liveQueryPropertyIds !== undefined) {
             const newPropertyIds = (event as any)._liveQueryPropertyIds as string[]
             // The model can be evicted with its schema (Schema.destroy, test cleanup) before the
@@ -197,7 +197,7 @@ export const modelMachine = setup({
       target: '.validating',
     },
     validationSuccess: {
-      actions: assign(({ context, event }) => ({
+      actions: assign(({ context }) => ({
         ...context,
         _validationErrors: [],
       })),
@@ -318,7 +318,7 @@ export const modelMachine = setup({
       }),
       on: {
         refreshProperties: {
-          actions: ({ self }) => {
+          actions: () => {
             // This event will be handled by the Model instance's subscription
             // The Model will call _refreshPropertiesFromDb when it receives this event
             logger(`[idle] refreshProperties event received, will be handled by Model instance`)
@@ -386,7 +386,7 @@ export const modelMachine = setup({
       on: {
         validationSuccess: {
           target: 'idle',
-          actions: assign(({ context, event }) => ({
+          actions: assign(({ context }) => ({
             ...context,
             _validationErrors: [],
           })),
@@ -426,7 +426,7 @@ export const modelMachine = setup({
                 _pendingPropertyDefinitions: undefined,
               }
             }),
-            ({ context, self }) => {
+            ({ self }) => {
               // Trigger property refresh after properties are created
               // This ensures _liveQueryPropertyIds is updated in Node.js where liveQuery isn't available
               setTimeout(() => {

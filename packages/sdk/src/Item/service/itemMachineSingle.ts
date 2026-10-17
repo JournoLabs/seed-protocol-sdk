@@ -8,7 +8,6 @@ import type { ItemPublishOptions } from '@/helpers/publishConfig'
 import type { IItem } from '@/interfaces/IItem'
 import { IItemProperty } from '@/interfaces'
 
-// @ts-ignore - Complex type inference from setup().createMachine()
 export const itemMachineSingle = setup({
   types: {
     context: {} as ItemMachineContext<any>,
@@ -168,7 +167,6 @@ export const itemMachineSingle = setup({
                 const existing = existingPropertyInstances.get(propertyName) as IItemProperty<any> | undefined
                 const existingHasSchema = existing?.propertyDef
                 const incomingHasSchema = (propertyInstance as IItemProperty<any>)?.propertyDef
-                const action = existingHasSchema && !incomingHasSchema ? 'preserve' : 'overwrite'
 
                 if (existingHasSchema && !incomingHasSchema) {
                   continue // Preserve existing instance with schema

@@ -1,4 +1,5 @@
 import configPrettier from 'eslint-config-prettier'
+import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
@@ -21,6 +22,7 @@ export default tseslint.config(
         extends: [tseslint.configs.recommended],
         rules: {
             '@typescript-eslint/no-explicit-any': 'warn',
+            'prefer-const': ['error', { destructuring: 'all', ignoreReadBeforeAssign: true }],
             '@typescript-eslint/no-unused-vars': [
                 'error',
                 {
@@ -31,6 +33,14 @@ export default tseslint.config(
                     ignoreRestSiblings: true,
                 },
             ],
+        },
+    },
+    {
+        files: ['packages/*/src/**/*.{ts,tsx}'],
+        plugins: { 'react-hooks': reactHooks },
+        rules: {
+            'react-hooks/rules-of-hooks': 'error',
+            'react-hooks/exhaustive-deps': 'warn',
         },
     },
     configPrettier,

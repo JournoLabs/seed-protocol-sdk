@@ -994,7 +994,7 @@ export async function deletePropertyFromModel(
   schemaName: string,
   modelName: string,
   propertyName: string,
-  options: DeleteOptions = {},
+  _options: DeleteOptions = {},
 ): Promise<string> {
   // Get the latest version
   const latestVersion = await getLatestSchemaVersion(schemaName)

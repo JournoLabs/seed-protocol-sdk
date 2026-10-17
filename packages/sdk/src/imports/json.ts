@@ -2,8 +2,7 @@ import { BaseFileManager } from '../helpers/FileManager/BaseFileManager'
 import { isNode } from '../helpers/environment'
 import { isInternalSchema, INTERNAL_SCHEMA_IDS } from '../helpers/constants'
 import { JsonImportSchema, SchemaFileFormat } from '../types/import'
-import { Static } from '@sinclair/typebox'
-import { ModelPropertyDataTypes, normalizeDataType, TProperty } from '@/helpers/property'
+import { normalizeDataType } from '@/helpers/property'
 import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
@@ -15,7 +14,6 @@ import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { getClient } from '@/client/ClientManager'
-import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
@@ -623,7 +621,6 @@ export async function importJsonSchema(
     // Before generating IDs, check if a file already exists with this schemaFileId
     // This handles the case where the schema was already loaded via loadSchemaFromFile
     const workingDir = BaseFileManager.getWorkingDir()
-    const path = BaseFileManager.getPathModule()
     const existingFilePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, schemaFile.version, schemaFile.id)
     const existingFileExists = await BaseFileManager.pathExists(existingFilePath)
     if (existingFileExists) {
@@ -1029,7 +1026,7 @@ export async function importJsonSchema(
             logger(`Schema file ${filePath} already exists and is complete, loading it`)
             return await loadSchemaFromFile(filePath)
           }
-        } catch (error) {
+        } catch {
           // If we can't read the file, proceed with the error
         }
       }
@@ -1200,7 +1197,6 @@ export const loadSchemaFromFile = async (
 
     // Extract schema name and version
     const schemaName = schemaFile.metadata?.name
-    const version = schemaFile.version
 
     if (!schemaName) {
       throw new Error('Schema name is required in metadata.name')

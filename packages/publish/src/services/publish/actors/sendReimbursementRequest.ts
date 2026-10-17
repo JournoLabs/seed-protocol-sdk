@@ -13,7 +13,7 @@ import {
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
 
 export const sendReimbursementRequest = fromPromise(
-  async ({ input: { context, event } }: PublishInput): Promise<ReimbursementResponse> => {
+  async ({ input: { context } }: PublishInput): Promise<ReimbursementResponse> => {
     const { arweaveTransactions = [], transactionKeys, reimbursementTransactionId } = context
 
     if (reimbursementTransactionId) {
@@ -28,7 +28,7 @@ export const sendReimbursementRequest = fromPromise(
 
     type ArweaveTx = { id: string; data?: unknown; chunks?: unknown; [key: string]: unknown }
     for (const transaction of transactions as ArweaveTx[]) {
-      let { data, chunks, ...json } = transaction
+      const { data, chunks, ...json } = transaction
       const dataBlob = data instanceof Blob ? data : new Blob([data as BlobPart])
       formData.append(`${transaction.id}-data`, dataBlob, `${transaction.id}-data`)
       const chunksBlob = new Blob([JSON.stringify(chunks)], { type: 'application/json' })

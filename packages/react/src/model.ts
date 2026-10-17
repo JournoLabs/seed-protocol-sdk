@@ -191,15 +191,6 @@ export const useModel = (
   // Otherwise, treat first param as modelId
   const isModelIdLookup = modelName === undefined || modelName === null
 
-  // Determine initial loading state
-  const shouldLoad = useMemo(() => {
-    if (!isClientReady) return false
-    if (isModelIdLookup) {
-      return !!schemaIdOrModelId
-    } else {
-      return !!(schemaIdOrModelId && modelName)
-    }
-  }, [isClientReady, isModelIdLookup, schemaIdOrModelId, modelName])
 
   // Lookup model by ID if needed
   useEffect(() => {

@@ -339,7 +339,7 @@ function getTagsStartOffset(raw: Uint8Array): number | null {
   if (targetFlag !== 0 && targetFlag !== 1) return null
   const targetPresent = targetFlag === 1
   if (targetPresent && raw.length < targetStart + 33) return null
-  let pos = targetStart + (targetPresent ? 33 : 1)
+  const pos = targetStart + (targetPresent ? 33 : 1)
   if (raw.length < pos + 1) return null
   const anchorFlag = raw[pos]!
   if (anchorFlag !== 0 && anchorFlag !== 1) return null

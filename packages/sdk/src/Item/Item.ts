@@ -23,7 +23,7 @@ import {
   NewItemProps,
   PropertyData
 } from '@/types'
-import type { CreateWaitOptions, ItemCreateOptions } from '@/types'
+import type { ItemCreateOptions } from '@/types'
 import type { ItemPublishOptions } from '@/helpers/publishConfig'
 import { normalizePublisher } from '@/helpers/addresses'
 
@@ -46,7 +46,7 @@ import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/It
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
+import { properties as propertiesTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
@@ -60,7 +60,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { deleteItem } from '@/db/write/deleteItem'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import debug from 'debug'
 
 const itemLogger = debug('seedSdk:Item')
@@ -94,7 +94,6 @@ const getModel = (): typeof import('@/Model/Model').Model => {
     if (!ModelClass) {
       // Fallback: try to access Model directly (works if already in module cache)
       try {
-        // @ts-ignore - accessing module cache directly
         const modelModule = (globalThis as any).__seedModelModule || 
           (typeof window !== 'undefined' && (window as any).__seedModelModule)
         if (modelModule) {
@@ -554,7 +553,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return hasVersionHead
   }
 
-  static async create<T extends ModelValues<ModelSchema>>(
+  static async create<_T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
     options?: ItemCreateOptions,
   ): Promise<Item<any>> {
@@ -861,7 +860,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             const snapshot = target._service.getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
             const context = snapshot.context
             const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
-            const modelName = context.modelName as string
             
             if (!propertyInstances || propertyInstances.size === 0) {
               return []
@@ -880,7 +878,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               
               // Include if it's a model property
               const isModelProp = target._isModelProperty(key, modelSchemaKeys)
-              const propValue = propertyInstance.value
               if (isModelProp) {
                 properties.push(propertyInstance)
               }
@@ -1176,7 +1173,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           readyTimeout,
         }
       )
-    } catch (error) {
+    } catch {
       return undefined
     }
   }
@@ -1804,7 +1801,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
       
       return schemaKeys
-    } catch (error) {
+    } catch {
       // If Model access fails, return empty array (property instances should be used instead)
       return []
     }
@@ -1824,7 +1821,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       
       // Prefer propertyInstance.propertyName if available (most reliable)
       // Otherwise use the Map key
-      let propertyName = propertyInstance.propertyName || key
+      const propertyName = propertyInstance.propertyName || key
       
       // Apply transformations if needed
       let transformedKey = propertyName
@@ -1887,7 +1884,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   get properties(): IItemProperty[] {
     const serviceContext = this.serviceContext
     const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
-    const modelName = this.modelName
     
     if (!propertyInstances || propertyInstances.size === 0) {
       return []
@@ -1991,7 +1987,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
       try {
         const seedSchemaMod = await import('../seedSchema')
-        const { seeds, versions, metadata } = seedSchemaMod
+        const { seeds, metadata } = seedSchemaMod
         const drizzleMod = await import('drizzle-orm')
         const { eq, and } = drizzleMod
         const versionDataMod = await import('../db/read/subqueries/versionData')
@@ -2344,7 +2340,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           instance._subscription?.unsubscribe()
         },
       })
-    } catch (error) {
+    } catch {
       // Still try to clean up what we can
       const instanceState = itemInstanceState.get(this)
       if (instanceState?.liveQuerySubscription) {

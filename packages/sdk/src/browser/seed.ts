@@ -19,7 +19,7 @@ type MetaValue = {
 class SeedBrowser {
   protected _subject: BehaviorSubject<SeedState>
 
-  constructor({ config: endpoints }: SeedConstructorOptions) {
+  constructor(_options: SeedConstructorOptions) {
     this._subject = new BehaviorSubject<SeedState>({ state: 'initializing' })
     
     // Internal machine removed - use ClientManager instead

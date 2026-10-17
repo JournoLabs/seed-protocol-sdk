@@ -13,7 +13,7 @@ import {
 } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { camelCase, startCase, upperFirst } from 'lodash-es'
+import { camelCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -26,8 +26,6 @@ import {
 } from '@/helpers'
 import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { findEntity } from '@/helpers/entity/entityFind'
-import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import {
   clearDestroySubscriptions,
@@ -156,7 +154,7 @@ const resolvePropertyRecordSchemaFromModel = async (
     }
     const schema = schemas[schemaKey]
     return schema as SchemaPropertyType | undefined
-  } catch (e) {
+  } catch {
     return undefined
   }
 }
@@ -558,10 +556,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           normalizedDataType,
           normalizedRefValueType
         )
-        const propertyNameVariant = propertyNames.length > 1 ? propertyNames[1] : undefined
 
-        const seedSchemaMod = await import('../seedSchema')
-        const { metadata } = seedSchemaMod
         const drizzleMod = await import('drizzle-orm')
         const { eq, and, or } = drizzleMod
         const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
@@ -952,7 +947,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
-    const { propertyName, seedLocalId, seedUid, versionLocalId, versionUid } =
+    const { propertyName, seedLocalId, seedUid } =
       props
     if (!propertyName || (!seedLocalId && !seedUid)) {
       if (!waitForReady) return undefined
@@ -1610,7 +1605,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           }
         },
       })
-    } catch (error) {
+    } catch {
       // Still try to clean up what we can
       const instanceState = itemPropertyInstanceState.get(this)
       if (instanceState?.liveQuerySubscription) {

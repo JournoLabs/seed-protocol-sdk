@@ -44,10 +44,8 @@ import { models, properties } from '@/seedSchema'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq, and, sql } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
-import debug from 'debug'
 import { encodeBytes32String } from '@/helpers/ethereumUtils'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
-const logger = debug('seedSdk:db:getPublishPayload')
 
 /** Case-insensitive dataType match (schema JSON may use "text" vs "Text"). */
 const matchesDataType = (
@@ -359,13 +357,6 @@ const getPropertyData = async (
  * created before loadOrCreateProperty was fixed). Ensures both new and existing items get property attestations.
  * Also ensures Relation/Image properties have required from schema when missing (for publish validation). */
 const ensurePropertyDefs = async (targetItem: IItem<any>) => {
-  const toFix = targetItem.properties.filter(
-    (p) =>
-      targetItem.modelName &&
-      (!p.propertyDef ||
-        (matchesDataType(p.propertyDef?.dataType, ModelPropertyDataTypes.Relation) &&
-          p.propertyDef?.required === undefined)),
-  )
   let schema: any
   // Model names are only unique per schema: resolve definitions from this item's own model.
   const targetScope = await getItemModelScope(targetItem as any)
@@ -380,15 +371,13 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
           if (!model?.properties?.length && !targetScope.modelFileId) {
             model = Model.findByModelType(easName(targetItem.modelName))
           }
-          const modelFound = !!model
-          const propsCount = model?.properties?.length ?? 0
           const schemaKeys: string[] = []
           if (model?.properties?.length) {
             const schemas = modelPropertiesToObject(model.properties)
             schemaKeys.push(...Object.keys(schemas))
             schema = schemas[itemProperty.propertyName]
           }
-        } catch (err) {
+        } catch {
           schema = undefined
         }
       }
@@ -487,10 +476,6 @@ const processBasicProperties = async (
         ? (context as any).propertyValue
         : ((basicProperty as IItemProperty<any>).value ??
           (context ? (context as any).propertyValue : undefined))
-    const hasContext = !!context
-    const hasValue = value != null && value !== ''
-    const hasUid = !!basicProperty.uid
-    const skipReason = !hasContext ? 'no_context' : (!hasValue || hasUid) ? (hasUid ? 'has_uid' : 'no_value') : null
     if (!context) {
       continue
     }
@@ -660,7 +645,7 @@ const processBasicProperties = async (
       value = decimal
     }
 
-    let data = [
+    const data = [
       {
         name: propertyNameForSchema,
         type: easDataType,

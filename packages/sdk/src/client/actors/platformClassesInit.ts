@@ -1,5 +1,5 @@
 import { ClientManagerContext, FromCallbackInput, SeedConstructorOptions } from '@/types'
-import { fromCallback, EventObject, waitFor }                      from "xstate";
+import { fromCallback, EventObject }                      from "xstate";
 import debug                                       from 'debug'
 import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";
@@ -58,9 +58,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
 
   // Validate synchronously before starting async operations
   // This ensures errors are handled immediately, preventing unhandled rejections
-  const { config } = options
-  const { endpoints } = config || {}
-  
   // Track if the operation is cancelled
   let cancelled = false
 

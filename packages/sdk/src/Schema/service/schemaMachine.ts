@@ -176,7 +176,7 @@ export const schemaMachine = setup({
       target: '.validating',
     },
     validationSuccess: {
-      actions: assign(({ context, event }) => ({
+      actions: assign(({ context }) => ({
         ...context,
         _validationErrors: [],
       })),

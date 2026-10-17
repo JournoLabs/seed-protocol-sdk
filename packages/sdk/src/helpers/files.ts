@@ -8,7 +8,7 @@ export const listFilesInOPFSRoot = async () => {
   const rootDirHandle = await navigator.storage.getDirectory()
 
   // Initialize an array to hold the file names
-  let fileNames = []
+  const fileNames = []
 
   // Create an async iterator to loop through directory entries
   for await (const entry of rootDirHandle.values()) {

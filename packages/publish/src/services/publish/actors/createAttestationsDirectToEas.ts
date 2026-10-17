@@ -158,7 +158,7 @@ type NormalizedRequest = {
 
 export const createAttestationsDirectToEas = fromPromise(
   async ({
-    input: { context, event },
+    input: { context },
   }: PublishInput): Promise<{
     easPayload: unknown
     publishedBatch: PublishMachineContext['publishedBatch']

@@ -203,7 +203,7 @@ const findMaxWidth = (config: BrowserImageResizerConfig, canvas: { width: number
  /**
  * Hermite resize, multicore version - fast image resize/resample using Hermite filter.
  */
- const resample = (srcCanvas: OffscreenCanvas, destCanvas: OffscreenCanvas, config: { debug?: boolean }) => {
+ const resample = (srcCanvas: OffscreenCanvas, destCanvas: OffscreenCanvas, _config: { debug?: boolean }) => {
   return new Promise<void>((resolve, reject) => {
 
       const ratio_h = srcCanvas.height / destCanvas.height;
@@ -238,7 +238,6 @@ const findMaxWidth = (config: BrowserImageResizerConfig, canvas: { width: number
       //start
       const destCtx = destCanvas.getContext('2d');
       if (!destCtx) return reject('Canvas is empty (resample dest)');
-      let workers_in_use = data_part.length;
       for (let c = 0; c < data_part.length; c++) {
 
         //draw
@@ -281,19 +280,19 @@ const findMaxWidth = (config: BrowserImageResizerConfig, canvas: { width: number
             const yy_stop = Math.min(Math.ceil((j + 1) * ratio_h), srcCanvasData.height);
 
             for (let yy = yy_start; yy < yy_stop; yy++) {
-                let dy = Math.abs(center_y - yy) / ratio_h_half;
-                let center_x = i * ratio_w;
-                let w0 = dy * dy; //pre-calc part of w
+                const dy = Math.abs(center_y - yy) / ratio_h_half;
+                const center_x = i * ratio_w;
+                const w0 = dy * dy; //pre-calc part of w
                 for (let xx = xx_start; xx < xx_stop; xx++) {
-                    let dx = Math.abs(center_x - xx) / ratio_w_half;
-                    let w = Math.sqrt(w0 + dx * dx);
+                    const dx = Math.abs(center_x - xx) / ratio_w_half;
+                    const w = Math.sqrt(w0 + dx * dx);
                     if (w >= 1) {
                         //pixel too far
                         continue;
                     }
                     //hermite filter
                     weight = 2 * w * w * w - 3 * w * w + 1;
-                    let pos_x = 4 * (xx + yy * srcCanvasData.width);
+                    const pos_x = 4 * (xx + yy * srcCanvasData.width);
                     //alpha
                     gx_a += weight * data[pos_x + 3];
                     weights_alpha += weight;

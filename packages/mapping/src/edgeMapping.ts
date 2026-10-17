@@ -1,5 +1,5 @@
 import { stripLookup } from './relationLookup'
-import type { AssembleSpec, DeriveSpec, FieldMapping, ResolveJob } from './types'
+import type { DeriveSpec, FieldMapping, ResolveJob } from './types'
 
 /** True when the edge covers a property for coverage / row presence. */
 export function isPresentEdge(mapping: FieldMapping): boolean {

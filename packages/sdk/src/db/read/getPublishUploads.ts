@@ -561,7 +561,7 @@ const processUploadPropertyData = async (
         const read = await readUploadFile(filePath)
         fileContents = read.bytes
         fileContentType = read.contentType
-      } catch (e) {
+      } catch {
         const fs = await BaseFileManager.getFs()
         fileContents = await toUint8Array(fs.readFileSync(filePath))
         fileContentType = resolveUploadMimeType({ fileName: filePath, bytes: fileContents })
@@ -581,7 +581,7 @@ const processUploadPropertyData = async (
       let childUploadContents: Uint8Array | string
       try {
         childUploadContents = await fs.promises.readFile(childUpload.localStoragePath)
-      } catch (e) {
+      } catch {
         childUploadContents = fs.readFileSync(childUpload.localStoragePath)
       }
       children.push({
@@ -608,10 +608,10 @@ const processUploadPropertyData = async (
     contentType = 'application/octet-stream'
   }
 
-  let itemPropertyLocalId = relatedItemProperty
+  const itemPropertyLocalId = relatedItemProperty
     ? relatedItemProperty.localId
     : itemProperty.localId
-  let itemPropertyName = relatedItemProperty
+  const itemPropertyName = relatedItemProperty
     ? relatedItemProperty.propertyName
     : itemProperty.propertyName
 

@@ -15,7 +15,7 @@ export type UploadActor = ActorRefFrom<typeof import('./uploadMachine').uploadMa
 
 export const sendReimbursementRequest = fromPromise(
   async ({
-    input: { context, event },
+    input: { context },
   }: {
     input: { context: UploadMachineContext; event?: unknown }
   }): Promise<ReimbursementResponse> => {

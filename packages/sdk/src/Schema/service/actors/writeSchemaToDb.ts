@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
-import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
-import { BaseFileManager, generateId } from '@/helpers'
+import { SchemaFileFormat } from '@/types/import'
+import { generateId } from '@/helpers'
 import { addSchemaToDb } from '@/helpers/db'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'

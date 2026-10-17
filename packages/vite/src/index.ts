@@ -1,4 +1,4 @@
-import type { ConfigEnv, Plugin, PreviewServer, UserConfig, ViteDevServer } from 'vite'
+import type { Plugin, PreviewServer, UserConfig, ViteDevServer } from 'vite'
 import { parseAst } from 'vite'
 import { attachScopes, type AttachedScope } from '@rollup/pluginutils'
 import fs from 'node:fs'

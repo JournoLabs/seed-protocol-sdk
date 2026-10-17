@@ -86,7 +86,7 @@ export interface RestoreFromDbInput {
 }
 
 export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
-  ({ sendBack, input: { context } }) => {
+  ({ sendBack }) => {
     const _restoreFromDb = async () => {
       const newPublishProcesses = new Map<string, import('xstate').ActorRef<any, any>>()
       const newSubscriptions = new Map<string, import('xstate').ActorRef<any, EventObject>>()

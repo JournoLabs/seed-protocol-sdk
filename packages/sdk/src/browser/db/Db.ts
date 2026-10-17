@@ -6,10 +6,8 @@ import { applyEmbeddedMigrations, canRunInTransaction, getEmbeddedMigrations } f
 import { withSqliteBusyRetry } from "./sqliteBusyRetry"
 import { withSeedDbLock } from "@/helpers/tabLocks"
 import { sql } from "drizzle-orm"
-import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
 import * as schema from '@/seedSchema'
-// @ts-ignore - sqlocal/drizzle types may not be available during build
 import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
@@ -198,7 +196,7 @@ export class BrowserDb implements IDb {
   //   await this.migrate()
   // }
 
-  async connectToDb(filesDir: string,): Promise<string | undefined> {
+  async connectToDb(_filesDir: string,): Promise<string | undefined> {
 
 
 

@@ -162,7 +162,7 @@ export const compareAndMarkDraft = fromCallback<
       // Clear isEdited flag in database
       try {
         const seedSchemaMod = await import('../../../seedSchema')
-        const { properties: propertiesTable, models: modelsTable } = seedSchemaMod
+        const { properties: propertiesTable } = seedSchemaMod
         const drizzleMod = await import('drizzle-orm')
         const { eq, and } = drizzleMod
         

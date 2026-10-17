@@ -1,4 +1,4 @@
-import { checksumAddress, toSnakeCase } from './utils.js'
+import { checksumAddress } from './utils.js'
 import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanonical.js'
 import { keepAttestationsFromRefAttester } from './easRefAttester.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
@@ -13,7 +13,7 @@ import {
   GET_SEEDS_LEAN,
   GET_VERSIONS,
 } from './queries.js'
-import type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
+import type { Attestation } from './graphql/gql/graphql.js'
 
 export type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 

@@ -1,5 +1,4 @@
 import { EventObject, fromCallback } from 'xstate'
-import { fetchAllFilesMachine } from '@/helpers/file/fetchAll/index'
 import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import {
   BaseFileManager,
@@ -18,19 +17,6 @@ import { addExcludedTransactions } from '@/db/write/addExcludedTransactions'
 
 const logger = debug('seedSdk:file:actors:fetchAll')
 
-type FileType = {
-  mimeType: string
-  extension: string
-}
-
-// Map of common MIME types to file extensions
-const fileTypeMap: Record<string, FileType> = {
-  'image/jpeg': { mimeType: 'image/jpeg', extension: '.jpg' },
-  'image/png': { mimeType: 'image/png', extension: '.png' },
-  'application/json': { mimeType: 'application/json', extension: '.json' },
-  'text/plain': { mimeType: 'text/plain', extension: '.txt' },
-  // Add more MIME types and file extensions as needed
-}
 
 type FetchAllFilesMachineContext = {
   addresses: string[]
@@ -42,7 +28,7 @@ type FetchAllFilesMachineContext = {
 export const fetchAllMetadataRecords = fromCallback<
   EventObject,
   { context: FetchAllFilesMachineContext; event?: any }
->(({ sendBack, receive, input: { context, event } }): (() => void) => {
+>(({ sendBack, input: { context } }): (() => void) => {
   const { addresses } = context
 
   const _fetchAllMetadataRecords = async () => {
@@ -83,7 +69,7 @@ export const fetchAllBinaryData = fromCallback<
   EventObject,
   { context: FetchAllFilesMachineContext }
 >(({ sendBack, input: { context } }): (() => void) => {
-  const { filesMetadata, addresses } = context
+  const { filesMetadata } = context
 
   if (!filesMetadata || filesMetadata.length === 0) {
     sendBack({ type: 'fetchingAllBinaryDataSuccess', binaryData: [] })
@@ -205,7 +191,7 @@ export const fetchAllBinaryData = fromCallback<
           continue
         }
 
-        const dataUint8Array = await BaseArweaveClient.getTransactionData(transactionId)
+        await BaseArweaveClient.getTransactionData(transactionId)
         // let buffer
         //
         // if (dataUint8Array && dataUint8Array instanceof Uint8Array) {
@@ -249,7 +235,6 @@ export const fetchAllBinaryData = fromCallback<
               'Unable to determine the file extension from the URL.',
             )
           }
-          const fileExtension = extensionMatch[0] // e.g., ".jpg"
 
           // Set the file name (you can customize this)
           // const fileNameFromUrl = `${transactionId}${fileExtension}`
@@ -265,7 +250,7 @@ export const fetchAllBinaryData = fromCallback<
           continue
         }
 
-        let mimeType = getMimeType(dataString)
+        const mimeType = getMimeType(dataString)
         let fileExtension = mimeType
 
         if (fileExtension && fileExtension?.startsWith('image')) {

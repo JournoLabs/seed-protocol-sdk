@@ -3,7 +3,6 @@ import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/r
 import { camelCase } from 'lodash-es'
 import {
   Attestation,
-  SchemaWhereInput,
   easName,
   isNameMatchLevel,
   matchEasName,
@@ -563,7 +562,6 @@ const createMetadataRecordsForStorageTransactionId = async (
   }
 
   const attestationData = parsed.metadata
-  const propertyName = camelCase(attestationData.name)
   const propertyValue =
     typeof attestationData.value === 'string'
       ? attestationData.value

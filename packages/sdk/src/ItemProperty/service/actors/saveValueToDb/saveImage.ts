@@ -36,7 +36,6 @@ export const saveImage = fromCallback<
   const {
     localId,
     propertyName: propertyNameRaw,
-    propertyValue: existingValue,
     propertyRecordSchema,
     modelName,
     seedLocalId,
@@ -45,7 +44,7 @@ export const saveImage = fromCallback<
     versionUid,
   } = context
 
-  let { schemaUid } = context
+  const { schemaUid } = context
 
   let newValue: ItemPropertyValueType
 
@@ -149,7 +148,7 @@ export const saveImage = fromCallback<
       try {
         await BaseFileManager.saveFile(filePath, fileData)
         notifyFileSaved(filePath)
-      } catch (e) {
+      } catch {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, new Uint8Array(fileData))
         notifyFileSaved(filePath)
@@ -160,7 +159,7 @@ export const saveImage = fromCallback<
       try {
         await BaseFileManager.saveFile(filePath, fileData)
         notifyFileSaved(filePath)
-      } catch (e) {
+      } catch {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, fileData)
         notifyFileSaved(filePath)
@@ -184,7 +183,7 @@ export const saveImage = fromCallback<
           })(),
           new Promise<void>((resolve) => setTimeout(resolve, RESIZE_TIMEOUT_MS)),
         ])
-      } catch (e) {
+      } catch {
         // Resize not implemented in this environment (e.g. Node); file is already saved
       }
     }

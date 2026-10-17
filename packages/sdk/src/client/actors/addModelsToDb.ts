@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { models as modelsTable, modelUids } from '@/seedSchema'
-import { eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
