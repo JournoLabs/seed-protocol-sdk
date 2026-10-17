@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.
+
 ## 0.7.5 (2026-10-17)
 
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
