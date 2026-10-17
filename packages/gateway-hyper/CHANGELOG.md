@@ -6,8 +6,15 @@ All notable changes to this package are documented in this file.
 
 A request the operator's upstream never answers no longer blocks the tunnel for good.
 
+- A tunnel session sends requests over up to `maxStreams` HyperDHT streams to the operator
+  (default 4), one request per stream at a time, so a slow request no longer holds up the
+  rest. `createGatewayProxy` and `connectTunnel` take `maxStreams`; `seed-gateway connect`
+  takes `--max-streams`. The wire protocol is unchanged and works with operators already
+  deployed, which now see up to `maxStreams` connections and concurrent upstream requests
+  from each client.
 - The client abandons a request once the stream has been idle for `requestTimeoutMs`
-  (default 60 s), answers 504, destroys the stream and reconnects for the next request.
+  (default 60 s), answers 504, and destroys that request's stream. The stream reopens for
+  the next request that takes it.
   `createGatewayProxy` and `connectTunnel` take `requestTimeoutMs` and `connectTimeoutMs`;
   `seed-gateway connect` takes `--request-timeout-ms`.
 - `forwardHttp` and `runOnTunnel` take `{ signal, timeoutMs }`. `handleFetch` passes

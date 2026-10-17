@@ -47,6 +47,11 @@ export type ConnectTunnelOptions = {
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
   connectTimeoutMs?: number
+  /**
+   * Most HyperDHT streams open to the operator at once. Each carries one request at a time,
+   * so a slow request holds up only its own stream. Default 4.
+   */
+  maxStreams?: number
 }
 
 export type ConnectTunnelResult = {
@@ -86,6 +91,11 @@ export type CreateGatewayProxyOptions = {
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
   connectTimeoutMs?: number
+  /**
+   * Most HyperDHT streams open to the operator at once. Each carries one request at a time,
+   * so a slow request holds up only its own stream. Default 4.
+   */
+  maxStreams?: number
 }
 
 export type GatewayProxy = {

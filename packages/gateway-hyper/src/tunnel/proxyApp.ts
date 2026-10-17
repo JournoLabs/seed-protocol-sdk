@@ -39,6 +39,7 @@ export function createGatewayProxy(options: CreateGatewayProxyOptions = {}): Gat
       storePath: options.storePath,
       requestTimeoutMs: options.requestTimeoutMs,
       connectTimeoutMs: options.connectTimeoutMs,
+      maxStreams: options.maxStreams,
     }).then((s) => {
       session = s
       starting = null

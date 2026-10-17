@@ -16,7 +16,7 @@ import {
 } from '../src/tunnel/protocol'
 import { proxyTunnelRequest, upstreamRequestHeaders } from '../src/tunnel/proxy'
 import { serveTunnelConnection } from '../src/tunnel/serve'
-import { createTunnelQueue, type TunnelSession } from '../src/tunnel/session'
+import { createTunnelPool, createTunnelQueue, type TunnelSession } from '../src/tunnel/session'
 import type { TunnelMeta } from '../src/types'
 
 const GET_INFO: TunnelMeta = { method: 'GET', path: '/info', headers: {} }
@@ -209,6 +209,135 @@ describe('createTunnelQueue', () => {
     expect(operatorSides).toHaveLength(2)
     void answerAll(operatorSides[1]!)
     expect((await next).meta.status).toBe(200)
+  })
+})
+
+/**
+ * Opens a fresh in-memory stream pair per call. The operator side answers every request with
+ * its path, except `/hang`, which it never answers.
+ */
+function streamFactory() {
+  const clients: Duplex[] = []
+  let maxLive = 0
+  const openStream = async () => {
+    const [client, operator] = duplexPair()
+    clients.push(client)
+    maxLive = Math.max(maxLive, clients.filter((c) => !c.destroyed).length)
+    void (async () => {
+      try {
+        while (true) {
+          const req = await readTunnelRequest(operator)
+          if (req.meta.path === '/hang') return
+          const body = Buffer.from(req.meta.path)
+          await writeTunnelResponse(operator, { status: 200, headers: {} }, body)
+        }
+      } catch {
+        /* stream closed */
+      }
+    })()
+    return client
+  }
+  return { openStream, clients, maxLive: () => maxLive }
+}
+
+describe('createTunnelPool', () => {
+  const get = (path: string) => ({ ...GET_INFO, path })
+  const opts = (maxStreams: number, requestTimeoutMs: number) => ({ maxStreams, requestTimeoutMs })
+
+  it('answers a request on another stream while one hangs', async () => {
+    const { openStream, clients } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(2, 0)).runOnTunnel)
+
+    let hungSettled = false
+    const hung = session.forwardHttp(get('/hang'), Buffer.alloc(0))
+    hung.then(
+      () => (hungSettled = true),
+      () => (hungSettled = true),
+    )
+    const info = await session.forwardHttp(get('/info'), Buffer.alloc(0))
+    expect(info.body.toString()).toBe('/info')
+    expect(hungSettled).toBe(false)
+    expect(clients).toHaveLength(2)
+    expect(clients[0]!.destroyed).toBe(false)
+  })
+
+  it('never opens more than maxStreams and reuses idle streams', async () => {
+    const { openStream, clients, maxLive } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(2, 0)).runOnTunnel)
+
+    const paths = ['/a', '/b', '/c', '/d', '/e', '/f']
+    const results = await Promise.all(
+      paths.map((p) => session.forwardHttp(get(p), Buffer.alloc(0))),
+    )
+    expect(results.map((r) => r.body.toString())).toEqual(paths)
+    expect(clients).toHaveLength(2)
+    expect(maxLive()).toBe(2)
+
+    await session.forwardHttp(get('/g'), Buffer.alloc(0))
+    expect(clients).toHaveLength(2)
+  })
+
+  it('queues behind busy streams when the pool is full', async () => {
+    const { openStream, clients } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(1, 100)).runOnTunnel)
+
+    const hung = session.forwardHttp(get('/hang'), Buffer.alloc(0))
+    const queued = session.forwardHttp(get('/info'), Buffer.alloc(0))
+    await expect(hung).rejects.toBeInstanceOf(TunnelTimeoutError)
+    expect((await queued).body.toString()).toBe('/info')
+    // The hung stream was destroyed; the queued request reopened the only slot.
+    expect(clients).toHaveLength(2)
+    expect(clients[0]!.destroyed).toBe(true)
+  })
+
+  it('destroys only the abandoned stream', async () => {
+    const { openStream, clients } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(2, 100)).runOnTunnel)
+
+    const hung = session.forwardHttp(get('/hang'), Buffer.alloc(0))
+    await session.forwardHttp(get('/info'), Buffer.alloc(0))
+    await expect(hung).rejects.toBeInstanceOf(TunnelTimeoutError)
+    expect(clients[0]!.destroyed).toBe(true)
+    expect(clients[1]!.destroyed).toBe(false)
+
+    // The next request takes the live stream instead of reopening the dead one.
+    await session.forwardHttp(get('/next'), Buffer.alloc(0))
+    expect(clients).toHaveLength(2)
+  })
+
+  it('drops a queued request on abort without opening or touching a stream', async () => {
+    const { openStream, clients } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(1, 0)).runOnTunnel)
+    const controller = new AbortController()
+
+    const hung = session.forwardHttp(get('/hang'), Buffer.alloc(0), { signal: controller.signal })
+    const other = new AbortController()
+    const queued = session.forwardHttp(get('/info'), Buffer.alloc(0), { signal: other.signal })
+    other.abort()
+    await expect(queued).rejects.toThrow(/abort/i)
+    expect(clients).toHaveLength(1)
+    expect(clients[0]!.destroyed).toBe(false)
+
+    controller.abort()
+    await expect(hung).rejects.toThrow(/abort/i)
+    const after = await session.forwardHttp(get('/after'), Buffer.alloc(0))
+    expect(after.body.toString()).toBe('/after')
+  })
+
+  it('rejects queued requests and destroys streams on close', async () => {
+    const { openStream, clients } = streamFactory()
+    const pool = createTunnelPool(openStream, opts(1, 0))
+    const session = sessionFrom(pool.runOnTunnel)
+
+    const hung = session.forwardHttp(get('/hang'), Buffer.alloc(0))
+    const queued = session.forwardHttp(get('/info'), Buffer.alloc(0))
+    await new Promise((resolve) => setImmediate(resolve))
+    pool.close()
+    await expect(queued).rejects.toThrow(/closed/)
+    await expect(hung).rejects.toThrow()
+    expect(clients[0]!.destroyed).toBe(true)
+    const late = session.forwardHttp(get('/info'), Buffer.alloc(0))
+    await expect(late).rejects.toThrow(/closed/)
   })
 })
 

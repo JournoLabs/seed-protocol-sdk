@@ -7,6 +7,7 @@ export { stripMountPath } from './tunnel/mountPath'
 export {
   createTunnelSession,
   DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_MAX_STREAMS,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './tunnel/session'
 export type { TunnelRequestOptions, TunnelSession, TunnelSessionOptions } from './tunnel/session'
