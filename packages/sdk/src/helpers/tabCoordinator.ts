@@ -23,6 +23,10 @@ export type TabMessage =
   | { type: 'event'; name: string; payload?: unknown }
   /** OPFS paths another tab (or its workers) wrote or removed, coalesced (helpers/tabEvents.ts). */
   | { type: 'files-changed'; paths: string[] }
+  /** Outbox ops were appended: the leader drains them (ADR 0019, outbox/outbox.ts). */
+  | { type: 'outbox-nudge' }
+  /** Outbox ops were applied, superseded or failed: tabs waiting on them re-read their status. */
+  | { type: 'outbox-settled'; opIds: string[] }
 
 /** A message as sent: `from` is the sending tab's TAB_ID, so a tab can drop its own messages. */
 type SentTabMessage = TabMessage & { from?: string }

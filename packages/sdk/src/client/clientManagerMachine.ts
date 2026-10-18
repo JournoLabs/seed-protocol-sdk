@@ -18,6 +18,7 @@ import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRow
 import { startAlignRowPublishers } from "@/db/alignRowPublishers"
 import { startClearStoredDisplayUrls } from "@/db/clearStoredDisplayUrls"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
+import { startOutbox } from "@/outbox"
 import {
   ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
@@ -300,6 +301,8 @@ export const clientManagerMachine = setup({
         () => startClearStoredDisplayUrls(),
         // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
         () => startCanonicalizeModelTypes(),
+        // Resumes outbox ops left pending (a reload, a closed leader tab) once this tab leads
+        () => startOutbox(),
       ],
       on: {
         [SAVE_APP_STATE_SUCCESS]: {

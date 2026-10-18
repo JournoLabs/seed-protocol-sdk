@@ -28,7 +28,8 @@ conflicts; this decision doesn't cover them.
 `storage`), `value`, `value_ref` (a staged file for storage values), `base_row_id` and `base_uid`
 (the stored row the edit was made against), `created_at`, `tab_id`, `status` (`pending`,
 `applied`, `superseded`, `failed`), `error`, `attempts`, `applied_at`, and `conflict` (JSON, see
-below). Ops for one `(seed_local_id, property_name)` apply in `created_at`, then `op_id`, order.
+below). Ops for one `(seed_local_id, property_name)` apply in append order (the row id), and a
+property waits behind its oldest pending op, including one waiting for a retry.
 
 **Assignment.** The setter checks the value's type and shape synchronously and throws a
 `TypeError` on a mismatch, before anything changes; documented coercions (a numeric string for
@@ -90,7 +91,9 @@ over the SQLocal driver), in Node through the libsql driver's `db.transaction()`
 that fails with `SQLITE_BUSY` is retried as a whole; the per-statement busy retry never runs
 inside one. SQLocal is upgraded from 0.16 to 0.18 for `tx.batch` inside transactions and the
 faster reactive bulk writes. From 0.17 SQLocal leaves cross-connection locking to SQLite, so
-cross-tab contention surfaces as `SQLITE_BUSY`.
+cross-tab contention surfaces as `SQLITE_BUSY`. In Node, libsql gives each transaction its own
+connection, so the database runs in WAL mode (readers don't block a commit) and libsql's
+`execute` and `batch` get the same per-statement busy retry as the browser driver.
 
 ## Consequences
 
