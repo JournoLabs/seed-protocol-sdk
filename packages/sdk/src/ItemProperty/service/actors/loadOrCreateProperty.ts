@@ -278,15 +278,22 @@ export const loadOrCreateProperty = fromCallback<
       }
     }
 
-    // Image: always resolve display value from file (blob URLs in DB are invalid after reload)
-    let refResolvedDisplayValue: string | undefined =
-      (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
     const isImage =
       refSeedType === 'image' ||
       normalizedDataType === 'Image' ||
       normalizedRefValueType === 'Image'
+    const isFile =
+      refSeedType === 'file' ||
+      normalizedDataType === 'File'
+
+    // Image and File: the display value is a session URL minted from the file below. A stored one is a
+    // dead blob: URL after reload (or a file:// URL that breaks when filesDir moves), so never read it.
+    let refResolvedDisplayValue: string | undefined =
+      isImage || isFile
+        ? context.refResolvedDisplayValue ?? undefined
+        : (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
 
     const resolveMatchingFilePath = async (dir: string, needle: string): Promise<string | undefined> => {
       const dirPath = BaseFileManager.getFilesPath(dir)
@@ -361,9 +368,6 @@ export const loadOrCreateProperty = fromCallback<
       }
     }
 
-    const isFile =
-      refSeedType === 'file' ||
-      normalizedDataType === 'File'
     if (isFile && metadataRecord.refResolvedValue) {
       try {
         const dir = (metadataRecord.localStorageDir ?? '/files').replace(/^\//, '')
@@ -375,6 +379,7 @@ export const loadOrCreateProperty = fromCallback<
         if (filePath) {
           // The content URL saveFile and hydrateFromDb set, so the value reads the same everywhere.
           renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
+          refResolvedDisplayValue = renderValue as string | undefined
         }
       } catch (e) {
         logger(`Failed to resolve File for ${propertyName}: ${e}`)

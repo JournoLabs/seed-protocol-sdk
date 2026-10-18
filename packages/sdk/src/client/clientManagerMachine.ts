@@ -16,6 +16,7 @@ import { emitAcrossTabs } from "@/helpers/tabEvents"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
 import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
 import { startAlignRowPublishers } from "@/db/alignRowPublishers"
+import { startClearStoredDisplayUrls } from "@/db/clearStoredDisplayUrls"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import {
   ADDRESSES_PERSISTED_EVENT,
@@ -295,6 +296,8 @@ export const clientManagerMachine = setup({
         () => startForeignAttestationCleanup(),
         // Also once: version and property rows get their seed's publisher (rows from older edits had none).
         () => startAlignRowPublishers(),
+        // Also once: File/Image rows lose the session URLs 0.7.5–0.7.6 stored (dead blob: URLs after reload).
+        () => startClearStoredDisplayUrls(),
         // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
         () => startCanonicalizeModelTypes(),
       ],
