@@ -39,7 +39,7 @@ export const findSeedBinary = (): string | null => {
 
 /**
  * Ensures the Node app DB exists and SDK migrations are applied.
- * (Formerly `runSeedInit`; CLI spawn / npx fallbacks archived under docs/archive/commented/.)
+ * (Formerly `runSeedInit`; its CLI spawn / npx fallbacks were removed in 0.5.0, see docs/adr/0018-fixed-sdk-tables-no-runtime-codegen.md.)
  */
 export const ensureNodeDbSchema = async (
   _schemaFileDir?: string,

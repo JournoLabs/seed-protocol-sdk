@@ -7,9 +7,8 @@ import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
-// ModelProperty.getById looks ids up in an index instead of scanning the instance cache (finding 18
-// in docs/TEST_SUITE_PERFORMANCE.md). The index has to follow ids that change and instances that
-// leave the cache.
+// ModelProperty.getById looks ids up in an index instead of scanning the instance cache. The index
+// has to follow ids that change and instances that leave the cache.
 testDescribe('ModelProperty.getById id index', () => {
   const schemaName = `GetById Index ${generateId()}`
   const titleId = generateId()

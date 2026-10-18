@@ -15,7 +15,7 @@ import { waitForIdle } from '../../test-utils/waitForIdle'
 /**
  * Browser test files on one worker share OPFS, so what a file leaves in the database is what the
  * next file's client.init loads: its schemas, their Model/ModelProperty instances and the work they
- * start (finding 14 in docs/TEST_SUITE_PERFORMANCE.md). teardownTestEnvironment used to delete only
+ * start. teardownTestEnvironment used to delete only
  * the schema files; it now removes the file's test schema rows and items too.
  */
 describe.skipIf(typeof window === 'undefined')('teardownTestEnvironment in the browser', () => {

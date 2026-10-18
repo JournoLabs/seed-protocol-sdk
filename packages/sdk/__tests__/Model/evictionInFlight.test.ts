@@ -18,8 +18,7 @@ import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
  * before the eviction keeps running: DB lookups that end in Model.create / ModelProperty.create, and
  * a model's property creation. Finishing after the eviction, that work used to put new instances for
  * the evicted schema back in the caches, built from rows about to be deleted; a re-created model then
- * wrote itself again and failed (or re-inserted its row) once the rows were gone (finding 14 in
- * docs/TEST_SUITE_PERFORMANCE.md).
+ * wrote itself again and failed (or re-inserted its row) once the rows were gone.
  */
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 

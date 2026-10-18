@@ -4,8 +4,6 @@ Tunnel a local **seed-protocol-server + ar.io gateway** stack to SDK users over 
 
 Generation and bundler logic stay in `seed-protocol-server`. This repo adds transport only (`@seedprotocol/gateway-hyper` + SDK config).
 
-See [GATEWAY_HYPER_SERVER_HANDOFF.md](./GATEWAY_HYPER_SERVER_HANDOFF.md) for optional changes on the server team.
-
 ## Concepts
 
 | Concept | Role |
@@ -187,6 +185,14 @@ initPublish({
    ```bash
    seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
+
+   If the tunnel runs in Docker on the stack's compose network, use the service that fronts the
+   gateway and seed API as the upstream, for example `--upstream http://traefik:80`.
+
+   Upload API routes (`/api/upload/arweave/*`) and gateway reads (`/raw/{id}`, `/graphql`,
+   `/{txId}`) must go through the same upstream, and `ARWEAVE_GATEWAY_URL` on `seed_server` must
+   point at the gateway SDK users read through. Otherwise an item uploaded through the bundler isn't
+   readable right away.
 
 3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional), in both `packages/arweave/src/constants.ts` and `packages/gateway-hyper/src/constants.ts`.
 4. Each SDK user (Path A) runs:

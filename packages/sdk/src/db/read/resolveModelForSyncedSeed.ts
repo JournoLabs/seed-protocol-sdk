@@ -29,8 +29,8 @@ export type SyncedSeedInfo = {
  * Seam for matching an EAS-synced seed to a local model (its schemaFileId).
  *
  * EAS identifies a seed's model only by name (`bytes32 <model_name>`), so when several local schemas
- * define a model with that name the seed alone can't say which one it is. The plan is to match by
- * the seed's properties and metadata (see docs/EAS_SYNCED_SEED_MODEL_RESOLUTION.md).
+ * define a model with that name the seed alone can't say which one it is. The original plan was to
+ * match by the seed's properties and metadata; docs/adr/0006-schema-scoped-seeds.md replaced it.
  *
  * TODO(eas-synced-seed-model-resolution): not implemented yet. Returns undefined, so callers fall
  * back to the name, which throws AmbiguousModelError when the name is ambiguous.

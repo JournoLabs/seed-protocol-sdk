@@ -324,7 +324,7 @@ Two changes landed on `main` the same day as this ADR, written without knowledge
 - **`631df2d`:** throws `AmbiguousModelError` when a model name exists in several
   schemas and no schema or `modelFileId` is given. Sync calls
   `resolveModelForSyncedSeed`, a stub, to set `model_file_id` on synced seeds. Its plan,
-  [`docs/EAS_SYNCED_SEED_MODEL_RESOLUTION.md`](../EAS_SYNCED_SEED_MODEL_RESOLUTION.md),
+  `docs/EAS_SYNCED_SEED_MODEL_RESOLUTION.md` (since removed; in git history),
   picks **one** model per synced seed: the candidate whose properties contain all of
   the seed's properties.
 
