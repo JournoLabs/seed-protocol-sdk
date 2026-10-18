@@ -3,12 +3,14 @@ import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds, versions } from '@/seedSchema'
 import { Item } from '@/Item/Item'
-import { ItemCreateValidationError } from '@/Item/errors'
+import { ItemCreateError, ItemCreateValidationError } from '@/Item/errors'
+import { OwnershipError } from '@/helpers/ownership'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { embeddedImageDataUri } from '../test-utils/embeddedImage'
 
 /**
  * Item.create writes the item's rows, then saves File/Image/Html/ItemStorage values through their
@@ -34,6 +36,8 @@ function schemaFile(): SchemaFileFormat {
         properties: {
           title: { id: generateId(), type: 'Text' },
           body: { id: generateId(), type: 'Html', validation: { maxLength: 20 } },
+          cover: { id: generateId(), type: 'Image' },
+          attachment: { id: generateId(), type: 'File' },
         },
       },
     },
@@ -46,9 +50,18 @@ const countRows = async () => {
   const db = BaseDb.getAppDb()!
   const posts = await db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'atomic_post'))
   const html = await db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'html'))
+  const images = await db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'image'))
+  const files = await db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'file'))
   const postVersions = await db.select({ localId: versions.localId }).from(versions).where(eq(versions.seedType, 'atomic_post'))
   const postRows = await db.select({ localId: metadata.localId }).from(metadata).where(eq(metadata.modelType, 'atomic_post'))
-  return { posts: posts.length, html: html.length, versions: postVersions.length, rows: postRows.length }
+  return {
+    posts: posts.length,
+    html: html.length,
+    images: images.length,
+    files: files.length,
+    versions: postVersions.length,
+    rows: postRows.length,
+  }
 }
 
 testDescribe('Item.create leaves nothing when it rejects', () => {
@@ -96,8 +109,50 @@ testDescribe('Item.create leaves nothing when it rejects', () => {
       body: '<p>ok</p>',
     } as never).catch((e) => e)
 
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ItemCreateError)
+    expect((error as ItemCreateError).code).toBe('save_failed')
+    expect((error as ItemCreateError).property).toBe('body')
+    expect((error as ItemCreateError).cause).toBeInstanceOf(OwnershipError)
     expect(String(error.message)).toMatch(/read-only/)
+    expect(await countRows()).toEqual(before)
+  }, 30000)
+
+  it('Image and File values refused for ownership reject with ItemCreateError and leave nothing', async () => {
+    const { client } = await import('@/client')
+    await client.setAddresses({ owned: [MINE], watched: [] })
+    setGetPublisherForNewSeeds(async () => OTHER)
+
+    for (const [property, value] of [
+      ['cover', embeddedImageDataUri()],
+      ['attachment', 'data:text/plain,not%20mine'],
+    ] as const) {
+      const before = await countRows()
+      const error = await Item.create({
+        modelName: 'AtomicPost',
+        schemaName: SCHEMA_NAME,
+        title: 'Not mine',
+        [property]: value,
+      } as never).catch((e) => e)
+
+      expect(error).toBeInstanceOf(ItemCreateError)
+      expect((error as ItemCreateError).property).toBe(property)
+      expect((error as ItemCreateError).cause).toBeInstanceOf(OwnershipError)
+      expect(await countRows()).toEqual(before)
+    }
+  }, 30000)
+
+  it('saved Image and File values are removed when a later value breaks its rule', async () => {
+    const before = await countRows()
+    const error = await Item.create({
+      modelName: 'AtomicPost',
+      schemaName: SCHEMA_NAME,
+      title: 'Partly saved',
+      cover: embeddedImageDataUri(),
+      attachment: 'data:text/plain,saved%20first',
+      body: '<p>' + 'x'.repeat(40) + '</p>',
+    } as never).catch((e) => e)
+
+    expect(error).toBeInstanceOf(ItemCreateValidationError)
     expect(await countRows()).toEqual(before)
   }, 30000)
 
@@ -114,5 +169,22 @@ testDescribe('Item.create leaves nothing when it rejects', () => {
     const after = await countRows()
     expect(after.posts).toBe(before.posts + 1)
     expect(after.html).toBe(before.html + 1)
+  }, 30000)
+
+  it('a create with Image and File values keeps their seeds', async () => {
+    const before = await countRows()
+    const item = await Item.create({
+      modelName: 'AtomicPost',
+      schemaName: SCHEMA_NAME,
+      title: 'With storage',
+      cover: embeddedImageDataUri(),
+      attachment: 'data:text/plain,kept',
+    } as never)
+
+    expect(item.seedLocalId).toBeTruthy()
+    const after = await countRows()
+    expect(after.posts).toBe(before.posts + 1)
+    expect(after.images).toBe(before.images + 1)
+    expect(after.files).toBe(before.files + 1)
   }, 30000)
 })

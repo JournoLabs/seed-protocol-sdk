@@ -63,8 +63,10 @@ export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {
+  ItemCreateError,
   ItemCreateValidationError,
   UnknownModelError,
+  type ItemCreateErrorCode,
   type ItemCreateProblem,
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'

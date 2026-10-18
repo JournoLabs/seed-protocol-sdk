@@ -992,7 +992,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   /**
    * Run each File/Image/Html/ItemStorage initial value through its ItemProperty save pipeline (sequentially, to
    * avoid SQLite write contention). Rejects on the first failure, with ItemCreateValidationError when the
-   * value breaks its property's rules; Item.create then removes the item.
+   * value breaks its property's rules and ItemCreateError otherwise; Item.create then removes the item.
    */
   private static async savePipelineValues(
     item: Item<any>,
@@ -1002,8 +1002,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     for (const [propertyName, value] of pipelineValues) {
       const property = await this.waitForPropertyInstance(item, propertyName, timeout)
       if (!property) {
-        throw new Error(
+        const { ItemCreateError } = await import('./errors')
+        throw new ItemCreateError(
           `Item.create: property ${item.modelName}.${propertyName} did not load for item ${item.seedLocalId}; value was not saved`,
+          { code: 'property_not_loaded', modelName: item.modelName, property: propertyName, seedLocalId: item.seedLocalId },
         )
       }
       // setValue, not the setter: the setter skips the save when the value is already in context.
@@ -1020,10 +1022,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           ;(created as Error & { cause?: unknown }).cause = error
           throw created
         }
-        throw new Error(
+        const { ItemCreateError } = await import('./errors')
+        throw new ItemCreateError(
           `Item.create: failed to save ${item.modelName}.${propertyName} for item ${item.seedLocalId}: ` +
             (error instanceof Error ? error.message : String(error)),
-          { cause: error },
+          { code: 'save_failed', modelName: item.modelName, property: propertyName, seedLocalId: item.seedLocalId, cause: error },
         )
       }
     }
