@@ -30,6 +30,7 @@ import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEn
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { ActorKeyedState } from '@/helpers/entity/entityState'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { createSessionObjectUrl, isSessionObjectUrl, revokeSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -189,6 +190,37 @@ const TRACKED_PROPERTIES = [
   'uid',
 ] as const
 
+// SDK-minted blob URLs a property's context has held, by actor (the raw instance and its proxy share
+// one). An entry no context field references any more is revoked; the rest are revoked on unload.
+const heldObjectUrls = new WeakMap<object, Set<string>>()
+
+const trackHeldObjectUrls = (context: PropertyMachineContext, held: Set<string>) => {
+  const referenced = new Set(
+    [
+      context.refResolvedDisplayValue,
+      context.renderValue,
+      context.propertyValue,
+      // Restored if the pending save is refused.
+      context._valueBeforeSave?.renderValue,
+      context._valueBeforeSave?.propertyValue,
+    ].filter(isSessionObjectUrl),
+  )
+  for (const url of held) {
+    if (!referenced.has(url)) {
+      held.delete(url)
+      revokeSessionObjectUrl(url)
+    }
+  }
+  for (const url of referenced) held.add(url)
+}
+
+const revokeHeldObjectUrls = (service: object) => {
+  const held = heldObjectUrls.get(service)
+  if (!held) return
+  for (const url of held) revokeSessionObjectUrl(url)
+  held.clear()
+}
+
 // Mutable state per ItemProperty instance
 const itemPropertyInstanceState = new ActorKeyedState<ItemProperty<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
@@ -324,6 +356,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       input: serviceInput as PropertyMachineContext,
     })
 
+    // Synchronous and reading the latest snapshot: the async subscriber below can run on stale ones.
+    const held = new Set<string>()
+    heldObjectUrls.set(this._service, held)
+    this._service.subscribe(() => trackHeldObjectUrls(this._service.getSnapshot().context, held))
+
     this._subscription = this._service.subscribe(
       async (snapshot: ItemPropertySnapshot) => {
         if (!snapshot || !snapshot.context) {
@@ -351,6 +388,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         }
 
         let renderValue
+        // Set when this pass minted the display URL; stored with it so the next pass reuses it.
+        let mintedDisplayValue: string | undefined
 
         const isImage =
           propertyRecordSchema &&
@@ -389,7 +428,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (isImage && !context.refResolvedValue && (isFileValue || isBlobValue)) {
           const fileOrBlob = pv as unknown as File | Blob
           const fileName = fileOrBlob instanceof File ? fileOrBlob.name : 'image'
-          const blobUrl = URL.createObjectURL(fileOrBlob)
+          const blobUrl = createSessionObjectUrl(fileOrBlob)
           this._service.send({
             type: 'updateContext',
             refResolvedValue: fileName,
@@ -423,15 +462,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 renderValue = context.refResolvedDisplayValue
               } 
               if (!context.refResolvedDisplayValue) {
-                renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
+                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
               }
             }
             if (exists && isFile) {
               // A File's value is its content URL (a blob URL in browsers, file:// in Node), as saveFile
               // and hydrateFromDb set it. Reading the text here made the value change from the URL to
               // the file's contents a moment after every save or load.
-              renderValue =
-                context.refResolvedDisplayValue ?? (await BaseFileManager.getContentUrlFromPath(filePath))
+              renderValue = context.refResolvedDisplayValue
+              if (!renderValue) {
+                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
+              }
             }
             if (!exists) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -487,6 +528,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (skipTransform && !this._alias) {
         }
 
+        // The context moved on while this pass awaited; the pass for the newer snapshot decides.
+        // Sending here put back values (and revoked URLs) that the newer pass had replaced.
+        if (this._service.getSnapshot().context !== context) {
+          if (mintedDisplayValue) revokeSessionObjectUrl(mintedDisplayValue)
+          return
+        }
+
         // Update context with renderValue instead of BehaviorSubject
         // The reactive proxy will handle reactivity
         const currentRenderValue = context.renderValue || context.propertyValue
@@ -494,10 +542,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           return
         }
 
-        // Update context with new renderValue
+        // Update context with new renderValue. A minted URL goes into refResolvedDisplayValue too:
+        // sent as renderValue alone, the next pass minted another, and so on about 60 times a second.
         this._service.send({
           type: 'updateContext',
           renderValue,
+          ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
         })
       },
     )
@@ -562,6 +612,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // File and Image display values are session URLs minted from the file on disk; the column holds
         // nothing useful for them (older versions stored blob: URLs that die on reload). Keep the minted
         // one unless the row now points at a different file, then clear it so the next render mints anew.
+        // A kept URL is also the renderValue: the row's propertyValue (the storage seed id) showed for a
+        // moment on every write to the metadata table, then the subscriber put the URL back.
         const displayValueFromRow = (row: { refResolvedValue: string | null; refResolvedDisplayValue: string | null }) => {
           const { context } = this._service.getSnapshot()
           const isSessionUrlType =
@@ -573,7 +625,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           if (!isSessionUrlType) {
             return { refResolvedDisplayValue: row.refResolvedDisplayValue || undefined }
           }
-          if ((row.refResolvedValue || undefined) === context.refResolvedValue) return {}
+          if ((row.refResolvedValue || undefined) === context.refResolvedValue) {
+            return context.refResolvedDisplayValue ? { renderValue: context.refResolvedDisplayValue } : {}
+          }
           return { refResolvedDisplayValue: undefined }
         }
 
@@ -1633,6 +1687,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         onUnload: (instance) => {
           // Clean up additional subscriptions
           instance._subscription?.unsubscribe()
+          revokeHeldObjectUrls(instance._service)
           const state = itemPropertyInstanceState.get(instance)
           if (state?.schemaLiveQuerySubscription) {
             state.schemaLiveQuerySubscription.unsubscribe()
@@ -1652,6 +1707,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         instanceState.schemaLiveQuerySubscription = null
       }
       this._subscription?.unsubscribe()
+      revokeHeldObjectUrls(this._service)
       try {
         this._service.stop()
       } catch {

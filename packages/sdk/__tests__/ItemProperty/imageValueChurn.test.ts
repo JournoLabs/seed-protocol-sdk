@@ -7,9 +7,12 @@ import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 import { embeddedImageBytes } from '../test-utils/embeddedImage'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { metadata } from '@/seedSchema'
+import { and, eq } from 'drizzle-orm'
 
-// Repro for a PermaPress report: after an Image save, the property's value took a new blob: URL
-// about 60 times a second until reload.
+// PermaPress report (0.7.5): after an Image save, the property's value took a new blob: URL about
+// 60 times a second until reload. The URLs were never revoked either.
 
 const SCHEMA_NAME = 'Test Schema Image Churn'
 
@@ -47,6 +50,14 @@ const countChanges = async (read: () => unknown, ms: number) => {
   return changes
 }
 
+// The item and several internal lookups each hold a reference; the instance stops at the last.
+const unloadAllHolders = (property: ItemProperty<any>) => {
+  const cache = (ItemProperty as any).instanceCache as Map<string, { instance: unknown }>
+  const held = () => [...cache.values()].some((entry) => entry.instance === property)
+  for (let i = 0; i < 20 && held(); i++) property.unload()
+  expect(held()).toBe(false)
+}
+
 describe('Image property value after a save', () => {
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
@@ -62,16 +73,36 @@ describe('Image property value after a save', () => {
     if (typeof window === 'undefined') return // Node mints stable file:// URLs
     const item = (await Item.create({ modelName: 'Clip', schemaName: SCHEMA_NAME, title: 'clip' } as never)) as any
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'image' })
-    const t0 = performance.now()
     property!.value = new File([embeddedImageBytes()], 'drop.png', { type: 'image/png' }) as never
     await property!.save()
-    console.error('[churn] save ms', Math.round(performance.now() - t0))
 
     await vi.waitFor(() => expect(String(property!.value)).toMatch(/^blob:/), { timeout: WAIT_TIMEOUT_MS })
     await new Promise((resolve) => setTimeout(resolve, 1000))
     const changes = await countChanges(() => property!.value, 2000)
-    console.error('[churn] value changes in 2 s after save:', changes, 'ctx display', (property as any)._service.getSnapshot().context.refResolvedDisplayValue)
     expect(changes).toBe(0)
+  }, 60000)
+
+  it('stays the same URL when its metadata row changes but names the same file', async () => {
+    if (typeof window === 'undefined') return
+    const item = (await Item.create({ modelName: 'Clip', schemaName: SCHEMA_NAME, title: 'row' } as never)) as any
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'image' })
+    property!.value = new File([embeddedImageBytes()], 'row.png', { type: 'image/png' }) as never
+    await property!.save()
+    await vi.waitFor(() => expect(String(property!.value)).toMatch(/^blob:/), { timeout: WAIT_TIMEOUT_MS })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const url = property!.value
+
+    const values: unknown[] = []
+    const sub = property!.subscribe({ next: (value: unknown) => values.push(value) })
+    // The live query re-emits the row; it used to show the storage seed id, then the URL again.
+    await BaseDb.getAppDb()
+      .update(metadata)
+      .set({ schemaUid: '0x' + '1'.repeat(64) })
+      .where(and(eq(metadata.seedLocalId, item.seedLocalId), eq(metadata.refSeedType, 'image')))
+    await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: WAIT_TIMEOUT_MS })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    sub.unsubscribe()
+    expect(values.filter((value) => value !== url)).toEqual([])
   }, 60000)
 
   it('mints one URL, not one per render', async () => {
@@ -84,7 +115,46 @@ describe('Image property value after a save', () => {
     // What displayValueFromRow does when the row names a different file (another tab's save).
     ;(property as any)._service.send({ type: 'updateContext', refResolvedDisplayValue: undefined })
     const changes = await countChanges(() => property!.value, 2000)
-    console.error('[churn] cleared-display changes in 2 s:', changes)
-    expect(changes).toBeLessThanOrEqual(1)
+    expect(changes).toBe(1)
+  }, 60000)
+
+  it('revokes the URL it replaced, and the one it holds when unloaded', async () => {
+    if (typeof window === 'undefined') return
+    const item = (await Item.create({ modelName: 'Clip', schemaName: SCHEMA_NAME, title: 'clip3' } as never)) as any
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'image' })
+    property!.value = new File([embeddedImageBytes()], 'first.png', { type: 'image/png' }) as never
+    await property!.save()
+    await vi.waitFor(() => expect(String(property!.value)).toMatch(/^blob:/), { timeout: WAIT_TIMEOUT_MS })
+    const firstUrl = String(property!.value)
+    expect((await fetch(firstUrl)).ok).toBe(true)
+
+    property!.value = new File([embeddedImageBytes(5000)], 'second.png', { type: 'image/png' }) as never
+    await property!.save()
+    await vi.waitFor(() => {
+      expect(String(property!.value)).toMatch(/^blob:/)
+      expect(property!.value).not.toBe(firstUrl)
+    }, { timeout: WAIT_TIMEOUT_MS })
+    const secondUrl = String(property!.value)
+    expect((await fetch(secondUrl)).ok).toBe(true)
+    await expect(fetch(firstUrl)).rejects.toThrow()
+
+    unloadAllHolders(property!)
+    await expect(fetch(secondUrl)).rejects.toThrow()
+  }, 60000)
+
+  it('leaves a blob URL the app passed in', async () => {
+    if (typeof window === 'undefined') return
+    const item = (await Item.create({ modelName: 'Clip', schemaName: SCHEMA_NAME, title: 'clip4' } as never)) as any
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'image' })
+    const appUrl = URL.createObjectURL(new Blob([embeddedImageBytes()], { type: 'image/png' }))
+    property!.value = appUrl as never
+    await property!.save()
+    await vi.waitFor(() => {
+      expect(String(property!.value)).toMatch(/^blob:/)
+      expect(property!.value).not.toBe(appUrl)
+    }, { timeout: WAIT_TIMEOUT_MS })
+    unloadAllHolders(property!)
+    expect((await fetch(appUrl)).ok).toBe(true)
+    URL.revokeObjectURL(appUrl)
   }, 60000)
 })

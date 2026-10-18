@@ -1,3 +1,4 @@
+import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { EventObject, fromCallback } from 'xstate'
 import { and, eq, or, sql } from 'drizzle-orm'
 import debug from 'debug'
@@ -199,7 +200,7 @@ export const hydrateFromDb = fromCallback<
           localStorageDir = `/${dir}`
           if (filePath) {
             const file = await BaseFileManager.readFile(filePath)
-            refResolvedDisplayValue = URL.createObjectURL(file)
+            refResolvedDisplayValue = createSessionObjectUrl(file)
             renderValue = refResolvedDisplayValue
             // Do not persist blob URL - it is session-scoped
           }

@@ -1,3 +1,4 @@
+import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { PropertyMachineContext } from '@/types/property'
@@ -358,7 +359,7 @@ export const loadOrCreateProperty = fromCallback<
         const filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
         if (filePath) {
           const file = await BaseFileManager.readFile(filePath)
-          const freshBlobUrl = URL.createObjectURL(file)
+          const freshBlobUrl = createSessionObjectUrl(file)
           renderValue = freshBlobUrl
           refResolvedDisplayValue = freshBlobUrl
         }
