@@ -2,11 +2,18 @@ import { useMemo } from 'react'
 import { BaseDb, easSyncProcesses, type EasSyncProcessType } from '@seedprotocol/sdk'
 import { desc, eq } from 'drizzle-orm'
 import { useLiveQuery } from './liveQuery'
+import { useIsClientReady } from './client'
 
 export type EasSyncProcessRecord = EasSyncProcessType
 
+/** The app DB once the client is ready; before that BaseDb.getAppDb() throws "Db not configured". */
+function useAppDbWhenReady() {
+  const isClientReady = useIsClientReady()
+  return isClientReady ? BaseDb.getAppDb() : null
+}
+
 function useEasSyncProcessesQuery() {
-  const db = BaseDb.getAppDb()
+  const db = useAppDbWhenReady()
   return useMemo(
     () =>
       db
@@ -46,7 +53,7 @@ export function useEasSyncProcessesNonActiveCount(): number | undefined {
 export function useEasSyncProcessById(
   id: number | undefined,
 ): { record: EasSyncProcessRecord | null; isLoading: boolean } {
-  const db = BaseDb.getAppDb()
+  const db = useAppDbWhenReady()
   const query = useMemo(
     () =>
       id != null && db
@@ -55,8 +62,9 @@ export function useEasSyncProcessById(
     [db, id],
   )
   const records = useLiveQuery(query)
-  // Without an id (or before the DB is open) there is nothing to load: not loading forever
-  const isLoading = query != null && records === undefined
+  // Without an id there is nothing to load: not loading forever. With one, waiting for the client
+  // counts as loading.
+  const isLoading = id != null && (db == null || records === undefined)
   const record = records && records.length > 0 ? (records[0] as EasSyncProcessRecord) : null
   return { record, isLoading }
 }
