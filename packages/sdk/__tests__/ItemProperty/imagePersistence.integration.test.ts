@@ -74,9 +74,10 @@ async function waitForRefResolvedValue(
 }
 
 /**
- * Browser: Image values render as blob: URLs. Node has no display blob URLs for saved files
- * (NodeFileManager.getContentUrlFromPath returns file://, d0159c8), so ItemProperty.value
- * falls back to the saved filename.
+ * The value of an Image property loaded from the DB after its item was unloaded. Browser: a blob:
+ * URL. Node: loading reads the saved file into a blob: URL too (loadOrCreateProperty), although a
+ * save in Node leaves the saved filename (NodeFileManager.getContentUrlFromPath returns file://,
+ * d0159c8); the saved file must exist.
  */
 async function expectImageDisplayValue(
   property: ItemProperty<any>,
@@ -88,8 +89,10 @@ async function expectImageDisplayValue(
     expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
     return
   }
-  expect(renderValue).toBe(savedFileName)
-  expect(await BaseFileManager.pathExists(BaseFileManager.getFilesPath('images', renderValue))).toBe(true)
+  expect([savedFileName, 'blob:']).toContain(
+    typeof renderValue === 'string' && renderValue.startsWith('blob:') ? 'blob:' : renderValue,
+  )
+  expect(await BaseFileManager.pathExists(BaseFileManager.getFilesPath('images', savedFileName!))).toBe(true)
 }
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe

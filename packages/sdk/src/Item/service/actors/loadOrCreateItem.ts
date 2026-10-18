@@ -265,7 +265,7 @@ const createItemPropertyInstances = async (
           localStorageDir: metaRow.localStorageDir ?? undefined,
         }
 
-        const property = ItemProperty.create(createProps, { waitForReady: false })
+        const property = ItemProperty.create(createProps, { waitForReady: false, hold: false })
         if (property) {
           propertyInstances.set(propertyName, property)
           logger(`Created/cached ItemProperty instance for propertyName "${propertyName}" with propertyRecordSchema: ${!!createProps.propertyRecordSchema}`)
@@ -295,7 +295,7 @@ const createItemPropertyInstances = async (
           propertyRecordSchema: propSchema,
         }
 
-        const property = ItemProperty.create(createProps, { waitForReady: false })
+        const property = ItemProperty.create(createProps, { waitForReady: false, hold: false })
         if (property) {
           propertyInstances.set(propertyName, property)
           logger(`Created placeholder ItemProperty for model property "${propertyName}" (no metadata)`)

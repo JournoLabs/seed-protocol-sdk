@@ -30,6 +30,7 @@ import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEn
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { ActorKeyedState } from '@/helpers/entity/entityState'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { createSessionObjectUrl, isSessionObjectUrl, revokeSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -189,11 +190,49 @@ const TRACKED_PROPERTIES = [
   'uid',
 ] as const
 
+// SDK-minted blob URLs a property's context has held, by actor (the raw instance and its proxy share
+// one). An entry no context field references any more is revoked; the rest are revoked on unload.
+const heldObjectUrls = new WeakMap<object, Set<string>>()
+
+const trackHeldObjectUrls = (context: PropertyMachineContext, held: Set<string>) => {
+  const referenced = new Set(
+    [
+      context.refResolvedDisplayValue,
+      context.renderValue,
+      context.propertyValue,
+      // Restored if the pending save is refused.
+      context._valueBeforeSave?.renderValue,
+      context._valueBeforeSave?.propertyValue,
+    ].filter(isSessionObjectUrl),
+  )
+  for (const url of held) {
+    if (!referenced.has(url)) {
+      held.delete(url)
+      revokeSessionObjectUrl(url)
+    }
+  }
+  for (const url of referenced) held.add(url)
+}
+
+const revokeHeldObjectUrls = (service: object) => {
+  const held = heldObjectUrls.get(service)
+  if (!held) return
+  for (const url of held) revokeSessionObjectUrl(url)
+  held.clear()
+}
+
 // Mutable state per ItemProperty instance
 const itemPropertyInstanceState = new ActorKeyedState<ItemProperty<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
   schemaLiveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for properties table (schema changes)
 }>()
+
+/**
+ * Each cached instance's entry in `ItemProperty.instanceCache`, keyed by its actor. Every key the
+ * instance is cached under shares this one entry, so `retain` and the constructor's re-keying find
+ * it without scanning the cache.
+ */
+const cacheEntries = new WeakMap<object, { instance: ItemProperty<any>; refCount: number }>()
 
 /** Thrown by ItemProperty.save() when the value failed validation (enum, pattern, minLength, maxLength). */
 export class ItemPropertySaveValidationError extends Error {
@@ -213,6 +252,14 @@ type ItemPropertyFindProps = {
   seedUid?: string
   /** When metadata has no modelType, callers (e.g. Item) can pass modelName so ItemProperty.create can succeed */
   modelName?: string
+}
+
+type ItemPropertyHoldOption = {
+  /**
+   * @internal false for SDK code that hands the instance to an owner that takes its own hold (an
+   * Item's property map): no hold is taken, and a new instance is cached with none.
+   */
+  hold?: false
 }
 
 export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
@@ -324,6 +371,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       input: serviceInput as PropertyMachineContext,
     })
 
+    // Synchronous and reading the latest snapshot: the async subscriber below can run on stale ones.
+    const held = new Set<string>()
+    heldObjectUrls.set(this._service, held)
+    this._service.subscribe(() => trackHeldObjectUrls(this._service.getSnapshot().context, held))
+
     this._subscription = this._service.subscribe(
       async (snapshot: ItemPropertySnapshot) => {
         if (!snapshot || !snapshot.context) {
@@ -342,15 +394,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             context.seedLocalId,
             context.propertyName,
           )
-          if (!ItemProperty.instanceCache.has(cacheKey)) {
-            ItemProperty.instanceCache.set(cacheKey, {
-              instance: this,
-              refCount: 1,
-            })
+          // The context's ids or name can change after create (a seed uid arrives, a List of relation
+          // moves to its storage name): add the new key to this instance's entry. Never a new entry
+          // or count, and nothing once the instance was unloaded (this runs after an await).
+          const entry = cacheEntries.get(this._service)
+          if (
+            entry &&
+            !ItemProperty.instanceCache.has(cacheKey) &&
+            this._service.getSnapshot().status === 'active'
+          ) {
+            ItemProperty.instanceCache.set(cacheKey, entry)
           }
         }
 
         let renderValue
+        // Set when this pass minted the display URL; stored with it so the next pass reuses it.
+        let mintedDisplayValue: string | undefined
 
         const isImage =
           propertyRecordSchema &&
@@ -389,7 +448,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (isImage && !context.refResolvedValue && (isFileValue || isBlobValue)) {
           const fileOrBlob = pv as unknown as File | Blob
           const fileName = fileOrBlob instanceof File ? fileOrBlob.name : 'image'
-          const blobUrl = URL.createObjectURL(fileOrBlob)
+          const blobUrl = createSessionObjectUrl(fileOrBlob)
           this._service.send({
             type: 'updateContext',
             refResolvedValue: fileName,
@@ -423,15 +482,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 renderValue = context.refResolvedDisplayValue
               } 
               if (!context.refResolvedDisplayValue) {
-                renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
+                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
               }
             }
             if (exists && isFile) {
               // A File's value is its content URL (a blob URL in browsers, file:// in Node), as saveFile
               // and hydrateFromDb set it. Reading the text here made the value change from the URL to
               // the file's contents a moment after every save or load.
-              renderValue =
-                context.refResolvedDisplayValue ?? (await BaseFileManager.getContentUrlFromPath(filePath))
+              renderValue = context.refResolvedDisplayValue
+              if (!renderValue) {
+                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
+              }
             }
             if (!exists) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -487,6 +548,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (skipTransform && !this._alias) {
         }
 
+        // The context moved on while this pass awaited; the pass for the newer snapshot decides.
+        // Sending here put back values (and revoked URLs) that the newer pass had replaced.
+        if (this._service.getSnapshot().context !== context) {
+          if (mintedDisplayValue) revokeSessionObjectUrl(mintedDisplayValue)
+          return
+        }
+
         // Update context with renderValue instead of BehaviorSubject
         // The reactive proxy will handle reactivity
         const currentRenderValue = context.renderValue || context.propertyValue
@@ -494,10 +562,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           return
         }
 
-        // Update context with new renderValue
+        // Update context with new renderValue. A minted URL goes into refResolvedDisplayValue too:
+        // sent as renderValue alone, the next pass minted another, and so on about 60 times a second.
         this._service.send({
           type: 'updateContext',
           renderValue,
+          ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
         })
       },
     )
@@ -562,6 +632,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // File and Image display values are session URLs minted from the file on disk; the column holds
         // nothing useful for them (older versions stored blob: URLs that die on reload). Keep the minted
         // one unless the row now points at a different file, then clear it so the next render mints anew.
+        // A kept URL is also the renderValue: the row's propertyValue (the storage seed id) showed for a
+        // moment on every write to the metadata table, then the subscriber put the URL back.
         const displayValueFromRow = (row: { refResolvedValue: string | null; refResolvedDisplayValue: string | null }) => {
           const { context } = this._service.getSnapshot()
           const isSessionUrlType =
@@ -573,7 +645,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           if (!isSessionUrlType) {
             return { refResolvedDisplayValue: row.refResolvedDisplayValue || undefined }
           }
-          if ((row.refResolvedValue || undefined) === context.refResolvedValue) return {}
+          if ((row.refResolvedValue || undefined) === context.refResolvedValue) {
+            return context.refResolvedDisplayValue ? { renderValue: context.refResolvedDisplayValue } : {}
+          }
           return { refResolvedDisplayValue: undefined }
         }
 
@@ -958,20 +1032,25 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
+  /**
+   * The cached instance for this item and property, or a new one. Takes a hold on it: release it
+   * with `unload()`. An Item holds the properties in its own map and releases them when it unloads.
+   */
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options: { waitForReady: false },
+    options: { waitForReady: false } & ItemPropertyHoldOption,
   ): ItemProperty<any> | undefined
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: { waitForReady?: true; readyTimeout?: number },
+    options?: { waitForReady?: true; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any> | undefined>
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: CreateWaitOptions,
+    options?: CreateWaitOptions & ItemPropertyHoldOption,
   ): ItemProperty<any> | undefined | Promise<ItemProperty<any> | undefined> {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
+    const holds = options?.hold === false ? 0 : 1
 
     const { propertyName, seedLocalId, seedUid } =
       props
@@ -991,7 +1070,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (lookupKey) {
       // One entry under both keys: one hold count for the instance
       const entry = this.instanceCache.get(lookupKey)!
-      entry.refCount += 1
+      entry.refCount += holds
       const { instance } = entry
       const otherKey = lookupKey === keyByLocal ? keyByUid : keyByLocal
       if (otherKey) this.instanceCache.set(otherKey, entry)
@@ -1073,7 +1152,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // Wrap instance in Proxy for reactive property access
         const proxiedInstance = ItemProperty.wrapInProxy(newInstance)
         
-        const entry = { instance: proxiedInstance, refCount: 1 }
+        const entry = { instance: proxiedInstance, refCount: holds }
+        cacheEntries.set(newInstance._service, entry)
         this.instanceCache.set(cacheKey, entry)
         if (keyByUid && keyByUid !== cacheKey) this.instanceCache.set(keyByUid, entry)
         if (!waitForReady) return proxiedInstance
@@ -1089,7 +1169,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // Wrap instance in Proxy for reactive property access
         const proxiedInstance = ItemProperty.wrapInProxy(newInstance)
         
-        const entry = { instance: proxiedInstance, refCount: 1 }
+        const entry = { instance: proxiedInstance, refCount: holds }
+        cacheEntries.set(newInstance._service, entry)
         this.instanceCache.set(cacheKey, entry)
         if (keyByLocal && keyByLocal !== cacheKey) this.instanceCache.set(keyByLocal, entry)
         if (!waitForReady) return proxiedInstance
@@ -1161,6 +1242,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return undefined
   }
 
+  /** Takes a hold on the instance it returns: release it with `unload()`. */
   static async find({
     propertyName,
     seedLocalId,
@@ -1168,10 +1250,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     modelName: modelNameOption,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
-  }): Promise<ItemProperty<any> | undefined> {
+  } & ItemPropertyHoldOption): Promise<ItemProperty<any> | undefined> {
     if ((!seedLocalId && !seedUid) || !propertyName) {
       return undefined
     }
@@ -1183,7 +1266,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // Check cache first. Mutate the entry: it may also be stored under the item's other id.
     const cachedEntry = this.instanceCache.get(cacheKey)
     if (cachedEntry) {
-      cachedEntry.refCount += 1
+      if (hold !== false) cachedEntry.refCount += 1
       foundProperty = cachedEntry.instance as ItemProperty<any>
     } else {
       // Query database
@@ -1216,7 +1299,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       )
       foundProperty = ItemProperty.create(
         { ...propertyData, modelName, propertyRecordSchema },
-        { waitForReady: false },
+        { waitForReady: false, hold },
       )
     }
 
@@ -1234,12 +1317,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   /**
    * Get all ItemProperty instances for an item.
    * Loads property data via getItemProperties, creates instances via create, optionally waits for idle.
+   * Takes a hold on each instance, as `create` does.
    */
   static async all(
     params: { seedLocalId?: string; seedUid?: string },
-    options?: { waitForReady?: boolean; readyTimeout?: number },
+    options?: { waitForReady?: boolean; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
@@ -1310,7 +1394,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         modelFileId,
         propertyRecordSchema,
       }
-      const instance = this.create(createProps, { waitForReady: false })
+      const instance = this.create(createProps, { waitForReady: false, hold })
       if (instance) {
         instances.push(instance)
       }
@@ -1330,6 +1414,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   find = ItemProperty.find
+
+  /**
+   * @internal Takes one more hold on a cached, running instance, released with `unload()`. False
+   * (and no hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: IItemProperty<any>): boolean {
+    const service = instance.getService()
+    const entry = cacheEntries.get(service)
+    if (!entry || service.getSnapshot().status !== 'active') return false
+    entry.refCount += 1
+    return true
+  }
 
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
@@ -1606,6 +1702,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         onUnload: (instance) => {
           // Clean up additional subscriptions
           instance._subscription?.unsubscribe()
+          revokeHeldObjectUrls(instance._service)
           const state = itemPropertyInstanceState.get(instance)
           if (state?.schemaLiveQuerySubscription) {
             state.schemaLiveQuerySubscription.unsubscribe()
@@ -1625,6 +1722,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         instanceState.schemaLiveQuerySubscription = null
       }
       this._subscription?.unsubscribe()
+      revokeHeldObjectUrls(this._service)
       try {
         this._service.stop()
       } catch {

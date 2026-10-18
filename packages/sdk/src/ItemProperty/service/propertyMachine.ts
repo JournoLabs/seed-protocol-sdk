@@ -356,6 +356,8 @@ export const propertyMachine = setup({
         actions: assign({
           isSaving: false,
           _saveValidationErrors: undefined,
+          // Only a refused or failed save restores it; kept after success, it pinned the old value.
+          _valueBeforeSave: undefined,
         }),
       },
     },

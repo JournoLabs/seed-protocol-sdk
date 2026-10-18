@@ -93,10 +93,11 @@ describe.skipIf(typeof window === 'undefined')('ItemProperty liveQuery teardown'
   }, 30000)
 
   it('the last unload closes both liveQueries', async () => {
-    const { property, filters } = await createWatchedTitle('unload')
+    const { item, property, filters } = await createWatchedTitle('unload')
 
-    // Release every hold (the item, its liveQuery and this find each take one), up to a bound.
-    for (let i = 0; i < 10 && property.getService().getSnapshot().status !== 'stopped'; i++) property.unload()
+    // The item and this find each hold the property once
+    item.unload()
+    property.unload()
 
     expect(property.getService().getSnapshot().status).toBe('stopped')
 
