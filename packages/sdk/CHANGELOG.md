@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **`ItemProperty.save()` and `item.publish()` reject with the error that was thrown**, so `instanceof` and fields like `code` and `cause` work: an `OwnershipError` from an assignment the item's owner check refused, or `@seedprotocol/publish`'s `ManagedAccountPublishError` with its `code`. Before, both rejected with a plain `Error` carrying only the message (and, for `save()`, the name). `save()`'s message is now the original one, without the `Failed to save property <name>:` prefix. The machine context's `_saveError` and `_publishError` hold the `Error` itself instead of `{ message, name }`. `usePublishItem`'s `error` gets the class too.
+- A value that breaks its property's rules no longer stays shown after its save is rejected. `property.value`, `Item.find` and `Item.all` kept the rejected value for the rest of the session although nothing was written; now they go back to the value from before the assignment, as they already did for ownership refusals.
+- A non-list `Relation` whose schema sets a `refValueType` other than `Image` saves its value. The save resolved without writing anything, so the value was gone after a reload.
+- New `property.setValue(value, { before })` shows a value and saves it, as assigning `property.value` does, but saves even when the value is already in context. `before` is what to restore if the save is refused or rejected; pass it when your code put the value into context itself, such as a debounced input.
+- `Item.create` throws `ItemCreateError` (exported) when a File, Image, Html or ItemStorage value fails to save for a reason other than its rules, for example an ownership refusal. It has `code` (`'save_failed'` or `'property_not_loaded'`), `modelName`, `property`, the removed draft's `seedLocalId`, and the save's own error as `cause`. Before, it was a plain `Error` with the same message. Rule failures still throw `ItemCreateValidationError`.
+
 ## 0.7.6 (2026-10-17)
 
 - **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.

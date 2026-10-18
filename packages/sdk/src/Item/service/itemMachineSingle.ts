@@ -128,8 +128,9 @@ export const itemMachineSingle = setup({
           target: 'idle',
           actions: assign({
             _publishError: ({ event }) => {
-              const err = 'error' in event ? (event as unknown as { error: Error }).error : null
-              return err ? { message: err.message } : null
+              if (!('error' in event)) return null
+              const err = (event as unknown as { error: unknown }).error
+              return err instanceof Error ? err : new Error(String(err))
             },
           }),
         },

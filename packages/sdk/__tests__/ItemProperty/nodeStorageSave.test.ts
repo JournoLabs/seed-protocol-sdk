@@ -70,7 +70,8 @@ testDescribe('Html property saves in Node', () => {
       new Error('Not implemented'),
     )
     html.value = '<p>Will fail</p>'
-    await expect(html.save()).rejects.toThrow(/Failed to save property bodyHtml: Not implemented/)
+    // save() rethrows the pipeline's own error.
+    await expect(html.save()).rejects.toThrow(/^Not implemented$/)
   }, 30000)
 
   it('Item.create runs raw html through the save pipeline', async () => {
