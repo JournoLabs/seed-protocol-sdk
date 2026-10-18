@@ -2,7 +2,8 @@
  * One app tab for browser/multiTab.e2e.test.ts: runs the real SDK client against the database
  * under `?filesDir=` and exposes `window.seedTab` for the test to drive through Playwright.
  */
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
+import { appState } from '@/seedSchema'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eventEmitter } from '@/eventBus'
@@ -91,6 +92,24 @@ const seedTab = {
     } catch {
       return Promise.resolve(null)
     }
+  },
+  /**
+   * Adds 1 to the appState counter `key`, `times` times, each a read-then-write BaseDb.transaction:
+   * run in two tabs at once, any lost update or escaped SQLITE_BUSY shows in the total.
+   */
+  async incrementInTransactions(key: string, times: number): Promise<void> {
+    for (let i = 0; i < times; i++) {
+      await BaseDb.transaction(async (tx) => {
+        const rows = await tx.select().from(appState).where(eq(appState.key, key))
+        const next = String(Number(rows[0]?.value ?? 0) + 1)
+        if (rows.length === 0) await tx.insert(appState).values({ key, value: next })
+        else await tx.update(appState).set({ value: next }).where(eq(appState.key, key))
+      })
+    }
+  },
+  async counterValue(key: string): Promise<number> {
+    const rows = await db().select().from(appState).where(eq(appState.key, key))
+    return Number(rows[0]?.value ?? 0)
   },
   tabId: () => TAB_ID,
   filesChanged: () => filesChanged,

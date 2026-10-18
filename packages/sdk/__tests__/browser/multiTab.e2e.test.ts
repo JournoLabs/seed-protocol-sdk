@@ -98,4 +98,19 @@ describe('two tabs of one app', () => {
     open.splice(open.indexOf(leader), 1)
     await vi.waitFor(async () => expect(await tabs.callSeedTab(follower, 'isLeader')).toBe(true), { timeout: WAIT_TIMEOUT_MS })
   }, 120_000)
+
+  it('transactions in both tabs at once neither lose updates nor fail busy', async () => {
+    const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
+    open.push(a, b)
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+
+    const key = `tx-counter-${Math.random().toString(36).slice(2, 8)}`
+    const times = 25
+    await Promise.all([
+      tabs.callSeedTab(a, 'incrementInTransactions', key, times),
+      tabs.callSeedTab(b, 'incrementInTransactions', key, times),
+    ])
+
+    expect(await tabs.callSeedTab(a, 'counterValue', key)).toBe(2 * times)
+  }, 60000)
 })
