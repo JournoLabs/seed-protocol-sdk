@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { BaseDb } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 
@@ -53,10 +53,16 @@ function queryKeyOf(query: unknown): unknown {
   return query
 }
 
+/** Delays before resubscribing after a live query fails, in ms; the last one repeats. */
+export const LIVE_QUERY_RETRY_DELAYS_MS = [500, 1000, 2000, 5000, 10000, 30000]
+
+const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)))
+
 /**
  * useLiveQuery with its error: `{ data, error }`. `data` is undefined until the first result and
- * resets when the query changes; `error` is the last error from the live query, cleared by the
- * next result.
+ * resets when the query changes or the client stops; `error` is the last error from creating or
+ * running the live query, cleared by the next result. After an error the hook keeps the last rows
+ * and resubscribes with backoff (LIVE_QUERY_RETRY_DELAYS_MS) until a result arrives.
  */
 export function useLiveQueryState<T>(
   query: ((sql: any) => any) | any | null | undefined
@@ -65,49 +71,60 @@ export function useLiveQueryState<T>(
     data: undefined,
     error: null,
   })
+  // Bumped to resubscribe after an error.
+  const [retryCount, setRetryCount] = useState(0)
   const isClientReady = useIsClientReady()
 
   const queryKey = queryKeyOf(query)
   const queryRef = useRef(query)
   queryRef.current = query
-
-  // Create Observable outside useEffect so it's stable and distinctUntilChanged can work.
-  // Only recreate when the query's identity or isClientReady changes.
-  const observable = useMemo(() => {
-    const current = queryRef.current
-    if (!isClientReady || !current) {
-      return null
-    }
-    try {
-      return BaseDb.liveQuery<T>(current)
-    } catch (error) {
-      console.error('[useLiveQuery] Failed to create live query:', error)
-      return null
-    }
-  }, [queryKey, isClientReady])
+  const failuresRef = useRef(0)
+  const subscribedForRef = useRef<{ queryKey: unknown; isClientReady: boolean } | null>(null)
 
   useEffect(() => {
-    // A new (or no) query: drop the previous query's rows (no re-render if already empty)
-    setState((prev) => (prev.data === undefined && prev.error === null ? prev : { data: undefined, error: null }))
-    if (!observable) {
+    const previous = subscribedForRef.current
+    subscribedForRef.current = { queryKey, isClientReady }
+    if (!previous || previous.queryKey !== queryKey || previous.isClientReady !== isClientReady) {
+      // A new (or no) query, or a client that started or stopped: drop the previous rows
+      // (no re-render if already empty). A retry keeps them.
+      failuresRef.current = 0
+      setState((prev) => (prev.data === undefined && prev.error === null ? prev : { data: undefined, error: null }))
+    }
+    const current = queryRef.current
+    if (!isClientReady || !current) {
       return
     }
 
-    const subscription = observable.subscribe({
-      next: (results) => {
-        // New array reference so React re-renders when SQLocal mutates row objects in place
-        // on the same backing array (Object.is would otherwise bail out of useState).
-        setState({ data: results !== undefined ? [...results] : undefined, error: null })
-      },
-      error: (err) => {
-        console.error('[useLiveQuery] Error:', err)
-        // Keep the last rows (no flicker on transient errors) and report the error
-        setState((prev) => ({ data: prev.data, error: err instanceof Error ? err : new Error(String(err)) }))
-      },
-    })
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    const fail = (err: unknown) => {
+      // Keep the last rows (no flicker on transient errors) and report the error
+      setState((prev) => ({ data: prev.data, error: toError(err) }))
+      const delay =
+        LIVE_QUERY_RETRY_DELAYS_MS[Math.min(failuresRef.current, LIVE_QUERY_RETRY_DELAYS_MS.length - 1)]
+      failuresRef.current += 1
+      retryTimer = setTimeout(() => setRetryCount((n) => n + 1), delay)
+    }
 
-    return () => subscription.unsubscribe()
-  }, [observable])
+    let subscription: { unsubscribe: () => void } | undefined
+    try {
+      subscription = BaseDb.liveQuery<T>(current).subscribe({
+        next: (results) => {
+          failuresRef.current = 0
+          // New array reference so React re-renders when SQLocal mutates row objects in place
+          // on the same backing array (Object.is would otherwise bail out of useState).
+          setState({ data: results !== undefined ? [...results] : undefined, error: null })
+        },
+        error: fail,
+      })
+    } catch (error) {
+      fail(error)
+    }
+
+    return () => {
+      subscription?.unsubscribe()
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+    }
+  }, [queryKey, isClientReady, retryCount])
 
   return state
 }

@@ -1,5 +1,5 @@
-import { useSelector } from '@xstate/react'
-import { getClient, ClientManagerState } from '@seedprotocol/sdk'
+import { ClientManagerState } from '@seedprotocol/sdk'
+import { useClientSelector } from './client'
 
 /**
  * Client states in which the app database is open: DB_INIT finishes with dbReady and moves to
@@ -18,10 +18,12 @@ export const isDbReadyState = (state: unknown): boolean =>
 
 /**
  * Whether the app database is open. True once the client has opened it, false again if init
- * fails or restarts.
+ * fails or restarts, or after `client.stop()`.
  */
 export const useDbsAreReady = () => {
-  const dbsAreReady = useSelector(getClient().getService(), (snapshot) => isDbReadyState(snapshot.value))
+  const dbsAreReady = useClientSelector(
+    (snapshot) => snapshot.status === 'active' && isDbReadyState(snapshot.value),
+  )
   return {
     dbsAreReady,
   }
