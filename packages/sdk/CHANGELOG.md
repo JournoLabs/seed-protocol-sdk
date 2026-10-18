@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Behavior change: an item's properties stop when the item does.** An Item holds each ItemProperty in its property map once and releases it when the item's last `unload()` (or `destroy()`) stops it, so a property nobody else holds stops with it and its liveQueries close. Each `ItemProperty.find()` or `ItemProperty.create()` is one hold of its own, released by one `property.unload()`. Before, the SDK took up to three uncounted holds per property while loading an item (refCount 4 after `Item.create` plus one `find` in the browser), so properties almost never stopped. Code that called `property.unload()` in a loop until the actor stopped should call `item.unload()` once and `property.unload()` once per `find`. A property read through `item.properties` after its item is unloaded is stopped: keep the item loaded, or `find` the property, to keep using it.
+- A property unloaded while a context update was still being processed could be put back in the instance cache as a stopped, unproxied instance, and a later `find` returned it. Re-keying after create now reuses the instance's own cache entry and skips stopped instances.
 - `client.subscribeService(listener)` calls `listener` with the clientManager actor when `client.init()` after `client.stop()` replaces it and when `stop()` ends it. It returns an unsubscribe function. `getService()` is unchanged.
 - `BaseDb.liveQuery` in the browser logs SQLite errors through `debug` (`seedSdk:browser:db:Db`) instead of `console.error`. Subscribers still get the error.
 

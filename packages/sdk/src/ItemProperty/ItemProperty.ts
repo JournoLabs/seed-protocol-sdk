@@ -195,6 +195,13 @@ const itemPropertyInstanceState = new ActorKeyedState<ItemProperty<any>, {
   schemaLiveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for properties table (schema changes)
 }>()
 
+/**
+ * Each cached instance's entry in `ItemProperty.instanceCache`, keyed by its actor. Every key the
+ * instance is cached under shares this one entry, so `retain` and the constructor's re-keying find
+ * it without scanning the cache.
+ */
+const cacheEntries = new WeakMap<object, { instance: ItemProperty<any>; refCount: number }>()
+
 /** Thrown by ItemProperty.save() when the value failed validation (enum, pattern, minLength, maxLength). */
 export class ItemPropertySaveValidationError extends Error {
   constructor(
@@ -213,6 +220,14 @@ type ItemPropertyFindProps = {
   seedUid?: string
   /** When metadata has no modelType, callers (e.g. Item) can pass modelName so ItemProperty.create can succeed */
   modelName?: string
+}
+
+type ItemPropertyHoldOption = {
+  /**
+   * @internal false for SDK code that hands the instance to an owner that takes its own hold (an
+   * Item's property map): no hold is taken, and a new instance is cached with none.
+   */
+  hold?: false
 }
 
 export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
@@ -342,11 +357,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             context.seedLocalId,
             context.propertyName,
           )
-          if (!ItemProperty.instanceCache.has(cacheKey)) {
-            ItemProperty.instanceCache.set(cacheKey, {
-              instance: this,
-              refCount: 1,
-            })
+          // The context's ids or name can change after create (a seed uid arrives, a List of relation
+          // moves to its storage name): add the new key to this instance's entry. Never a new entry
+          // or count, and nothing once the instance was unloaded (this runs after an await).
+          const entry = cacheEntries.get(this._service)
+          if (
+            entry &&
+            !ItemProperty.instanceCache.has(cacheKey) &&
+            this._service.getSnapshot().status === 'active'
+          ) {
+            ItemProperty.instanceCache.set(cacheKey, entry)
           }
         }
 
@@ -958,20 +978,25 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
+  /**
+   * The cached instance for this item and property, or a new one. Takes a hold on it: release it
+   * with `unload()`. An Item holds the properties in its own map and releases them when it unloads.
+   */
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options: { waitForReady: false },
+    options: { waitForReady: false } & ItemPropertyHoldOption,
   ): ItemProperty<any> | undefined
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: { waitForReady?: true; readyTimeout?: number },
+    options?: { waitForReady?: true; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any> | undefined>
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: CreateWaitOptions,
+    options?: CreateWaitOptions & ItemPropertyHoldOption,
   ): ItemProperty<any> | undefined | Promise<ItemProperty<any> | undefined> {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
+    const holds = options?.hold === false ? 0 : 1
 
     const { propertyName, seedLocalId, seedUid } =
       props
@@ -991,7 +1016,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (lookupKey) {
       // One entry under both keys: one hold count for the instance
       const entry = this.instanceCache.get(lookupKey)!
-      entry.refCount += 1
+      entry.refCount += holds
       const { instance } = entry
       const otherKey = lookupKey === keyByLocal ? keyByUid : keyByLocal
       if (otherKey) this.instanceCache.set(otherKey, entry)
@@ -1086,7 +1111,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           },
         })
         
-        const entry = { instance: proxiedInstance, refCount: 1 }
+        const entry = { instance: proxiedInstance, refCount: holds }
+        cacheEntries.set(newInstance._service, entry)
         this.instanceCache.set(cacheKey, entry)
         if (keyByUid && keyByUid !== cacheKey) this.instanceCache.set(keyByUid, entry)
         if (!waitForReady) return proxiedInstance
@@ -1115,7 +1141,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           },
         })
         
-        const entry = { instance: proxiedInstance, refCount: 1 }
+        const entry = { instance: proxiedInstance, refCount: holds }
+        cacheEntries.set(newInstance._service, entry)
         this.instanceCache.set(cacheKey, entry)
         if (keyByLocal && keyByLocal !== cacheKey) this.instanceCache.set(keyByLocal, entry)
         if (!waitForReady) return proxiedInstance
@@ -1180,6 +1207,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return undefined
   }
 
+  /** Takes a hold on the instance it returns: release it with `unload()`. */
   static async find({
     propertyName,
     seedLocalId,
@@ -1187,10 +1215,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     modelName: modelNameOption,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
-  }): Promise<ItemProperty<any> | undefined> {
+  } & ItemPropertyHoldOption): Promise<ItemProperty<any> | undefined> {
     if ((!seedLocalId && !seedUid) || !propertyName) {
       return undefined
     }
@@ -1202,7 +1231,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // Check cache first. Mutate the entry: it may also be stored under the item's other id.
     const cachedEntry = this.instanceCache.get(cacheKey)
     if (cachedEntry) {
-      cachedEntry.refCount += 1
+      if (hold !== false) cachedEntry.refCount += 1
       foundProperty = cachedEntry.instance as ItemProperty<any>
     } else {
       // Query database
@@ -1235,7 +1264,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       )
       foundProperty = ItemProperty.create(
         { ...propertyData, modelName, propertyRecordSchema },
-        { waitForReady: false },
+        { waitForReady: false, hold },
       )
     }
 
@@ -1253,12 +1282,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   /**
    * Get all ItemProperty instances for an item.
    * Loads property data via getItemProperties, creates instances via create, optionally waits for idle.
+   * Takes a hold on each instance, as `create` does.
    */
   static async all(
     params: { seedLocalId?: string; seedUid?: string },
-    options?: { waitForReady?: boolean; readyTimeout?: number },
+    options?: { waitForReady?: boolean; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
@@ -1329,7 +1359,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         modelFileId,
         propertyRecordSchema,
       }
-      const instance = this.create(createProps, { waitForReady: false })
+      const instance = this.create(createProps, { waitForReady: false, hold })
       if (instance) {
         instances.push(instance)
       }
@@ -1349,6 +1379,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   find = ItemProperty.find
+
+  /**
+   * @internal Takes one more hold on a cached, running instance, released with `unload()`. False
+   * (and no hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: IItemProperty<any>): boolean {
+    const service = instance.getService()
+    const entry = cacheEntries.get(service)
+    if (!entry || service.getSnapshot().status !== 'active') return false
+    entry.refCount += 1
+    return true
+  }
 
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
