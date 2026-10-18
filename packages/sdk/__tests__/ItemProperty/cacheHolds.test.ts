@@ -7,7 +7,8 @@ import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
- * ItemProperty operations that look up their item must not take a hold on it.
+ * ItemProperty operations that look up their item must not take a hold on it. A property known by
+ * its item's local id and seed uid is cached under both, as one entry with one hold count.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -54,5 +55,26 @@ testDescribe('ItemProperty cache holds', () => {
 
     item.unload()
     expect(item.getService().getSnapshot().status).toBe('stopped')
+  }, 30000)
+
+  it('a property released under its seed uid is not handed out stopped under its local id', async () => {
+    const item = await createPost('two keys')
+    const seedLocalId = item.seedLocalId
+    const seedUid = '0x' + 'cd'.repeat(32)
+    // Known by both ids: cached under both keys, as one entry
+    const byBoth = ItemProperty.create(
+      { propertyName: 'title', seedLocalId, seedUid, modelName: 'HoldPost' } as never,
+      { waitForReady: false },
+    )!
+    const byUid = await ItemProperty.find({ propertyName: 'title', seedUid })
+    expect(byUid).toBe(byBoth)
+
+    for (let i = 0; i < 20 && byBoth.getService().getSnapshot().status !== 'stopped'; i++) byBoth.unload()
+    expect(byBoth.getService().getSnapshot().status).toBe('stopped')
+
+    const byLocalId = await ItemProperty.find({ propertyName: 'title', seedLocalId })
+    expect(byLocalId).toBeDefined()
+    expect(byLocalId!.getService().getSnapshot().status).not.toBe('stopped')
+    item.unload()
   }, 30000)
 })

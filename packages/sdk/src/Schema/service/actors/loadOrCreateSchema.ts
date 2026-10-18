@@ -71,7 +71,9 @@ const createModelInstances = async (modelIds: string[], evictionEpoch: number): 
     const createPromises = modelIds.map(async (modelFileId) => {
       try {
         // Not if the schema was evicted (Schema.destroy, test cleanup) since this load started
-        const model = await Model.createById(modelFileId, { evictionEpoch })
+        const schemaHold = Model.takeSchemaHold(modelFileId)
+        const model = await Model.createById(modelFileId, { evictionEpoch, ...(!schemaHold && { hold: false as const }) })
+        if (!model && schemaHold) Model.dropSchemaHold(modelFileId)
         if (model) {
           logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
         } else {

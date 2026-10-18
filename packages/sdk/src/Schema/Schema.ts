@@ -1847,6 +1847,7 @@ export class Schema {
         onUnload: () => {
           // Clean up WeakMap entry
           schemaInstanceState.delete(this)
+          if (context.schemaName) Model.releaseSchemaHolds(context.schemaName)
         },
       })
     } catch (error) {

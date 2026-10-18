@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Model } from '@/Model/Model'
 import { Schema } from '@/Schema/Schema'
+import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
+import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
@@ -9,6 +11,8 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
  * A schema is cached under its name and, once loaded, its file id; a hold taken under either is one
  * hold on the instance. SDK code that only looks the schema up (Model and ModelProperty writes,
  * validation) must not take one.
+ *
+ * A schema holds each model it loads once, and its last unload releases those holds.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -76,5 +80,46 @@ testDescribe('Schema cache holds', () => {
 
     schema.unload()
     expect(status(schema)).toBe('stopped')
+  }, 30000)
+
+  const importSchemaWithModel = async () => {
+    const name = freshName()
+    const modelFileId = generateId()
+    const now = new Date().toISOString()
+    const file = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: generateId(),
+      metadata: { name, createdAt: now, updatedAt: now },
+      models: { HeldNote: { id: modelFileId, properties: { title: { id: generateId(), type: 'Text' } } } },
+      enums: {},
+      migrations: [],
+    } as SchemaFileFormat
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const schema = await Schema.create(name, { waitForReady: true })
+    const [model] = await Model.all(name, { waitForReady: true })
+    expect(model.id).toBe(modelFileId)
+    return { schema, model, modelFileId }
+  }
+
+  it("the schema's last unload releases its models", async () => {
+    const { schema, model } = await importSchemaWithModel()
+
+    schema.unload()
+
+    expect(status(schema)).toBe('stopped')
+    expect(model.getService().getSnapshot().status).toBe('stopped')
+  }, 30000)
+
+  it("a model the caller holds outlives its schema's unload", async () => {
+    const { schema, model, modelFileId } = await importSchemaWithModel()
+    const held = await Model.find({ modelFileId })
+    expect(held).toBe(model)
+
+    schema.unload()
+    expect(model.getService().getSnapshot().status).not.toBe('stopped')
+
+    held!.unload()
+    expect(model.getService().getSnapshot().status).toBe('stopped')
   }, 30000)
 })

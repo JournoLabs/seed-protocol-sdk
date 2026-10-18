@@ -1696,12 +1696,15 @@ export const createModelFromJson = async (
   } else {
     logger(`Warning: Creating schema model "${modelName}" without modelFileId - it will be renamed if duplicates exist`)
   }
+  // The schema holds its models once (Model.takeSchemaHold); a model it already holds takes no more.
+  const schemaHold = Model.takeSchemaHold(modelFileId)
   const modelInstance = Model.create(modelName, schemaName, {
     modelFileId: modelFileId, // Pass modelFileId (preferred) as id (schemaFileId) from JSON file
     id: modelFileId, // Also pass as id for backward compatibility
     properties: convertedProperties,
     waitForReady: false,
     persistedBy,
+    ...(!schemaHold && { hold: false as const }),
   }) as import('@/Model/Model').Model
 
   return modelInstance

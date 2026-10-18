@@ -9,11 +9,7 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
  * Item.all takes `waitForReady` (default false) and `readyTimeout`. With waitForReady false it must
  * hand back the instances without waiting for each one to load; with true it waits, within
  * readyTimeout. Item.all builds each instance with Item.create, whose own waitForReady defaults to
- * true, so the options have to be passed through.
- *
- * Tests marked `it.fails` describe behavior the current code gets wrong, so they fail today and
- * `it.fails` counts that as a pass. Once a fix makes one pass, `it.fails` reports it as a failure:
- * switch it back to `it` then.
+ * true, so Item.all creates them with waitForReady false and does its own wait.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -74,7 +70,7 @@ testDescribe('Item.all readiness options', () => {
     return { items, options }
   }
 
-  it.fails('waitForReady: false builds each item without waiting for it to load', async () => {
+  it('waitForReady: false builds each item without waiting for it to load', async () => {
     const { items, options } = await createOptionsDuring(() =>
       Item.all(MODEL_NAME, false, { schemaName: SCHEMA_NAME, waitForReady: false }),
     )
@@ -86,7 +82,7 @@ testDescribe('Item.all readiness options', () => {
     }
   }, 30000)
 
-  it.fails('the default is waitForReady: false', async () => {
+  it('the default is waitForReady: false', async () => {
     const { items, options } = await createOptionsDuring(() => Item.all(MODEL_NAME, false, { schemaName: SCHEMA_NAME }))
 
     expect(items).toHaveLength(ITEM_COUNT)

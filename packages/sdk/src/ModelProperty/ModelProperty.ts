@@ -19,7 +19,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
-import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { isActorStopped, sameEntity } from '@/helpers/entity/entityCommon'
 import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import { setCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
@@ -884,7 +884,8 @@ export class ModelProperty {
     propertyFileId: string,
     entry: { cacheKey: string; instance: ModelProperty },
   ): boolean {
-    if (this.instanceCache.get(entry.cacheKey)?.instance !== entry.instance) return false
+    const cached = this.instanceCache.get(entry.cacheKey)?.instance
+    if (!cached || !sameEntity(cached, entry.instance)) return false
     try {
       return entry.instance._getSnapshotContext().id === propertyFileId
     } catch {
@@ -898,7 +899,7 @@ export class ModelProperty {
       if (!id) return
       const existing = this.idIndex.get(id)
       // Keep the instance cached first, as the old scan in insertion order returned
-      if (existing && existing.instance !== instance && this.isIndexEntryCurrent(id, existing)) return
+      if (existing && !sameEntity(existing.instance, instance) && this.isIndexEntryCurrent(id, existing)) return
       this.idIndex.set(id, { cacheKey, instance })
     }
     let indexedId = instance._getSnapshotContext().id
@@ -1145,7 +1146,8 @@ export class ModelProperty {
         if (newCacheKey && cacheKey === `${context.modelName}:${context.name}` && !this.instanceCache.has(newCacheKey)) {
           this.instanceCache.delete(cacheKey)
           this.instanceCache.set(newCacheKey, entry)
-          if (this.idIndex.get(propertyFileId)?.instance === instance) {
+          const indexed = this.idIndex.get(propertyFileId)?.instance
+          if (indexed && sameEntity(indexed, instance)) {
             this.idIndex.set(propertyFileId, { cacheKey: newCacheKey, instance })
           }
         }

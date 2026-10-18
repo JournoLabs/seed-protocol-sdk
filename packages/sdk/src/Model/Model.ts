@@ -1,6 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { modelMachine, ModelMachineContext } from './service/modelMachine'
-import { getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
+import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { Item } from '@/Item/Item'
 import type { CreateWaitOptions } from '@/types'
 import { ItemData } from '@/types/item'
@@ -586,179 +586,86 @@ export class Model {
       }
     }
     
-    // Wrap instance in Proxy for reactive property access
-    // Create a custom proxy that handles 'name' as an alias for 'modelName'
-    const proxiedInstance = new Proxy(newInstance, {
-      get(target, prop: string | symbol) {
-        // Handle special properties
-        if (prop === '_service') {
-          return Reflect.get(target, prop)
+    // Wrap instance in Proxy for reactive property access. `name` is an alias for `modelName`.
+    const sendUpdate = (target: Model, prop: string, value: unknown) => {
+      if (prop === 'modelName') {
+        // Model name change - need to update Schema and database
+        const context = target._getSnapshotContext()
+        const oldName = context.modelName
+        const newName = value as string
+
+        if (oldName === newName) {
+          logger(`Model name unchanged: "${oldName}"`)
+          return
         }
-        
-        // Handle 'name' as an alias for 'modelName'
-        if (prop === 'name') {
-          const context = target._getSnapshotContext()
-          return context.modelName
-        }
-        
-        // Handle 'id' property - returns the schemaFileId (string)
-        if (prop === 'id') {
-          const context = target._getSnapshotContext()
-          return context.id // id is now the schemaFileId (string)
-        }
-        
-        // Handle tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          const context = target._getSnapshotContext()
-          return (context as any)[prop]
-        }
-        
-        // Handle 'properties' getter - not tracked, but accessible via getter
-        if (typeof prop === 'string' && prop === 'properties') {
-          // Delegate to the getter method on the instance
-          return target.properties
-        }
-        
-        // For methods and other properties, use Reflect
-        return Reflect.get(target, prop)
-      },
-      
-      set(target, prop: string | symbol, value: any) {
-        // Handle special properties
-        if (prop === '_service') {
-          return Reflect.set(target, prop, value)
-        }
-        
-        // Handle 'name' as an alias for 'modelName'
-        if (prop === 'name') {
-          prop = 'modelName'
-        }
-        
-        // Handle tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          // Use the sendUpdate logic
-          if (prop === 'modelName') {
-            // Model name change - need to update Schema and database
-            const context = target._getSnapshotContext()
-            const oldName = context.modelName
-            const newName = value as string
-            
-            if (oldName === newName) {
-              logger(`Model name unchanged: "${oldName}"`)
-              return true
-            }
-            
-            logger(`Updating model name from "${oldName}" to "${newName}"`)
-            
-            // Update Model instance cache using new ID-based structure
-            const modelFileId = context.id // id is now the schemaFileId (string)
-            if (modelFileId) {
-              Model.updateNameIndex(oldName, newName, context.schemaName, modelFileId)
-            } else {
-              // Fallback to legacy cache if no ID (shouldn't happen, but safety)
-              const oldCacheKey = `${context.schemaName}:${oldName}`
-              const newCacheKey = `${context.schemaName}:${newName}`
-              if (Model.instanceCache.has(oldCacheKey)) {
-                const entry = Model.instanceCache.get(oldCacheKey)!
-                Model.instanceCache.delete(oldCacheKey)
-                Model.instanceCache.set(newCacheKey, entry)
-              }
-            }
-            
-            // Update Model context
-            target._service.send({
-              type: 'updateContext',
-              modelName: newName,
-            })
-            
-            // Mark model as draft
-            target._service.send({
-              type: 'markAsDraft',
-              propertyKey: 'modelName',
-            })
-            
-            // Save draft to database immediately so changes persist
-            trackDraftSave(target._service, target._saveDraftToDb(oldName, newName), `Model "${newName}"`)
-            
-            // NOTE: Schema is not notified of model name changes during edits.
-            // Schema will read from Model instances when persisting/saving.
-          } else if (prop === 'properties') {
-            // Properties are read-only computed values from ModelProperty instances
-            // Cannot be set directly - properties are managed via ModelProperty instances
-            throw new Error('Cannot set model.properties directly. Properties are computed from ModelProperty instances.')
-          } else if (prop === 'description') {
-            // Description is not supported - JSON files can have it but we ignore it at runtime
-            throw new Error('Cannot set model.description. Description is not supported in runtime Model instances.')
-          } else {
-            // Standard property update
-            target._service.send({
-              type: 'updateContext',
-              [prop]: value,
-            })
-          }
-          return true
-        }
-        
-        // For non-tracked properties, use Reflect
-        return Reflect.set(target, prop, value)
-      },
-      
-      has(target, prop: string | symbol) {
-        // Handle 'name' as an alias for 'modelName'
-        if (prop === 'name') {
-          return true
-        }
-        
-        // Handle 'id' property
-        if (prop === 'id') {
-          return true
-        }
-        
-        // Check tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          const context = target._getSnapshotContext()
-          return prop in context
-        }
-        return Reflect.has(target, prop)
-      },
-      
-      ownKeys(target) {
-        // Include 'name' and 'id' in ownKeys
-        const keys = Reflect.ownKeys(target)
-        const additionalKeys: (string | symbol)[] = []
-        if (!keys.includes('name')) {
-          additionalKeys.push('name')
-        }
-        if (!keys.includes('id')) {
-          additionalKeys.push('id')
-        }
-        return additionalKeys.length > 0 ? [...keys, ...additionalKeys] : keys
-      },
-      
-      getOwnPropertyDescriptor(target, prop: string | symbol) {
-        // Handle 'name' as an alias for 'modelName'
-        if (prop === 'name') {
-          return getInvariantSafePropertyDescriptor(target, prop, {
-            value: target._getSnapshotContext().modelName,
-          })
-        }
-        
-        // Handle 'id' property - returns the modelFileId
-        if (prop === 'id') {
-          return getInvariantSafePropertyDescriptor(target, prop, {
-            value: target._getSnapshotContext().id, // id is now the schemaFileId (string)
-            writable: false, // id is read-only
-          })
-        }
-        
-        let invent: { value: unknown } | undefined
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          const context = target._getSnapshotContext()
-          if (prop in context) {
-            invent = { value: (context as any)[prop] }
+
+        logger(`Updating model name from "${oldName}" to "${newName}"`)
+
+        // Update Model instance cache using new ID-based structure
+        const modelFileId = context.id // id is now the schemaFileId (string)
+        if (modelFileId) {
+          Model.updateNameIndex(oldName, newName, context.schemaName, modelFileId)
+        } else {
+          // Fallback to legacy cache if no ID (shouldn't happen, but safety)
+          const oldCacheKey = `${context.schemaName}:${oldName}`
+          const newCacheKey = `${context.schemaName}:${newName}`
+          if (Model.instanceCache.has(oldCacheKey)) {
+            const entry = Model.instanceCache.get(oldCacheKey)!
+            Model.instanceCache.delete(oldCacheKey)
+            Model.instanceCache.set(newCacheKey, entry)
           }
         }
-        return getInvariantSafePropertyDescriptor(target, prop, invent)
+
+        // Update Model context
+        target._service.send({
+          type: 'updateContext',
+          modelName: newName,
+        })
+
+        // Mark model as draft
+        target._service.send({
+          type: 'markAsDraft',
+          propertyKey: 'modelName',
+        })
+
+        // Save draft to database immediately so changes persist
+        trackDraftSave(target._service, target._saveDraftToDb(oldName, newName), `Model "${newName}"`)
+
+        // NOTE: Schema is not notified of model name changes during edits.
+        // Schema will read from Model instances when persisting/saving.
+      } else {
+        // Standard property update
+        target._service.send({
+          type: 'updateContext',
+          [prop]: value,
+        })
+      }
+    }
+    const proxiedInstance = createReactiveProxy<Model>({
+      instance: newInstance,
+      service: newInstance._service,
+      trackedProperties: TRACKED_PROPERTIES,
+      getContext: (target) => target._getSnapshotContext(),
+      sendUpdate,
+      resolve: (target, prop) => {
+        if (prop === 'name') {
+          return {
+            get: () => target._getSnapshotContext().modelName,
+            set: (value) => sendUpdate(target, 'modelName', value),
+          }
+        }
+        return undefined
+      },
+      virtualKeys: () => ['name'],
+      onSet: (_target, prop) => {
+        if (prop === 'properties') {
+          // Properties are read-only computed values from ModelProperty instances
+          throw new Error('Cannot set model.properties directly. Properties are computed from ModelProperty instances.')
+        }
+        if (prop === 'description') {
+          // Description is not supported - JSON files can have it but we ignore it at runtime
+          throw new Error('Cannot set model.description. Description is not supported in runtime Model instances.')
+        }
       },
     }) as Model
     
@@ -1072,6 +979,43 @@ export class Model {
     if (!entry) return undefined
     entry.refCount += 1
     return entry.instance
+  }
+
+  /**
+   * Models their schema holds, by modelFileId. A schema's first load of a model takes one hold for
+   * the schema, and the schema's last unload releases it (releaseSchemaHolds), so a user's unload
+   * can't drop a model out of `schema.models` while the schema is loaded.
+   */
+  private static schemaHeldModelIds = new Set<string>()
+
+  /**
+   * @internal For a Schema loading its models: true when this load should take the schema's hold
+   * on the model (pass no `hold` option), false when the schema already holds it (pass
+   * `hold: false`). After a true, call `dropSchemaHold` if the load returns no model.
+   */
+  static takeSchemaHold(modelFileId: string | undefined): boolean {
+    if (!modelFileId || this.schemaHeldModelIds.has(modelFileId)) return false
+    this.schemaHeldModelIds.add(modelFileId)
+    return true
+  }
+
+  /** @internal The load `takeSchemaHold` approved found no model: there is no hold to release. */
+  static dropSchemaHold(modelFileId: string): void {
+    this.schemaHeldModelIds.delete(modelFileId)
+  }
+
+  /** @internal A Schema's last unload: releases its hold on each of its models. */
+  static releaseSchemaHolds(schemaName: string): void {
+    for (const modelFileId of [...this.schemaHeldModelIds]) {
+      const model = this.peek(modelFileId)
+      if (!model) {
+        this.schemaHeldModelIds.delete(modelFileId)
+        continue
+      }
+      if (model._getSnapshotContext().schemaName !== schemaName) continue
+      this.schemaHeldModelIds.delete(modelFileId)
+      model.unload()
+    }
   }
 
   /**
@@ -2055,6 +1999,7 @@ export class Model {
       if (context.schemaName !== schemaName) continue
 
       const nameKey = `${context.schemaName}:${context.modelName}`
+      if (context.id) this.schemaHeldModelIds.delete(context.id)
       clearDestroySubscriptions(instance, { instanceState: modelInstanceState })
       forceRemoveFromCaches(instance, {
         getCacheKeys: () => (context.id ? [context.id, nameKey] : [nameKey]),
@@ -2122,6 +2067,7 @@ export class Model {
 
     // Before the caches are cleared, so a lookup by id already reading the row doesn't re-cache it
     if (modelFileId) recordModelDestroy(modelFileId)
+    if (modelFileId) Model.schemaHeldModelIds.delete(modelFileId)
 
     const cacheKeys: string[] = []
     if (modelFileId) cacheKeys.push(modelFileId)
