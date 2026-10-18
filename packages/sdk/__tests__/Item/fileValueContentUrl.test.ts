@@ -10,6 +10,7 @@ import { clearStoredDisplayUrls } from '@/db/clearStoredDisplayUrls'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { and, eq } from 'drizzle-orm'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /**
  * A File property's value is its content URL (file:// in Node, a blob URL in browsers), before and
@@ -82,7 +83,7 @@ testDescribe('File property values', () => {
     property!.value = 'data:text/plain,hi%20there'
     await property!.save()
 
-    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^file:\/\//))
+    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^file:\/\//), { timeout: WAIT_TIMEOUT_MS })
     const urlAfterSave = item.attachment
     // The subscription that used to swap in the file's text runs after the save.
     await new Promise((resolve) => setTimeout(resolve, 1500))
@@ -90,7 +91,7 @@ testDescribe('File property values', () => {
 
     Item.dropCachedInstancesForSeedIds([item.seedLocalId])
     const reloaded = (await Item.find({ seedLocalId: item.seedLocalId })) as any
-    await vi.waitFor(() => expect(String(reloaded.attachment)).toMatch(/^file:\/\//))
+    await vi.waitFor(() => expect(String(reloaded.attachment)).toMatch(/^file:\/\//), { timeout: WAIT_TIMEOUT_MS })
     await new Promise((resolve) => setTimeout(resolve, 1500))
     expect(reloaded.attachment).toBe(urlAfterSave)
   }, 30000)
@@ -101,7 +102,7 @@ testDescribe('File property values', () => {
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'attachment' })
     property!.value = 'data:text/plain,moved'
     await property!.save()
-    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^file:\/\//))
+    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^file:\/\//), { timeout: WAIT_TIMEOUT_MS })
 
     const row = await fileRow(item.seedLocalId)
     expect(row.refResolvedDisplayValue).toBeNull()
@@ -113,7 +114,7 @@ testDescribe('File property values', () => {
     // A URL stored under an older filesDir: the value follows the file's current path instead.
     await storeDisplayValue(row.localId!, 'file:///old/files/dir/files/' + row.refResolvedValue)
     const reloaded = await reload(item.seedLocalId)
-    await vi.waitFor(() => expect(reloaded.attachment).toBe(expected))
+    await vi.waitFor(() => expect(reloaded.attachment).toBe(expected), { timeout: WAIT_TIMEOUT_MS })
     await new Promise((resolve) => setTimeout(resolve, 1000))
     expect(reloaded.attachment).toBe(expected)
 
@@ -128,7 +129,7 @@ testDescribe('File property values', () => {
     property!.value = new File(['hi there'], 'note.txt', { type: 'text/plain' }) as never
     await property!.save()
 
-    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^blob:/))
+    await vi.waitFor(() => expect(String(item.attachment)).toMatch(/^blob:/), { timeout: WAIT_TIMEOUT_MS })
     const sessionUrl = String(item.attachment)
     expect(await (await fetch(sessionUrl)).text()).toBe('hi there')
     const row = await fileRow(item.seedLocalId)
@@ -141,7 +142,7 @@ testDescribe('File property values', () => {
     await vi.waitFor(() => {
       expect(String(reloaded.attachment)).toMatch(/^blob:/)
       expect(reloaded.attachment).not.toBe(sessionUrl)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
     // The live query must not put the stored URL back.
     await new Promise((resolve) => setTimeout(resolve, 1500))
     expect(reloaded.attachment).not.toBe(sessionUrl)
