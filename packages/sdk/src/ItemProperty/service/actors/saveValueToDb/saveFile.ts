@@ -7,12 +7,10 @@ import {
   PropertyMachineContext,
   SaveValueToDbEvent,
 } from '@/types/property'
-import { createSeed } from '@/db/write/createSeed'
+import { resolveNewSeedFields } from '@/db/write/createSeed'
+import { generateId } from '@/helpers/generateId'
+import { writeStorageValue } from './storageValue'
 import { toMetadataPropertyName } from '@/helpers'
-import { createVersion } from '@/db/write/createVersion'
-import { createMetadata } from '@/db/write/createMetadata'
-import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
@@ -139,10 +137,8 @@ export const saveFile = fromCallback<
       throw new Error('No file data found')
     }
 
-    const newFileSeedLocalId = await createSeed({
-      type: 'file',
-      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.file,
-    })
+    // Named now so the file can be named after it; the seed row is written when the op applies
+    const newFileSeedLocalId = generateId()
 
     if (!fileName) {
       fileName = newFileSeedLocalId
@@ -153,11 +149,6 @@ export const saveFile = fromCallback<
     const filePath = BaseFileManager.getFilesPath('files', fileName)
 
     await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('files'))
-
-    await createVersion({
-      seedLocalId: newFileSeedLocalId,
-      seedType: 'file',
-    })
 
     if (!isExistingFileReference) {
       if (fileData instanceof ArrayBuffer) {
@@ -185,56 +176,55 @@ export const saveFile = fromCallback<
     // dead blob: URL after reload, so readers mint their own from the path, as for Image.
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
-    let newLocalId
-
-    if (!localId) {
-      const result = await createMetadata(
-        {
-          propertyName,
-          propertyValue: newFileSeedLocalId,
-          seedLocalId,
-          seedUid,
+    const written = await writeStorageValue(
+      { seedLocalId, seedUid, propertyName },
+      {
+        storageSeed: {
+          localId: newFileSeedLocalId,
+          type: 'file',
+          modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.file,
+          fields: await resolveNewSeedFields('file'),
+        },
+        // A reference to a file that was already there isn't this value's to delete
+        ownedFilePath: isExistingFileReference ? undefined : filePath,
+        create: {
+          values: {
+            propertyName,
+            propertyValue: newFileSeedLocalId,
+            seedUid,
+            versionLocalId,
+            versionUid,
+            modelName,
+            schemaUid: fileSchemaUid,
+            refSeedType: 'file',
+            refModelUid: fileSchemaUid,
+            refResolvedValue: fileName,
+            localStorageDir: '/files',
+            easDataType: 'bytes32',
+          },
+          propertyRecordSchema,
+        },
+        update: {
+          newValue: newFileSeedLocalId,
           versionLocalId,
-          versionUid,
           modelName,
-          schemaUid: fileSchemaUid,
+          schemaUid,
           refSeedType: 'file',
-          refModelUid: fileSchemaUid,
           refResolvedValue: fileName,
+          refModelUid: fileSchemaUid,
           localStorageDir: '/files',
           easDataType: 'bytes32',
+          dataType: 'File',
         },
-        propertyRecordSchema,
-      )
-
-      if (result && result.localId) {
-        newLocalId = result.localId
-      }
-    }
-
-    let writtenRow: Partial<PropertyMachineContext> = {}
-    if (localId) {
-      writtenRow = rowContext(await updateItemPropertyValue({
-        localId,
-        propertyName,
-        newValue: newFileSeedLocalId,
-        seedLocalId,
-        versionLocalId,
-        modelName,
-        schemaUid,
-        refSeedType: 'file',
-        refResolvedValue: fileName,
-        refModelUid: fileSchemaUid,
-        localStorageDir: '/files',
-        easDataType: 'bytes32',
-        dataType: 'File',
-      } as any))
-    }
+      },
+    )
+    // A newer value superseded this one; its save sets the context
+    if (written.skipped) return
 
     sendBack({
       type: 'updateContext',
-      localId: newLocalId || localId,
-      ...writtenRow,
+      localId,
+      ...written.row,
       propertyValue: newFileSeedLocalId,
       refSeedType: 'file',
       refSchemaUid: fileSchemaUid,

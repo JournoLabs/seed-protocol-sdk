@@ -7,11 +7,9 @@ import {
   PropertyMachineContext,
   SaveValueToDbEvent,
 } from '@/types/property'
-import { createSeed } from '@/db/write/createSeed'
-import { createVersion } from '@/db/write/createVersion'
-import { createMetadata } from '@/db/write/createMetadata'
-import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { rowContext } from './rowContext'
+import { resolveNewSeedFields } from '@/db/write/createSeed'
+import { generateId } from '@/helpers/generateId'
+import { writeStorageValue } from './storageValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { toMetadataPropertyName } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -62,20 +60,13 @@ export const saveHtml = fromCallback<
       htmlSchemaUid = fetchedSchemaUid ?? undefined
     }
 
-    const newHtmlSeedLocalId = await createSeed({
-      type: 'html',
-      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.html,
-    })
+    // Named now so the file can be named after it; the seed row is written when the op applies
+    const newHtmlSeedLocalId = generateId()
 
     const fileName = `${newHtmlSeedLocalId}.html`
     const filePath = BaseFileManager.getFilesPath('html', fileName)
 
     await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('html'))
-
-    await createVersion({
-      seedLocalId: newHtmlSeedLocalId,
-      seedType: 'html',
-    })
 
     try {
       await BaseFileManager.saveFile(filePath, htmlContent)
@@ -92,58 +83,56 @@ export const saveHtml = fromCallback<
     // The blob URL (refResolvedDisplayValue) is stored in metadata for iframe display when needed.
     const renderValueForContext = htmlContent
 
-    let newLocalId
-
-    if (!localId) {
-      const result = await createMetadata(
-        {
-          propertyName,
-          propertyValue: newHtmlSeedLocalId,
-          seedLocalId,
-          seedUid,
+    const written = await writeStorageValue(
+      { seedLocalId, seedUid, propertyName },
+      {
+        storageSeed: {
+          localId: newHtmlSeedLocalId,
+          type: 'html',
+          modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.html,
+          fields: await resolveNewSeedFields('html'),
+        },
+        ownedFilePath: filePath,
+        create: {
+          values: {
+            propertyName,
+            propertyValue: newHtmlSeedLocalId,
+            seedUid,
+            versionLocalId,
+            versionUid,
+            modelName,
+            schemaUid: htmlSchemaUid,
+            refSeedType: 'html',
+            refModelUid: htmlSchemaUid,
+            refResolvedDisplayValue,
+            refResolvedValue: fileName,
+            localStorageDir: '/html',
+            easDataType: 'bytes32',
+          },
+          propertyRecordSchema,
+        },
+        update: {
+          newValue: newHtmlSeedLocalId,
           versionLocalId,
-          versionUid,
           modelName,
-          schemaUid: htmlSchemaUid,
+          schemaUid,
           refSeedType: 'html',
-          refModelUid: htmlSchemaUid,
           refResolvedDisplayValue,
           refResolvedValue: fileName,
+          refModelUid: htmlSchemaUid,
           localStorageDir: '/html',
           easDataType: 'bytes32',
+          dataType: 'Html',
         },
-        propertyRecordSchema,
-      )
-
-      if (result && result.localId) {
-        newLocalId = result.localId
-      }
-    }
-
-    let writtenRow: Partial<PropertyMachineContext> = {}
-    if (localId) {
-      writtenRow = rowContext(await updateItemPropertyValue({
-        localId,
-        propertyName,
-        newValue: newHtmlSeedLocalId,
-        seedLocalId,
-        versionLocalId,
-        modelName,
-        schemaUid,
-        refSeedType: 'html',
-        refResolvedDisplayValue,
-        refResolvedValue: fileName,
-        refModelUid: htmlSchemaUid,
-        localStorageDir: '/html',
-        easDataType: 'bytes32',
-        dataType: 'Html',
-      } as any))
-    }
+      },
+    )
+    // A newer value superseded this one; its save sets the context
+    if (written.skipped) return
 
     sendBack({
       type: 'updateContext',
-      localId: newLocalId || localId,
-      ...writtenRow,
+      localId,
+      ...written.row,
       propertyValue: newHtmlSeedLocalId,
       refSeedType: 'html',
       refSchemaUid: htmlSchemaUid,

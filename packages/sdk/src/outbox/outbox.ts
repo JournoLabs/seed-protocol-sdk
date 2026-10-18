@@ -4,8 +4,8 @@
  * transaction.
  *
  * Ops apply in append order (the row id) per item property. A property's run of consecutive
- * `set` ops is coalesced: only the newest is applied and the older ones are marked superseded in
- * the same transaction. An op with a `groupId` applies together with the rest of its group.
+ * value ops (`set`, `storage`) is coalesced: only the newest is applied and the older ones are
+ * marked superseded in the same transaction. An op with a `groupId` applies together with the rest of its group.
  *
  * This module knows nothing about items: appliers are registered per op kind
  * (registerOutboxApplier).
@@ -51,6 +51,11 @@ export type OutboxApplier<Prepared = unknown> = {
    * any other error is retried. What it returns is stored as the op's `result` (JSON).
    */
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
+  /**
+   * Cleans up after an op that will never apply (superseded or failed): a file written for it,
+   * say. Runs after the op is settled; errors are logged and ignored.
+   */
+  discard?: (op: OutboxOp) => Promise<void>
 }
 
 /** An op that can never apply (a broken rule, an item the client doesn't own). Not retried. */
@@ -211,6 +216,9 @@ type Unit =
   /** Every op of a group, read when the unit applies. */
   | { groupId: string }
 
+/** Kinds that replace a property's value: a run of them applies only its newest. */
+const VALUE_KINDS = new Set<string>(['set', 'storage'])
+
 const keyOf = (op: OutboxOp) => `${op.seedLocalId}\u0000${op.propertyName ?? ''}`
 const isDue = (op: OutboxOp) => (notBefore.get(op.opId) ?? 0) <= Date.now()
 
@@ -244,8 +252,8 @@ function planUnits(pending: OutboxOp[]): Unit[] {
       continue
     }
     let end = 0
-    if (head.kind === 'set') {
-      while (end + 1 < queue.length && queue[end + 1].kind === 'set' && !queue[end + 1].groupId) end++
+    if (VALUE_KINDS.has(head.kind)) {
+      while (end + 1 < queue.length && VALUE_KINDS.has(queue[end + 1].kind) && !queue[end + 1].groupId) end++
     }
     units.push({ unit: { op: queue[end], superseded: queue.slice(0, end) }, order: head.id })
   }
@@ -298,6 +306,7 @@ async function applyUnit(unit: Unit): Promise<void> {
     })
     for (const id of ids) notBefore.delete(id)
     settle([...ids, ...supersededIds])
+    discardAll(superseded)
   } catch (error) {
     if (error instanceof ClaimLostError) return
     await recordFailure(ops, superseded, error)
@@ -342,6 +351,16 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
   }
   for (const id of ids) notBefore.delete(id)
   settle([...ids, ...supersededIds])
+  discardAll([...ops, ...superseded])
+}
+
+/** Runs each op's applier's discard step (ops that will never apply). */
+function discardAll(ops: OutboxOp[]): void {
+  for (const op of ops) {
+    const discard = appliers.get(op.kind)?.discard
+    if (!discard) continue
+    discard(op).catch((error) => logger(`discarding op ${op.opId} failed`, error))
+  }
 }
 
 /** Drains again when the earliest op waiting for a retry is due. */

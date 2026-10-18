@@ -44,6 +44,8 @@ export const createSeed = async (
     db?: ReturnType<typeof BaseDb.getAppDb>
     /** From resolveNewSeedFields; required with a transaction's `db`, which mustn't wait on EAS. */
     fields?: NewSeedFields
+    /** The new seed's local id, when the caller needs it before the row exists; generated otherwise. */
+    localId?: string
   } = {},
 ): Promise<string> => {
   if (options.db && !options.fields) {
@@ -53,7 +55,7 @@ export const createSeed = async (
 
   const appDb = options.db ?? BaseDb.getAppDb()
 
-  const newSeedLocalId = generateId()
+  const newSeedLocalId = options.localId ?? generateId()
 
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,
