@@ -8,9 +8,9 @@ All create and destroy hooks follow the same pattern:
 
 **Create hooks** return:
 
-- `create` – function to create an entity (signature varies by entity)
-- `isLoading` – `true` while the create operation is in progress
-- `error` – `Error | null`; set when the operation fails
+- `create` – function to create an entity (signature varies by entity). `useCreateModelProperty`'s returns a promise, since it resolves the schema name first.
+- `isLoading` – `true` from the call until the entity is idle or in error. An entity that was already loaded clears it at once.
+- `error` – `Error | null`; set when the operation fails, including when `create` throws (the error is also rethrown)
 - `resetError` – call to clear `error` (e.g. when dismissing UI)
 
 **Destroy hooks** return:
