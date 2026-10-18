@@ -54,7 +54,7 @@ import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { ActorKeyedState } from '@/helpers/entity/entityState'
-import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { isActorStopped, sameEntity } from '@/helpers/entity/entityCommon'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -349,7 +349,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   private static collectInstanceCacheKeysForInstance(instance: Item<any>): string[] {
     const keys: string[] = []
     for (const [k, v] of this.instanceCache) {
-      if (v.instance === instance) keys.push(k)
+      if (sameEntity(v.instance, instance)) keys.push(k)
     }
     return keys
   }
