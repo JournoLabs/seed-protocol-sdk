@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `react-dom` `^18 || ^19` is a peer dependency. The package already imported `flushSync` from it.
+- An input bound to `property.value` from `useItemProperty` keeps every keystroke. The hook re-renders at once when the value changes; before, re-renders were throttled to one per 50 ms while the property saved, and a controlled input that missed one was reset to the old text.
+- `useDebouncedItemProperty` saves through `property.setValue(value, { before })`. When the save is refused (the item isn't owned) or the value breaks a rule, the shown value goes back to what it was before the first keystroke of that edit, and `error` reports the failure: an `OwnershipError`, an `ItemPropertySaveValidationError`, or the save's own error. Before, it skipped the setter, so a property without a loaded record schema failed with `Missing propertyRecordSchema`, nothing rolled back, and `error` only reported a failed lookup.
+- `useCreateItem`'s `createItem` takes `ItemCreateOptions` (`validate`, `readyTimeout`, `waitForReady`) as a third argument and passes them to `Item.create`. A call made while another is in flight returns that call's promise and item; it returned `undefined`.
+- `useEasSyncProcesses`, `useEasSyncProcessesState` and `useEasSyncProcessById` can mount before the client is ready; they threw `Db not configured`. They return `undefined` until then, and `useEasSyncProcessById` with an id reports `isLoading: true`.
+- `useResolvedMediaRef` reports `status: 'loading'` and no `href` after `value` changes until the new value resolves. It returned the previous value's `href` for a render or two, sometimes a `blob:` URL it had already revoked.
+- `SeedImage` forwards `ref` to its `<img>` on React 18.
+
 ## 0.7.7 (2026-10-18)
 
 - The deleted-items query (`useItems` with `deleted: true`) matches rows with `_markedForDeletion = 1` only. It also matched rows where the column was `0`.
