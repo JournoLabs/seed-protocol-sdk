@@ -4,10 +4,11 @@ import {
   INTERNAL_PROPERTY_NAMES,
   PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
 } from '@/helpers/constants'
-import { getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
+import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import {
   getAlternatePropertyNameForInstanceLookup,
   resolveStorageNameToSchemaName,
+  toItemPropertyKey,
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
 import { VersionsType } from '@/seedSchema'
@@ -36,7 +37,6 @@ import {
   SnapshotFrom,
   waitFor,
 } from 'xstate'
-import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
@@ -145,7 +145,6 @@ const TRACKED_PROPERTIES = [
 // Mutable state per Item instance
 const itemInstanceState = new ActorKeyedState<Item<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
-  definedPropertyNames: Set<string>
 }>()
 
 /**
@@ -158,11 +157,15 @@ const itemInstanceState = new ActorKeyedState<Item<any>, {
 const supersededSeedUids = new WeakMap<object, Set<string>>()
 
 /**
- * Each Item's reactive proxy, keyed by the raw instance. The class's arrow-function methods see the
- * raw instance as `this`, where tracked properties such as `seedUid` are getter-only; anything they
- * hand the item to that assigns tracked properties (the publish executor) must get the proxy.
+ * Each Item's reactive proxy, keyed by its actor. The class's arrow-function methods see the raw
+ * instance as `this`, where tracked properties such as `seedUid` are getter-only and model
+ * properties (`item.title`) don't exist; anything they hand the item to (the publish executor)
+ * must get the proxy.
  */
 const reactiveProxies = new WeakMap<object, Item<any>>()
+
+/** The latest seed uid write per item, keyed by its actor (see `_persistSeedUid`). */
+const pendingSeedUidWrites = new WeakMap<object, Promise<void>>()
 
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
@@ -219,7 +222,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return
       }
 
-      const state = itemInstanceState.get(this)
       const propertiesObj: Record<string, IItemProperty> = {}
 
       for (const [key, propertyInstance] of context.propertyInstances) {
@@ -228,51 +230,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           continue
         }
 
-        let transformedKey: string = key as string
-
-        if (propertyInstance.alias) {
-          transformedKey = propertyInstance.alias
-        }
-
-        if (!propertyInstance.alias && key.endsWith('Ids')) {
-          transformedKey = key.slice(0, -3) // Remove 'Ids'
-          transformedKey = pluralize(transformedKey)
-        }
-
-        if (
-          !propertyInstance.alias &&
-          key.endsWith('Id') &&
-          !PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP.has(key)
-        ) {
-          transformedKey = key.slice(0, -2) // Remove 'Id'
-        }
-
-        propertiesObj[transformedKey] = propertyInstance
-      }
-
-      // Define accessors for any property instances we don't have yet (e.g. from loadOrCreateItem)
-      const definedSet = state?.definedPropertyNames
-      if (definedSet) {
-        for (const key of context.propertyInstances.keys()) {
-          if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) {
-            continue
-          }
-          if (!definedSet.has(key)) {
-            this._definePropertyAccessor(key)
-          }
-        }
-        // Html/Image/File/Relation store as e.g. htmlId; ensure schema name (html) has accessor when htmlId exists
-        for (const key of context.propertyInstances.keys()) {
-          if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) continue
-          const schemaBaseName = toSchemaPropertyName(key)
-          if (
-            schemaBaseName &&
-            (schemaKeys.includes(schemaBaseName) || schemaKeys.length === 0) &&
-            !definedSet.has(schemaBaseName)
-          ) {
-            this._definePropertyAccessor(schemaBaseName)
-          }
-        }
+        propertiesObj[toItemPropertyKey(key, propertyInstance.alias)] = propertyInstance
       }
 
       this._propertiesSubject.next(propertiesObj)
@@ -283,7 +241,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Initialize instance state in WeakMap
     itemInstanceState.set(this, {
       liveQuerySubscription: null,
-      definedPropertyNames: new Set(),
     })
     
     // Set up liveQuery subscription for cross-instance updates
@@ -411,6 +368,90 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (!lid && !uid) {
       throw new Error('Item.registerItemInInstanceCache: missing seedLocalId and seedUid')
     }
+  }
+
+  /**
+   * Wraps a new instance in its reactive proxy: tracked names read from and write to the actor's
+   * context, and the model's property names (`item.title`, or `item.html` for `htmlId`) read and
+   * write their ItemProperty's value.
+   */
+  private static wrapInProxy(instance: Item<any>): Item<any> {
+    const proxy = createReactiveProxy<Item<any>>({
+      instance,
+      service: instance._service,
+      trackedProperties: TRACKED_PROPERTIES,
+      getContext: (target) => target._getSnapshotContext(),
+      sendUpdate: (target, prop, value) => {
+        if (prop === 'publisher') throw new Error('Cannot set item.publisher: publisher is read-only.')
+        Item.sendTrackedPropertyUpdate(target, prop, value)
+        if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
+          target._persistSeedUid(value)
+        }
+      },
+      resolve: (target, prop) => {
+        const property = target._findPropertyInstance(prop)
+        if (!property) return undefined
+        return {
+          get: () => property.value,
+          set: (value) => {
+            property.value = value
+          },
+        }
+      },
+      virtualKeys: (target) => target._propertyInstanceNames(),
+      onSet: (_target, prop) => {
+        if (prop === 'properties') {
+          // Properties are read-only computed values from propertyInstances, managed via ItemProperty instances
+          throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
+        }
+      },
+    }) as Item<any>
+    reactiveProxies.set(instance._service, proxy)
+    return proxy
+  }
+
+  /**
+   * The ItemProperty a model property name reads and writes on the item: by its name, or by its
+   * storage name (`html` finds `htmlId` and the other way round). Internal names don't resolve.
+   */
+  private _findPropertyInstance(propertyName: string): IItemProperty | undefined {
+    if (INTERNAL_PROPERTY_NAMES.includes(propertyName)) return undefined
+    const instances = this._service.getSnapshot().context.propertyInstances
+    if (!instances || instances.size === 0) return undefined
+    const direct = instances.get(propertyName)
+    if (direct) return direct
+    const altKey = getAlternatePropertyNameForInstanceLookup(propertyName)
+    return altKey ? instances.get(altKey) : undefined
+  }
+
+  /** Every name `_findPropertyInstance` resolves: the stored names and their schema names. */
+  private _propertyInstanceNames(): string[] {
+    const instances = this._service.getSnapshot().context.propertyInstances
+    if (!instances) return []
+    const names = new Set<string>()
+    for (const key of instances.keys()) {
+      if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) continue
+      names.add(key)
+      const schemaName = toSchemaPropertyName(key)
+      if (schemaName && !INTERNAL_PROPERTY_NAMES.includes(schemaName)) names.add(schemaName)
+    }
+    return [...names]
+  }
+
+  /**
+   * Writes an assigned seed uid to the item's seed row, so later loads and getPublishPayload see it.
+   * Writes run one after another per item, so the last assignment is the one that stays.
+   */
+  private _persistSeedUid(seedUid: string): void {
+    const seedLocalId = this._getSnapshotContext().seedLocalId
+    if (!seedLocalId) return
+    const previous = pendingSeedUidWrites.get(this._service) ?? Promise.resolve()
+    const write = previous
+      .then(() => updateSeedUid({ seedLocalId, seedUid }))
+      .catch((err) => {
+        itemLogger('updateSeedUid failed:', err)
+      })
+    pendingSeedUidWrites.set(this._service, write)
   }
 
   /**
@@ -645,95 +686,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         const propsWithModel = { ...propsWithoutVersionUid } as any
         const newInstance = new Item(propsWithModel)
         
-        // Wrap instance in Proxy for reactive property access
-        const proxiedInstance = new Proxy(newInstance, {
-          get(target, prop: string | symbol) {
-            // Handle special properties
-            if (prop === '_service') {
-              return Reflect.get(target, prop)
-            }
-            
-            // Handle tracked properties
-            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              const context = target._getSnapshotContext()
-              return (context as any)[prop]
-            }
-            
-            // Handle 'properties' getter - not tracked, but accessible via getter
-            if (typeof prop === 'string' && prop === 'properties') {
-              // Delegate to the getter method on the instance
-              return target.properties
-            }
-            
-            // For methods and other properties, use Reflect
-            return Reflect.get(target, prop)
-          },
-          
-          set(target, prop: string | symbol, value: any) {
-            // Handle special properties
-            if (prop === '_service') {
-              return Reflect.set(target, prop, value)
-            }
-            
-            if (typeof prop === 'string' && prop === 'publisher') {
-              throw new Error('Cannot set item.publisher: publisher is read-only.')
-            }
-            
-            // Handle tracked properties
-            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              // Standard property update
-              Item.sendTrackedPropertyUpdate(target, prop, value)
-              // Auto-persist seedUid to DB when assigned so future loads and getPublishPayload see it
-              if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
-                const seedLocalId = target._getSnapshotContext().seedLocalId
-                if (seedLocalId) {
-                  void updateSeedUid({ seedLocalId, seedUid: value }).catch((err) => {
-                    itemLogger('updateSeedUid failed:', err)
-                  })
-                }
-              }
-              return true
-            }
-            
-            // Handle 'properties' - read-only computed property
-            if (typeof prop === 'string' && prop === 'properties') {
-              // Properties are read-only computed values from propertyInstances
-              // Cannot be set directly - properties are managed via ItemProperty instances
-              throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
-            }
-            
-            // For non-tracked properties, use Reflect
-            return Reflect.set(target, prop, value)
-          },
-          
-          has(target, prop: string | symbol) {
-            // Check tracked properties
-            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              const context = target._getSnapshotContext()
-              return prop in context
-            }
-            return Reflect.has(target, prop)
-          },
-          
-          ownKeys(target) {
-            // Return keys from target
-            return Reflect.ownKeys(target)
-          },
-          
-          getOwnPropertyDescriptor(target, prop: string | symbol) {
-            let invent: { value: unknown } | undefined
-            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              const context = target._getSnapshotContext()
-              if (prop in context) {
-                invent = { value: (context as any)[prop] }
-              }
-            }
-            return getInvariantSafePropertyDescriptor(target, prop, invent)
-          },
-        }) as Item<any>
+        const proxiedInstance = Item.wrapInProxy(newInstance)
 
-        reactiveProxies.set(newInstance, proxiedInstance)
-        this.registerItemInInstanceCache(proxiedInstance)
+                this.registerItemInInstanceCache(proxiedInstance)
         if (!waitForReady) return proxiedInstance
         try {
           await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
@@ -862,111 +817,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const propsWithModel = { ...propsWithoutVersionUid } as any
     const newInstance = new Item(propsWithModel)
     
-    // Wrap instance in Proxy for reactive property access
-    const proxiedInstance = new Proxy(newInstance, {
-      get(target, prop: string | symbol) {
-        // Handle special properties
-        if (prop === '_service') {
-          return Reflect.get(target, prop)
-        }
-        
-        // Handle tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          // Special handling for properties - compute from propertyInstances Map
-          if (prop === 'properties') {
-            const snapshot = target._service.getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
-            const context = snapshot.context
-            const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
-            
-            if (!propertyInstances || propertyInstances.size === 0) {
-              return []
-            }
-            
-            // Get model schema keys for filtering
-            const modelSchemaKeys = target._getModelSchemaKeys()
-            
-            // Convert Map to array, filtering by model schema
-            const properties: IItemProperty[] = []
-            for (const [key, propertyInstance] of propertyInstances) {
-              // Skip internal properties
-              if (INTERNAL_PROPERTY_NAMES.includes(key)) {
-                continue
-              }
-              
-              // Include if it's a model property
-              const isModelProp = target._isModelProperty(key, modelSchemaKeys)
-              if (isModelProp) {
-                properties.push(propertyInstance)
-              }
-            }
-            
-            // CRITICAL: Always create a new array reference so React detects changes
-            return [...properties]
-          }
-          
-          const context = target._getSnapshotContext()
-          return (context as any)[prop]
-        }
-        
-        // For methods and other properties, use Reflect
-        return Reflect.get(target, prop)
-      },
-      
-        set(target, prop: string | symbol, value: any) {
-          // Handle special properties
-          if (prop === '_service') {
-            return Reflect.set(target, prop, value)
-          }
-          
-          if (typeof prop === 'string' && prop === 'publisher') {
-            throw new Error('Cannot set item.publisher: publisher is read-only.')
-          }
-          
-          // Handle tracked properties
-          if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-            if (prop === 'properties') {
-              // Properties are read-only computed values from propertyInstances
-              // Cannot be set directly - properties are managed via ItemProperty instances
-              throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
-            } else {
-              // Standard property update
-              Item.sendTrackedPropertyUpdate(target, prop, value)
-            }
-            return true
-          }
-          
-          // For non-tracked properties, use Reflect
-          return Reflect.set(target, prop, value)
-        },
-      
-      has(target, prop: string | symbol) {
-        // Check tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          const context = target._getSnapshotContext()
-          return prop in context
-        }
-        return Reflect.has(target, prop)
-      },
-      
-      ownKeys(target) {
-        // Return keys from target
-        return Reflect.ownKeys(target)
-      },
-      
-      getOwnPropertyDescriptor(target, prop: string | symbol) {
-        let invent: { value: unknown } | undefined
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          const context = target._getSnapshotContext()
-          if (prop in context) {
-            invent = { value: (context as any)[prop] }
-          }
-        }
-        return getInvariantSafePropertyDescriptor(target, prop, invent)
-      },
-    }) as Item<any>
+    const proxiedInstance = Item.wrapInProxy(newInstance)
     
-    reactiveProxies.set(newInstance, proxiedInstance)
-    this.registerItemInInstanceCache(proxiedInstance)
+        this.registerItemInInstanceCache(proxiedInstance)
     // Storage values must be saved before returning, so wait for readiness even when not requested.
     if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
     try {
@@ -1396,43 +1249,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       propertyName: props.propertyName,
       propertyInstance,
     })
-
-    this._definePropertyAccessor(props.propertyName)
-  }
-
-  /**
-   * Defines a property accessor on this Item that delegates get/set to the
-   * ItemProperty in context.propertyInstances at access time (so the correct
-   * instance is used after loadOrCreateItemSuccess merges DB-backed instances).
-   */
-  protected _definePropertyAccessor(propertyName: string): void {
-    let state = itemInstanceState.get(this)
-    if (!state) {
-      state = { liveQuerySubscription: null, definedPropertyNames: new Set() }
-      itemInstanceState.set(this, state)
-    }
-    if (state.definedPropertyNames.has(propertyName)) {
-      return
-    }
-    const altKey = getAlternatePropertyNameForInstanceLookup(propertyName)
-    Object.defineProperty(this, propertyName, {
-      get: () => {
-        const instances = this._service.getSnapshot().context.propertyInstances
-        const inst = instances?.get(propertyName) ?? (altKey ? instances?.get(altKey) : undefined)
-        const val = inst?.value
-        return val
-      },
-      set: (value: any) => {
-        const instances = this._service.getSnapshot().context.propertyInstances
-        const inst = instances?.get(propertyName) ?? (altKey ? instances?.get(altKey) : undefined)
-        if (inst) {
-          inst.value = value
-        }
-      },
-      enumerable: true,
-      configurable: true,
-    })
-    state.definedPropertyNames.add(propertyName)
   }
 
   /** Same as `item.publish(options)`; requires @seedprotocol/publish. */
@@ -1630,7 +1446,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
       })
       // The executor assigns item.seedUid, which only the proxy accepts.
-      const item = reactiveProxies.get(this) ?? this
+      const item = reactiveProxies.get(this._service) ?? this
       this._service.send({ type: 'startPublish', item, options })
     })
   }
@@ -1848,16 +1664,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Otherwise use the Map key
       const propertyName = propertyInstance.propertyName || key
       
-      // Apply transformations if needed
-      let transformedKey = propertyName
-      if (propertyInstance.alias) {
-        transformedKey = propertyInstance.alias
-      } else if (propertyName.endsWith('Ids')) {
-        transformedKey = pluralize(propertyName.slice(0, -3))
-      } else if (propertyName.endsWith('Id')) {
-        transformedKey = propertyName.slice(0, -2)
-      }
-      
+      const transformedKey = toItemPropertyKey(propertyName, propertyInstance.alias)
       if (!schemaKeys.includes(transformedKey)) {
         schemaKeys.push(transformedKey)
       }
@@ -1889,17 +1696,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (!propertyInstance) {
       return false
     }
-    // Apply same transformation as _getSchemaKeysFromPropertyInstances
+    // Same key as _getSchemaKeysFromPropertyInstances
     const propertyName = propertyInstance.propertyName || key
-    let transformedKey = propertyName
-    if (propertyInstance.alias) {
-      transformedKey = propertyInstance.alias
-    } else if (propertyName.endsWith('Ids')) {
-      transformedKey = pluralize(propertyName.slice(0, -3))
-    } else if (propertyName.endsWith('Id')) {
-      transformedKey = propertyName.slice(0, -2)
-    }
-    return modelSchemaKeys.includes(transformedKey)
+    return modelSchemaKeys.includes(toItemPropertyKey(propertyName, propertyInstance.alias))
   }
 
   /**

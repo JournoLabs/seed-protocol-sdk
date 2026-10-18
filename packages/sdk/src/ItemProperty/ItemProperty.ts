@@ -1071,20 +1071,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const newInstance = new ItemProperty(props)
         
         // Wrap instance in Proxy for reactive property access
-        const proxiedInstance = createReactiveProxy<ItemProperty<any>>({
-          instance: newInstance,
-          service: newInstance._service,
-          trackedProperties: TRACKED_PROPERTIES,
-          getContext: (instance) => {
-            return instance._getSnapshotContext()
-          },
-          sendUpdate: (instance, prop: string, value: any) => {
-            instance._service.send({
-              type: 'updateContext',
-              [prop]: value,
-            })
-          },
-        })
+        const proxiedInstance = ItemProperty.wrapInProxy(newInstance)
         
         const entry = { instance: proxiedInstance, refCount: 1 }
         this.instanceCache.set(cacheKey, entry)
@@ -1100,20 +1087,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const newInstance = new ItemProperty(props)
         
         // Wrap instance in Proxy for reactive property access
-        const proxiedInstance = createReactiveProxy<ItemProperty<any>>({
-          instance: newInstance,
-          service: newInstance._service,
-          trackedProperties: TRACKED_PROPERTIES,
-          getContext: (instance) => {
-            return instance._getSnapshotContext()
-          },
-          sendUpdate: (instance, prop: string, value: any) => {
-            instance._service.send({
-              type: 'updateContext',
-              [prop]: value,
-            })
-          },
-        })
+        const proxiedInstance = ItemProperty.wrapInProxy(newInstance)
         
         const entry = { instance: proxiedInstance, refCount: 1 }
         this.instanceCache.set(cacheKey, entry)
@@ -1127,24 +1101,31 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const newInstance = new ItemProperty(props)
     
     // Wrap instance in Proxy for reactive property access
-    const result = createReactiveProxy<ItemProperty<any>>({
-      instance: newInstance,
-      service: newInstance._service,
-      trackedProperties: TRACKED_PROPERTIES,
-      getContext: (instance) => {
-        return instance._getSnapshotContext()
-      },
-      sendUpdate: (instance, prop: string, value: any) => {
-        instance._service.send({
-          type: 'updateContext',
-          [prop]: value,
-        })
-      },
-    })
+    const result = ItemProperty.wrapInProxy(newInstance)
     if (!waitForReady) return result
     return waitForEntityIdle(result, { timeout: readyTimeout }).then(
       () => result,
     )
+  }
+
+  /**
+   * Wraps a new instance in its reactive proxy: tracked names read from and write to the actor's
+   * context, and assigning `value` also sends it to the actor before the setter runs.
+   */
+  private static wrapInProxy(instance: ItemProperty<any>): ItemProperty<any> {
+    const sendUpdate = (target: ItemProperty<any>, prop: string, value: unknown) => {
+      target._service.send({ type: 'updateContext', [prop]: value })
+    }
+    return createReactiveProxy<ItemProperty<any>>({
+      instance,
+      service: instance._service,
+      trackedProperties: TRACKED_PROPERTIES,
+      getContext: (target) => target._getSnapshotContext(),
+      sendUpdate,
+      onSet: (target, prop, value) => {
+        if (prop === 'value') sendUpdate(target, prop, value)
+      },
+    })
   }
 
   /**

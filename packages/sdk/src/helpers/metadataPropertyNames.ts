@@ -1,7 +1,7 @@
 import pluralize from 'pluralize'
 import { easName } from '@seedprotocol/eas'
 import { normalizeDataType } from './property/index'
-import { INTERNAL_DATA_TYPES } from './constants'
+import { INTERNAL_DATA_TYPES, PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP } from './constants'
 
 /** Minimal property def shape for List-of-relation storage name resolution */
 export type PropertySchemaEntry = {
@@ -124,6 +124,20 @@ export function getMetadataPropertyNamesForQuery(
     return [propertyName, `${propertyName}Id`, `${propertyName}Ids`]
   }
   return [propertyName]
+}
+
+/**
+ * The name an item exposes a property under, from the name it is stored under: its alias when it
+ * has one (List of relation), else `tagIds` → `tags`, `authorId` → `author`. Names in
+ * PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP keep their `Id`.
+ */
+export function toItemPropertyKey(storedName: string, alias?: string): string {
+  if (alias) return alias
+  if (storedName.endsWith('Ids')) return pluralize(storedName.slice(0, -3))
+  if (storedName.endsWith('Id') && !PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP.has(storedName)) {
+    return storedName.slice(0, -2)
+  }
+  return storedName
 }
 
 /**

@@ -12,6 +12,25 @@ interface ProxyConfig<T> {
   getContext: (instance: T) => any
   /** Function to send an update to the actor when a property is set */
   sendUpdate: (instance: T, prop: string, value: any) => void
+  /**
+   * Names that aren't tracked fields but read and write through the proxy: Item's model properties
+   * (`item.title`), Model's `name` alias. Checked before the instance's own members. Return
+   * undefined for names it doesn't handle.
+   */
+  resolve?: (instance: T, prop: string) => VirtualProperty | undefined
+  /** The names `resolve` handles right now, so they enumerate (`Object.keys`, spread). */
+  virtualKeys?: (instance: T) => string[]
+  /**
+   * Called before an assignment to a name that is neither tracked nor resolved, before it reaches
+   * the instance. Throw to refuse it (read-only names).
+   */
+  onSet?: (instance: T, prop: string, value: unknown) => void
+}
+
+/** A name `resolve` routes through the proxy. Without `set`, assigning it throws. */
+export interface VirtualProperty {
+  get: () => unknown
+  set?: (value: unknown) => void
 }
 
 /**
@@ -69,7 +88,7 @@ export function getInvariantSafePropertyDescriptor(
  * The Proxy implementation preserves all methods via Reflect.get, so this is safe.
  */
 export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): Proxied<T> {
-  const { instance, trackedProperties, getContext, sendUpdate } = config
+  const { instance, trackedProperties, getContext, sendUpdate, resolve, virtualKeys, onSet } = config
   
   // Convert readonly array to regular array for includes() checks
   const trackedPropsSet = new Set(trackedProperties)
@@ -90,6 +109,9 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
         const context = getContext(instance)
         return context[prop]
       }
+
+      const virtual = typeof prop === 'string' ? resolve?.(instance, prop) : undefined
+      if (virtual) return virtual.get()
       
       // For methods and non-tracked properties, use Reflect
       return Reflect.get(target, prop)
@@ -107,10 +129,14 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
         return true // Indicate success
       }
       
-      // For non-tracked properties, use Reflect. Also trigger sendUpdate for virtual
-      // 'value' so the callback runs when .value is assigned (e.g. ItemProperty).
-      if (typeof prop === 'string' && prop === 'value') {
-        sendUpdate(instance, prop, value)
+      if (typeof prop === 'string') {
+        const virtual = resolve?.(instance, prop)
+        if (virtual) {
+          if (!virtual.set) throw new TypeError(`Cannot set ${prop}: it is read-only.`)
+          virtual.set(value)
+          return true
+        }
+        onSet?.(instance, prop, value)
       }
       return Reflect.set(target, prop, value)
     },
@@ -121,15 +147,18 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
         const context = getContext(instance)
         return prop in context
       }
+      if (typeof prop === 'string' && resolve?.(instance, prop)) return true
       return Reflect.has(target, prop)
     },
     
     ownKeys(target) {
-      // Only return keys that actually exist on the target object
-      // This is required when the target is non-extensible (e.g., frozen by Immer)
-      // Tracked properties are virtual (read from context), so we don't include them here
-      // They're accessible via the get trap, but don't appear in ownKeys
-      return Reflect.ownKeys(target)
+      // Tracked properties are virtual (read from context), so we don't include them here.
+      // They're accessible via the get trap, but don't appear in ownKeys. Resolved names do, when
+      // the target is extensible (a non-extensible one, e.g. frozen by Immer, can't report them).
+      const keys = Reflect.ownKeys(target)
+      if (!virtualKeys || !Object.isExtensible(target)) return keys
+      const extra = virtualKeys(instance).filter((key) => !keys.includes(key))
+      return extra.length > 0 ? [...keys, ...extra] : keys
     },
     
     getOwnPropertyDescriptor(target, prop: string | symbol) {
@@ -139,6 +168,9 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
         if (prop in context) {
           invent = { value: context[prop] }
         }
+      } else if (typeof prop === 'string') {
+        const virtual = resolve?.(instance, prop)
+        if (virtual) invent = { value: virtual.get(), writable: !!virtual.set }
       }
       return getInvariantSafePropertyDescriptor(target, prop, invent)
     }
