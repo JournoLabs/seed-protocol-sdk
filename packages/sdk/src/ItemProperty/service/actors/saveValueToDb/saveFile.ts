@@ -182,6 +182,8 @@ export const saveFile = fromCallback<
       }
     }
 
+    // A session URL (blob: in browsers, file:// in Node): it goes in the context only. Stored, it is a
+    // dead blob: URL after reload, so readers mint their own from the path, as for Image.
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
     let newLocalId
@@ -199,7 +201,6 @@ export const saveFile = fromCallback<
           schemaUid: fileSchemaUid,
           refSeedType: 'file',
           refModelUid: fileSchemaUid,
-          refResolvedDisplayValue,
           refResolvedValue: fileName,
           localStorageDir: '/files',
           easDataType: 'bytes32',
@@ -223,7 +224,6 @@ export const saveFile = fromCallback<
         modelName,
         schemaUid,
         refSeedType: 'file',
-        refResolvedDisplayValue,
         refResolvedValue: fileName,
         refModelUid: fileSchemaUid,
         localStorageDir: '/files',

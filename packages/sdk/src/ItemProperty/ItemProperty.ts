@@ -560,6 +560,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         )
         const propertyNameVariant = propertyNames.length > 1 ? propertyNames[1] : undefined
 
+        // File and Image display values are session URLs minted from the file on disk; the column holds
+        // nothing useful for them (older versions stored blob: URLs that die on reload). Keep the minted
+        // one unless the row now points at a different file, then clear it so the next render mints anew.
+        const displayValueFromRow = (row: { refResolvedValue: string | null; refResolvedDisplayValue: string | null }) => {
+          const { context } = this._service.getSnapshot()
+          const isSessionUrlType =
+            normalizedDataType === 'Image' ||
+            normalizedDataType === 'File' ||
+            normalizedRefValueType === 'Image' ||
+            context.refSeedType === 'image' ||
+            context.refSeedType === 'file'
+          if (!isSessionUrlType) {
+            return { refResolvedDisplayValue: row.refResolvedDisplayValue || undefined }
+          }
+          if ((row.refResolvedValue || undefined) === context.refResolvedValue) return {}
+          return { refResolvedDisplayValue: undefined }
+        }
+
         const seedSchemaMod = await import('../seedSchema')
         const { metadata } = seedSchemaMod
         const drizzleMod = await import('drizzle-orm')
@@ -612,7 +630,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             versionUid: metaRow.versionUid || undefined,
             schemaUid: metaRow.schemaUid || undefined,
             refResolvedValue: metaRow.refResolvedValue || undefined,
-            refResolvedDisplayValue: metaRow.refResolvedDisplayValue || undefined,
+            ...displayValueFromRow(metaRow),
             localStorageDir: metaRow.localStorageDir || undefined,
           })
         }
@@ -735,7 +753,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 versionUid: metaRow.versionUid || undefined,
                 schemaUid: metaRow.schemaUid || undefined,
                 refResolvedValue: metaRow.refResolvedValue || undefined,
-                refResolvedDisplayValue: metaRow.refResolvedDisplayValue || undefined,
+                ...displayValueFromRow(metaRow),
                 localStorageDir: metaRow.localStorageDir || undefined,
               })
             },
