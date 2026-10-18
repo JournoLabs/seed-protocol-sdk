@@ -3,24 +3,33 @@
  * Used by Schema, Model, ModelProperty, Item, and ItemProperty destroy() methods.
  */
 
+import type { InstanceStateStore } from './entityState'
+
+type LiveQuerySubscriptions = {
+  liveQuerySubscription?: { unsubscribe: () => void } | null
+  schemaLiveQuerySubscription?: { unsubscribe: () => void } | null
+}
+
 export interface ClearDestroySubscriptionsConfig<T extends object> {
-  instanceState: WeakMap<T, { liveQuerySubscription?: { unsubscribe: () => void } | null }>
+  instanceState: InstanceStateStore<T, LiveQuerySubscriptions>
   onUnload?: (instance: T) => void
 }
 
 /**
- * Unsubscribe liveQuery and any extra subscription (e.g. Item/ItemProperty _subscription).
- * Swallows errors so one failure doesn't block the rest.
+ * Unsubscribe the entity's liveQueries and any extra subscription (e.g. Item/ItemProperty
+ * _subscription). Swallows errors so one failure doesn't block the rest.
  */
 export function clearDestroySubscriptions<T extends object>(
   instance: T,
   config: ClearDestroySubscriptionsConfig<T>,
 ): void {
   const instanceState = config.instanceState.get(instance)
-  if (instanceState?.liveQuerySubscription) {
+  for (const key of ['liveQuerySubscription', 'schemaLiveQuerySubscription'] as const) {
+    const subscription = instanceState?.[key]
+    if (!subscription) continue
     try {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
+      subscription.unsubscribe()
+      instanceState[key] = null
     } catch {
       // Ignore errors during cleanup
     }

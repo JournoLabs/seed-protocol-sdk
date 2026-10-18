@@ -1,6 +1,7 @@
 import { Observable, Subscription } from 'rxjs'
 import debug from 'debug'
 import { isActorStopped } from './entityCommon'
+import type { InstanceStateStore } from './entityState'
 
 /**
  * Configuration for entity liveQuery setup
@@ -33,9 +34,9 @@ export interface LiveQueryConfig<T extends object> {
    */
   createChildInstances?: (ids: string[]) => Promise<void>
   /**
-   * Instance state WeakMap (for storing subscription)
+   * Instance state store (for storing subscription)
    */
-  instanceState: WeakMap<T, { liveQuerySubscription: Subscription | null }>
+  instanceState: InstanceStateStore<T, { liveQuerySubscription: Subscription | null }>
   /**
    * Logger name for debugging
    */
@@ -120,6 +121,9 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
           logger('Instance state not found')
           return
         }
+
+        // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+        if (isActorStopped(instance.getService())) return
 
         // Subscribe to liveQuery updates
         const subscription = query$.subscribe({

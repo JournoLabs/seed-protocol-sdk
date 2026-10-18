@@ -28,6 +28,8 @@ import {
 import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { ActorKeyedState } from '@/helpers/entity/entityState'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -187,9 +189,8 @@ const TRACKED_PROPERTIES = [
   'uid',
 ] as const
 
-// WeakMap to store mutable state per ItemProperty instance
-// This avoids issues with read-only properties when instances are frozen by Immer
-const itemPropertyInstanceState = new WeakMap<ItemProperty<any>, {
+// Mutable state per ItemProperty instance
+const itemPropertyInstanceState = new ActorKeyedState<ItemProperty<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
   schemaLiveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for properties table (schema changes)
 }>()
@@ -717,6 +718,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             return
           }
 
+          // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+          if (isActorStopped(this._service)) return
+
           // Subscribe to liveQuery updates
           const subscription = metadata$.subscribe({
             next: async (metadataRows) => {
@@ -878,6 +882,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           logger('[ItemProperty._setupPropertySchemaLiveQuery] Instance state not found')
           return
         }
+
+        // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+        if (isActorStopped(this._service)) return
 
         const subscription = schema$.subscribe({
           next: (rows) => {
