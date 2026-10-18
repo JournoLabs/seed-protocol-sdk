@@ -982,6 +982,43 @@ export class Model {
   }
 
   /**
+   * Models their schema holds, by modelFileId. A schema's first load of a model takes one hold for
+   * the schema, and the schema's last unload releases it (releaseSchemaHolds), so a user's unload
+   * can't drop a model out of `schema.models` while the schema is loaded.
+   */
+  private static schemaHeldModelIds = new Set<string>()
+
+  /**
+   * @internal For a Schema loading its models: true when this load should take the schema's hold
+   * on the model (pass no `hold` option), false when the schema already holds it (pass
+   * `hold: false`). After a true, call `dropSchemaHold` if the load returns no model.
+   */
+  static takeSchemaHold(modelFileId: string | undefined): boolean {
+    if (!modelFileId || this.schemaHeldModelIds.has(modelFileId)) return false
+    this.schemaHeldModelIds.add(modelFileId)
+    return true
+  }
+
+  /** @internal The load `takeSchemaHold` approved found no model: there is no hold to release. */
+  static dropSchemaHold(modelFileId: string): void {
+    this.schemaHeldModelIds.delete(modelFileId)
+  }
+
+  /** @internal A Schema's last unload: releases its hold on each of its models. */
+  static releaseSchemaHolds(schemaName: string): void {
+    for (const modelFileId of [...this.schemaHeldModelIds]) {
+      const model = this.peek(modelFileId)
+      if (!model) {
+        this.schemaHeldModelIds.delete(modelFileId)
+        continue
+      }
+      if (model._getSnapshotContext().schemaName !== schemaName) continue
+      this.schemaHeldModelIds.delete(modelFileId)
+      model.unload()
+    }
+  }
+
+  /**
    * The cached Model with this modelFileId, without taking a hold. For SDK code that reads the
    * model and doesn't hand it to a caller; callers that keep it use `getById`, `find` or `create`.
    */
@@ -1962,6 +1999,7 @@ export class Model {
       if (context.schemaName !== schemaName) continue
 
       const nameKey = `${context.schemaName}:${context.modelName}`
+      if (context.id) this.schemaHeldModelIds.delete(context.id)
       clearDestroySubscriptions(instance, { instanceState: modelInstanceState })
       forceRemoveFromCaches(instance, {
         getCacheKeys: () => (context.id ? [context.id, nameKey] : [nameKey]),
@@ -2029,6 +2067,7 @@ export class Model {
 
     // Before the caches are cleared, so a lookup by id already reading the row doesn't re-cache it
     if (modelFileId) recordModelDestroy(modelFileId)
+    if (modelFileId) Model.schemaHeldModelIds.delete(modelFileId)
 
     const cacheKeys: string[] = []
     if (modelFileId) cacheKeys.push(modelFileId)
