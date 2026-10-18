@@ -3,6 +3,7 @@ import { models as modelsTable, modelUids } from '@/seedSchema'
 import { inArray } from 'drizzle-orm'
 import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { loadNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { isTestOrSeedDev } from '@/helpers/environment'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
@@ -118,7 +119,6 @@ export const addModelsToDb = fromCallback<
     // If we have no models to process, still send success (empty models is valid)
     if (schemaDefsByModelName.size === 0) {
       logger('[client/actors] [addModelsToDb] No models to process, but continuing')
-      sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
       return
     }
 
@@ -202,6 +202,12 @@ export const addModelsToDb = fromCallback<
   }
 
   _addModelsToDb()
+    // Model.findByModelType reads the nameMatch levels synchronously: have them before init is ready.
+    .then(() =>
+      loadNameMatchLevels().catch((error) => {
+        logger('[client/actors] [addModelsToDb] Could not load nameMatch levels:', error)
+      }),
+    )
     .then(() => {
       sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
     })

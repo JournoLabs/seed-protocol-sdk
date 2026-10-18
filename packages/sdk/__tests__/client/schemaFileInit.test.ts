@@ -177,6 +177,29 @@ testDescribe('schemaFile init', () => {
       expect(String(snapshot.context.initError)).toContain('broken-schema.json')
     })
 
+    it('fails init with the name error when a complete-format schema has no metadata.name', async () => {
+      if (typeof window !== 'undefined') return
+      fs.writeFileSync(
+        path.join(process.cwd(), 'nameless-schema.json'),
+        JSON.stringify({
+          $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+          version: 1,
+          metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          models: { Note: { properties: { title: { type: 'Text' } } } },
+          enums: {},
+          migrations: [],
+        }),
+      )
+
+      const snapshot = await runInit({ schema: 'nameless-schema.json' })
+
+      expect(snapshot.value).toBe(ClientManagerState.INIT_FAILED)
+      const message = String(snapshot.context.initError)
+      expect(message).toContain('config.schema')
+      expect(message).toContain('Schema name is required')
+      expect(message).not.toContain('Failed query')
+    })
+
     it('a later init with a loadable schema succeeds after a failed one', async () => {
       if (typeof window !== 'undefined') return
       const failed = await runInit({ schemaFile: 'nonexistent-schema.json' })

@@ -9,6 +9,12 @@ All notable changes to this package are documented in this file.
 - A non-list `Relation` whose schema sets a `refValueType` other than `Image` saves its value. The save resolved without writing anything, so the value was gone after a reload.
 - New `property.setValue(value, { before })` shows a value and saves it, as assigning `property.value` does, but saves even when the value is already in context. `before` is what to restore if the save is refused or rejected; pass it when your code put the value into context itself, such as a debounced input.
 - `Item.create` throws `ItemCreateError` (exported) when a File, Image, Html or ItemStorage value fails to save for a reason other than its rules, for example an ownership refusal. It has `code` (`'save_failed'` or `'property_not_loaded'`), `modelName`, `property`, the removed draft's `seedLocalId`, and the save's own error as `cause`. Before, it was a plain `Error` with the same message. Rule failures still throw `ItemCreateValidationError`.
+- `item.destroy()` soft-deletes only that item's seed row. It matched the row by local id or uid, and `seeds.uid` isn't unique, so destroying one item also marked every other local row with the same uid as deleted.
+- `Item.all(modelName, true)` (deleted items) lists rows with `_markedForDeletion = 1` only. It also listed rows where the column was `0`, which the non-deleted list includes too.
+- A loaded item claimed by `client.claimUnpublishedDrafts` stops on its owner's `unload()`. The claim took a cache hold on each loaded item it updated and never released it, so the item kept running.
+- A schema file in the complete format (`$schema` and `metadata`) with no `metadata.name` fails init with `Could not load config.schema: Schema name is required (either at top level or in metadata.name)`. It failed with a raw SQL error (`Failed query: …`).
+- `nameMatch` levels (ADR 0009) load before `client.init` resolves. Until they loaded, a few seconds after init, model lookups by EAS type treated every model as `'fuzzy'`, so a model set to `'exact'` matched plural or misspelled types; each schema write reopened that window. After a schema write, lookups keep the previous levels until the reload finishes.
+- On Node, `BaseDb.isAppDbReady()` returns `false` until the database is open, as in the browser. It returned `true` before init.
 
 ## 0.7.6 (2026-10-17)
 

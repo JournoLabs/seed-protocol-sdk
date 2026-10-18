@@ -107,7 +107,7 @@ export class NodeDb implements IDb {
   }
 
   isAppDbReady() {
-    return true
+    return !!this.db
   }
 
   /**

@@ -546,7 +546,8 @@ async function importSchema(
     // It's file contents - check if it's already a complete schema format
     try {
       const parsed = JSON.parse(importFilePathOrContents.contents) as any
-      if (parsed.$schema && parsed.metadata) {
+      // Without metadata.name it falls through to parseJsonImportContent, which rejects it.
+      if (parsed.$schema && parsed.metadata?.name) {
         // It's already a complete schema format - preserve it (id may be missing, will be generated)
         originalSchemaFile = parsed as SchemaFileFormat
         logger(

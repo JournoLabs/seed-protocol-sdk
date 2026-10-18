@@ -20,7 +20,7 @@ import { useLiveQuery } from './liveQuery'
 import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
-import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, eq, gt, isNull, or } from 'drizzle-orm'
 import { easName } from '@seedprotocol/sdk'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
@@ -330,12 +330,7 @@ export const useItems: UseItems = ({
       )
     }
     if (deleted) {
-      conditions.push(
-        or(
-          isNotNull(seeds._markedForDeletion),
-          eq(seeds._markedForDeletion, 1)
-        ) as any
-      )
+      conditions.push(eq(seeds._markedForDeletion, 1) as any)
     } else {
       conditions.push(
         or(

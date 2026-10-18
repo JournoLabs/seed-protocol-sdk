@@ -116,6 +116,18 @@ testDescribe('new drafts and owned addresses', () => {
     expect(propertyRows.map((row: { publisher: string | null }) => row.publisher)).toEqual(propertyRows.map(() => SMART))
   }, 30000)
 
+  it('claiming a loaded draft adds no hold: one unload stops it', async () => {
+    const { client } = await import('@/client')
+    await client.setAddresses({ owned: [OWNER, SMART], watched: [] })
+
+    const item = await Item.create({ modelName: 'Note', schemaName, title: 'claimed then unloaded' } as never)
+    await client.claimUnpublishedDrafts(SMART)
+    expect(item.getService().getSnapshot().context.publisher?.toLowerCase()).toBe(SMART)
+
+    item.unload()
+    expect(item.getService().getSnapshot().status).toBe('stopped')
+  }, 30000)
+
   it("an edit's rows take the seed's publisher, so another wallet's claim leaves them alone", async () => {
     const { client } = await import('@/client')
     await client.setAddresses({ owned: [OWNER], watched: [] })

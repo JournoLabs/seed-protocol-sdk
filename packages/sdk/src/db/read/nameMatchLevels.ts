@@ -117,7 +117,10 @@ export const loadNameMatchLevels = async (db: Db | undefined = BaseDb.getAppDb()
   loading = load
   try {
     const levels = await load
-    if (loading === load) current = levels
+    if (loading === load) {
+      current = levels
+      previous = undefined
+    }
     return levels
   } finally {
     if (loading === load) loading = undefined
@@ -129,15 +132,32 @@ export const nameMatchLevels = async (db: Db | undefined = BaseDb.getAppDb()): P
   current ?? loading ?? loadNameMatchLevels(db)
 
 /**
- * The last loaded levels, for synchronous callers (Model.findByModelType). Sync and the post-init
- * model type pass load them; before that every name is at DEFAULT_NAME_MATCH_LEVEL.
+ * The last loaded levels, for synchronous callers (Model.findByModelType). Init loads them before
+ * it reports ready. After a schema write clears them, this returns the levels from before the
+ * write until the reload that clear starts finishes.
  */
-export const currentNameMatchLevels = (): NameMatchLevels => current ?? DEFAULT_LEVELS
+export const currentNameMatchLevels = (): NameMatchLevels => current ?? previous ?? DEFAULT_LEVELS
 
-/** Called when a schema row or its models are written, so the next read reloads. */
+let previous: NameMatchLevels | undefined
+let reloadScheduled = false
+
+/**
+ * Called when a schema row or its models are written. The next {@link nameMatchLevels} read
+ * reloads, and a reload starts on the next tick (one per burst of writes) for synchronous callers.
+ */
 export const clearNameMatchLevels = (): void => {
+  if (current) previous = current
   current = undefined
   loading = undefined
+  if (reloadScheduled) return
+  reloadScheduled = true
+  setTimeout(() => {
+    reloadScheduled = false
+    if (current || loading || !BaseDb.isAppDbReady()) return
+    loadNameMatchLevels().catch(() => {
+      // The next nameMatchLevels() read retries.
+    })
+  }, 0)
 }
 
 /**
