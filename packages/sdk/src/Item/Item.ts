@@ -158,6 +158,46 @@ const itemInstanceState = new ActorKeyedState<Item<any>, {
 const supersededSeedUids = new WeakMap<object, Set<string>>()
 
 /**
+ * The ItemProperty instances an item holds, keyed by the item's actor, then by each property's
+ * actor. An item takes one hold on each instance in its `propertyInstances` map while it is there
+ * and releases it when the instance leaves the map or the item's actor stops. The SDK code that puts
+ * instances in the map looks them up with `hold: false`, so these are their only item-owned holds.
+ */
+const propertyHolds = new WeakMap<object, Map<object, IItemProperty<any>>>()
+
+function syncPropertyHolds(itemService: object, propertyInstances: Map<PropertyKey, IItemProperty<any>> | undefined): void {
+  let held = propertyHolds.get(itemService)
+  if (!held) {
+    held = new Map()
+    propertyHolds.set(itemService, held)
+  }
+  const current = new Set<object>()
+  for (const property of propertyInstances?.values() ?? []) {
+    const propertyService = property.getService()
+    current.add(propertyService)
+    if (!held.has(propertyService) && ItemProperty.retain(property)) held.set(propertyService, property)
+  }
+  for (const [propertyService, property] of held) {
+    if (current.has(propertyService)) continue
+    held.delete(propertyService)
+    property.unload()
+  }
+}
+
+function releasePropertyHolds(itemService: object): void {
+  const held = propertyHolds.get(itemService)
+  if (!held) return
+  propertyHolds.delete(itemService)
+  for (const property of held.values()) {
+    try {
+      property.unload()
+    } catch {
+      // Already stopped
+    }
+  }
+}
+
+/**
  * Each Item's reactive proxy, keyed by the raw instance. The class's arrow-function methods see the
  * raw instance as `this`, where tracked properties such as `seedUid` are getter-only; anything they
  * hand the item to that assigns tracked properties (the publish executor) must get the proxy.
@@ -276,6 +316,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
 
       this._propertiesSubject.next(propertiesObj)
+    })
+
+    // Hold the properties in the map; release them all when the actor stops (last unload, destroy,
+    // eviction or error), whichever teardown path stops it.
+    const itemService = this._service
+    itemService.subscribe({
+      next: (snapshot) => syncPropertyHolds(itemService, snapshot.context?.propertyInstances),
+      complete: () => releasePropertyHolds(itemService),
+      error: () => releasePropertyHolds(itemService),
     })
 
     this._service.start()
@@ -1342,6 +1391,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 seedLocalId,
                 seedUid,
                 modelName: itemModelName,
+                hold: false,
               })
               if (property) {
                 sendToItemMachine({
@@ -1383,8 +1433,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       props.storageTransactionId = this._storageTransactionId
     }
 
+    // The item's own hold is taken when the instance enters its map (syncPropertyHolds)
     const propertyInstance = ItemProperty.create(props, {
         waitForReady: false,
+        hold: false,
       })
 
     if (!propertyInstance || !props.propertyName) {
@@ -2091,6 +2143,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                     seedLocalId: watchedSeedLocalId,
                     seedUid: this._getSnapshotContext().seedUid ?? seedUid,
                     modelName: itemModelName,
+                    hold: false,
                   })
                   if (property) {
                     logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
@@ -2274,6 +2327,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                         seedLocalId: watchedSeedLocalId,
                         seedUid: this._getSnapshotContext().seedUid ?? seedUid,
                         modelName: itemModelName,
+                        hold: false,
                       })
                       if (property) {
                         sendToItemMachine({

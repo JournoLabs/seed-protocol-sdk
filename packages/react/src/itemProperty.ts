@@ -121,18 +121,20 @@ export function useItemProperty(
       queryKey,
       queryFn: async (): Promise<IItemProperty | null> => {
         if (!lookupMode) return null
-        // A ready cached property is what find() would return, minus the cache hold find() takes.
+        // A ready cached property is what find() would return. No hold here: the hook holds the
+        // property it shows while mounted (useHeldItemProperties).
         const found =
           ItemProperty.peekReady(lookupMode) ??
           (await ItemProperty.find({
             propertyName: lookupMode.propertyName,
             seedLocalId: lookupMode.seedLocalId,
             seedUid: lookupMode.seedUid,
+            hold: false,
           }))
         // itemId may be a seedUid (an item synced from EAS): it was only ever looked up as a local id
         const foundByUid =
           !found && lookupMode.itemId
-            ? await ItemProperty.find({ propertyName: lookupMode.propertyName, seedUid: lookupMode.itemId })
+            ? await ItemProperty.find({ propertyName: lookupMode.propertyName, seedUid: lookupMode.itemId, hold: false })
             : undefined
         const result = found ?? foundByUid
         if (!result) {
@@ -156,6 +158,7 @@ export function useItemProperty(
     queryClient,
   )
   const property = query.data ?? undefined
+  useHeldItemProperties(useMemo(() => (property ? [property] : []), [property]))
 
   // Re-render on the property's own changes (value updates after it loaded).
   useEffect(() => {
@@ -356,6 +359,22 @@ type UseItemPropertiesReturn = {
   error: Error | null
 }
 
+/**
+ * Holds each property while the component shows it, so an item unloading elsewhere doesn't stop
+ * it. The release is deferred a tick: a StrictMode remount or a refetch returning the same
+ * instances takes its new hold before the old one is dropped, so the count never touches 0.
+ */
+function useHeldItemProperties(properties: readonly IItemProperty[]): void {
+  useEffect(() => {
+    const held = properties.filter((p) => ItemProperty.retain(p))
+    return () => {
+      setTimeout(() => {
+        for (const p of held) p.unload()
+      }, 0)
+    }
+  }, [properties])
+}
+
 /** Fetches item properties list for useQuery (shared with useItemProperties). */
 async function fetchItemPropertiesList(
   seedLocalId: string | undefined,
@@ -367,7 +386,7 @@ async function fetchItemPropertiesList(
 
   const baseList = await ItemProperty.all(
     { seedLocalId: seedLocalId ?? undefined, seedUid: seedUid ?? undefined },
-    { waitForReady: true },
+    { waitForReady: true, hold: false },
   )
   const _itemProperties: IItemProperty[] = [...(baseList as IItemProperty[])]
 
@@ -422,7 +441,7 @@ async function fetchItemPropertiesList(
             seedUid: resolvedSeedUid || undefined,
             propertyValue: null,
           },
-          { waitForReady: false },
+          { waitForReady: false, hold: false },
         )
         if (itemProperty) _itemProperties.push(itemProperty as any as IItemProperty)
       } catch (error) {
@@ -452,7 +471,7 @@ async function fetchItemPropertiesList(
               seedUid: resolvedSeedUid || undefined,
               propertyValue: seedRecords[0].createdAt.toString(),
             },
-            { waitForReady: false },
+            { waitForReady: false, hold: false },
           )
           if (createdAtProperty) _itemProperties.push(createdAtProperty as any as IItemProperty)
         } catch (error) {
@@ -546,7 +565,11 @@ export function useItemProperties(
     queryKey: itemPropertiesQueryKey,
     queryFn: () => fetchItemPropertiesList(seedLocalId, seedUid),
     enabled: isClientReady && !!canonicalItemKey,
+    // The instances are held only while a hook shows them: a list kept after unmount could hold
+    // stopped ones.
+    gcTime: 0,
   })
+  useHeldItemProperties(properties)
 
   // Watch the metadata table for changes
   // Query metadata table directly and filter for latest records in JavaScript
