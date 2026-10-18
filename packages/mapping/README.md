@@ -288,7 +288,7 @@ default html to assemble.
 
 Sync `applyMapping` preview lists pending **extract/file/derive/assemble** edges under `_pendingResolve`. Lookup refs from stored entries appear in the bag.
 
-See [FIELD_MAPPER_REDESIGN.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped).
+See [ADR 0017](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/adr/0017-mapping-headless-core-props-ui.md) for why the UI uses rows and edges are the saved format.
 
 ## Relationship to `FeedFieldManifest`
 
@@ -305,7 +305,7 @@ Compose them: map + resolve into a plain item, then optionally normalize roles f
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
 - UI: self-contained dark theme (or `theme="none"` / `"structural"` for host paint); `layout` defaults to `rows` (`wires` deprecated); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/MAPPING_PHASE2.md) for remaining consumer work and [FIELD_MAPPER_REDESIGN.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FIELD_MAPPER_REDESIGN.md) for the row-layout study.
+The package's design decisions are recorded in [ADR 0017](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/adr/0017-mapping-headless-core-props-ui.md).
 
 ## License
 

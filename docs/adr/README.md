@@ -2,8 +2,9 @@
 
 Short records of decisions that shape this repo: what we decided, why, and what it
 costs us. They explain *why the code looks the way it does* to someone arriving later.
-Design studies and specs stay in `docs/` (for example `FIELD_MAPPER_REDESIGN.md`); an
-ADR records the decision a study led to.
+Design studies, plans, implementation logs and handoffs are working documents: keep them in
+`docs/private/` (gitignored) while the work is open, and record the decisions they lead to here.
+Public docs in `docs/` describe how things work for users and contributors.
 
 ## Index
 
@@ -20,6 +21,13 @@ ADR records the decision a study led to.
 | [0009](0009-name-match-strictness.md) | A schema sets how strictly EAS names match its models and properties | Accepted |
 | [0010](0010-number-encoding-on-eas.md) | Number properties are published as decimal strings | Accepted |
 | [0011](0011-reading-a-seed-at-a-version.md) | Reading a seed at a version takes a time as well as a version uid | Accepted |
+| [0012](0012-tabs-coordinate-through-web-locks.md) | Browser tabs coordinate through Web Locks and one leader tab | Accepted |
+| [0013](0013-nextjs-browser-only-through-next-package.md) | Next.js support is browser-only, through `@seedprotocol/next` | Accepted |
+| [0014](0014-entities-proxy-actor-context-id-caches.md) | Entity state lives in actor context behind reactive proxies; caches are keyed by stable id | Accepted |
+| [0015](0015-database-reactivity-through-livequery.md) | Database reactivity goes through `BaseDb.liveQuery` | Accepted |
+| [0016](0016-schema-changes-write-version-files.md) | Schema changes write a new version file; database rows change in place by id | Accepted |
+| [0017](0017-mapping-headless-core-props-ui.md) | `@seedprotocol/mapping`: a headless core, a props-driven UI, and edges as the saved format | Accepted |
+| [0018](0018-fixed-sdk-tables-no-runtime-codegen.md) | Fixed SDK tables and app schemas as rows; no runtime code generation | Accepted |
 
 ## Writing one
 

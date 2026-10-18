@@ -1,7 +1,7 @@
 # Next.js spike apps
 
-Throwaway apps from the Next.js integration spike (2026-10-16). Findings are in
-[docs/NEXTJS_WEBPACK_PLAN.md](../docs/NEXTJS_WEBPACK_PLAN.md). Not part of the workspace or CI.
+Throwaway apps from the Next.js integration spike (2026-10-16). The decisions it led to are in
+[ADR 0013](../docs/adr/0013-nextjs-browser-only-through-next-package.md). Not part of the workspace or CI.
 
 `next-app` runs Next 16.4.2 and `next15-app` runs Next 15.5.28. Both have the same App Router
 page and the same `next.config.mjs`. The page inits the client through `SeedClientGate`, creates

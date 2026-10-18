@@ -334,9 +334,6 @@ export class BrowserDb implements IDb {
     await this.runMigrations(targetDb, pathToDbDir)
   }
 
-  // Legacy commented migrate/exec implementation archived at
-  // docs/archive/commented/browser-Db-legacy-migrate.ts.txt
-
   /**
    * Execute a reactive query that emits new results whenever the underlying data changes.
    * 

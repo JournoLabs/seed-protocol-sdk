@@ -516,5 +516,5 @@ root.render(
 
 - [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) – client configuration and database options
 - [DATA_ACCESS_PATTERNS.md](DATA_ACCESS_PATTERNS.md) – patterns for reading and writing data
-- [SCHEMA_CREATION_FLOW.md](SCHEMA_CREATION_FLOW.md) – how schema and model creation work under the hood
+- [ADR 0016](adr/0016-schema-changes-write-version-files.md) – how schema versions, renames and deletes are stored
 - [PUBLISHING.md](PUBLISHING.md) – publish flow and schema setup requirements
