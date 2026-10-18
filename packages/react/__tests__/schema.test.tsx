@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState, useRef } from 'react'
 import {
   useSchema,
@@ -1228,6 +1228,79 @@ describe(
       await waitFor(() => {
         expect(screen.queryByTestId('create-error')).toBeNull()
       }, { timeout: WAIT_TIMEOUT_MS })
+    })
+  })
+
+  describe('useCreateSchema loading state', () => {
+    it('clears isLoading when create returns an instance that is already loaded', async () => {
+      const loaded = Schema.create('Test Schema 1', { waitForReady: false })
+      await waitUntilOrThrow(() => loaded.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+
+      const { result } = renderHook(() => useCreateSchema())
+      let created: Schema | undefined
+      act(() => {
+        created = result.current.createSchema('Test Schema 1')
+      })
+      // The same cached instance: nothing changes state after the call.
+      expect(created).toBe(loaded)
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 2000 })
+      expect(result.current.error).toBeNull()
+    })
+
+    it('clears isLoading and sets error when Schema.create throws', async () => {
+      const { result } = renderHook(() => useCreateSchema())
+      let thrown: unknown
+      act(() => {
+        try {
+          result.current.createSchema('')
+        } catch (err) {
+          thrown = err
+        }
+      })
+      expect(thrown).toBeInstanceOf(Error)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.error).toBe(thrown)
+    })
+  })
+
+  describe('useSchema cache hold', () => {
+    const refCountByName = (name: string): number =>
+      (Schema as unknown as { instanceCacheByName: Map<string, { refCount: number }> })
+        .instanceCacheByName.get(name)?.refCount ?? 0
+
+    it('releases its hold on the cached schema on unmount', async () => {
+      // Hold the schema here so the cache entry outlives the hook and its count stays readable.
+      const held = Schema.create('Test Schema 1', { waitForReady: false })
+      await waitUntilOrThrow(() => held.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+      const before = refCountByName('Test Schema 1')
+
+      const { result, unmount } = renderHook(() => useSchema('Test Schema 1'))
+      await waitFor(() => expect(result.current.schema).toBe(held), { timeout: WAIT_TIMEOUT_MS })
+      expect(refCountByName('Test Schema 1')).toBe(before + 1)
+
+      unmount()
+      expect(refCountByName('Test Schema 1')).toBe(before)
+    })
+
+    it('releases the previous schema when the identifier changes', async () => {
+      const held = Schema.create('Test Schema 1', { waitForReady: false })
+      await waitUntilOrThrow(() => held.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+      const before = refCountByName('Test Schema 1')
+
+      const { result, rerender, unmount } = renderHook(
+        ({ name }: { name: string }) => useSchema(name),
+        { initialProps: { name: 'Test Schema 1' } },
+      )
+      await waitFor(() => expect(result.current.schema).toBe(held), { timeout: WAIT_TIMEOUT_MS })
+      expect(refCountByName('Test Schema 1')).toBe(before + 1)
+
+      rerender({ name: 'Test Schema 2' })
+      expect(refCountByName('Test Schema 1')).toBe(before)
+      await waitFor(
+        () => expect(result.current.schema?.metadata?.name).toBe('Test Schema 2'),
+        { timeout: WAIT_TIMEOUT_MS },
+      )
+      unmount()
     })
   })
 

@@ -9,6 +9,11 @@ All notable changes to this package are documented in this file.
 - `useLiveQuery` and `useLiveQueryState` resubscribe after an error, waiting 0.5 s, then 1, 2, 5, 10 and 30 s between attempts, and keep the last rows meanwhile. An error creating the live query lands in `error` instead of only the console.
 - `SeedClientGate` compares `initConfig` and `schema` by value, so an inline object no longer calls `client.init` on every parent render.
 - `useService(...).percentComplete` is 100 once the service is idle (it was 0) and, for the client manager, 0–100 during startup (it was `-Infinity`).
+- `useCreateSchema`, `useCreateModel` and `useCreateModelProperty` clear `isLoading` when the SDK hands back an instance that is already loaded, and when the create throws (for example an empty name). They read the instance's current state right after subscribing; before, `isLoading` stayed `true` until a state change that never came. A throw also sets `error` and is rethrown.
+- Breaking: `useCreateModelProperty`'s `create` returns `Promise<ModelProperty>`. It looks `schemaId` up as a stored schema name or schema file id first, so a schema named `app-2` is no longer cut to `app`; only an id that matches nothing falls back to stripping a `-<version>` suffix. A missing name or `dataType` rejects instead of throwing.
+- `useSchema` releases its hold on the cached Schema on unmount and when `schemaIdentifier` changes. Each mount used to add a hold that was never released, so the instance was never unloaded.
+- `useModelProperty`'s overloads accept `string | null | undefined`, so passing `null` while an id isn't known yet type-checks. The lookup form now follows the number of arguments: `useModelProperty(schemaId, null, null)` waits, where it used to look `schemaId` up as a property file id.
+- Hooks outside `SeedProvider` share one fallback QueryClient with Seed's defaults (`createSeedQueryClient()`). `useModels` (and so `useModel`) built a bare `new QueryClient()` instead, and `useSchemas`, `useModelProperties`, `useFiles` and `useImageFiles` threw without a provider. Development builds log one `console.warn` when the fallback is used; from 0.8 these hooks will throw without `SeedProvider`.
 
 ## 0.7.7 (2026-10-18)
 

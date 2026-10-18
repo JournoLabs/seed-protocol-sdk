@@ -72,15 +72,38 @@ export function createSeedQueryClient(overrides?: Partial<QueryClientConfig>): Q
 }
 
 let fallbackQueryClient: QueryClient | undefined
+let warnedMissingProvider = false
+
+/** False in production builds; bundlers compile `process.env.NODE_ENV` in. */
+const isDevBuild = (): boolean => {
+  try {
+    return process.env.NODE_ENV !== 'production'
+  } catch {
+    return false // no `process` and no bundler replacement
+  }
+}
 
 /**
  * The QueryClient from the nearest QueryClientProvider (SeedProvider sets one), or else one shared
- * client with Seed defaults. For hooks that worked without SeedProvider before they used React
- * Query (useItem, useItemProperty), so they keep working there.
+ * client with Seed defaults, used by every Seed hook outside a provider. Development builds warn
+ * once when the fallback is used. From 0.8 these hooks will throw without SeedProvider.
  */
 export function useSeedQueryClient(): QueryClient {
   const fromProvider = useContext(QueryClientContext)
   if (fromProvider) return fromProvider
+  if (!warnedMissingProvider && isDevBuild()) {
+    warnedMissingProvider = true
+    console.warn(
+      '[@seedprotocol/react] A Seed hook ran outside SeedProvider (no QueryClientProvider found), so it ' +
+        'uses a shared fallback QueryClient. Wrap the app in <SeedProvider>: from 0.8 these hooks ' +
+        'will throw without it.',
+    )
+  }
   fallbackQueryClient ??= createSeedQueryClient()
+  return fallbackQueryClient
+}
+
+/** @internal For tests: the fallback client `useSeedQueryClient` returns outside a provider. */
+export function getFallbackSeedQueryClient(): QueryClient | undefined {
   return fallbackQueryClient
 }

@@ -10,7 +10,9 @@ import { BaseDb } from '@seedprotocol/sdk'
 import { properties as propertiesTable, schemas as schemasTable } from '@seedprotocol/sdk'
 import { eq, or } from "drizzle-orm"
 import { Model } from '@seedprotocol/sdk'
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
+import { useSeedQueryClient } from "./queryClient"
+import { useCreateState } from "./useCreateState"
 import { getSchemaNameFromId } from '@seedprotocol/sdk'
 
 
@@ -58,7 +60,7 @@ export const useModelProperties = (
   const { model } = useModel(schemaIdOrModelId, modelName)
   
   const isClientReady = useIsClientReady()
-  const queryClient = useQueryClient()
+  const queryClient = useSeedQueryClient()
 
   // The model's database id. It can arrive after the model is first seen (the row is written later),
   // so follow the model's snapshot: memoizing it once left the properties live query unbuilt.
@@ -78,7 +80,7 @@ export const useModelProperties = (
     queryKey: modelPropertiesQueryKey,
     queryFn: () => ModelProperty.all(modelId!, { waitForReady: true }),
     enabled: isClientReady && !!modelId,
-  })
+  }, queryClient)
 
   const db = isClientReady ? BaseDb.getAppDb() : null
   const propertiesQuery = useMemo(() => {
@@ -225,46 +227,41 @@ const getPropertySchemaByModelFileId = async (
  * @param propertyName - The name of the property
  * @returns Object with modelProperty, isLoading, and error
  */
-export function useModelProperty(propertyFileId: string): {
+export function useModelProperty(propertyFileId: string | null | undefined): {
   modelProperty: ModelProperty | undefined
   isLoading: boolean
   error: Error | null
 }
 export function useModelProperty(
-  modelFileId: string,
-  propertyName: string
+  modelFileId: string | null | undefined,
+  propertyName: string | null | undefined
 ): {
   modelProperty: ModelProperty | undefined
   isLoading: boolean
   error: Error | null
 }
 export function useModelProperty(
-  schemaId: string,
-  modelName: string,
-  propertyName: string
+  schemaId: string | null | undefined,
+  modelName: string | null | undefined,
+  propertyName: string | null | undefined
 ): {
   modelProperty: ModelProperty | undefined
   isLoading: boolean
   error: Error | null
 }
-export function useModelProperty(
-  arg1: string | null | undefined,
-  arg2?: string | null | undefined,
-  arg3?: string | null | undefined
-) {
+export function useModelProperty(...args: Array<string | null | undefined>) {
+  const [arg1, arg2, arg3] = args
+  // The lookup form follows the number of arguments, so a null or undefined argument (not ready
+  // yet) waits instead of switching to a shorter form: (schemaId, null, null) used to look the
+  // schema id up as a property file id.
+  const argCount = Math.min(args.length, 3)
+
   // Determine initial loading state - start loading if we have valid parameters
   const initialLoadingState = useMemo(() => {
-    if (arg3 !== undefined && arg3 !== null) {
-      // Three arguments: schemaId, modelName, propertyName
-      return !!(arg1 && arg2 && arg3)
-    } else if (arg2 !== undefined && arg2 !== null) {
-      // Two arguments: modelFileId, propertyName
-      return !!(arg1 && arg2)
-    } else {
-      // One argument: propertyFileId
-      return !!arg1
-    }
-  }, [arg1, arg2, arg3])
+    if (argCount === 3) return !!(arg1 && arg2 && arg3)
+    if (argCount === 2) return !!(arg1 && arg2)
+    return !!arg1
+  }, [argCount, arg1, arg2, arg3])
 
   const [modelProperty, setModelProperty] = useState<ModelProperty | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(initialLoadingState)
@@ -275,17 +272,14 @@ export function useModelProperty(
 
   // Determine which lookup mode we're in based on arguments
   const lookupMode = useMemo(() => {
-    if (arg3 !== undefined && arg3 !== null) {
-      // Three arguments: schemaId, modelName, propertyName
+    if (argCount === 3) {
       return { type: 'schemaId' as const, schemaId: arg1, modelName: arg2, propertyName: arg3 }
-    } else if (arg2 !== undefined && arg2 !== null) {
-      // Two arguments: modelFileId, propertyName
-      return { type: 'modelFileId' as const, modelFileId: arg1, propertyName: arg2 }
-    } else {
-      // One argument: propertyFileId
-      return { type: 'propertyFileId' as const, propertyFileId: arg1 }
     }
-  }, [arg1, arg2, arg3])
+    if (argCount === 2) {
+      return { type: 'modelFileId' as const, modelFileId: arg1, propertyName: arg2 }
+    }
+    return { type: 'propertyFileId' as const, propertyFileId: arg1 }
+  }, [argCount, arg1, arg2, arg3])
 
   // Determine if we should be loading based on parameters
   const shouldLoad = useMemo(() => {
@@ -466,7 +460,7 @@ export type UseCreateModelPropertyReturn = {
     schemaId: string,
     modelName: string,
     property: UseCreateModelPropertyOptions
-  ) => ModelProperty
+  ) => Promise<ModelProperty>
   isLoading: boolean
   error: Error | null
   resetError: () => void
@@ -474,63 +468,33 @@ export type UseCreateModelPropertyReturn = {
 
 /**
  * Hook to create a ModelProperty with loading and error state.
- * create(schemaId, modelName, property) creates a new property on the model.
+ * create(schemaId, modelName, property) creates a new property on the model. schemaId is a schema
+ * name, schema file id or "name-version"; it is resolved to a stored schema name first, so create
+ * returns a promise.
  */
 export const useCreateModelProperty = (): UseCreateModelPropertyReturn => {
-  const subscriptionRef = useRef<Subscription | undefined>(undefined)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-
-  const resetError = useCallback(() => setError(null), [])
+  const { runAsync, isLoading, error, resetError } = useCreateState(
+    'Failed to create model property',
+  )
 
   const create = useCallback(
     (
       schemaId: string,
       modelName: string,
       property: UseCreateModelPropertyOptions
-    ): ModelProperty => {
-      setError(null)
-      setIsLoading(true)
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-
-      if (!modelName || !property.name || !property.dataType) {
-        const err = new Error('modelName, property name and dataType are required')
-        setError(err)
-        setIsLoading(false)
-        throw err
-      }
-
-      // Resolve schema name: schemaId may be "Blog-1" (schemaName-version) or just "Blog"
-      const schemaName = getSchemaNameFromId(schemaId) ?? schemaId
-
-      const created = ModelProperty.create(
-        { ...property, modelName } as Parameters<typeof ModelProperty.create>[0],
-        { waitForReady: false, schemaName }
-      ) as ModelProperty
-      const subscription = created.getService().subscribe((snapshot) => {
-        if ((snapshot as { value?: string }).value === 'error') {
-          const err = (snapshot.context as any)._loadingError?.error ?? new Error('Failed to create model property')
-          setError(err instanceof Error ? err : new Error(String(err)))
-          setIsLoading(false)
+    ): Promise<ModelProperty> =>
+      runAsync(async () => {
+        if (!modelName || !property.name || !property.dataType) {
+          throw new Error('modelName, property name and dataType are required')
         }
-        if (snapshot.value === 'idle') {
-          setError(null)
-          setIsLoading(false)
-        }
-      })
-      subscriptionRef.current = subscription
-      return created
-    },
-    []
+        const schemaName = await resolveSchemaName(schemaId)
+        return ModelProperty.create(
+          { ...property, modelName } as Parameters<typeof ModelProperty.create>[0],
+          { waitForReady: false, schemaName }
+        ) as ModelProperty
+      }),
+    [runAsync]
   )
-
-  useEffect(() => {
-    return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-    }
-  }, [])
 
   return {
     create,
