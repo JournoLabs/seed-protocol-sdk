@@ -1,5 +1,5 @@
 import { ItemData } from '@/types'
-import { and, eq, gt, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
+import { and, eq, gt, isNull, or, SQL, sql } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -73,12 +73,7 @@ export const getItemsData: GetItemsData = async ({
   }
 
   if (deleted) {
-    conditions.push(
-      or(
-        isNotNull(seeds._markedForDeletion),
-        eq(seeds._markedForDeletion, 1),
-      ) as SQL,
-    )
+    conditions.push(eq(seeds._markedForDeletion, 1))
   }
 
   if (!deleted) {

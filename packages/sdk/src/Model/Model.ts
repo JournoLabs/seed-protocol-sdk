@@ -320,9 +320,8 @@ export class Model {
       return modelName
     }
     
-    // Find the next available number
-    // Start from 1 if base name exists, otherwise check if we can use 1
-    let nextNumber = existingNumbers.has(0) ? 1 : 1
+    // Find the next available number, starting from 1
+    let nextNumber = 1
     while (existingNumbers.has(nextNumber)) {
       nextNumber++
     }
