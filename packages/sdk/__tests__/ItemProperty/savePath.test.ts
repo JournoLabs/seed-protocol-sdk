@@ -8,8 +8,11 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
+import { Model } from '@/Model/Model'
+import { Schema } from '@/Schema/Schema'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 /**
  * The property save path: what a rejected save leaves behind, which error save() throws, and
@@ -105,5 +108,43 @@ testDescribe('ItemProperty save path', () => {
     await vi.waitFor(() => expect(property!.getService().getSnapshot().context._saveError).toBeTruthy())
     expect(property!.getService().getSnapshot().context._saveError).toBeInstanceOf(OwnershipError)
     expect(property!.value).toBe('Not mine')
+  }, 30000)
+
+  it('a Relation whose schema sets refValueType saves and survives a reload', async () => {
+    // Schema files drop refValueType on a non-list Relation; a model built in code keeps it.
+    const schema = Schema.create(SCHEMA_NAME, { waitForReady: false }) as Schema
+    await waitForSchemaIdle(schema)
+    await Model.create('SavePathReview', schema, {
+      properties: {
+        summary: { dataType: 'Text' },
+        editor: { dataType: 'Relation', ref: 'SavePathAuthor', refValueType: 'Text' },
+      },
+    })
+    const author = (await Item.create({
+      modelName: 'SavePathAuthor',
+      schemaName: SCHEMA_NAME,
+      name: 'Ada',
+    } as never)) as any
+    const review = (await Item.create({
+      modelName: 'SavePathReview',
+      schemaName: SCHEMA_NAME,
+      summary: 'With editor',
+    } as never)) as any
+    const property = await ItemProperty.find({ seedLocalId: review.seedLocalId, propertyName: 'editor' })
+    await vi.waitFor(() => expect(property!.propertyDef?.refValueType).toBe('Text'))
+
+    property!.value = author.seedLocalId
+    await property!.save()
+
+    const stored = await BaseDb.getAppDb()!
+      .select({ value: metadata.propertyValue, name: metadata.propertyName })
+      .from(metadata)
+      .where(eq(metadata.seedLocalId, review.seedLocalId))
+    expect(stored.map((row: { value: string | null }) => row.value)).toContain(author.seedLocalId)
+
+    Item.dropCachedInstancesForSeedIds([review.seedLocalId])
+    await Item.find({ seedLocalId: review.seedLocalId })
+    const reloaded = await ItemProperty.find({ seedLocalId: review.seedLocalId, propertyName: 'editor' })
+    await vi.waitFor(() => expect(reloaded!.value).toBe(author.seedLocalId))
   }, 30000)
 })

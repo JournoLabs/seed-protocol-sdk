@@ -11,7 +11,6 @@ import {
   saveFile,
   saveHtml,
   saveItemStorage,
-  saveRelation,
 } from '@/ItemProperty/service/actors/saveValueToDb'
 import { analyzeInput } from '@/ItemProperty/service/actors/saveValueToDb/analyzeInput' // import { updateMachineContext } from '@/helpers'
 // import { updateMachineContext } from '@/helpers'
@@ -83,7 +82,6 @@ export const propertyMachine = setup({
     saveImage,
     saveFile,
     saveHtml,
-    saveRelation,
     saveItemStorage,
   },
 }).createMachine({
@@ -269,7 +267,6 @@ export const propertyMachine = setup({
             saveImage: 'savingImage',
             saveFile: 'savingFile',
             saveHtml: 'savingHtml',
-            saveRelation: 'savingRelation',
             saveItemStorage: 'savingItemStorage',
           },
           invoke: {
@@ -328,24 +325,6 @@ export const propertyMachine = setup({
           invoke: {
             src: 'saveHtml',
             input: ({ context, event }) => {
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        savingRelation: {
-          on: {
-            saveRelationSuccess: 'doneSaving',
-            saveRelationError: {
-              target: 'doneSaving',
-              actions: assign({
-                _saveError: ({ event }) => toError((event as { type: 'saveRelationError'; error: unknown }).error),
-              }),
-            },
-          },
-          invoke: {
-            src: 'saveRelation',
-            input: ({ context, event }) => {
-              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
               return { context, event: event as SaveValueToDbEvent }
             },
           },

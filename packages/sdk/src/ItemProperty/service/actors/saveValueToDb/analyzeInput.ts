@@ -104,18 +104,8 @@ export const analyzeInput = fromCallback<
     const normalizedDataType = normalizeDataType(propertyRecordSchema.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema.refValueType)
 
-    if (
-      propertyRecordSchema.refValueType &&
-      normalizedRefValueType !== ModelPropertyDataTypes.Image &&
-      normalizedDataType === ModelPropertyDataTypes.Relation
-    ) {
-      sendBack({
-        type: 'saveRelation',
-        newValue,
-      })
-      return false
-    }
-
+    // A Relation with a non-Image refValueType stores the related seed id like any other value,
+    // through the write below.
     if (
       normalizedRefValueType === ModelPropertyDataTypes.Image ||
       normalizedDataType === ModelPropertyDataTypes.Image
