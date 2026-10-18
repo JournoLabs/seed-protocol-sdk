@@ -1508,7 +1508,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const normalized = normalizePublisher(publisher)
     if (!normalized) return
     for (const seedLocalId of seedLocalIds) {
-      const item = Item.getById(seedLocalId)
+      // Not getById: that adds a cache hold the caller would never release.
+      const item = Item.findItemInstanceCacheEntryById(seedLocalId)?.instance
       if (!item) continue
       const status = item.getService().getSnapshot().status
       if (status === 'stopped' || status === 'done') continue
