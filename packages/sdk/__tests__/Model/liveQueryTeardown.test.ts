@@ -13,7 +13,8 @@ import { waitUntilOrThrow } from '../test-utils/waitUntil'
 
 /**
  * In the browser a Model watches its property rows with a liveQuery. Releasing the model for good
- * (destroy, its schema's eviction or destruction) must close it.
+ * (last unload, destroy, its schema's eviction or destruction) must close it. A model its schema
+ * loaded is held by the schema, so the unload test uses a model created at runtime.
  *
  * Browser only: the Node DB's liveQuery is a stub.
  */
@@ -77,6 +78,30 @@ describe.skipIf(typeof window === 'undefined')('Model liveQuery teardown', () =>
   const expectClosed = (filter: { param: number; sql: RegExp }) => {
     expect(liveQueries.active(filter), `still open: ${JSON.stringify(liveQueries.activeSql(filter))}`).toBe(0)
   }
+
+  it('the last unload closes the liveQuery of a runtime model', async () => {
+    const schemaName = `Model Teardown Unload ${generateId()}`
+    const { filter: schemaModelFilter } = await importWatchedModel(schemaName)
+    const model = await Model.create(`Runtime${generateId().slice(0, 6)}`, schemaName, {
+      properties: { body: { dataType: 'Text' } },
+      waitForReady: true,
+    })
+    const db = BaseDb.getAppDb()!
+    const rowId = await vi.waitUntil(
+      async () =>
+        (await db.select({ id: modelsTable.id }).from(modelsTable).where(eq(modelsTable.schemaFileId, model.id!)))[0]?.id,
+      { timeout: 15000 },
+    )
+    const filter = { param: rowId, sql: MODEL_SQL }
+    await waitUntilOrThrow(() => liveQueries.active(filter) > 0, "the model's liveQuery to be subscribed")
+
+    model.unload()
+
+    expect(model.getService().getSnapshot().status).toBe('stopped')
+    expectClosed(filter)
+    expect(liveQueries.active(schemaModelFilter)).toBeGreaterThan(0)
+    Schema.evict(schemaName)
+  }, 30000)
 
   it('destroy closes the liveQuery', async () => {
     const schemaName = `Model Teardown Destroy ${generateId()}`

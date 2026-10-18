@@ -145,9 +145,7 @@ export const compareAndMarkDraft = fromCallback<
         const { Schema } = schemaMod
         // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
         if (isActorStopped(self)) return
-        const schema = Schema.create(fullContext._schemaName, {
-          waitForReady: false,
-        }) as import('@/Schema/Schema').Schema
+        const schema = Schema.create(fullContext._schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
 
         // Send event to Schema machine to mark as draft
         schema.getService().send({

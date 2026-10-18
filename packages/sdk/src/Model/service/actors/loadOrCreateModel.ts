@@ -256,7 +256,7 @@ export const loadOrCreateModel = fromCallback<
       const { Schema } = schemaMod
       // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
       if (isActorStopped(self)) return
-      const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+      const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
       const schemaSnapshot = schema.getService().getSnapshot()
       
       // Wait for schema to load if it's still loading
@@ -503,7 +503,7 @@ export const loadOrCreateModel = fromCallback<
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
       if (!isActorStopped(self)) {
-        const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+        const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
         schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
       }
     } catch (err) {

@@ -12,7 +12,8 @@ import { waitUntilOrThrow } from '../test-utils/waitUntil'
 
 /**
  * In the browser a Schema watches its model links (`model_schemas`) with a liveQuery. Releasing the
- * schema for good (last unload, destroy, evict) must close it.
+ * schema for good (last unload, destroy, evict) must close it. The import loads the schema without a
+ * hold, so the test's create is the only one.
  *
  * Browser only: the Node DB's liveQuery is a stub.
  */
@@ -71,6 +72,19 @@ describe.skipIf(typeof window === 'undefined')('Schema liveQuery teardown', () =
   const expectClosed = (filter: { param: number; sql: RegExp }) => {
     expect(liveQueries.active(filter), `still open: ${JSON.stringify(liveQueries.activeSql(filter))}`).toBe(0)
   }
+
+  it('the last unload closes the liveQuery', async () => {
+    const name = `Schema Teardown Unload ${generateId()}`
+    const { schema, filter } = await importWatchedSchema(name)
+    const second = await Schema.create(name, { waitForReady: true })
+
+    second.unload()
+    expect(liveQueries.active(filter)).toBeGreaterThan(0)
+    schema.unload()
+
+    expect(schema.getService().getSnapshot().status).toBe('stopped')
+    expectClosed(filter)
+  }, 30000)
 
   it('evict closes the liveQuery', async () => {
     const name = `Schema Teardown Evict ${generateId()}`

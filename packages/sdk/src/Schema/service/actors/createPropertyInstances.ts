@@ -45,7 +45,7 @@ export const createPropertyInstances = fromCallback<
       
       // For each model, check if properties are loaded
       for (const modelFileId of modelIds) {
-        const model = Model.getById(modelFileId)
+        const model = Model.peek(modelFileId)
         if (model && model.properties) {
           // Count properties that match our property IDs
           for (const prop of model.properties) {

@@ -123,17 +123,17 @@ const resolvePropertyRecordSchemaFromModel = async (
       ? await Model.resolveAsync(modelName || modelTypeToModelName(modelType ?? ''), { modelFileId })
       : undefined
     if (!model?.properties?.length && modelName) {
-      model = Model.getByName(modelName)
+      model = Model.peekByName(modelName)
     }
     if (!model?.properties?.length && modelType) {
       model = Model.findByModelType(modelType)
     }
     // Fallback: load from DB when not in cache (fixes external app persistence when Model not yet loaded)
     if (!model?.properties?.length && modelName) {
-      model = await Model.getByNameAsync(modelName)
+      model = await Model.getByNameAsync(modelName, undefined, { hold: false })
     }
     if (!model?.properties?.length && modelType) {
-      model = await Model.getByNameAsync(modelTypeToModelName(modelType))
+      model = await Model.getByNameAsync(modelTypeToModelName(modelType), undefined, { hold: false })
     }
     if (!model?.properties?.length) {
       // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
@@ -989,9 +989,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         ? keyByUid
         : null
     if (lookupKey) {
-      const { instance, refCount } = this.instanceCache.get(lookupKey)!
-      const entry = { instance, refCount: refCount + 1 }
-      this.instanceCache.set(lookupKey, entry)
+      // One entry under both keys: one hold count for the instance
+      const entry = this.instanceCache.get(lookupKey)!
+      entry.refCount += 1
+      const { instance } = entry
       const otherKey = lookupKey === keyByLocal ? keyByUid : keyByLocal
       if (otherKey) this.instanceCache.set(otherKey, entry)
       // On cache hit, sync refResolvedValue/refResolvedDisplayValue/localStorageDir/refSeedType when incoming has them
@@ -1198,14 +1199,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
     let foundProperty: ItemProperty<any> | undefined
     
-    // Check cache first
-    if (this.instanceCache.has(cacheKey)) {
-      const { instance, refCount } = this.instanceCache.get(cacheKey)!
-      this.instanceCache.set(cacheKey, {
-        instance,
-        refCount: refCount + 1,
-      })
-      foundProperty = instance as ItemProperty<any>
+    // Check cache first. Mutate the entry: it may also be stored under the item's other id.
+    const cachedEntry = this.instanceCache.get(cacheKey)
+    if (cachedEntry) {
+      cachedEntry.refCount += 1
+      foundProperty = cachedEntry.instance as ItemProperty<any>
     } else {
       // Query database
       const propertyData = await getPropertyData({
@@ -1604,27 +1602,21 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // })
   }
 
+  /**
+   * Every cache key holding this instance: its item's local id and seed uid, and the name it had
+   * before a rename (List of relation). They share one entry.
+   */
+  private _cacheKeys(): string[] {
+    const keys: string[] = []
+    for (const [key, entry] of ItemProperty.instanceCache) {
+      if (entry.instance.getService() === this._service) keys.push(key)
+    }
+    return keys
+  }
+
   unload() {
     try {
-      const context = this._getSnapshotContext()
-      const cacheKey = ItemProperty.cacheKey(
-        context.seedUid || context.seedLocalId || '',
-        context.propertyName || ''
-      )
-      const cacheKeys: string[] = []
-      
-      if (cacheKey && cacheKey !== 'Item__') {
-        cacheKeys.push(cacheKey)
-      }
-      // Renamed after construction (List of relation): also drop the entry cached under the old name.
-      const publicName = this.propertyName
-      if (publicName && publicName !== context.propertyName) {
-        const aliasKey = ItemProperty.cacheKey(context.seedUid || context.seedLocalId || '', publicName)
-        if (aliasKey && aliasKey !== 'Item__' && ItemProperty.instanceCache.get(aliasKey)?.instance === this) {
-          cacheKeys.push(aliasKey)
-        }
-      }
-      
+      const cacheKeys = this._cacheKeys()
       unloadEntity(this, {
         getCacheKeys: () => cacheKeys,
         caches: [ItemProperty.instanceCache],
@@ -1672,11 +1664,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       seedLocalId: context.seedLocalId ?? undefined,
       seedUid: context.seedUid ?? undefined,
     })
-    const cacheKey = ItemProperty.cacheKey(
-      context.seedUid || context.seedLocalId || '',
-      context.propertyName || '',
-    )
-    const cacheKeys: string[] = cacheKey && cacheKey !== 'Item__' ? [cacheKey] : []
+    const cacheKeys = this._cacheKeys()
 
     clearDestroySubscriptions(this, {
       instanceState: itemPropertyInstanceState,
@@ -1718,7 +1706,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
         const itemMod = await import('../Item/Item')
         const { Item } = itemMod
-        const item = Item.getById((seedLocalId || seedUid) as string)
+        const item = Item.peek(seedLocalId || seedUid)
         if (item) {
           item.getService().send({ type: 'removePropertyInstance', propertyName })
         }

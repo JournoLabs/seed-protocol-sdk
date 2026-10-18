@@ -876,7 +876,7 @@ const resolveSyncedSeedModel = async (
   seed: { seedLocalId?: string | null; seedUid?: string | null },
 ) => {
   const modelFileId = await resolveItemModelFileId(seed)
-  return (modelFileId ? Model.getById(modelFileId) : undefined) ?? Model.findByModelType(modelType)
+  return (modelFileId ? Model.peek(modelFileId) : undefined) ?? Model.findByModelType(modelType)
 }
 
 const insertSyncedProperties = async ({

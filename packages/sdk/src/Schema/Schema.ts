@@ -166,14 +166,36 @@ export class Schema {
     // Note: Property getters/setters are now handled by the Proxy in create()
   }
 
-  static create(schemaName: string, options: { waitForReady: false }): Schema
+  /**
+   * Returns the cached schema for `schemaName`, or loads it (creating a draft for an unknown name).
+   * Each call takes a hold on the instance; release it with `unload()`.
+   */
   static create(
     schemaName: string,
-    options?: { waitForReady?: true; readyTimeout?: number },
+    options: {
+      waitForReady: false
+      /** @internal SDK lookups pass false: see the implementation signature */
+      hold?: false
+    },
+  ): Schema
+  static create(
+    schemaName: string,
+    options?: {
+      waitForReady?: true
+      readyTimeout?: number
+      /** @internal SDK lookups pass false: see the implementation signature */
+      hold?: false
+    },
   ): Promise<Schema>
   static create(
     schemaName: string,
-    options?: CreateWaitOptions,
+    options?: CreateWaitOptions & {
+      /**
+       * @internal false for SDK code that only looks the schema up: no hold is taken, and a schema
+       * loaded here is cached with none, so its users' last unload still stops it.
+       */
+      hold?: false
+    },
   ): Schema | Promise<Schema> {
     if (!schemaName) {
       throw new Error('Schema name is required')
@@ -182,20 +204,21 @@ export class Schema {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
+    const holds = options?.hold === false ? 0 : 1
+
     // First, check if we have an instance cached by name
-    if (this.instanceCacheByName.has(schemaName)) {
-      const { instance, refCount } = this.instanceCacheByName.get(schemaName)!
-      this.instanceCacheByName.set(schemaName, {
-        instance,
-        refCount: refCount + 1,
-      })
+    const cached = this.instanceCacheByName.get(schemaName)
+    if (cached) {
+      cached.refCount += holds
+      const { instance } = cached
       if (!waitForReady) return instance
       return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
         () => instance,
       )
     }
 
-    // Deduplicate concurrent creates for same schema (prevents many parallel checkExistingSchema loads)
+    // Deduplicate concurrent creates for same schema (prevents many parallel checkExistingSchema loads).
+    // The name cache is set before a pending load is recorded, so a hold was already taken above.
     if (waitForReady) {
       const pending = this.pendingSchemaByName.get(schemaName)
       if (pending) {
@@ -429,7 +452,7 @@ export class Schema {
     // Cache by name initially (will be moved to id-based cache once schemaFileId is available)
     this.instanceCacheByName.set(schemaName, {
       instance: proxiedInstance,
-      refCount: 1,
+      refCount: holds,
     })
     const schema = proxiedInstance as Schema
     if (!waitForReady) return schema
@@ -458,14 +481,11 @@ export class Schema {
     }
     
     // If we have an instance cached by name, also add it to id-based cache
-    // Keep it in both caches for efficient lookups
+    // Keep it in both caches for efficient lookups, as one entry: one hold count for both keys
     if (this.instanceCacheByName.has(schemaName)) {
       const cacheEntry = this.instanceCacheByName.get(schemaName)!
       // Add to ID cache (don't remove from name cache)
-      this.instanceCacheById.set(schemaFileId, {
-        instance: cacheEntry.instance,
-        refCount: cacheEntry.refCount, // Use same refCount
-      })
+      this.instanceCacheById.set(schemaFileId, cacheEntry)
       logger(`Added schema cache entry to id "${schemaFileId}" (kept in name cache: "${schemaName}")`)
     }
   }
@@ -475,15 +495,21 @@ export class Schema {
    * Returns null if not found in cache
    */
   static getById(schemaFileId: string): Schema | null {
-    if (this.instanceCacheById.has(schemaFileId)) {
-      const { instance, refCount } = this.instanceCacheById.get(schemaFileId)!
-      this.instanceCacheById.set(schemaFileId, {
-        instance,
-        refCount: refCount + 1,
-      })
-      return instance
-    }
-    return null
+    const entry = this.instanceCacheById.get(schemaFileId)
+    if (!entry) return null
+    entry.refCount += 1
+    return entry.instance
+  }
+
+  /**
+   * The cached schema with this file id or name, without taking a hold. For SDK code that reads
+   * the schema and doesn't hand it to a caller; callers that keep it use `create` or `find`.
+   */
+  static peek(schemaFileIdOrName: string): Schema | undefined {
+    return (
+      this.instanceCacheById.get(schemaFileIdOrName)?.instance ??
+      this.instanceCacheByName.get(schemaFileIdOrName)?.instance
+    )
   }
 
   /**
@@ -524,15 +550,19 @@ export class Schema {
    * Create or get schema instance by schemaFileId
    * Queries the database to find the schema name if not cached
    * @param schemaFileId - The schema file ID
-   * @returns Schema instance
+   * @returns Schema instance, with a hold taken (unless `hold: false`)
    */
-  static async createById(schemaFileId: string): Promise<Schema> {
+  static async createById(
+    schemaFileId: string,
+    /** @internal `hold: false` as for `create` */
+    options?: { hold?: false },
+  ): Promise<Schema> {
     if (!schemaFileId) {
       throw new Error('Schema file ID is required')
     }
 
     // First, check if we have an instance cached by ID
-    const cachedInstance = this.getById(schemaFileId)
+    const cachedInstance = options?.hold === false ? this.peek(schemaFileId) : this.getById(schemaFileId)
     if (cachedInstance) {
       return cachedInstance
     }
@@ -562,7 +592,7 @@ export class Schema {
     }
 
     // Create schema using the name (this will load from database/file)
-    return this.create(schemaName)
+    return this.create(schemaName, options?.hold === false ? { hold: false } : undefined)
   }
 
   /**
@@ -605,6 +635,7 @@ export class Schema {
    * Get instantiated Schema objects for all schemas (from database and files)
    * By default, returns only the latest version of each schema and excludes the internal Seed Protocol schema.
    * Uses loadAllSchemasFromDb() as the single source of truth, which intelligently merges database and file data.
+   * Takes no holds on the instances it returns: a caller that keeps one uses `Schema.create` or `Schema.find`.
    * 
    * @param options - Configuration options
    * @param options.includeAllVersions - If true, returns all versions of each schema. Default: false
@@ -677,9 +708,10 @@ export class Schema {
         processedSchemaNames.add(schemaName)
         
         // Try to use schemaFileId to ensure we load the correct version
-        // First check if we have a cached instance by schemaFileId
+        // First check if we have a cached instance by schemaFileId. Schema.all takes no holds: it
+        // lists schemas (useSchemas caches the list and never unloads it).
         if (schemaFileId) {
-          const cachedById = this.getById(schemaFileId)
+          const cachedById = this.peek(schemaFileId)
           if (cachedById) {
             // Verify the cached instance has the correct version
             const cachedContext = cachedById.getService().getSnapshot().context
@@ -706,18 +738,14 @@ export class Schema {
         // But to ensure we get the correct version, we'll use createById if we have the schemaFileId
         if (schemaFileId) {
           try {
-            const instance = await this.createById(schemaFileId)
+            const instance = await this.createById(schemaFileId, { hold: false })
             schemaInstances.push(instance)
           } catch {
             // Fallback to creating by name if createById fails
-            schemaInstances.push(
-              this.create(schemaName, { waitForReady: false }) as Schema,
-            )
+            schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
           }
         } else {
-          schemaInstances.push(
-            this.create(schemaName, { waitForReady: false }) as Schema,
-          )
+          schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
         }
       }
 
@@ -772,9 +800,7 @@ export class Schema {
       // Create Schema instances for each unique schema name
       const schemaInstances: Schema[] = []
       for (const schemaName of uniqueSchemaNames) {
-        schemaInstances.push(
-          this.create(schemaName, { waitForReady: false }) as Schema,
-        )
+        schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
       }
 
       if (waitForReady && schemaInstances.length > 0) {
@@ -855,7 +881,7 @@ export class Schema {
     const seen = new Set<string>()
     const modelInstances: Model[] = []
     for (const modelFileId of allModelIds) {
-      const model = Model.getById(modelFileId)
+      const model = Model.peek(modelFileId)
       if (model && modelFileId && !seen.has(modelFileId)) {
         modelInstances.push(model)
         seen.add(modelFileId)
@@ -2076,7 +2102,7 @@ export class Schema {
         // One at a time: an eviction of this schema part way through stops the rest
         const evictionEpoch = currentEvictionEpoch()
         for (const id of ids) {
-          await Model.createById(id, { evictionEpoch })
+          await Model.createById(id, { evictionEpoch, hold: false })
         }
       },
       queryInitialData: async (schemaId) => {

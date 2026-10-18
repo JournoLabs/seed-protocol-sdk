@@ -68,9 +68,7 @@ export const getPropertySchema = async (
   try {
     const schemaName = model.schemaName
     if (schemaName) {
-      const schemaInstance = Schema.create(schemaName, {
-        waitForReady: false,
-      }) as import('@/Schema/Schema').Schema
+      const schemaInstance = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
       const schemaContext = schemaInstance.getService().getSnapshot().context
       if (schemaContext.models && schemaContext.models[modelName]) {
         // Get properties from Schema context (original schema file data)
