@@ -31,7 +31,12 @@ mock.module('../helpers/receiptAttestationMs', () => ({
 
 const { recordMultiPublishReceipt } = await import('./recordMultiPublishReceipt')
 
-const record = (receipt: unknown, normalizedRequests: any[], useModularExecutor: boolean) =>
+const record = (
+  receipt: unknown,
+  normalizedRequests: any[],
+  useModularExecutor: boolean,
+  resolvedSeedUids?: Record<string, string>,
+) =>
   recordMultiPublishReceipt({
     receipt: receipt as any,
     requests: normalizedRequests,
@@ -39,6 +44,7 @@ const record = (receipt: unknown, normalizedRequests: any[], useModularExecutor:
     useModularExecutor,
     contractAddressForEvents: MODULE,
     publisherAddress: ATTESTER,
+    ...(resolvedSeedUids ? { resolvedSeedUids } : {}),
   })
 
 const MODULE = '0x00000000000000000000000000000000000000aa' as `0x${string}`
@@ -214,6 +220,30 @@ describe('recordMultiPublishReceipt: properties of several items in one transact
     }
     await record(receipt, requests(), false)
     expect(callsBySeed()).toEqual(expected)
+  })
+
+  test('relation/list values: every seed of this transaction and of earlier ones is passed to resolve', async () => {
+    applyPropertyAttestationUidsFromPublish.mockClear()
+    const receipt = {
+      logs: [
+        created(SCHEMA_IMAGE_SEED, IMAGE_SEED, publisherEventsAbi),
+        created(SCHEMA_VERSION, IMAGE_VERSION, publisherEventsAbi),
+        extensionSeedPublished([IMAGE_SRC]),
+        created(SCHEMA_POST_SEED, POST_SEED, publisherEventsAbi),
+        created(SCHEMA_VERSION, POST_VERSION, publisherEventsAbi),
+        extensionSeedPublished([POST_TITLE, POST_COVER]),
+      ],
+    }
+    const EARLIER = h('9')
+    await record(receipt, requests(), false, { earlierLocal: EARLIER })
+    const post = applyPropertyAttestationUidsFromPublish.mock.calls
+      .map(([a]) => a as { seedLocalId: string; resolvedSeedUids?: Record<string, string> })
+      .find((a) => a.seedLocalId === 'postLocal01')
+    expect(post?.resolvedSeedUids).toEqual({
+      earlierLocal: EARLIER,
+      imageLocal1: IMAGE_SEED,
+      postLocal01: POST_SEED,
+    })
   })
 })
 
