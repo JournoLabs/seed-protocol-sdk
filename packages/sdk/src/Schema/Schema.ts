@@ -24,6 +24,7 @@ import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEn
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { ActorKeyedState } from '@/helpers/entity/entityState'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -39,9 +40,8 @@ const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
 type SchemaService = ActorRefFrom<typeof schemaMachine>
 type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 
-// WeakMap to store non-serializable resources per Schema instance
-// Only stores resources that cannot be serialized (subscriptions, timers, etc.)
-export const schemaInstanceState = new WeakMap<Schema, {
+// Non-serializable resources per Schema instance (subscriptions, timers, etc.)
+export const schemaInstanceState = new ActorKeyedState<Schema, {
   liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance model updates
 }>()
 
@@ -2128,7 +2128,7 @@ export class Schema {
         
         return queryInitialModels()
       },
-      instanceState: schemaInstanceState as WeakMap<Schema, { liveQuerySubscription: Subscription | null }>,
+      instanceState: schemaInstanceState,
       loggerName: 'seedSdk:schema:liveQuery',
       isReady: (schema) => {
         const snapshot = schema._service.getSnapshot()

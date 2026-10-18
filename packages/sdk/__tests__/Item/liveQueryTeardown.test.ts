@@ -14,10 +14,6 @@ import { waitUntil, waitUntilOrThrow } from '../test-utils/waitUntil'
  * instances for an item whose actor is stopped.
  *
  * Browser only: the Node DB's liveQuery is a stub and Item skips liveQueries outside a window.
- *
- * Tests marked `it.fails` describe behavior the current code gets wrong, so they fail today and
- * `it.fails` counts that as a pass. Once a fix makes one pass, `it.fails` reports it as a failure:
- * switch it back to `it` then.
  */
 
 const SCHEMA_NAME = 'Test Schema LiveQuery Teardown'
@@ -89,7 +85,7 @@ describe.skipIf(typeof window === 'undefined')('Item liveQuery teardown', () => 
     ).toBe(0)
   }
 
-  it.fails('the last unload closes the seeds and versions liveQueries', async () => {
+  it('the last unload closes the seeds and versions liveQueries', async () => {
     const item = await createPost('unload')
     const seedLocalId = item.seedLocalId
     await waitForItemLiveQueries(seedLocalId)
@@ -100,7 +96,7 @@ describe.skipIf(typeof window === 'undefined')('Item liveQuery teardown', () => 
     expectNoOpenLiveQueries(seedLocalId)
   }, 30000)
 
-  it.fails('an unload that leaves another holder keeps the liveQueries open', async () => {
+  it('an unload that leaves another holder keeps the liveQueries open', async () => {
     const item = await createPost('shared')
     const seedLocalId = item.seedLocalId
     await waitForItemLiveQueries(seedLocalId)
@@ -114,7 +110,7 @@ describe.skipIf(typeof window === 'undefined')('Item liveQuery teardown', () => 
     expectNoOpenLiveQueries(seedLocalId)
   }, 30000)
 
-  it.fails('destroy closes the liveQueries', async () => {
+  it('destroy closes the liveQueries', async () => {
     const item = await createPost('destroy')
     const seedLocalId = item.seedLocalId
     await waitForItemLiveQueries(seedLocalId)
@@ -125,7 +121,7 @@ describe.skipIf(typeof window === 'undefined')('Item liveQuery teardown', () => 
     expectNoOpenLiveQueries(seedLocalId)
   }, 30000)
 
-  it.fails('dropCachedInstancesForSeedIds closes the liveQueries', async () => {
+  it('dropCachedInstancesForSeedIds closes the liveQueries', async () => {
     const item = await createPost('purge')
     const seedLocalId = item.seedLocalId
     await waitForItemLiveQueries(seedLocalId)
@@ -136,7 +132,7 @@ describe.skipIf(typeof window === 'undefined')('Item liveQuery teardown', () => 
     expectNoOpenLiveQueries(seedLocalId)
   }, 30000)
 
-  it.fails('an unload before liveQuery setup finishes leaves no liveQuery open', async () => {
+  it('an unload before liveQuery setup finishes leaves no liveQuery open', async () => {
     const item = await createPost('early unload', { waitForReady: false })
     const seedLocalId = item.seedLocalId
 

@@ -53,6 +53,8 @@ import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers
 import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { ActorKeyedState } from '@/helpers/entity/entityState'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -140,9 +142,8 @@ const TRACKED_PROPERTIES = [
   'revokedAt',
 ] as const
 
-// WeakMap to store mutable state per Item instance
-// This avoids issues with read-only properties when instances are frozen by Immer
-const itemInstanceState = new WeakMap<Item<any>, {
+// Mutable state per Item instance
+const itemInstanceState = new ActorKeyedState<Item<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
   definedPropertyNames: Set<string>
 }>()
@@ -2142,6 +2143,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             logger('[Item._setupLiveQuerySubscription] Instance state not found')
             return
           }
+
+          // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+          if (isActorStopped(this._service)) return
 
           // Subscribe to seeds updates
           const seedsSubscription = seeds$.subscribe({

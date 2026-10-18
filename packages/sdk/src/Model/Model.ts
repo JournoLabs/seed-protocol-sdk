@@ -18,6 +18,7 @@ import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEn
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { ActorKeyedState } from '@/helpers/entity/entityState'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
 import {
   currentEvictionEpoch,
@@ -67,10 +68,8 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
-// WeakMap to store mutable state per Model instance
-// This avoids issues with read-only properties when instances are frozen by Immer
-
-const modelInstanceState = new WeakMap<Model, {
+// Mutable state per Model instance
+const modelInstanceState = new ActorKeyedState<Model, {
   liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance property updates
 }>()
 
@@ -2280,7 +2279,7 @@ export class Model {
         const writeState = writeProcess?.getSnapshot().value
         return writeState !== 'validating' && writeState !== 'writing'
       },
-      instanceState: modelInstanceState as WeakMap<Model, { liveQuerySubscription: Subscription | null }>,
+      instanceState: modelInstanceState,
       loggerName: 'seedSdk:model:liveQuery',
     })
   }

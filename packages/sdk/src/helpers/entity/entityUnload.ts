@@ -1,4 +1,5 @@
 import { CacheEntry } from './entityCache'
+import type { InstanceStateStore } from './entityState'
 
 /**
  * Configuration for entity unload operations
@@ -20,10 +21,10 @@ export interface UnloadConfig<T extends object> {
    */
   secondaryCaches?: Map<string, string>[]
   /**
-   * Instance state WeakMap
+   * Instance state store
    * Used to clean up liveQuery subscriptions (liveQuerySubscription, schemaLiveQuerySubscription, etc.)
    */
-  instanceState: WeakMap<T, {
+  instanceState: InstanceStateStore<T, {
     liveQuerySubscription?: { unsubscribe: () => void } | null
     schemaLiveQuerySubscription?: { unsubscribe: () => void } | null
     [key: string]: unknown
