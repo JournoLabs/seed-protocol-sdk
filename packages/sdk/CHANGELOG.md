@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `client.subscribeService(listener)` calls `listener` with the clientManager actor when `client.init()` after `client.stop()` replaces it and when `stop()` ends it. It returns an unsubscribe function. `getService()` is unchanged.
+- `BaseDb.liveQuery` in the browser logs SQLite errors through `debug` (`seedSdk:browser:db:Db`) instead of `console.error`. Subscribers still get the error.
+
 ## 0.7.7 (2026-10-18)
 
 - **Breaking: client methods throw `CLIENT_NOT_INITIALIZED` after `client.stop()` or `client.unload()`** until `client.init()` runs again. Before, `getAddresses()`, `setAddresses()`, `syncFromEas()` and the other client methods kept working against the open database after a stop. A second `stop()` or `unload()` now does nothing and logs a `console.warn` instead of stopping again, so teardown code that stops twice keeps working and shows where the extra call is.

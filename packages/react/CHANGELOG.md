@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- The status hooks (`useIsClientReady`, `useDbsAreReady`, `useIsDbReady`, `useGlobalServiceStatus`, `useServices`) and `SeedClientGate` follow the client after `client.stop()` and a new `client.init()`. Before, they kept reading the stopped client: they reported ready while the new init ran and didn't re-render when it finished. They now report not ready from `stop()` until the next init finishes, and the gate shows its loading state again without a remount.
+- New `useClientService()` returns the current clientManager actor, and `useClientSelector(selector)` derives a value from its snapshot; both follow `stop()` and init.
+- `useLiveQuery` and `useLiveQueryState` resubscribe after an error, waiting 0.5 s, then 1, 2, 5, 10 and 30 s between attempts, and keep the last rows meanwhile. An error creating the live query lands in `error` instead of only the console.
+- `SeedClientGate` compares `initConfig` and `schema` by value, so an inline object no longer calls `client.init` on every parent render.
+- `useService(...).percentComplete` is 100 once the service is idle (it was 0) and, for the client manager, 0–100 during startup (it was `-Infinity`).
+
 ## 0.7.7 (2026-10-18)
 
 - The deleted-items query (`useItems` with `deleted: true`) matches rows with `_markedForDeletion = 1` only. It also matched rows where the column was `0`.
