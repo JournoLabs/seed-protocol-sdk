@@ -50,12 +50,11 @@ const countChanges = async (read: () => unknown, ms: number) => {
   return changes
 }
 
-// The item and several internal lookups each hold a reference; the instance stops at the last.
-const unloadAllHolders = (property: ItemProperty<any>) => {
-  const cache = (ItemProperty as any).instanceCache as Map<string, { instance: unknown }>
-  const held = () => [...cache.values()].some((entry) => entry.instance === property)
-  for (let i = 0; i < 20 && held(); i++) property.unload()
-  expect(held()).toBe(false)
+// The item and the test's find each hold the property once; it stops at the second release.
+const releaseItemAndFind = (item: { unload(): void }, property: ItemProperty<any>) => {
+  item.unload()
+  property.unload()
+  expect(property.getService().getSnapshot().status).toBe('stopped')
 }
 
 describe('Image property value after a save', () => {
@@ -138,7 +137,7 @@ describe('Image property value after a save', () => {
     expect((await fetch(secondUrl)).ok).toBe(true)
     await expect(fetch(firstUrl)).rejects.toThrow()
 
-    unloadAllHolders(property!)
+    releaseItemAndFind(item, property!)
     await expect(fetch(secondUrl)).rejects.toThrow()
   }, 60000)
 
@@ -153,7 +152,7 @@ describe('Image property value after a save', () => {
       expect(String(property!.value)).toMatch(/^blob:/)
       expect(property!.value).not.toBe(appUrl)
     }, { timeout: WAIT_TIMEOUT_MS })
-    unloadAllHolders(property!)
+    releaseItemAndFind(item, property!)
     expect((await fetch(appUrl)).ok).toBe(true)
     URL.revokeObjectURL(appUrl)
   }, 60000)
