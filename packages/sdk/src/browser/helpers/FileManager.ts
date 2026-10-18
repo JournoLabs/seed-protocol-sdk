@@ -1,3 +1,4 @@
+import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import type {
   DownloadAllFilesParams,
@@ -154,7 +155,7 @@ export class BrowserFileManager implements IFileManager {
     const fileExists = await this.pathExists(path)
     if ( fileExists ) {
       const file = await this.readFile(path)
-      return URL.createObjectURL(file)
+      return createSessionObjectUrl(file)
     }
   }
 
