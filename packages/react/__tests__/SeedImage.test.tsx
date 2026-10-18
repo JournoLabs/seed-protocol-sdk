@@ -175,6 +175,26 @@ describe('SeedImage integration tests', () => {
     )
   })
 
+  it('forwards ref to the img', async () => {
+    // React 18 drops `ref` on a plain function component; React 19 (these tests) passes it as a prop
+    // either way, so check for the forwardRef wrapper too.
+    expect((SeedImage as unknown as { type: { $$typeof: symbol } }).type.$$typeof).toBe(Symbol.for('react.forward_ref'))
+    if (!testItem) return
+    const featureImageProperty = testItem.properties.find(
+      (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+    )
+    expect(featureImageProperty).toBeTruthy()
+
+    const ref = React.createRef<HTMLImageElement>()
+    render(
+      <SeedProviderWrapper>
+        <SeedImage ref={ref} imageProperty={featureImageProperty!} alt="Feature image" filename="not-saved.png" />
+      </SeedProviderWrapper>,
+      { container }
+    )
+    await waitFor(() => expect(ref.current).toBeInstanceOf(HTMLImageElement))
+  })
+
   it('renders img element when image file exists and width subdir is present', async () => {
     if (!testItem) return
 
