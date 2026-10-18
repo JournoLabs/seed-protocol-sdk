@@ -165,7 +165,24 @@ describe('item and query hooks', () => {
       result.current.createItem('GuardNote', { schemaName: name, title: 'two' }),
     ])
     expect(first).toBeDefined()
-    expect(second).toBeUndefined()
+    // The second call gets the in-flight create's promise: the same item, not undefined.
+    expect(second).toBe(first)
+  })
+
+  it('useCreateItem passes ItemCreateOptions to Item.create', async () => {
+    const name = 'Create Options Schema'
+    const file = schemaFile(name, {
+      OptionsNote: { id: 'options-note-model-id', properties: { title: { id: 'options-note-title-id', type: 'Text' } } },
+    })
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useCreateItem(), { wrapper })
+    // An unknown key: Item.create rejects it unless validate is false.
+    const data = { schemaName: name, title: 'imported', notAProperty: 'x' }
+
+    expect(await result.current.createItem('OptionsNote', data)).toBeUndefined()
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+    const item = await result.current.createItem('OptionsNote', data, { validate: false })
+    expect(item?.seedLocalId).toBeTruthy()
   })
 })
 
