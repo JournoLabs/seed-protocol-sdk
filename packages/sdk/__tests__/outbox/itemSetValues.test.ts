@@ -92,20 +92,22 @@ testDescribe('item values through the outbox', () => {
     post.unload()
   }, 30000)
 
-  it('typing coalesces into one row with the last value', async () => {
+  it('typing writes one row with the last value: older keystrokes never append', async () => {
     const post = await createPost('t')
+    const before = (await opsFor(post.seedLocalId, 'title')).length
     pauseOutboxDrainForTests(true)
     for (const value of ['ty', 'typ', 'typed']) post.title = value
-    await vi.waitFor(async () => expect((await opsFor(post.seedLocalId, 'title')).filter((op) => op.status === 'pending')).toHaveLength(3), {
+    // Each keystroke's save sees a newer one started and drops its value; only the last appends
+    await vi.waitFor(async () => expect((await opsFor(post.seedLocalId, 'title')).length).toBe(before + 1), {
       timeout: 10000,
     })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const appended = (await opsFor(post.seedLocalId, 'title')).slice(before)
+    expect(appended).toHaveLength(1)
+    expect(JSON.parse(appended[0].value!).newValue).toBe('typed')
 
     pauseOutboxDrainForTests(false)
-    const pendingIds = (await opsFor(post.seedLocalId, 'title')).filter((op) => op.status === 'pending').map((op) => op.opId)
-    await Promise.all(pendingIds.map((id) => waitForOutboxOp(id)))
-
-    const statuses = (await opsFor(post.seedLocalId, 'title')).filter((op) => pendingIds.includes(op.opId)).map((op) => op.status)
-    expect(statuses).toEqual(['superseded', 'superseded', 'applied'])
+    await waitForOutboxOp(appended[0].opId)
     const rows = await rowsFor(post.seedLocalId, 'title')
     expect(rows.map((row: { propertyValue: string | null }) => row.propertyValue)).toEqual(['typed'])
     expect(post.title).toBe('typed')
