@@ -120,9 +120,6 @@ testDescribe('Schema ID Generation Integration Tests', () => {
       const db = BaseDb.getAppDb()
       if (!db) throw new Error('Database not available')
 
-      // Small delay to ensure database update is committed (especially in browser/OPFS)
-      await new Promise(resolve => setTimeout(resolve, 50))
-
       // Check schema - query by schemaFileId first (most reliable), then fallback to name
       let schemaRecords = await db
         .select()
@@ -240,9 +237,6 @@ testDescribe('Schema ID Generation Integration Tests', () => {
 
       const db = BaseDb.getAppDb()
       if (!db) throw new Error('Database not available')
-
-      // Small delay to ensure database update is committed (especially in browser/OPFS)
-      await new Promise(resolve => setTimeout(resolve, 50))
 
       // Check schema - should preserve existing ID - query by schemaFileId first (most reliable)
       let schemaRecords = await db

@@ -11,6 +11,8 @@ import { eq } from 'drizzle-orm'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema, syncSchemaFromSource } from '@/imports/json'
+import { loadAllSchemasFromDb } from '@/helpers/schema'
+import { Model } from '@/Model/Model'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { waitForSchemaIdle } from '../test-utils/waitForIdle'
@@ -337,6 +339,117 @@ testDescribe('Schema Models Integration Tests', () => {
       expect(barRows.length).toBe(1)
 
       expect(modelIds.length).toBe(2)
+    })
+  })
+
+  // A schema with pinned schema, model and property ids, as PermaPress ships it. A content change that
+  // keeps the id and version maps to the same file path as the device's stored file.
+  describe('changed schema with a pinned id', () => {
+    const pinnedSchema = (
+      schemaId: string,
+      schemaName: string,
+      modelNames: string[],
+      version = 1,
+    ): SchemaFileFormat => ({
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      id: schemaId,
+      version,
+      metadata: {
+        name: schemaName,
+        createdAt: '2026-10-01T00:00:00.000Z',
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      },
+      models: Object.fromEntries(
+        modelNames.map((modelName) => [
+          modelName,
+          {
+            id: `${schemaId}${modelName}`.slice(-10),
+            properties: { title: { id: `${modelName}title`.slice(-10), dataType: 'Text' } },
+          },
+        ]),
+      ),
+      enums: {},
+      migrations: [],
+    })
+
+    const schemaRowFor = async (schemaName: string) => {
+      const rows = await BaseDb.getAppDb()!.select().from(schemas).where(eq(schemas.name, schemaName))
+      expect(rows.length).toBe(1)
+      return rows[0]
+    }
+
+    const linkedModelNames = async (schemaRowId: number): Promise<string[]> => {
+      const rows = await BaseDb.getAppDb()!
+        .select({ name: modelsTable.name })
+        .from(modelSchemas)
+        .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+        .where(eq(modelSchemas.schemaId, schemaRowId))
+      return rows.map((r: { name: string }) => r.name).sort()
+    }
+
+    const schemaFileContent = (schemaId: string, schemaName: string, version: number): SchemaFileFormat => {
+      const workingDir = BaseFileManager.getWorkingDir()
+      const file = fsModule
+        .readdirSync(workingDir)
+        .find((f: string) => f.startsWith(`${schemaId}_`) && f.endsWith(`_v${version}.json`))
+      expect(file, `schema file for ${schemaName} v${version}`).toBeDefined()
+      return JSON.parse(fsModule.readFileSync(pathModule.join(workingDir, file), 'utf8'))
+    }
+
+    it('syncSchemaFromSource writes the new content over the stored file of the same id and version', async () => {
+      const schemaId = 'pin0000001'
+      const schemaName = 'Pinned Sync Schema'
+      await syncSchemaFromSource(pinnedSchema(schemaId, schemaName, ['PinArticle', 'PinLink']))
+      await syncSchemaFromSource(pinnedSchema(schemaId, schemaName, ['PinArticle', 'PinSection']))
+
+      expect(Object.keys(schemaFileContent(schemaId, schemaName, 1).models).sort()).toEqual([
+        'PinArticle',
+        'PinSection',
+      ])
+
+      const row = await schemaRowFor(schemaName)
+      expect(Object.keys(JSON.parse(row.schemaData!).models).sort()).toEqual(['PinArticle', 'PinSection'])
+      expect(await linkedModelNames(row.id!)).toEqual(['PinArticle', 'PinSection'])
+
+      expect(Model.getByName('PinSection', schemaName)).toBeDefined()
+
+      const loaded = (await loadAllSchemasFromDb()).find((s) => s.schema.metadata?.name === schemaName)
+      expect(Object.keys(loaded!.schema.models).sort()).toEqual(['PinArticle', 'PinSection'])
+    })
+
+    it('a new version with the same pinned id unlinks models it removed', async () => {
+      const schemaId = 'pin0000002'
+      const schemaName = 'Pinned Version Schema'
+      await syncSchemaFromSource(pinnedSchema(schemaId, schemaName, ['PinPost', 'PinOldLink']))
+      await syncSchemaFromSource(pinnedSchema(schemaId, schemaName, ['PinPost', 'PinClip'], 2))
+
+      const row = await schemaRowFor(schemaName)
+      expect(row.version).toBe(2)
+      expect(await linkedModelNames(row.id!)).toEqual(['PinClip', 'PinPost'])
+    })
+
+    it('importJsonSchema throws instead of loading the stored file when the content differs', async () => {
+      const schemaId = 'pin0000003'
+      const schemaName = 'Pinned Import Schema'
+      await importJsonSchema({ contents: JSON.stringify(pinnedSchema(schemaId, schemaName, ['PinNote'])) })
+
+      await expect(
+        importJsonSchema({ contents: JSON.stringify(pinnedSchema(schemaId, schemaName, ['PinNote', 'PinTag'])) }),
+      ).rejects.toThrow(/already exists with different content/)
+
+      expect(Object.keys(schemaFileContent(schemaId, schemaName, 1).models)).toEqual(['PinNote'])
+    })
+
+    it('reuses the stored file when the content is unchanged', async () => {
+      const schemaId = 'pin0000004'
+      const schemaName = 'Pinned Unchanged Schema'
+      const schema = pinnedSchema(schemaId, schemaName, ['PinPage'])
+      await syncSchemaFromSource(schema)
+      await syncSchemaFromSource(schema)
+      await importJsonSchema({ contents: JSON.stringify(schema) })
+
+      const row = await schemaRowFor(schemaName)
+      expect(await linkedModelNames(row.id!)).toEqual(['PinPage'])
     })
   })
 })

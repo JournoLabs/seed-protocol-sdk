@@ -1,4 +1,4 @@
-import { waitForEntityIdle } from '../waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '../waitForEntityIdle'
 
 /**
  * Configuration for entity find operations
@@ -55,7 +55,7 @@ export async function findEntity<T extends { getService(): any }>(
   },
   options: FindOptions = {}
 ): Promise<T | undefined> {
-  const { waitForReady = true, readyTimeout = 5000 } = options
+  const { waitForReady = true, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options
   let instance: T | undefined
 
   // Try ID lookup first (most specific)

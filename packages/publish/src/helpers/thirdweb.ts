@@ -3,7 +3,7 @@ import { getClient } from './publishThirdwebClient'
 import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
-import { useEffect, useRef, useState, } from 'react'
+import { useEffect, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
 import type { Address, Hex } from 'viem'
 import debug from 'debug'
@@ -123,36 +123,11 @@ export const wallets = [
   // createWallet("me.rainbow"),
 ]
 
-export const useLocalWalletAccount = () => {
-
-  const [ localWalletAccount, setLocalWalletAccount, ] = useState<Account | null>(null,)
-  const personalWallet = createWallet('io.metamask',)
-
-  const isConnecting = useRef(false)
-
-  useEffect(() => {
-    const _getAccount = async (): Promise<void> => {
-      // if ( isConnecting.current ) {
-      //   return
-      // }
-      // isConnecting.current = true
-
-      // const personalAccount = await personalWallet.connect({ client, },)
-      // if ( !personalAccount ) {
-      //   throw new Error('Failed to connect to personal account',)
-      // }
-
-      // setLocalWalletAccount(personalAccount,)
-      // isConnecting.current = false
-    }
-
-    _getAccount()
-
-  }, [],)
-
-  return localWalletAccount
-
-}
+/**
+ * @deprecated Always returns null: its implementation was never finished. Use thirdweb's
+ * `useActiveAccount()`, or `useSeedWallet()` from @seedprotocol/publish. Will be removed.
+ */
+export const useLocalWalletAccount = (): Account | null => null
 
 export const useActiveSmartWalletContract = () => {
   const account = useActiveAccount()

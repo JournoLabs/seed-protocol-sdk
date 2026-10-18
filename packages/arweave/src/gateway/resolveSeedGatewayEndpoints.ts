@@ -233,7 +233,7 @@ export async function resolveSeedGatewayEndpoints(
       if (!ok) {
         throw new Error(
           `Gateway Hyper sidecar not reachable at ${hyperEndpoints.arweaveBaseUrl}. ` +
-            'Run: seed gateway tunnel connect <operator-z32-key> — or configure gateway.proxyBaseUrl for an app-server proxy.',
+            'Run: seed-gateway connect <operator-z32-key> — or configure gateway.proxyBaseUrl for an app-server proxy.',
         )
       }
     }

@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.7.0",
-  "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
+  "version": "0.7.6",
+  "description": "RSS 2.0, Atom and JSON Feed generation for Seed Protocol items, with HTTP handlers, ETag caching and RFC 5005 archives",
+  "keywords": [
+    "seed-protocol",
+    "rss",
+    "atom",
+    "json-feed",
+    "feed",
+    "syndication",
+    "eas",
+    "arweave"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -38,11 +49,21 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/express": "^5.0.6",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/feed"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/feed#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

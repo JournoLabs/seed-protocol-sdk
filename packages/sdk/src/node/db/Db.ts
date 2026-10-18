@@ -44,19 +44,22 @@ export function resolveSdkDrizzleMigrationsDir(sdkRootDir?: string): string {
       }
     })()
 
-  // Also resolve relative to this module so temp-cwd tests / odd roots still find
-  // packages/sdk/src/db/drizzle (or dist/db/drizzle after publish).
+  // Look next to this module first, so the SDK always runs its own migrations
+  // whatever the working directory (monorepos, packaged Electron apps, scripts
+  // run from elsewhere). Rollup bundles this file into a chunk directly under
+  // dist/, next to the copied dist/db/drizzle.
   const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
   const candidates = [
+    path.join(moduleDir, 'db', 'drizzle'), // bundled: dist/<chunk>.js -> dist/db/drizzle
+    path.join(moduleDir, '..', '..', 'db', 'drizzle'), // source: src/node/db -> src/db/drizzle
+    path.join(moduleDir, '..', 'db', 'drizzle'), // dist layout variants
+    path.join(moduleDir, '..', '..', '..', 'src', 'db', 'drizzle'), // dist/node -> src
     path.join(root, 'db', 'drizzle'), // production: sdkRoot is dist/
     path.join(root, 'dist', 'db', 'drizzle'), // sdk package root with built dist
     path.join(root, 'src', 'db', 'drizzle'), // monorepo / sdk-dev
     path.join(root, 'packages', 'sdk', 'src', 'db', 'drizzle'), // monorepo root as cwd
     path.join(root, 'packages', 'sdk', 'dist', 'db', 'drizzle'),
-    path.join(moduleDir, '..', '..', 'db', 'drizzle'), // src/node/db -> src/db/drizzle
-    path.join(moduleDir, '..', '..', '..', 'src', 'db', 'drizzle'), // dist/node -> src
-    path.join(moduleDir, '..', 'db', 'drizzle'), // dist layout variants
   ]
 
   for (const candidate of candidates) {
@@ -86,6 +89,15 @@ function copyDirRecursive(sourceDir: string, targetDir: string) {
   }
 }
 
+
+/** The file a local libsql `file:` URL opens; undefined for `:memory:` and remote URLs. */
+const localDbFilePath = (dbUrl: string): string | undefined => {
+  if (!dbUrl.startsWith('file:')) return undefined
+  const filePath = dbUrl.slice('file:'.length).split('?')[0]
+  if (!filePath || filePath === ':memory:') return undefined
+  return filePath.startsWith('//') ? filePath.replace(/^\/\/(localhost)?/, '') : filePath
+}
+
 export class NodeDb implements IDb {
   db: any
 
@@ -101,8 +113,8 @@ export class NodeDb implements IDb {
   /**
    * Copy prebuilt SQL migrations into the app db directory (overwrite to stay current).
    */
-  copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string): string {
-    const { outDir } = resolveDbPaths(filesDir)
+  copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string, config?: DbConfig): string {
+    const { outDir } = resolveDbPaths(filesDir, config)
     const source = migrationsSourceDir || resolveSdkDrizzleMigrationsDir()
     logger('[Db.copyDrizzleFiles] copying from %s to %s', source, outDir)
     copyDirRecursive(source, outDir)
@@ -123,11 +135,17 @@ export class NodeDb implements IDb {
     }
 
     // Install SDK migration SQL next to the DB (same source of truth as browser)
-    this.copyDrizzleFiles(resolvedFilesDir)
+    this.copyDrizzleFiles(resolvedFilesDir, undefined, config)
 
     const dbUrl = config?.dbUrl
       ? (config.dbUrl.startsWith('file:') ? config.dbUrl : `file:${path.resolve(config.dbUrl)}`)
       : `file:${path.resolve(dbPath)}`
+
+    // libsql won't create the database's folder ("Unable to open connection … 14").
+    const dbFilePath = localDbFilePath(dbUrl)
+    if (dbFilePath) {
+      fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
+    }
 
     const client = createClient({ url: dbUrl })
     const db = drizzle(client, { schema })

@@ -6,9 +6,8 @@ import { eventEmitter } from '@seedprotocol/sdk'
 import pluralize from 'pluralize'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
-import { appState } from '@seedprotocol/sdk'
-import { like } from 'drizzle-orm'
-import { BaseDb, MachineIds, ClientManagerState, getClient } from '@seedprotocol/sdk'
+import { MachineIds, ClientManagerState, getClient } from '@seedprotocol/sdk'
+import { isDbReadyState } from './db'
 
 const logger = debug('seedSdk:react:services')
 
@@ -154,112 +153,52 @@ export const useService = (service: ActorRef<any, any>) => {
   }
 }
 
+/** Whether the app database is open (see useDbsAreReady). */
 export const useIsDbReady = () => {
-  const [isDbReady, setIsDbReady] = useState(false)
-
   const { internalStatus } = useGlobalServiceStatus()
-
-  useEffect(() => {
-    if (internalStatus === 'ready') {
-      setIsDbReady(true)
-    }
-  }, [internalStatus])
-
-  useEffect(() => {
-    if (internalStatus === 'ready') {
-      setIsDbReady(true)
-    }
-  }, [])
-  
-
-  return isDbReady
+  return internalStatus === 'ready'
 }
 
-export const usePersistedSnapshots = () => {
-  const [initialized, setInitialized] = useState(false)
+/**
+ * @deprecated Does nothing: actor snapshots were never written, and loaded ones were discarded.
+ * Will be removed.
+ */
+export const usePersistedSnapshots = () => {}
 
-  const hasSavedSnapshots = useHasSavedSnapshots()
+/**
+ * @deprecated Always false: nothing writes snapshot rows. Will be removed.
+ */
+export const useHasSavedSnapshots = () => false
 
-  const { services, percentComplete } = useServices()
-
-  // Helper function to save all actor snapshots to the database
-  const save = useCallback(async () => {
-    for (const actor of services) {
-      const uniqueKey = getServiceUniqueKey(actor)
-      logger(
-        `would save to db with snapshot__${uniqueKey}:`,
-        JSON.stringify(actor.getPersistedSnapshot()),
-      )
-      // await writeAppState(
-      //   `snapshot__${uniqueKey}`,
-      //   JSON.stringify(actor.getPersistedSnapshot()),
-      // )
-    }
-  }, [services])
-
-  // Helper function to load persisted snapshots from the database
-  const load = useCallback(async () => {
-    const appDb = BaseDb.getAppDb()
-
-    if (!appDb) {
-      return []
-    }
-
-    const persistedSnapshots = await appDb
-      .select()
-      .from(appState)
-      .where(like(appState.key, 'snapshot__%'))
-    return persistedSnapshots
-  }, [])
-
-  useEffect(() => {
-    if (!hasSavedSnapshots || initialized) {
-      return
-    }
-    const initialize = async () => {
-      const persistedSnapshots = await load()
-      logger('persistedSnapshots:', persistedSnapshots)
-      setInitialized(true)
-    }
-
-    initialize()
-
-    return () => {
-      save() // Save snapshots on unmount
-    }
-  }, [hasSavedSnapshots, initialized])
-}
-
-export const useHasSavedSnapshots = () => {
-  const [hasSavedSnapshots, setHasSavedSnapshots] = useState(false)
-
-  const isDbReady = useIsDbReady()
-
-  useEffect(() => {
-    if (isDbReady) {
-      const _checkForSnapshots = async (): Promise<void> => {
-        const appDb = BaseDb.getAppDb()
-
-        const rows = await appDb
-          .select()
-          .from(appState)
-          .where(like(appState.key, 'snapshot__%'))
-
-        if (rows && rows.length > 0) {
-          setHasSavedSnapshots(true)
-        }
-      }
-
-      _checkForSnapshots()
-    }
-  }, [isDbReady])
-
-  return hasSavedSnapshots
+const percentForClientState = (state: unknown): number => {
+  switch (state) {
+    case ClientManagerState.IDLE:
+      return 100
+    case ClientManagerState.ADD_MODELS_TO_DB:
+      return 90
+    case ClientManagerState.ADD_MODELS_TO_STORE:
+      return 80
+    case ClientManagerState.PROCESS_SCHEMA_FILES:
+      return 70
+    case ClientManagerState.SAVE_CONFIG:
+      return 60
+    case ClientManagerState.DB_INIT:
+      return 50
+    case ClientManagerState.FILE_SYSTEM_INIT:
+      return 30
+    case ClientManagerState.PLATFORM_CLASSES_INIT:
+      return 10
+    default:
+      return 0
+  }
 }
 
 export const useServices = () => {
   const [actors, setActors] = useState<ActorRef<any, any>[]>([])
-  const [percentComplete, setPercentComplete] = useState(5)
+  // From the current state: subscribe() doesn't replay it, so an already-idle client stayed at 5.
+  const [percentComplete, setPercentComplete] = useState(() =>
+    percentForClientState(getClient().getService().getSnapshot().value),
+  )
 
   // Global service removed - now track ClientManager directly
   useEffect(() => {
@@ -272,29 +211,9 @@ export const useServices = () => {
     
     setActors([clientActor])
     
-    // Calculate percent complete based on ClientManager state
+    setPercentComplete(percentForClientState(clientService.getSnapshot().value))
     const subscription = clientService.subscribe((snapshot) => {
-      const state = snapshot.value
-      // Calculate completion based on state progression
-      let percent = 0
-      if (state === ClientManagerState.IDLE) {
-        percent = 100
-      } else if (state === ClientManagerState.ADD_MODELS_TO_DB) {
-        percent = 90
-      } else if (state === ClientManagerState.ADD_MODELS_TO_STORE) {
-        percent = 80
-      } else if (state === ClientManagerState.PROCESS_SCHEMA_FILES) {
-        percent = 70
-      } else if (state === ClientManagerState.SAVE_CONFIG) {
-        percent = 60
-      } else if (state === ClientManagerState.DB_INIT) {
-        percent = 50
-      } else if (state === ClientManagerState.FILE_SYSTEM_INIT) {
-        percent = 30
-      } else if (state === ClientManagerState.PLATFORM_CLASSES_INIT) {
-        percent = 10
-      }
-      setPercentComplete(percent)
+      setPercentComplete(percentForClientState(snapshot.value))
     })
     
     return () => {
@@ -316,20 +235,10 @@ export const useGlobalServiceStatus = () => {
     return snapshot.value
   })
 
-  // Internal service functionality is now part of ClientManager
-  // DB is ready when ClientManager reaches DB_INIT or later states
-  const internalStatus = useSelector(clientService, (snapshot) => {
-    const state = snapshot.value
-    if (state === ClientManagerState.DB_INIT || 
-        state === ClientManagerState.SAVE_CONFIG ||
-        state === ClientManagerState.PROCESS_SCHEMA_FILES ||
-        state === ClientManagerState.ADD_MODELS_TO_STORE ||
-        state === ClientManagerState.ADD_MODELS_TO_DB ||
-        state === ClientManagerState.IDLE) {
-      return 'ready'
-    }
-    return state
-  })
+  // 'ready' while the app database is open (see isDbReadyState), otherwise the client state.
+  const internalStatus = useSelector(clientService, (snapshot) =>
+    isDbReadyState(snapshot.value) ? 'ready' : snapshot.value,
+  )
 
   return {
     status,

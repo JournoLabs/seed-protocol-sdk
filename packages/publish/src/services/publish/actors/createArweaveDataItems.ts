@@ -25,6 +25,8 @@ export type CreateArweaveDataItemsResult = {
   publishUploads: PublishUpload[]
   /** Signed DataItems for uploadViaBundler (dataItemSigner path only). */
   signedDataItems?: unknown[]
+  /** Nothing for uploadViaBundler to send: signDataItems uploaded the items itself, or there were none. */
+  bundlerUploadNotNeeded: boolean
 }
 
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
@@ -99,7 +101,8 @@ export async function signBundlerUploadDataList(
     }))
   } else {
     throw new Error(
-      '@seedprotocol/publish: useArweaveBundler requires signDataItems or dataItemSigner (pass at createPublish or in PublishProvider config)'
+      '@seedprotocol/publish: uploading data items needs signDataItems or a dataItemSigner (pass one at createPublish or in the PublishProvider config). ' +
+        "It must be an EOA's key: a smart account's signatures don't verify as Arweave data items, so pass its admin EOA's signer."
     )
   }
 
@@ -115,6 +118,7 @@ export async function signBundlerUploadDataList(
     arweaveTransactions,
     publishUploads,
     signedDataItems,
+    bundlerUploadNotNeeded: !!signDataItems || uploadDataList.length === 0,
   }
 }
 

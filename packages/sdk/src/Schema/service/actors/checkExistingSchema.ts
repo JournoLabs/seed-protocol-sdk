@@ -4,7 +4,7 @@ import { SchemaMachineContext } from '../schemaMachine'
 import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schema'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseFileManager } from '@/helpers'
-import { loadModelsFromDbForSchema } from '@/helpers/db'
+import { loadModelsFromDbForSchema, mergeDbModelsIntoSchemaModels } from '@/helpers/db'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -291,20 +291,7 @@ export const checkExistingSchema = fromCallback<
           if (dbSchema.id) {
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
-              let mergedModels = { ...(schemaFile.models || {}) }
-              mergedModels = { ...mergedModels, ...dbModels }
-              for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (mergedModels[modelName]) {
-                  mergedModels[modelName] = {
-                    ...mergedModels[modelName],
-                    properties: {
-                      ...mergedModels[modelName].properties,
-                      ...dbModel.properties,
-                    },
-                  }
-                }
-              }
-              schemaFile.models = mergedModels
+              schemaFile.models = mergeDbModelsIntoSchemaModels(schemaFile.models, dbModels)
             }
           }
         } catch (error) {
@@ -314,7 +301,11 @@ export const checkExistingSchema = fromCallback<
         // Try to load from file
         try {
           const completeSchemas = await listCompleteSchemaFiles()
-          const idBasedMatch = completeSchemas.find((s) => s.schemaFileId === dbSchema.schemaFileId)
+          // Match version too: the row is per schema name, so after a new version is imported
+          // under a new id it can carry the newer version with the older version's schemaFileId.
+          const idBasedMatch = completeSchemas.find(
+            (s) => s.schemaFileId === dbSchema.schemaFileId && s.version === dbSchema.version,
+          )
           
           if (idBasedMatch) {
             const content = await BaseFileManager.readFileAsString(idBasedMatch.filePath)
@@ -343,20 +334,7 @@ export const checkExistingSchema = fromCallback<
           if (schemaFile && dbSchema.id) {
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
-              let mergedModels = { ...(schemaFile.models || {}) }
-              mergedModels = { ...mergedModels, ...dbModels }
-              for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (mergedModels[modelName]) {
-                  mergedModels[modelName] = {
-                    ...mergedModels[modelName],
-                    properties: {
-                      ...mergedModels[modelName].properties,
-                      ...dbModel.properties,
-                    },
-                  }
-                }
-              }
-              schemaFile.models = mergedModels
+              schemaFile.models = mergeDbModelsIntoSchemaModels(schemaFile.models, dbModels)
             }
           }
         } catch (error) {

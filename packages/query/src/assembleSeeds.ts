@@ -1,6 +1,9 @@
 import {
+  decodeEasNumber,
+  isNumericEasType,
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
+  keepAttestationsFromRefAttester,
 } from '@seedprotocol/eas'
 import { getArweaveUrlForTransaction } from './arweaveUrl.js'
 import {
@@ -18,7 +21,7 @@ import {
 } from './fieldStorageModel.js'
 import { getRemoteQueryDataSource } from './source/remote.js'
 import type { QueryDataSource } from './source/types.js'
-import type { AssembleOptions, AttestationLike, SeedRecord } from './types.js'
+import type { AssembleOptions, AttestationLike, SeedRecord, VersionPin } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
 
@@ -46,24 +49,43 @@ const toCamelCase = (str: string): string => {
 type AssembleContext = {
   seedUidToModelType: Map<string, string>
   relatedSeedUids: Set<string>
+  /** Related seeds each seed's properties name (what its record depends on besides itself). */
+  relatedSeedUidsBySeedUid: Map<string, Set<string>>
   versionUidToSeedUid: Map<string, string>
   assembledItems: Map<string, Record<string, unknown>>
   versionsBySeedUid: Map<string, AttestationLike[]>
   latestVersionUidsBySeedUid: Map<string, string>
   /** Requested seeds left out because every version is revoked; not fetched again as related. */
   droppedSeedUids: Set<string>
+  /**
+   * The seeds asked for, in order. Only these become records: a related seed is fetched to expand
+   * relations into, even when it has the requested schema.
+   */
+  requestedSeedUids: Set<string>
 }
 
 function createAssembleContext(): AssembleContext {
   return {
     seedUidToModelType: new Map(),
     relatedSeedUids: new Set(),
+    relatedSeedUidsBySeedUid: new Map(),
     versionUidToSeedUid: new Map(),
     assembledItems: new Map(),
     versionsBySeedUid: new Map(),
     latestVersionUidsBySeedUid: new Map(),
     droppedSeedUids: new Set(),
+    requestedSeedUids: new Set(),
   }
+}
+
+/** Requested seeds still assembled (not dropped), in request order, with their items. */
+function requestedItems(ctx: AssembleContext): Array<[string, Record<string, unknown>]> {
+  const items: Array<[string, Record<string, unknown>]> = []
+  for (const seedUid of ctx.requestedSeedUids) {
+    const item = ctx.assembledItems.get(seedUid)
+    if (item) items.push([seedUid, item])
+  }
+  return items
 }
 
 function ensureSeedIdentity(clone: Record<string, unknown>, seedUid: string): void {
@@ -80,6 +102,19 @@ function ensureSeedIdentity(clone: Record<string, unknown>, seedUid: string): vo
   } else if (clone.Attester && !clone.attester) {
     clone.attester = clone.Attester
   }
+}
+
+function addRelatedSeedUid(
+  ctx: AssembleContext,
+  property: AttestationLike,
+  relatedSeedUid: string,
+): void {
+  ctx.relatedSeedUids.add(relatedSeedUid)
+  const seedUid = ctx.versionUidToSeedUid.get(property.refUID)
+  if (!seedUid) return
+  const related = ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? new Set<string>()
+  related.add(relatedSeedUid)
+  ctx.relatedSeedUidsBySeedUid.set(seedUid, related)
 }
 
 async function processItemProperty(
@@ -152,10 +187,10 @@ async function processItemProperty(
         }
       }
       metadata.value.forEach((value: string) => {
-        if (!relationValuesToExclude.includes(value)) ctx.relatedSeedUids.add(value)
+        if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
       })
     } else if (!relationValuesToExclude.includes(metadata.value as string)) {
-      ctx.relatedSeedUids.add(metadata.value as string)
+      addRelatedSeedUid(ctx, property, metadata.value as string)
     }
   }
 
@@ -163,7 +198,9 @@ async function processItemProperty(
   if (isRelation && isList && Array.isArray(propertyValue)) {
     propertyValue = propertyValue.map((v) => String(v))
   } else if (typeof propertyValue !== 'string') {
-    propertyValue = JSON.stringify(propertyValue)
+    // ADR 0010: an integer value as its decimal string, not the indexer's `{ type: 'BigNumber', hex }`.
+    const decimal = isNumericEasType(easType) ? decodeEasNumber(propertyValue) : undefined
+    propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
   const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
@@ -180,11 +217,44 @@ async function processItemProperty(
   ctx.assembledItems.set(seedUidForProperty, existingItem)
 }
 
+/** Pins that name a version or a time, by lowercase seed UID. */
+function activePins(pins: ReadonlyMap<string, VersionPin>): Map<string, VersionPin> {
+  const active = new Map<string, VersionPin>()
+  for (const [seedUid, pin] of pins) {
+    if (pin.versionUid !== undefined || pin.asOf !== undefined) active.set(seedUid.toLowerCase(), pin)
+  }
+  return active
+}
+
+/** The seed's live version `pin` names (else its newest), if it was created by `pin.asOf`. */
+function pinnedVersion(
+  versions: AttestationLike[],
+  pin: VersionPin,
+): AttestationLike | undefined {
+  const asOf = pin.asOf
+  const candidates =
+    asOf === undefined ? versions : versions.filter((v) => v.timeCreated <= asOf)
+  if (pin.versionUid === undefined) {
+    return [...candidates].sort((a, b) => b.timeCreated - a.timeCreated)[0]
+  }
+  const needle = pin.versionUid.toLowerCase()
+  return candidates.find((v) => v.id.toLowerCase() === needle)
+}
+
 async function processSeeds(
   ctx: AssembleContext,
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
-  opts: { dropSeedsWithOnlyRevokedVersions?: boolean } = {},
+  opts: {
+    dropSeedsWithOnlyRevokedVersions?: boolean
+    /**
+     * Versions already fetched with `getVersionsForSeeds(…, { includeRevoked: true })` for these
+     * seeds (and possibly others, which are ignored), so the request isn't made again.
+     */
+    versions?: AttestationLike[]
+    /** Versions to assemble instead of the latest, by lowercase seed UID (see VersionPin). */
+    pins?: ReadonlyMap<string, VersionPin>
+  } = {},
 ): Promise<void> {
   const seedUids: string[] = []
 
@@ -208,13 +278,17 @@ async function processSeeds(
 
   // Revoked versions come back too (marked), in the same request, only so a seed whose versions
   // were all revoked can be told from one that never had a version; they are never used below.
-  const allVersions = await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  const requested = new Set(seedUids)
+  const fetchedVersions = opts.versions
+    ? opts.versions.filter((v) => requested.has(v.refUID))
+    : await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  // Anyone can attest with any refUID: only the seed's attester's versions count.
+  const allVersions = keepAttestationsFromRefAttester(fetchedVersions, seeds)
   const itemVersions = allVersions.filter((v) => v.revoked !== true)
 
   if (opts.dropSeedsWithOnlyRevokedVersions) {
     // Like the SDK (latest published version skips revoked ones): every version revoked means
     // no published version, so the seed is left out. A seed with no version at all is kept.
-    const requested = new Set(seedUids)
     const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
     for (const version of allVersions) {
       const seedUid = version.refUID
@@ -233,7 +307,26 @@ async function processSeeds(
     ctx.versionsBySeedUid.set(seedUid, [...existingVersions, itemVersion])
   }
 
+  // Each seed's assembled version: the pinned one, else the latest. A pinned seed without that
+  // version (not the seed's, revoked, or created after `asOf`) is left out, like a seed whose
+  // versions were all revoked.
   const latestVersionUids: string[] = []
+  const asOfByVersionUid = new Map<string, number>()
+  for (const seedUid of seedUids) {
+    const pin = opts.pins?.get(seedUid.toLowerCase())
+    if (!pin) continue
+    const pinned = pinnedVersion(ctx.versionsBySeedUid.get(seedUid) ?? [], pin)
+    if (!pinned) {
+      ctx.assembledItems.delete(seedUid)
+      ctx.seedUidToModelType.delete(seedUid)
+      ctx.versionsBySeedUid.delete(seedUid)
+      ctx.droppedSeedUids.add(seedUid)
+      continue
+    }
+    latestVersionUids.push(pinned.id)
+    ctx.latestVersionUidsBySeedUid.set(seedUid, pinned.id)
+    if (pin.asOf !== undefined) asOfByVersionUid.set(pinned.id, pin.asOf)
+  }
   for (const [seedUid, versions] of ctx.versionsBySeedUid.entries()) {
     if (ctx.latestVersionUidsBySeedUid.has(seedUid)) continue
     const sortedVersions = [...versions].sort((a, b) => b.timeCreated - a.timeCreated)
@@ -246,8 +339,13 @@ async function processSeeds(
 
   if (latestVersionUids.length === 0) return
 
-  const rawProperties =
-    await dataSource.getPropertiesForVersionUids(latestVersionUids)
+  const rawProperties = keepAttestationsFromRefAttester(
+    await dataSource.getPropertiesForVersionUids(latestVersionUids),
+    itemVersions,
+  ).filter((property) => {
+    const asOf = asOfByVersionUid.get(property.refUID)
+    return asOf === undefined || property.timeCreated <= asOf
+  })
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
   for (let i = 0; i < itemProperties.length; i++) {
@@ -255,12 +353,8 @@ async function processSeeds(
   }
 }
 
-function resolveRelationPropertiesToUrls(ctx: AssembleContext, schemaName: string): void {
-  const itemsToProcess = Array.from(ctx.assembledItems.entries()).filter(
-    ([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName,
-  )
-
-  for (const [, item] of itemsToProcess) {
+function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
+  for (const [, item] of requestedItems(ctx)) {
     const keysToProcess = Object.keys(item).filter(
       (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
     )
@@ -362,18 +456,10 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext, schemaName: strin
   }
 }
 
-function expandRelationProperties(
-  ctx: AssembleContext,
-  schemaName: string,
-  expandRelations: boolean,
-): void {
+function expandRelationProperties(ctx: AssembleContext, expandRelations: boolean): void {
   if (!expandRelations) return
 
-  const itemsToProcess = Array.from(ctx.assembledItems.entries()).filter(
-    ([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName,
-  )
-
-  for (const [, item] of itemsToProcess) {
+  for (const [, item] of requestedItems(ctx)) {
     const keysToProcess = Object.keys(item).filter(
       (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
     )
@@ -444,35 +530,137 @@ function expandRelationProperties(
   }
 }
 
-function toSeedRecords(
-  ctx: AssembleContext,
+/** A record still being assembled (hydration fills in its data); read-only once returned. */
+type AssembledRecord = Omit<SeedRecord, 'data'> & { data: Record<string, unknown> }
+
+function toSeedRecords(ctx: AssembleContext, schemaName?: string): AssembledRecord[] {
+  return requestedItems(ctx).map(([seedUid, item]) => {
+    const versionUid = ctx.latestVersionUidsBySeedUid.get(seedUid) ?? ''
+    if (versionUid) {
+      item.versionUid = versionUid
+    }
+    ensureSeedIdentity(item, seedUid)
+    const timeCreated =
+      typeof item.timeCreated === 'number' ? item.timeCreated : 0
+    const attester =
+      typeof item.attester === 'string'
+        ? item.attester
+        : typeof item.Attester === 'string'
+          ? item.Attester
+          : undefined
+    return {
+      seedUid,
+      schemaName: schemaName ?? ctx.seedUidToModelType.get(seedUid) ?? 'unknown',
+      attester,
+      timeCreated,
+      versionUid,
+      data: item,
+    }
+  })
+}
+
+/**
+ * What an assembled record was built from, so a cache can tell when it changed: an attestation
+ * created or revoked later that references one of `refUIDs` (a new or revoked Version of the seed
+ * or of a seed it relates to, a property of one of their head Versions) or is one of `ids` (the
+ * seed or a related seed, revoked).
+ */
+export type SeedDependencies = {
+  refUIDs: string[]
+  ids: string[]
+}
+
+function dependenciesOf(ctx: AssembleContext, seedUid: string): SeedDependencies {
+  const seedUids = [seedUid, ...(ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? [])]
+  const headVersionUids = seedUids
+    .map((uid) => ctx.latestVersionUidsBySeedUid.get(uid))
+    .filter((uid): uid is string => !!uid)
+  return { refUIDs: [...seedUids, ...headVersionUids], ids: seedUids }
+}
+
+export type AssembleRequest = {
+  /** The schema name every record gets. Default: each seed's own (its first schema name). */
+  schemaName?: string
+  /** Versions of the seeds already fetched with `includeRevoked: true` (see getSeed). */
+  versions?: AttestationLike[]
+  /**
+   * Versions to assemble instead of the latest, by seed UID. Applies to `seeds` only: related
+   * seeds are always assembled at their latest version.
+   */
+  pins?: ReadonlyMap<string, VersionPin>
+}
+
+/**
+ * Like assembleSeeds, plus each record's dependencies by seedUid (see SeedDependencies).
+ */
+export async function assembleSeedsWithDependencies(
   schemaName: string,
-): SeedRecord[] {
-  return Array.from(ctx.assembledItems.entries())
-    .filter(([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName)
-    .map(([seedUid, item]) => {
-      const versionUid = ctx.latestVersionUidsBySeedUid.get(seedUid) ?? ''
-      if (versionUid) {
-        item.versionUid = versionUid
-      }
-      ensureSeedIdentity(item, seedUid)
-      const timeCreated =
-        typeof item.timeCreated === 'number' ? item.timeCreated : 0
-      const attester =
-        typeof item.attester === 'string'
-          ? item.attester
-          : typeof item.Attester === 'string'
-            ? item.Attester
-            : undefined
-      return {
-        seedUid,
-        schemaName,
-        attester,
-        timeCreated,
-        versionUid,
-        data: item,
-      }
-    })
+  seeds: AttestationLike[],
+  options?: AssembleOptions,
+  dataSource: QueryDataSource = getRemoteQueryDataSource(),
+  /** Versions of `seeds` already fetched with `includeRevoked: true` (see getSeed). */
+  prefetched?: { versions?: AttestationLike[] },
+): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
+  return assembleSeedRecords(seeds, options, dataSource, {
+    schemaName,
+    versions: prefetched?.versions,
+  })
+}
+
+/**
+ * Records for `seeds`, in order, which may be of different schemas, with each record's
+ * dependencies by seedUid. One set of requests for all of them: seeds and versions, properties,
+ * related seeds and their versions, related properties, then storage bodies.
+ */
+export async function assembleSeedRecords(
+  seeds: AttestationLike[],
+  options: AssembleOptions | undefined,
+  dataSource: QueryDataSource,
+  request: AssembleRequest = {},
+): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
+  const expandRelations = options?.expandRelations !== false
+  const hydrateStorage = options?.hydrateStorage !== false
+
+  const ctx = createAssembleContext()
+  for (const seed of seeds) if (seed) ctx.requestedSeedUids.add(seed.id)
+
+  await processSeeds(ctx, seeds, dataSource, {
+    dropSeedsWithOnlyRevokedVersions: true,
+    versions: request.versions,
+    pins: request.pins && activePins(request.pins),
+  })
+
+  const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
+    (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
+  )
+  if (relatedSeedUidsArray.length > 0) {
+    // Their versions only need the UIDs, so they are fetched alongside the seeds. Versions of a
+    // related seed that isn't returned (revoked, or not found) are ignored by processSeeds.
+    const [relatedSeeds, relatedVersions] = await Promise.all([
+      dataSource.getSeedsByUids(relatedSeedUidsArray),
+      dataSource.getVersionsForSeeds(relatedSeedUidsArray, { includeRevoked: true }),
+    ])
+    await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
+  }
+
+  resolveRelationPropertiesToUrls(ctx)
+  expandRelationProperties(ctx, expandRelations)
+
+  const records = toSeedRecords(ctx, request.schemaName)
+
+  if (hydrateStorage) {
+    await hydrateArweaveRichTextInItems(
+      records.map((r) => r.data),
+      dataSource.readStorageBody
+        ? { readStorageBody: dataSource.readStorageBody.bind(dataSource) }
+        : undefined,
+    )
+  }
+
+  const dependencies = new Map(
+    records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid)]),
+  )
+  return { records, dependencies }
 }
 
 /**
@@ -485,34 +673,5 @@ export async function assembleSeeds(
   options?: AssembleOptions,
   dataSource: QueryDataSource = getRemoteQueryDataSource(),
 ): Promise<SeedRecord[]> {
-  const expandRelations = options?.expandRelations !== false
-  const hydrateStorage = options?.hydrateStorage !== false
-
-  const ctx = createAssembleContext()
-
-  await processSeeds(ctx, seeds, dataSource, { dropSeedsWithOnlyRevokedVersions: true })
-
-  const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
-    (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
-  )
-  if (relatedSeedUidsArray.length > 0) {
-    const relatedSeeds = await dataSource.getSeedsByUids(relatedSeedUidsArray)
-    await processSeeds(ctx, relatedSeeds, dataSource)
-  }
-
-  resolveRelationPropertiesToUrls(ctx, schemaName)
-  expandRelationProperties(ctx, schemaName, expandRelations)
-
-  const records = toSeedRecords(ctx, schemaName)
-
-  if (hydrateStorage) {
-    await hydrateArweaveRichTextInItems(
-      records.map((r) => r.data),
-      dataSource.readStorageBody
-        ? { readStorageBody: dataSource.readStorageBody.bind(dataSource) }
-        : undefined,
-    )
-  }
-
-  return records
+  return (await assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)).records
 }

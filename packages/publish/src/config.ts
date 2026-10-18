@@ -1,13 +1,16 @@
+import { assertPublishPaymentConfig, resolveSponsorGas, resolveUseArweaveBundler } from './payment'
 import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   setAdditionalSyncAddresses,
   setGetPublisherForNewSeeds,
+  setPublishExecutor,
   setRevokeExecutor,
   whenLeaderTab,
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
+import { publishItem } from './helpers/publishItem'
 import {
   configureEasReadChain,
   expectEasReadChain,
@@ -55,7 +58,7 @@ export interface ThirdwebWalletOptions {
   bundlerUrl?: string
   /**
    * Sponsor gas through Thirdweb: the managed smart account's UserOps and, in `'EIP7702'` mode,
-   * the in-app EOA's transactions. Default `true`. Set `false` where Thirdweb's paymaster is
+   * the in-app EOA's transactions. Default `true` (`false` with `payment: { gas: 'user' }`). Set `false` where Thirdweb's paymaster is
    * unavailable (local chains); the accounts then pay their own gas and must hold ETH.
    */
   sponsorGas?: boolean
@@ -114,6 +117,13 @@ export interface PublishConfig {
    */
   thirdweb?: ThirdwebWalletOptions
   /**
+   * Who pays for publishes: `gas` (`'sponsored'` | `'user'`) and `storage` (`'operator'` |
+   * `'user'`). Optional; the settings below decide when it's left out. When set, it supplies
+   * their defaults (e.g. `gas: 'user'` makes Thirdweb wallets unsponsored) and `initPublish`
+   * throws on a contradiction. See `resolvePublishPayment`.
+   */
+  payment?: import('./payment').PublishPaymentConfig
+  /**
    * EntryPoint v0.8 bundler for the permissionless EIP-7702 `SeedTxSender` used by non-Thirdweb
    * wallets. Setting it switches `accountMode` to `eip7702`. Not used by Thirdweb wallets: a local
    * twin's (v0.6) bundler goes in {@link ThirdwebWalletOptions.bundlerUrl}. A bundler that
@@ -121,7 +131,8 @@ export interface PublishConfig {
    */
   bundlerUrl?: string
   /**
-   * Paymaster / sponsorship endpoint for permissionless EIP-7702 sends.
+   * Paymaster / sponsorship endpoint for permissionless EIP-7702 sends. Defaults to `bundlerUrl`,
+   * so the bundler is asked to sponsor; set `payment: { gas: 'user' }` to send without a paymaster.
    */
   paymasterUrl?: string
   /**
@@ -131,9 +142,9 @@ export interface PublishConfig {
   /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
   /**
-   * Gateway transport for publish + read paths. Prefer resolving once via
-   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` at app bootstrap
-   * and passing `uploadApiBaseUrl` / `arweaveGraphqlUrl` from the result.
+   * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
+   * them once at app bootstrap with
+   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` and pass those instead.
    */
   gatewayTransport?: 'http-gateway' | 'hyper' | 'hybrid'
   /** Operator Gateway Hyper key (z32) — informational; sidecar is configured separately. */
@@ -160,7 +171,7 @@ export interface PublishConfig {
    * missing; accounts without the extension are skipped.
    */
   modularAccountModuleContract?: string
-  /** Unused: `installSeedExecutor()` takes no install data. */
+  /** @deprecated Not read: `installSeedExecutor()` takes no install data. */
   modularAccountModuleData?: string
   /**
    * Use the modular executor for multiPublish.
@@ -216,6 +227,8 @@ export interface PublishConfig {
   ) => Promise<ArweaveTransactionInfoResult[]>
   /**
    * Optional fallback: Arweave JWK for in-process signing (non-bundler path). Prefer passing at createPublish time.
+   * A publish restored after a reload never has the per-publish JWK (it is not saved to the
+   * database), so it signs with this one, or fails at creatingArweaveTransactions without it.
    */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
@@ -240,6 +253,11 @@ export interface PublishConfig {
    * Per-publish {@link CreatePublishOptions.onPublished} overrides this when set.
    */
   onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /**
+   * Approves each publish before it spends anything; return `false` to refuse, or `{ token }` to
+   * send a token to the upload API with the publish's requests. See {@link AuthorizePublish}.
+   */
+  authorizePublish?: import('./authorization').AuthorizePublish
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
@@ -259,7 +277,11 @@ export interface CreatePublishOptions {
   signArweaveTransactions?: (
     uploads: SerializedPublishUpload[]
   ) => Promise<ArweaveTransactionInfoResult[]>
-  /** Required when NOT useArweaveBundler: JWK for in-process signing */
+  /**
+   * Required when NOT useArweaveBundler: JWK for in-process signing. Kept in memory only; it is
+   * stripped from the saved publish snapshot, so a publish resumed after a reload falls back to
+   * {@link PublishConfig.arweaveJwk}.
+   */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
    * Extra tags for this publish only, appended after {@link PublishConfig.arweaveUploadTags}.
@@ -276,6 +298,8 @@ export interface CreatePublishOptions {
    * Overrides {@link PublishConfig.onPublished} when both are set.
    */
   onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /** Overrides {@link PublishConfig.authorizePublish} for this publish. */
+  authorizePublish?: import('./authorization').AuthorizePublish
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */
@@ -296,11 +320,45 @@ export function getConfigRef(): PublishConfig | null {
 }
 
 /**
+ * `uploadApiBaseUrl` is where uploads and the operator's storage payments go. With operator-paid
+ * storage (the default) it must be set, or requests would go to `undefined/api/upload/...`.
+ * Whenever it is set it must be an absolute http(s) URL, or in a browser a path from the page's
+ * origin (`/seed-api`).
+ */
+export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment'>): void {
+  const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
+  if (!raw) {
+    if ((c.payment?.storage ?? 'operator') === 'operator') {
+      throw new Error(
+        'initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave), unless payment.storage is "user".',
+      )
+    }
+    return
+  }
+  if (raw.startsWith('/') && !raw.startsWith('//')) return
+  let url: URL | undefined
+  try {
+    url = new URL(raw)
+  } catch {
+    url = undefined
+  }
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    throw new Error(
+      `initPublish: uploadApiBaseUrl must be an absolute http(s) URL or a path from the page's origin, got "${c.uploadApiBaseUrl}".`,
+    )
+  }
+}
+
+/**
  * Initialize the publish package. Call once before using PublishManager or other publish APIs.
- * Registers the config and SDK hooks (revoke executor, getPublisherForNewSeeds, etc.).
+ * Registers the config and SDK hooks: the publish executor behind `item.publish()`, the
+ * revoke executor behind `item.unpublish()`, getPublisherForNewSeeds, etc. Until this runs,
+ * `item.publish()` and `item.unpublish()` throw.
  * For React apps, you can alternatively pass config to PublishProvider.
  */
 export function initPublish(c: PublishConfig): void {
+  assertPublishPaymentConfig(c)
+  assertUploadApiBaseUrl(c)
   // Fail fast on chains without a known EAS deployment and no address overrides.
   const easChain = resolvePublishEasChain(c)
   // Point SDK reads (EAS sync, schema lookups) at the chain we publish to. Throws when
@@ -313,6 +371,7 @@ export function initPublish(c: PublishConfig): void {
     if (wallet?.signer?.address) return wallet.signer.address
     return undefined
   })
+  setPublishExecutor(publishItem)
   setRevokeExecutor(revokeAttestations)
   // Polls every 45 s; one tab is enough (docs/MULTI_TAB.md). Starts on takeover if this tab
   // isn't the leader yet.
@@ -348,7 +407,6 @@ export interface ResolvedPublishConfig extends PublishConfig {
   /** EAS deployment for the publish chain (addresses, indexer and explorer URLs). */
   easChain: EasChainDeployment
   useDirectEas: boolean
-  modularAccountModuleData: string
   useModularExecutor: boolean
   useArweaveBundler: boolean
   /** Resolved: defaults to false. */
@@ -373,12 +431,12 @@ export type ResolvedThirdwebWalletOptions = {
 
 /** Applies defaults to {@link PublishConfig.thirdweb}. */
 export function resolveThirdwebWalletOptions(
-  config: Pick<PublishConfig, 'thirdweb'> | null | undefined,
+  config: Pick<PublishConfig, 'thirdweb' | 'payment'> | null | undefined,
 ): ResolvedThirdwebWalletOptions {
   const tw = config?.thirdweb ?? {}
   return {
     bundlerUrl: tw.bundlerUrl?.trim() || undefined,
-    sponsorGas: tw.sponsorGas ?? true,
+    sponsorGas: resolveSponsorGas(config ?? {}),
     modularWalletMode: tw.modularWalletMode ?? 'EIP7702',
   }
 }
@@ -397,7 +455,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
       '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
-  const useArweaveBundler = config.useArweaveBundler ?? false
+  const useArweaveBundler = resolveUseArweaveBundler(config)
   const arweaveUploadVerificationBaseUrl =
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
@@ -414,7 +472,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     schemaRegistryAddress: easChain.schemaRegistryAddress,
     easChain,
     useDirectEas: config.useDirectEas ?? false,
-    modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor,
     useArweaveBundler,
     arweaveUploadVerificationBaseUrl,

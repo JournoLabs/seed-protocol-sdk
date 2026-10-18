@@ -71,6 +71,8 @@ export interface RunDestroyLifecycleConfig<T extends object> {
 /**
  * Run the service event sequence and stop the service:
  * destroyStarted -> doDestroy -> (destroyError on failure) -> stop.
+ * A doDestroy failure is recorded on the service (destroyError) and rethrown, so destroy()
+ * rejects instead of resolving with the rows still in the DB.
  * Event names must match what the entity machines expect.
  */
 export async function runDestroyLifecycle<T extends object>(
@@ -83,6 +85,7 @@ export async function runDestroyLifecycle<T extends object>(
     await config.doDestroy()
   } catch (error) {
     service.send({ type: 'destroyError', error } as { type: string; error?: unknown })
+    throw error
   } finally {
     try {
       service.stop()

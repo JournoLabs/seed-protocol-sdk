@@ -1,10 +1,23 @@
 import { initializeQueryPlatform } from './bootstrap.js'
-import { assembleSeeds } from './assembleSeeds.js'
+import {
+  assembleSeedRecords,
+  assembleSeedsWithDependencies,
+  type SeedDependencies,
+} from './assembleSeeds.js'
 import { assembleSeedChangelog } from './assembleChangelog.js'
 import {
   buildAssembleOptionsKey,
   getQueryCacheManager,
 } from './cache/index.js'
+import {
+  checkedAtFor,
+  checkWindowAged,
+  findChangedItems,
+  findChangedSeeds,
+  nowSeconds,
+  type ItemChangeCheck,
+} from './cache/changes.js'
+import type { CachedItemData, CachedRecordMeta } from './cache/types.js'
 import {
   normalizeSourceMode,
   resolveQuerySource,
@@ -15,10 +28,15 @@ import type {
   AssembleOptions,
   GetSeedOptions,
   GetSeedResult,
+  GetSeedsOptions,
   QueryBySchemaOptions,
   QueryBySchemaResult,
+  AttestationLike,
   SeedRecord,
+  VersionPin,
 } from './types.js'
+
+const NO_DEPENDENCIES: SeedDependencies = { refUIDs: [], ids: [] }
 
 function shouldUseCache(
   options: AssembleOptions | undefined,
@@ -37,18 +55,23 @@ function wantsData(include: GetSeedOptions['include']): boolean {
   return include !== 'changelog'
 }
 
+type Assembled = {
+  records: SeedRecord[]
+  dependencies: Map<string, SeedDependencies>
+}
+
 async function fetchAndAssemble(
   schemaName: string,
   limit: number,
   skip: number,
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
-): Promise<SeedRecord[]> {
+): Promise<Assembled> {
   const seeds = await dataSource.listSeedsBySchemaName(schemaName, {
     limit,
     skip,
   })
-  return assembleSeeds(schemaName, seeds, options, dataSource)
+  return assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
 }
 
 /**
@@ -57,22 +80,137 @@ async function fetchAndAssemble(
 async function withAutoFallbackForCollection(
   mode: ReturnType<typeof normalizeSourceMode>,
   dataSource: QueryDataSource,
-  run: (ds: QueryDataSource) => Promise<SeedRecord[]>,
-): Promise<{ items: SeedRecord[]; dataSource: QueryDataSource; useQueryCache: boolean }> {
-  const items = await run(dataSource)
+  run: (ds: QueryDataSource) => Promise<Assembled>,
+): Promise<{ assembled: Assembled; dataSource: QueryDataSource; useQueryCache: boolean }> {
+  const assembled = await run(dataSource)
   if (mode !== 'auto' || dataSource.kind !== 'local') {
     return {
-      items,
+      assembled,
       dataSource,
       useQueryCache: dataSource.kind === 'remote',
     }
   }
-  if (items.length > 0) {
-    return { items, dataSource, useQueryCache: false }
+  if (assembled.records.length > 0) {
+    return { assembled, dataSource, useQueryCache: false }
   }
   const remote = getRemoteQueryDataSource()
-  const remoteItems = await run(remote)
-  return { items: remoteItems, dataSource: remote, useQueryCache: true }
+  return { assembled: await run(remote), dataSource: remote, useQueryCache: true }
+}
+
+/** Item-cache write-through for records assembled by a read that started at `startedAt`. */
+async function writeThroughAssembled(
+  assembled: Assembled,
+  optionsKey: string,
+  startedAt: number,
+  seenChangeKeys: string[] = [],
+): Promise<void> {
+  await getQueryCacheManager().writeThroughItems(
+    assembled.records.map((record) => ({
+      record,
+      optionsKey,
+      dependencies: assembled.dependencies.get(record.seedUid) ?? NO_DEPENDENCIES,
+      checkedAt: checkedAtFor(startedAt),
+      seenChangeKeys,
+      lastUpdated: startedAt,
+    })),
+  )
+}
+
+/**
+ * The schema's first `limit` seeds, newest first, from the collection cache where they haven't
+ * changed. The seed list itself is always fetched (it's cheap, and shows new and revoked seeds);
+ * cached seeds are checked for changes in one request (see findChangedSeeds), and only new or
+ * changed seeds are assembled. The TTL counts from the last full assembly.
+ */
+async function refreshCollection(
+  schemaName: string,
+  limit: number,
+  options: QueryBySchemaOptions | undefined,
+  optionsKey: string,
+  dataSource: QueryDataSource,
+): Promise<QueryBySchemaResult> {
+  const cache = getQueryCacheManager()
+  const startedAt = nowSeconds()
+  const cached = await cache.getCollection(schemaName, optionsKey)
+  const listed = await dataSource.listSeedsBySchemaName(schemaName, { limit, skip: 0 })
+
+  const cachedBySeedUid = new Map(cached?.items.map((item) => [item.seedUid, item]) ?? [])
+  let changed = new Set<string>()
+  let seenChangeKeys: string[] = []
+  if (cached) {
+    const toCheck = new Map<string, SeedDependencies>()
+    for (const seed of listed) {
+      const meta = cached.meta[seed.id]
+      if (cachedBySeedUid.has(seed.id)) toCheck.set(seed.id, meta?.dependencies ?? NO_DEPENDENCIES)
+    }
+    const found = await findChangedSeeds(dataSource, toCheck, cached)
+    if (found) {
+      changed = found.changed
+      seenChangeKeys = found.seenChangeKeys
+    } else {
+      changed = new Set(toCheck.keys())
+    }
+  }
+
+  const toAssemble = listed.filter((seed) => !cachedBySeedUid.has(seed.id) || changed.has(seed.id))
+  const fresh =
+    toAssemble.length > 0
+      ? await assembleSeedsWithDependencies(schemaName, toAssemble, options, dataSource)
+      : { records: [], dependencies: new Map<string, SeedDependencies>() } satisfies Assembled
+  const freshBySeedUid = new Map(fresh.records.map((record) => [record.seedUid, record]))
+
+  // In list order. A changed seed that no longer assembles (every version revoked) drops out,
+  // as do cached seeds no longer listed (revoked, or pushed past `limit`).
+  const items: SeedRecord[] = []
+  const meta: Record<string, CachedRecordMeta> = {}
+  for (const seed of listed) {
+    const record = freshBySeedUid.get(seed.id)
+    if (record) {
+      items.push(record)
+      meta[seed.id] = {
+        dependencies: fresh.dependencies.get(seed.id) ?? NO_DEPENDENCIES,
+        builtAt: startedAt,
+      }
+    } else if (cached && !changed.has(seed.id) && cachedBySeedUid.has(seed.id)) {
+      items.push(cachedBySeedUid.get(seed.id)!)
+      meta[seed.id] = cached.meta[seed.id] ?? { dependencies: NO_DEPENDENCIES, builtAt: startedAt }
+    }
+  }
+
+  const unchanged =
+    !!cached &&
+    fresh.records.length === 0 &&
+    items.length === cached.items.length &&
+    items.every((item, i) => item === cached.items[i])
+  if (cached && unchanged && !checkWindowAged(cached, startedAt)) {
+    return { items, limit, skip: 0, etag: cached.etag }
+  }
+  if (cached) cache.recordRefresh()
+
+  const stored = await cache.setCollection(schemaName, optionsKey, {
+    items,
+    meta,
+    checkedAt: checkedAtFor(startedAt),
+    seenChangeKeys,
+    lastUpdated: cached?.lastUpdated ?? startedAt,
+  })
+  await writeThroughAssembled(fresh, optionsKey, startedAt, seenChangeKeys)
+  // The cached records (frozen outside production), so a fresh result behaves like a cache hit.
+  return { items: stored ? [...stored.items] : items, limit, skip: 0, etag: stored?.etag }
+}
+
+/** Hex digits a uid prefix needs, so a stray short value can't list most of a schema. */
+const MIN_UID_PREFIX_HEX_DIGITS = 4
+
+/**
+ * `0x` + lowercase hex for a seed UID prefix given with or without `0x`, in any case (EAS indexes
+ * UIDs lowercase and matches prefixes case-sensitively). Null when it isn't 4–64 hex digits.
+ */
+export function normalizeUidPrefix(prefix: string): string | null {
+  const hex = prefix.trim().toLowerCase().replace(/^0x/, '')
+  if (hex.length < MIN_UID_PREFIX_HEX_DIGITS || hex.length > 64) return null
+  if (!/^[0-9a-f]+$/.test(hex)) return null
+  return `0x${hex}`
 }
 
 export async function queryBySchema(
@@ -86,61 +224,34 @@ export async function queryBySchema(
   const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
 
-  const runAssemble = (ds: QueryDataSource) =>
-    fetchAndAssemble(schemaName, limit, skip, options, ds)
+  let uidPrefix: string | null = null
+  if (options?.uidPrefix !== undefined) {
+    uidPrefix = normalizeUidPrefix(options.uidPrefix)
+    if (!uidPrefix) return { items: [], limit, skip }
+  }
 
-  // Collection cache only for remote + skip=0 working set
+  const runAssemble = async (ds: QueryDataSource): Promise<Assembled> => {
+    if (!uidPrefix) return fetchAndAssemble(schemaName, limit, skip, options, ds)
+    const seeds = await ds.listSeedsByUidPrefix(schemaName, uidPrefix, { limit, skip })
+    return assembleSeedsWithDependencies(schemaName, seeds, options, ds)
+  }
+
+  // Collection cache only for remote + skip=0 working set (a uid-prefix match isn't one)
   if (
+    !uidPrefix &&
     shouldUseCache(options, resolved.useQueryCache) &&
     skip === 0 &&
     resolved.dataSource.kind === 'remote'
   ) {
-    const cache = getQueryCacheManager()
-    return cache.withRefreshLock(schemaName, async () => {
-      const cachedData = await cache.getCollection(schemaName)
-      let items: SeedRecord[]
-      let etag: string | undefined
-
-      if (cachedData) {
-        const pageItems = await fetchAndAssemble(
-          schemaName,
-          limit,
-          0,
-          options,
-          resolved.dataSource,
-        )
-        const newItems = cache.filterNewRecords(
-          pageItems,
-          cachedData.lastProcessedTimestamp,
-        )
-
-        if (newItems.length > 0) {
-          items = cache
-            .mergeRecords(cachedData.items, newItems)
-            .slice(0, limit)
-        } else {
-          items = cachedData.items.slice(0, limit)
-        }
-      } else {
-        items = await fetchAndAssemble(
-          schemaName,
-          limit,
-          0,
-          options,
-          resolved.dataSource,
-        )
-      }
-
-      const stored = await cache.setCollection(schemaName, items)
-      etag = stored?.etag
-      await cache.writeThroughItems(items, optionsKey)
-
-      return { items, limit, skip, etag }
-    })
+    const lockKey = `${schemaName}\n${optionsKey}\n${limit}`
+    return getQueryCacheManager().withRefreshLock(lockKey, () =>
+      refreshCollection(schemaName, limit, options, optionsKey, resolved.dataSource),
+    )
   }
 
+  const startedAt = nowSeconds()
   const {
-    items,
+    assembled,
     dataSource: used,
     useQueryCache,
   } = await withAutoFallbackForCollection(mode, resolved.dataSource, (ds) =>
@@ -148,9 +259,65 @@ export async function queryBySchema(
   )
 
   if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
-    await getQueryCacheManager().writeThroughItems(items, optionsKey)
+    await writeThroughAssembled(assembled, optionsKey, startedAt)
   }
-  return { items, limit, skip }
+  return { items: assembled.records, limit, skip }
+}
+
+/**
+ * Cached items, by seedUid, for the seeds whose dependencies haven't changed since each was last
+ * checked (one change request for all; see findChangedItems). Changed items are dropped so the
+ * caller assembles them again.
+ */
+async function getUnchangedCachedItems(
+  requests: Array<{ seedUid: string; optionsKey: string }>,
+  dataSource: QueryDataSource,
+): Promise<Map<string, GetSeedResult>> {
+  const cache = getQueryCacheManager()
+  const cachedBySeedUid = new Map<string, CachedItemData>()
+  await Promise.all(
+    requests.map(async ({ seedUid, optionsKey }) => {
+      const cached = await cache.getItem(seedUid, optionsKey)
+      if (cached) cachedBySeedUid.set(seedUid, cached)
+    }),
+  )
+  const hits = new Map<string, GetSeedResult>()
+  if (cachedBySeedUid.size === 0) return hits
+
+  const startedAt = nowSeconds()
+  const checks = new Map<string, ItemChangeCheck>()
+  for (const [seedUid, cached] of cachedBySeedUid) checks.set(seedUid, cached)
+  const found = await findChangedItems(dataSource, checks)
+  for (const [seedUid, cached] of cachedBySeedUid) {
+    if (!found || found.changed.has(seedUid)) {
+      await cache.clearItem(seedUid, cached.optionsKey)
+      continue
+    }
+    if (checkWindowAged(cached, startedAt)) {
+      await cache.setItem({
+        ...cached,
+        checkedAt: checkedAtFor(startedAt),
+        seenChangeKeys: found.seenChangeKeys.get(seedUid) ?? [],
+      })
+    }
+    hits.set(seedUid, cached.record)
+  }
+  return hits
+}
+
+async function getUnchangedCachedItem(
+  seedUid: string,
+  optionsKey: string,
+  dataSource: QueryDataSource,
+): Promise<GetSeedResult | null> {
+  const hits = await getUnchangedCachedItems([{ seedUid, optionsKey }], dataSource)
+  return hits.get(seedUid) ?? null
+}
+
+/** The pin in `options`, if it names a version or a time. */
+function pinOf(options: VersionPin | undefined): VersionPin | undefined {
+  if (options?.versionUid === undefined && options?.asOf === undefined) return undefined
+  return { versionUid: options.versionUid, asOf: options.asOf }
 }
 
 export async function getSeed(
@@ -172,25 +339,30 @@ export async function getSeed(
   let allowCache = resolved.useQueryCache
 
   if (shouldUseCache(options, allowCache) && dataSource.kind === 'remote') {
-    const cached = await getQueryCacheManager().getItem(trimmed, optionsKey)
-    if (cached) {
-      return cached.record
-    }
+    const cached = await getUnchangedCachedItem(trimmed, optionsKey, dataSource)
+    if (cached) return cached
   }
 
-  let seed = await dataSource.getSeedByUid(trimmed)
+  // The seed's versions only need its UID, so they are fetched alongside the seed (assembly
+  // would otherwise ask for them after it).
+  const fetchSeedAndVersions = (ds: QueryDataSource) =>
+    Promise.all([
+      ds.getSeedByUid(trimmed),
+      ds.getVersionsForSeeds([trimmed], { includeRevoked: true }),
+    ])
+
+  const startedAt = nowSeconds()
+  let [seed, versions] = await fetchSeedAndVersions(dataSource)
 
   // auto: local miss → remote
   if (!seed && mode === 'auto' && dataSource.kind === 'local') {
     dataSource = getRemoteQueryDataSource()
     allowCache = true
-    seed = await dataSource.getSeedByUid(trimmed)
     if (shouldUseCache(options, allowCache)) {
-      const cached = await getQueryCacheManager().getItem(trimmed, optionsKey)
-      if (cached) {
-        return cached.record
-      }
+      const cached = await getUnchangedCachedItem(trimmed, optionsKey, dataSource)
+      if (cached) return cached
     }
+    ;[seed, versions] = await fetchSeedAndVersions(dataSource)
   }
 
   if (!seed) return null
@@ -199,10 +371,22 @@ export async function getSeed(
   if (!schemaName) return null
 
   let result: GetSeedResult | null = null
+  let dependencies: SeedDependencies = { refUIDs: [trimmed], ids: [trimmed] }
+
+  const pin = pinOf(options)
+  const assembleData = async (): Promise<SeedRecord | null> => {
+    const assembled = await assembleSeedRecords([seed], options, dataSource, {
+      schemaName,
+      versions,
+      pins: pin && new Map([[trimmed, pin]]),
+    })
+    const record = assembled.records[0]
+    if (record) dependencies = assembled.dependencies.get(record.seedUid) ?? dependencies
+    return record ?? null
+  }
 
   if (!wantsChangelog(include)) {
-    const records = await assembleSeeds(schemaName, [seed], options, dataSource)
-    result = records[0] ?? null
+    result = await assembleData()
   } else {
     const { latestVersionUid, changelog } = await assembleSeedChangelog(
       trimmed,
@@ -211,18 +395,8 @@ export async function getSeed(
     )
 
     if (wantsData(include)) {
-      const records = await assembleSeeds(
-        schemaName,
-        [seed],
-        options,
-        dataSource,
-      )
-      const record = records[0]
-      if (!record) {
-        result = null
-      } else {
-        result = { ...record, changelog }
-      }
+      const record = await assembleData()
+      result = record ? { ...record, changelog } : null
     } else {
       result = {
         seedUid: trimmed,
@@ -233,6 +407,13 @@ export async function getSeed(
         data: {},
         changelog,
       }
+      if (latestVersionUid) dependencies.refUIDs.push(latestVersionUid)
+    }
+    // Property changes on any version in the changelog change it.
+    for (const entry of changelog) dependencies.refUIDs.push(entry.versionUid)
+    dependencies = {
+      refUIDs: [...new Set(dependencies.refUIDs)],
+      ids: dependencies.ids,
     }
   }
 
@@ -241,9 +422,123 @@ export async function getSeed(
     shouldUseCache(options, allowCache) &&
     dataSource.kind === 'remote'
   ) {
-    await getQueryCacheManager().setItem(result, optionsKey)
+    const stored = await getQueryCacheManager().setItem({
+      record: result,
+      optionsKey,
+      dependencies,
+      checkedAt: checkedAtFor(startedAt),
+      seenChangeKeys: [],
+      lastUpdated: startedAt,
+    })
+    // The cached record (frozen outside production), so a fresh result behaves like a cache hit.
+    if (stored) result = stored.record
   }
 
+  return result
+}
+
+/**
+ * Many seeds, of any schemas, keyed by UID as given (first spelling of each, in order). Seeds
+ * not found, revoked, or without their pinned version are left out. Uncached seeds are
+ * assembled together, in one set of requests (see assembleSeedRecords), and cached ones are
+ * checked for changes in one request; records are shared with `getSeed` (same item cache).
+ * A seed can be read at one version per call.
+ */
+export async function getSeeds(
+  seedUids: readonly string[],
+  options?: GetSeedsOptions,
+): Promise<Map<string, SeedRecord>> {
+  await initializeQueryPlatform()
+
+  // Read lowercase (EAS indexes UIDs lowercase and matches them case-sensitively); keyed as given.
+  const givenByUid = new Map<string, string>()
+  for (const given of seedUids) {
+    if (typeof given !== 'string' || given.trim() === '') continue
+    const uid = given.trim().toLowerCase()
+    if (!givenByUid.has(uid)) givenByUid.set(uid, given.trim())
+  }
+  const requested = [...givenByUid.keys()]
+  if (requested.length === 0) return new Map()
+
+  const pins = new Map<string, VersionPin>()
+  for (const [uid, pin] of options?.pins ?? []) {
+    const active = pinOf(pin)
+    if (active) pins.set(uid.trim().toLowerCase(), active)
+  }
+  const optionsKeyFor = (seedUid: string) =>
+    buildAssembleOptionsKey({ ...options, ...pins.get(seedUid) })
+
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
+  const found = new Map<string, SeedRecord>()
+
+  /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
+  const readFrom = async (
+    dataSource: QueryDataSource,
+    allowCache: boolean,
+    uids: string[],
+  ): Promise<string[]> => {
+    const useCache = shouldUseCache(options, allowCache) && dataSource.kind === 'remote'
+    let toFetch = uids
+    if (useCache) {
+      const hits = await getUnchangedCachedItems(
+        uids.map((seedUid) => ({ seedUid, optionsKey: optionsKeyFor(seedUid) })),
+        dataSource,
+      )
+      for (const [seedUid, record] of hits) found.set(seedUid, record)
+      toFetch = uids.filter((uid) => !hits.has(uid))
+    }
+    if (toFetch.length === 0) return []
+
+    const startedAt = nowSeconds()
+    const [seeds, versions] = await Promise.all([
+      dataSource.getSeedsByUids(toFetch),
+      dataSource.getVersionsForSeeds(toFetch, { includeRevoked: true }),
+    ])
+    const seedByUid = new Map(seeds.map((seed) => [seed.id.toLowerCase(), seed]))
+    const missing = toFetch.filter((uid) => !seedByUid.has(uid))
+    // Like getSeed: a seed without a schema name isn't assembled.
+    const toAssemble = toFetch
+      .map((uid) => seedByUid.get(uid))
+      .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
+
+    const assembled = await assembleSeedRecords(toAssemble, options, dataSource, {
+      versions,
+      pins,
+    })
+    for (const record of assembled.records) {
+      let result: SeedRecord = record
+      if (useCache) {
+        const stored = await getQueryCacheManager().setItem({
+          record,
+          optionsKey: optionsKeyFor(record.seedUid.toLowerCase()),
+          dependencies: assembled.dependencies.get(record.seedUid) ?? {
+            refUIDs: [record.seedUid],
+            ids: [record.seedUid],
+          },
+          checkedAt: checkedAtFor(startedAt),
+          seenChangeKeys: [],
+          lastUpdated: startedAt,
+        })
+        // The cached record (frozen outside production), so a fresh result behaves like a cache hit.
+        if (stored) result = stored.record
+      }
+      found.set(record.seedUid.toLowerCase(), result)
+    }
+    return missing
+  }
+
+  const missing = await readFrom(resolved.dataSource, resolved.useQueryCache, requested)
+  // auto: seeds the local source doesn't have → remote
+  if (missing.length > 0 && mode === 'auto' && resolved.dataSource.kind === 'local') {
+    await readFrom(getRemoteQueryDataSource(), true, missing)
+  }
+
+  const result = new Map<string, SeedRecord>()
+  for (const [uid, given] of givenByUid) {
+    const record = found.get(uid)
+    if (record) result.set(given, record)
+  }
   return result
 }
 
@@ -267,16 +562,16 @@ export async function queryBySchemaForMonth(
       year,
       month,
     )
-    return assembleSeeds(schemaName, seeds, options, ds)
+    return assembleSeedsWithDependencies(schemaName, seeds, options, ds)
   }
 
-  const { items, dataSource: used, useQueryCache } =
+  const startedAt = nowSeconds()
+  const { assembled, dataSource: used, useQueryCache } =
     await withAutoFallbackForCollection(mode, resolved.dataSource, run)
 
   if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
-    const optionsKey = buildAssembleOptionsKey(options)
-    await getQueryCacheManager().writeThroughItems(items, optionsKey)
+    await writeThroughAssembled(assembled, buildAssembleOptionsKey(options), startedAt)
   }
 
-  return items
+  return assembled.records
 }

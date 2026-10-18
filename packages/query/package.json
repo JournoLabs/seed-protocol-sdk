@@ -1,9 +1,21 @@
 {
   "name": "@seedprotocol/query",
-  "version": "0.7.0",
-  "description": "Canonical Seed JSON query (remote EAS + local SQLite adapters) for Seed Protocol",
+  "version": "0.7.6",
+  "description": "Read canonical Seed Protocol JSON (seeds, collections, changelogs) from EAS attestations or a local SQLite source, with memory and disk caching",
+  "keywords": [
+    "seed-protocol",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "query",
+    "arweave",
+    "sqlite",
+    "web3"
+  ],
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.node.js",
+  "types": "./dist/index.node.d.ts",
+  "browser": "./dist/index.js",
   "exports": {
     ".": {
       "browser": {
@@ -52,10 +64,19 @@
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/query"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/query#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

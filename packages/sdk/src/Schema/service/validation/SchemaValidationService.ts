@@ -5,10 +5,16 @@ import { ValidationResult, ValidationError, ValidationRules, DEFAULT_TEXT_MAX_LE
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { ModelMachineContext } from '@/Model/service/modelMachine'
-import { Type, TSchema, TUnion, TLiteral } from '@sinclair/typebox'
+import { FormatRegistry, Type, TSchema, TUnion, TLiteral } from '@sinclair/typebox'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:validation')
+
+// Date properties use Type.String({ format: 'date-time' }). TypeBox only checks formats that are
+// registered, and fails every value for an unknown one, so without this no Date value was valid.
+if (!FormatRegistry.Has('date-time')) {
+  FormatRegistry.Set('date-time', (value) => !Number.isNaN(Date.parse(value)))
+}
 
 /**
  * Service for validating schemas, models, and properties using TypeBox
@@ -209,6 +215,15 @@ export class SchemaValidationService {
         }))
       }
       
+      if (normalized.validation?.custom) {
+        errors.push({
+          field: 'validation.custom',
+          message: `Custom validators are not supported (validation.custom: "${normalized.validation.custom}"). Use pattern, minLength, maxLength or enum.`,
+          code: 'custom_validation_unsupported',
+          severity: 'error' as const,
+        })
+      }
+
       // Non-List types: refValueType is only valid for Relation+Image (related entity type). Reject otherwise.
       const nonListTypes = [
         ModelPropertyDataTypes.Text,
@@ -353,7 +368,11 @@ export class SchemaValidationService {
         const elementDataType = normalizeDataType(String(refValueType)) as ModelPropertyDataTypes
         // Apply default maxLength for Text elements in List. Html elements hold arbitrary-length content.
         const elementEffectiveRules = validationRules ? { ...validationRules } : {}
-        if (elementDataType === ModelPropertyDataTypes.Text && elementEffectiveRules.maxLength === undefined) {
+        if (
+          elementDataType === ModelPropertyDataTypes.Text &&
+          elementEffectiveRules.maxLength === undefined &&
+          !(Array.isArray(elementEffectiveRules.enum) && elementEffectiveRules.enum.length > 0)
+        ) {
           elementEffectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
         }
         for (let i = 0; i < value.length; i++) {
@@ -400,7 +419,9 @@ export class SchemaValidationService {
 
       // Apply default maxLength for Text when not explicitly set. Html holds arbitrary-length content (e.g. article body) and must not default to 255.
       const effectiveRules = validationRules ? { ...validationRules } : {}
-      if (dataType === ModelPropertyDataTypes.Text && effectiveRules.maxLength === undefined) {
+      // An enum already bounds the value, so the default limit is not added to it.
+      const hasEnum = !!(effectiveRules.enum && Array.isArray(effectiveRules.enum) && effectiveRules.enum.length > 0)
+      if (dataType === ModelPropertyDataTypes.Text && effectiveRules.maxLength === undefined && !hasEnum) {
         effectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
       }
 
@@ -797,7 +818,10 @@ export class SchemaValidationService {
   }
 
   /**
-   * Apply validation rules to a TypeBox schema
+   * Apply validation rules to a TypeBox schema. For Text and Html, pattern, minLength and
+   * maxLength combine into one string schema; enum further restricts the value to its list.
+   * (Each rule used to replace the schema built so far, so e.g. Text's default maxLength
+   * silently dropped any pattern.)
    */
   private applyValidationRules(
     schema: TSchema,
@@ -806,34 +830,26 @@ export class SchemaValidationService {
   ): TSchema {
     let result = schema
 
-    // Apply pattern (regex) for strings
-    if (rules.pattern && (dataType === ModelPropertyDataTypes.Text || dataType === ModelPropertyDataTypes.Html)) {
-      try {
-        const regex = new RegExp(rules.pattern)
-        result = Type.RegExp(regex)
-      } catch (error) {
-        logger('Invalid regex pattern:', rules.pattern, error)
-      }
-    }
-
-    // Apply minLength/maxLength for strings
     if (dataType === ModelPropertyDataTypes.Text || dataType === ModelPropertyDataTypes.Html) {
-      const stringSchema = Type.String()
-      if (rules.minLength !== undefined) {
-        result = Type.String({ minLength: rules.minLength })
-      }
-      if (rules.maxLength !== undefined) {
-        if (rules.minLength !== undefined) {
-          result = Type.String({ minLength: rules.minLength, maxLength: rules.maxLength })
-        } else {
-          result = Type.String({ maxLength: rules.maxLength })
+      const options: { pattern?: string; minLength?: number; maxLength?: number } = {}
+      if (rules.pattern) {
+        try {
+          new RegExp(rules.pattern)
+          options.pattern = rules.pattern
+        } catch (error) {
+          logger('Invalid regex pattern:', rules.pattern, error)
         }
       }
+      if (rules.minLength !== undefined) options.minLength = rules.minLength
+      if (rules.maxLength !== undefined) options.maxLength = rules.maxLength
+      if (Object.keys(options).length > 0) {
+        result = Type.String(options)
+      }
     }
 
-    // Apply enum
     if (rules.enum && Array.isArray(rules.enum) && rules.enum.length > 0) {
-      result = Type.Union(rules.enum.map(val => Type.Literal(val)))
+      const allowed = Type.Union(rules.enum.map(val => Type.Literal(val)))
+      result = result === schema ? allowed : Type.Intersect([result, allowed])
     }
 
     return result
@@ -848,10 +864,9 @@ export class SchemaValidationService {
   ): ValidationError[] {
     const errors: ValidationError[] = []
 
-    // Custom validator reference (would need to be implemented based on your needs)
+    // Custom validators are not supported; validatePropertyStructure rejects schemas that use them.
     if (rules.custom) {
-      // TODO: Implement custom validator lookup and execution
-      logger('Custom validator not yet implemented:', rules.custom)
+      logger('Ignoring unsupported custom validator:', rules.custom)
     }
 
     return errors

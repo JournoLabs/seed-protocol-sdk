@@ -25,7 +25,7 @@ import {
   resolveStorageNameToSchemaName,
 } from '@/helpers'
 import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -39,6 +39,7 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteQueue'
 import {
   ModelPropertyDataTypes,
   isDataType,
@@ -426,7 +427,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               }
             }
             if (exists && isFile) {
-              renderValue = await BaseFileManager.readFileAsString(filePath,)
+              // A File's value is its content URL (a blob URL in browsers, file:// in Node), as saveFile
+              // and hydrateFromDb set it. Reading the text here made the value change from the URL to
+              // the file's contents a moment after every save or load.
+              renderValue =
+                context.refResolvedDisplayValue ?? (await BaseFileManager.getContentUrlFromPath(filePath))
             }
             if (!exists) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -705,7 +710,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               
               const metaRow = metadataRows[0]
               logger(`[ItemProperty._setupLiveQuerySubscription] Metadata updated in database for propertyName: ${propertyName}`)
-              
+
+              // While this property has a save pending, the row is older than the value in memory
+              // (the user may still be typing): showing it would drop keystrokes, and another tab's
+              // write would replace the value being typed. The save sets the context itself.
+              const { context } = this._service.getSnapshot()
+              if (
+                context.isSaving ||
+                hasPendingPropertyWrite(
+                  propertyWriteKey(context.seedLocalId ?? context.seedUid, context.propertyName),
+                )
+              ) {
+                return
+              }
+
               // Update context with metadata changes
               this._service.send({
                 type: 'updateContext',
@@ -921,7 +939,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: { waitForReady?: false },
+    options: { waitForReady: false },
   ): ItemProperty<any> | undefined
   static create(
     props: Partial<CreatePropertyInstanceProps>,
@@ -932,7 +950,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     options?: CreateWaitOptions,
   ): ItemProperty<any> | undefined | Promise<ItemProperty<any> | undefined> {
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     const { propertyName, seedLocalId, seedUid, versionLocalId, versionUid } =
       props
@@ -1107,13 +1125,46 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
   }
 
+  /**
+   * The cached ItemProperty when it can be read right now (idle, not saving), the state
+   * `ItemProperty.find()` waits for. Otherwise undefined. Unlike `find`, it takes no cache hold, so
+   * React hooks can call it during render.
+   */
+  static peekReady({
+    propertyName,
+    seedLocalId,
+    seedUid,
+  }: {
+    propertyName?: string
+    seedLocalId?: string
+    seedUid?: string
+  }): ItemProperty<any> | undefined {
+    if (!propertyName) return undefined
+    // Same key order as find(), then the other id: instances are cached under both when both are known.
+    const keys = [seedUid, seedLocalId]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => this.cacheKey(id, propertyName))
+    for (const key of keys) {
+      const instance = this.instanceCache.get(key)?.instance
+      if (!instance) continue
+      const snap = instance.getService().getSnapshot() as {
+        status?: string
+        value?: unknown
+        context?: { isSaving?: boolean }
+      }
+      if (snap.status !== 'active' || snap.value !== 'idle' || snap.context?.isSaving) return undefined
+      return instance
+    }
+    return undefined
+  }
+
   static async find({
     propertyName,
     seedLocalId,
     seedUid,
     modelName: modelNameOption,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1188,7 +1239,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     params: { seedLocalId?: string; seedUid?: string },
     options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
@@ -1419,6 +1470,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (currentValue === value) {
       return
     }
+    // Restored if the save is refused (item not owned) or fails.
+    const before = { propertyValue: context.propertyValue, renderValue: context.renderValue }
     // Update context immediately so UI shows the value before save completes
     this._service.send({
       type: 'updateContext',
@@ -1438,7 +1491,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         (schema) => {
           if (!schema) return false
           this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
-          this._service.send({ type: 'save', newValue: value })
+          this._service.send({ type: 'save', newValue: value, before })
           return true
         },
         () => false,
@@ -1451,6 +1504,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       this._service.send({
         type: 'save',
         newValue: value,
+        before,
       })
     }
   }
@@ -1577,10 +1631,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   /**
-   * Destroy the item property: remove from caches, delete metadata from DB, remove from parent Item, stop service.
+   * Destroy the item property: remove from caches, delete its metadata rows (every version of
+   * this item's value) from the DB, remove it from the parent Item, and stop the service.
+   * Throws OwnershipError if none of the client's addresses own the item.
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
+    const { assertItemOwned } = await import('@/helpers/ownership')
+    await assertItemOwned({
+      seedLocalId: context.seedLocalId ?? undefined,
+      seedUid: context.seedUid ?? undefined,
+    })
     const cacheKey = ItemProperty.cacheKey(
       context.seedUid || context.seedLocalId || '',
       context.propertyName || '',
@@ -1611,11 +1672,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const seedSchemaMod = await import('../seedSchema')
           const { metadata } = seedSchemaMod
           const drizzleMod = await import('drizzle-orm')
-          const { and, eq, or } = drizzleMod
+          const { and, eq } = drizzleMod
           const conditions = [eq(metadata.propertyName, propertyName)]
-          if (seedLocalId && seedUid) {
-            conditions.push(or(eq(metadata.seedLocalId, seedLocalId), eq(metadata.seedUid, seedUid)) as any)
-          } else if (seedLocalId) {
+          // Match this item's local rows only. Matching seedUid too would also delete rows of
+          // other local copies of the same seed (e.g. duplicate EAS syncs).
+          if (seedLocalId) {
             conditions.push(eq(metadata.seedLocalId, seedLocalId))
           } else if (seedUid) {
             conditions.push(eq(metadata.seedUid, seedUid))

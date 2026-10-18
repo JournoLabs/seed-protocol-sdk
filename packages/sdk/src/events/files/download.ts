@@ -18,6 +18,10 @@ import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySel
 import { getArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { Endpoints } from '@/types'
+import type { TransactionTag } from '@/types/arweave'
+import { getTransactionTagsByIds } from '@seedprotocol/arweave'
+import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
+import { getCompositeChildPaths } from '@/db/read/getCompositeChildPaths'
 import { throttle } from 'lodash-es'
 
 
@@ -91,14 +95,11 @@ const normalizeArweaveTxId = (raw: string | null | undefined): string | undefine
   if (ARWEAVE_TX_ID_RE.test(t)) return t
   const m = t.match(/^([a-z0-9_-]{43})(?:\.[^/]+)?$/i)
   if (m) return m[1]
-  // Values may be full gateway URLs or paths; scan for the embedded tx id.
-  const embedded = t.match(/[a-z0-9_-]{43}/gi)
-  if (embedded) {
-    for (const candidate of embedded) {
-      if (ARWEAVE_TX_ID_RE.test(candidate)) return candidate
-    }
-  }
-  return undefined
+  // Values may be full gateway URLs or paths; scan for an embedded tx id. It must be 43 characters
+  // on its own, not the start of a longer run: the first 43 of a bytes32 value (`0x0000…0020`,
+  // an EAS UID) are in the alphabet too.
+  const embedded = t.match(/(?<![a-z0-9_-])[a-z0-9_-]{43}(?![a-z0-9_-])/gi)
+  return embedded?.[0]
 }
 
 const mergeAddressLists = (a: string[] | undefined, b: string[] | undefined): string[] => {
@@ -198,6 +199,63 @@ const parseTransactionIdsFromMetadata = (filesMetadata: any[], excludedTransacti
   return transactionIds
 }
 
+/** Content-SHA-256 tag values for the transactions that have one, from one batched tag lookup (cached). */
+const getExpectedContentHashes = async (transactionIds: string[]): Promise<Record<string, string>> => {
+  const queryClient = BaseQueryClient.getQueryClient()
+  const tagsById = new Map<string, TransactionTag[]>()
+  const toFetch: string[] = []
+  for (const transactionId of transactionIds) {
+    // Tags never change once a transaction is indexed, so a cached lookup stays good.
+    const cached = queryClient.getQueryData?.(['getTransactionTags', transactionId]) as TransactionTag[] | undefined
+    if (cached) tagsById.set(transactionId, cached)
+    else toFetch.push(transactionId)
+  }
+
+  if (toFetch.length > 0) {
+    try {
+      const fetched = await getTransactionTagsByIds(toFetch, {
+        client: BaseArweaveClient.getArweaveClient(),
+        onError: (error: unknown) => logger('[download] transaction tags lookup failed', error),
+      })
+      for (const [transactionId, tags] of fetched) {
+        tagsById.set(transactionId, tags)
+        // Seed the per-transaction cache entry (the client interface has no setQueryData).
+        void queryClient
+          .fetchQuery({ queryKey: ['getTransactionTags', transactionId], queryFn: async () => tags })
+          .catch(() => {})
+      }
+    } catch (error) {
+      logger('[download] transaction tags lookup failed', error)
+    }
+  }
+
+  const out: Record<string, string> = {}
+  for (const [transactionId, tags] of tagsById) {
+    const value = tags.find((tag) => tag.name === CONTENT_SHA256_TAG)?.value?.trim()
+    if (value) out[transactionId] = value
+  }
+  return out
+}
+
+/** Store the (now verified) Content-SHA-256 of each downloaded transaction on its metadata row. */
+const recordVerifiedContentHashes = async (
+  transactionIds: string[],
+  expectedContentHashes: Record<string, string>,
+): Promise<void> => {
+  for (const transactionId of transactionIds) {
+    const contentHash = expectedContentHashes[transactionId]
+    if (!contentHash) continue
+    try {
+      const metadataRecord = await getMetadata({ storageTransactionId: transactionId })
+      if (metadataRecord) {
+        await saveMetadata(metadataRecord, { contentHash })
+      }
+    } catch (error) {
+      logger(error)
+    }
+  }
+}
+
 const downloadTransactionIds = async (
   rawTransactionIds: string[],
   options?: { resizeAllImages?: boolean },
@@ -212,72 +270,57 @@ const downloadTransactionIds = async (
   }
 
   const excludedTransactions = await getExcludedTransactions()
-  const queryClient = BaseQueryClient.getQueryClient()
-
-  const transactionIdsToDownload: string[] = []
 
   await ensureReadGatewaySelected()
 
-  for (const transactionId of transactionIds) {
-    if (excludedTransactions.has(transactionId)) {
-      continue
-    }
-
-    try {
-      // Browser: do not call getTransactionStatus() — many gateways (e.g. g8way.io) redirect or omit
-      // CORS headers, so fetch() fails and we would wrongly exclude txs. The OPFS worker fetch decides success.
-
-      let tags: { name: string; value: string }[] = []
-      try {
-        tags = await queryClient.fetchQuery({
-          queryKey: ['getTransactionTags', transactionId],
-          queryFn: async () => BaseArweaveClient.getTransactionTags(transactionId),
-        })
-      } catch {
-        tags = []
-      }
-
-      if (tags && tags.length > 0) {
-        for (const { name, value } of tags) {
-          if (name !== 'Content-SHA-256') continue
-          const metadataRecord = await getMetadata({
-            storageTransactionId: transactionId,
-          })
-          if (metadataRecord) {
-            await saveMetadata(metadataRecord, {
-              contentHash: value,
-            })
-          }
-        }
-      }
-
-      transactionIdsToDownload.push(transactionId)
-    } catch (error) {
-      logger(error)
-    }
-  }
-
+  // Browser: do not call getTransactionStatus() — many gateways (e.g. g8way.io) redirect or omit
+  // CORS headers, so fetch() fails and we would wrongly exclude txs. The OPFS worker fetch decides success.
+  const transactionIdsToDownload = transactionIds.filter((id) => !excludedTransactions.has(id))
   if (transactionIdsToDownload.length === 0) {
     return false
   }
 
+  // One batched lookup for every upload's Content-SHA-256 tag; downloads are verified against it.
+  // Missing tags (old uploads, or a just-published one not indexed yet) just mean no verification.
+  const expectedContentHashes = await getExpectedContentHashes(transactionIdsToDownload)
+
   // Preferred gateways first: a just-published item is only on the gateway it was uploaded through.
   const arweaveBaseUrls = getArweaveReadBaseUrls()
 
+  // Where each ItemStorage child of a composite goes (the worker cannot read the DB or the schema).
+  const compositeChildPaths = await getCompositeChildPaths(transactionIdsToDownload).catch((error) => {
+    logger('[download] composite child paths lookup failed', error)
+    return {} as Record<string, Record<string, string>>
+  })
+
+  let result: DownloadAllFilesResult | void
   if (transactionIdsToDownload.length === 1) {
-    await BaseFileManager.downloadFileByTransactionId({
-      transactionId: transactionIdsToDownload[0],
+    const transactionId = transactionIdsToDownload[0]
+    result = await BaseFileManager.downloadFileByTransactionId({
+      transactionId,
       arweaveHost: BaseArweaveClient.getBaseUrl(),
       arweaveBaseUrls,
       excludedTransactions,
+      expectedContentHash: expectedContentHashes[transactionId],
+      compositeChildPaths: compositeChildPaths[transactionId],
     })
   } else {
-    await BaseFileManager.downloadAllFiles({
+    result = await BaseFileManager.downloadAllFiles({
       transactionIds: transactionIdsToDownload,
       arweaveHost: BaseArweaveClient.getBaseUrl(),
       arweaveBaseUrls,
       excludedTransactions,
+      expectedContentHashes,
+      compositeChildPaths,
     })
+  }
+
+  if (result) {
+    for (const transactionId of result.hashMismatchTransactionIds) {
+      // Not saved by the worker; left for a later run (a gateway may serve the right bytes then).
+      logger(`[download] ${transactionId}: downloaded bytes do not match Content-SHA-256; skipped`)
+    }
+    await recordVerifiedContentHashes(result.verifiedTransactionIds, expectedContentHashes)
   }
 
   if (options?.resizeAllImages !== false) {
@@ -395,6 +438,7 @@ export const downloadAllFilesBinaryRequestHandler = async (
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('html'))
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('json'))
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
+  await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('files'))
 
   const excludedTransactions = await getExcludedTransactions()
   const fromEas = parseTransactionIdsFromMetadata(filesMetadata ?? [], excludedTransactions)
@@ -408,7 +452,11 @@ export const downloadTransactionIdWithDedupe = async (transactionId: string): Pr
     return false
   }
 
-  const normalizedTxId = normalizeArweaveTxId(transactionId) ?? transactionId.trim()
+  const normalizedTxId = normalizeArweaveTxId(transactionId)
+  if (!normalizedTxId) {
+    logger(`[download] not an Arweave transaction id: ${transactionId}`)
+    return false
+  }
 
   const existing = lazyDownloadInFlightByTransactionId.get(normalizedTxId)
   if (existing) {

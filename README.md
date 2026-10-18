@@ -40,32 +40,55 @@ npm install @seedprotocol/sdk
 pnpm add @seedprotocol/sdk
 ```
 
-**Optional (React):** If you use React hooks (`useModel`, `useSchema`, etc.), install peer dependencies:
+**Optional (React):** For React hooks (`useModel`, `useItems`, etc.), install [`@seedprotocol/react`](https://www.npmjs.com/package/@seedprotocol/react) and its peer dependencies:
 
 ```bash
-bun add react @tanstack/react-query
+bun add @seedprotocol/react react @tanstack/react-query
 ```
 
 ## Quick start
 
-1. **Define your schema** in a config file at the project root: `seed.config.ts` (recommended), `seed.schema.ts`, or `schema.ts`.
+1. **Optionally declare your schema** in a config file at the project root: `seed.config.ts` (recommended), `seed.schema.ts`, or `schema.ts`.
 
 2. **Use the SDK** in your app:
 
 ```ts
-import { Model, Property, Item } from '@seedprotocol/sdk'
+import { client, Schema, Model } from '@seedprotocol/sdk'
 
-// Define models in your schema; then create and publish items:
-const post = await Post.create({ title: 'Hello', summary: '...', ... })
-await post.publish()
+await client.init({ config: { filesDir: '.seed' } })
+
+const schema = await Schema.create('Blog')
+const Post = await Model.create('Post', schema, {
+  properties: { title: { dataType: 'Text' }, summary: { dataType: 'Text' } },
+})
+const post = await Post.create({ title: 'Hello', summary: '...' })
+post.title = 'Hello, world' // persisted by the SDK
 ```
 
-For full guides on schema, models, properties, items, files, and the CLI, see **[the docs](https://seedprotocol.io)**.
+`item.publish()` needs **[@seedprotocol/publish](packages/publish)**. The SDK builds the payload, but the uploads and EAS writes are done by an executor that the publish package registers when you call its `initPublish()` (or mount `<PublishProvider config>`). Without it, `publish()` throws an error saying so. `item.unpublish()` works the same way.
+
+For full guides on schema, models, properties, items, files, and the CLI, see **[the docs](https://seedprotocol.io)** and [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ## Module support
 
-- **ESM** (recommended): `import { Model, Property, Item } from '@seedprotocol/sdk'`
-- **CommonJS**: `const { Model, Property, Item } = require('@seedprotocol/sdk')`
+- **ESM** (recommended): `import { Schema, Model, Item } from '@seedprotocol/sdk'`
+- **CommonJS**: `const { Schema, Model, Item } = require('@seedprotocol/sdk')`. The package is ESM-only; `require()` loads the same ESM build through Node's `require(esm)`, so it needs Node 20.19+ or 22.12+.
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| [`@seedprotocol/sdk`](packages/sdk) | Core SDK: local-first ORM, EAS + Arweave sync |
+| [`@seedprotocol/react`](packages/react) | React hooks and components |
+| [`@seedprotocol/publish`](packages/publish) | Publish flow (EAS attestations + Arweave uploads) |
+| [`@seedprotocol/vite`](packages/vite) | Vite plugin for browser apps |
+| [`@seedprotocol/query`](packages/query) | Canonical Seed JSON queries over EAS or local SQLite |
+| [`@seedprotocol/feed`](packages/feed) | RSS, Atom and JSON Feed generation |
+| [`@seedprotocol/feed-hyper`](packages/feed-hyper) | Hyperdrive / Hyperswarm feed distribution |
+| [`@seedprotocol/gateway-hyper`](packages/gateway-hyper) | Hyperswarm HTTP tunnel for gateway + upload API |
+| [`@seedprotocol/mapping`](packages/mapping) | Field mapping from external sources to models |
+| [`@seedprotocol/eas`](packages/eas) | EAS GraphQL read client |
+| [`@seedprotocol/arweave`](packages/arweave) | Arweave gateway client |
 
 ## License
 

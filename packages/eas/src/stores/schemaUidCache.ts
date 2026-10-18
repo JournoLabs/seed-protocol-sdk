@@ -110,6 +110,10 @@ export const setSchemaUidForModel = ({
 export const getSchemaUidForModelFromCache = (modelName: string): string | undefined =>
   schemaUidForModel.get(modelName.toLowerCase())
 
+/** UID cached for `text` by {@link setSchemaUidForSchemaDefinition} or an earlier lookup; no request. */
+export const getSchemaUidForSchemaDefinitionFromCache = (text: string): string | undefined =>
+  schemaUidForSchemaDefinition.get(toSnakeCase(text))
+
 export const getEasSchemaUidForSchemaDefinition = async ({
   schemaText,
 }: {

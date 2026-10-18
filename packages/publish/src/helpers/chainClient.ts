@@ -99,6 +99,24 @@ export async function isContractDeployed(address: string): Promise<boolean> {
   return !!code && code !== '0x'
 }
 
+/** EIP-7702 delegation designator: an EOA's code is `0xef0100` + the delegate's address. */
+const EIP7702_DELEGATION_PREFIX = '0xef0100'
+
+/**
+ * What is at an address: nothing, an EOA delegating with EIP-7702 (still an EOA: it signs and
+ * attests as itself), or a contract.
+ */
+export function accountCodeKind(code: string | undefined | null): 'none' | 'eip7702-delegated' | 'contract' {
+  if (!code || code === '0x') return 'none'
+  if (code.toLowerCase().startsWith(EIP7702_DELEGATION_PREFIX)) return 'eip7702-delegated'
+  return 'contract'
+}
+
+export async function getAccountCodeKind(address: string): Promise<ReturnType<typeof accountCodeKind>> {
+  const code = await getPublishPublicClient().getBytecode({ address: address as Address })
+  return accountCodeKind(code)
+}
+
 export async function getBlockTimestampMs(blockNumber: bigint): Promise<number | null> {
   try {
     const block = await getPublishPublicClient().getBlock({ blockNumber })

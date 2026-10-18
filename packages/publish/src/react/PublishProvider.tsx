@@ -1,4 +1,4 @@
-import React, { FC, useEffect } from "react"
+import React, { FC, useRef } from "react"
 import type { MutableRefObject } from "react"
 import type { QueryClient } from "@tanstack/react-query"
 import { SeedProvider } from '@seedprotocol/react'
@@ -31,11 +31,13 @@ const PublishProvider: FC<PublishProviderProps> = ({
   queryClient,
   queryClientRef,
 }) => {
-  useEffect(() => {
-    if (config) {
-      initPublish(config)
-    }
-  }, [config])
+  // During render, not in an effect: children such as ConnectButton read the config on their
+  // first render, which runs before this provider's effects. Once per config object.
+  const initializedConfig = useRef<PublishConfig | undefined>(undefined)
+  if (config && initializedConfig.current !== config) {
+    initPublish(config)
+    initializedConfig.current = config
+  }
 
   return (
     <PublishConfigContext.Provider value={config ?? getConfigRef()}>

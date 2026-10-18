@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
+import { useContext, useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { Model } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useLiveQuery } from './liveQuery'
@@ -6,7 +6,7 @@ import { BaseDb } from '@seedprotocol/sdk'
 import { models as modelsTable, modelSchemas, schemas as schemasTable } from '@seedprotocol/sdk'
 import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'xstate'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientContext, useQuery } from '@tanstack/react-query'
 
 type UseModelsResult = {
   models: Model[]
@@ -27,13 +27,16 @@ type UseModels = (schemaId: UseModelsParams) => UseModelsResult
  */
 const getModelsQueryKey = (schemaId: UseModelsParams) => ['seed', 'models', schemaId] as const
 
-// Last-known-good models per schemaId so we never flash [] after remount or refetch race (survives component unmount).
-const lastModelsBySchemaId = new Map<string, Model[]>()
+// Used only outside a QueryClientProvider: useModel(modelId) calls useModels(null) (hooks must
+// run in the same order), and an id lookup never needed a provider.
+let fallbackQueryClient: QueryClient | undefined
 
 export const useModels: UseModels = (schemaId) => {
   const isClientReady = useIsClientReady()
-  const queryClient = useQueryClient()
-  const modelsRef = useRef<Model[]>([])
+  const contextQueryClient = useContext(QueryClientContext)
+  const queryClient = contextQueryClient ?? (fallbackQueryClient ??= new QueryClient())
+  // Latest models-table rows for this schema (live query): the ground truth for what exists.
+  const tableIdsRef = useRef<Set<string> | null>(null)
 
   const queryKey = useMemo(() => getModelsQueryKey(schemaId), [schemaId])
 
@@ -44,41 +47,22 @@ export const useModels: UseModels = (schemaId) => {
   } = useQuery({
     queryKey,
     queryFn: async () => {
-      // Capture previous data before any async work so we don't overwrite good cache with [].
-      const prev = queryClient.getQueryData<Model[]>(queryKey)
       // Use waitForReady: false so we return models as soon as they exist; waitForReady: true
       // filters to only idle models and can return [] while a model is in creatingProperties.
       const next = await Model.all(schemaId!, { waitForReady: false })
-      // getModelsData can intermittently return [] after returning data; keep prev to avoid overwrite.
-      if (Array.isArray(prev) && prev.length > 0 && Array.isArray(next) && next.length === 0) {
-        return [...prev]
-      }
-      // If this refetch returned [], avoid overwriting non-empty cache (e.g. race where another refetch already wrote data).
-      if (Array.isArray(next) && next.length === 0) {
-        const current = queryClient.getQueryData<Model[]>(queryKey)
-        if (Array.isArray(current) && current.length > 0) {
-          return [...current]
-        }
+      // Model.all can briefly return [] while models load. Keep the previous list only while the
+      // table still has rows; once it is empty (all deleted), [] is the answer.
+      const prev = queryClient.getQueryData<Model[]>(queryKey)
+      const tableIds = tableIdsRef.current
+      if (next.length === 0 && prev && prev.length > 0 && (!tableIds || tableIds.size > 0)) {
+        return prev
       }
       return next
     },
     enabled: isClientReady && !!schemaId,
-  })
-  // Never expose [] when we previously had models (avoids flash from refetch races, remounts, or intermittent getModelsData returning []).
-  // When schemaId is null/undefined, always show [] — do not use fallback from a previous schema.
-  const schemaIdKey = schemaId && typeof schemaId === 'string' ? schemaId : ''
-  if (models.length > 0) {
-    lastModelsBySchemaId.set(schemaIdKey, models)
-  }
-  const fallback = modelsRef.current.length > 0 ? modelsRef.current : lastModelsBySchemaId.get(schemaIdKey)
-  const displayModels =
-    !schemaId
-      ? models
-      : models.length > 0
-        ? models
-        : fallback?.length
-          ? fallback
-          : models
+  }, queryClient)
+  const displayModels = schemaId ? models : []
+  const modelsRef = useRef<Model[]>(displayModels)
   modelsRef.current = displayModels
 
   // When a model is created, writeModelToDb posts to this channel; live query over join often doesn't re-run
@@ -157,19 +141,14 @@ export const useModels: UseModels = (schemaId) => {
       if (dbModel.modelFileId) tableDataModelsSet.add(dbModel.modelFileId)
       else if (dbModel.modelName) tableDataModelsSet.add(dbModel.modelName)
     }
+    tableIdsRef.current = tableDataModelsSet
 
     const setsAreEqual =
       currentModelsSet.size === tableDataModelsSet.size &&
       [...currentModelsSet].every((id) => tableDataModelsSet.has(id))
 
-    // Only invalidate when the table has rows we might be missing (live query saw new data).
-    // Do NOT invalidate when we have more than the table: the live query may not have updated
-    // yet (e.g. join over model_schemas), and refetching would overwrite cache with [].
-    const tableHasNewRows =
-      tableDataModelsSet.size > 0 &&
-      [...tableDataModelsSet].some((id) => !currentModelsSet.has(id))
-
-    if (!setsAreEqual && tableHasNewRows) {
+    // Refetch on any difference: new rows, and deleted ones (which used to leave the list stale).
+    if (!setsAreEqual) {
       queryClient.invalidateQueries({ queryKey })
     }
   }, [isClientReady, modelsTableData, schemaId, queryClient, queryKey])
@@ -251,45 +230,13 @@ export const useModel = (
     lookupModelById()
   }, [isClientReady, isModelIdLookup, schemaIdOrModelId])
 
-  // Subscribe to service changes when model is available (for modelId lookup)
-  useEffect(() => {
-    if (!isModelIdLookup || !model) {
-      // Clean up subscription if model is not available
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-      return
-    }
-
-    // Clean up previous subscription
-    subscriptionRef.current?.unsubscribe()
-
-    // Subscribe to service changes
-    const subscription = model.getService().subscribe((snapshot) => {
-      // Force re-render by incrementing version counter
-      setVersion(prev => prev + 1)
-    })
-    
-    subscriptionRef.current = subscription
-
-    return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-    }
-  }, [isModelIdLookup, model])
-
-  // If doing modelId lookup, return the model directly
-  if (isModelIdLookup) {
-    return {
-      model,
-      isLoading,
-      error,
-    }
-  }
-
-  // Otherwise, use schemaId + modelName lookup via useModels
-  const { models: modelsList, isLoading: modelsLoading, error: modelsError } = useModels(schemaIdOrModelId)
+  // Always call useModels (with null for an id lookup): hooks must run in the same order on
+  // every render, and returning early before it crashed when modelName switched null <-> string.
+  const { models: modelsList, isLoading: modelsLoading, error: modelsError } = useModels(
+    isModelIdLookup ? null : schemaIdOrModelId,
+  )
   const foundModel = useMemo(() => {
-    if (!modelName) {
+    if (isModelIdLookup || !modelName) {
       return undefined
     }
     // Try both modelName property and name getter for compatibility
@@ -297,35 +244,33 @@ export const useModel = (
       const mName = m.modelName ?? (m as any).name
       return mName === modelName
     })
-  }, [modelsList, modelName])
+  }, [isModelIdLookup, modelsList, modelName])
 
-  // Subscribe to service changes when model is available (for schemaId + modelName lookup)
+  const activeModel = isModelIdLookup ? model : foundModel
+
+  // Re-render on the model's service changes
   useEffect(() => {
-    if (isModelIdLookup || !foundModel) {
-      // Clean up subscription if model is not available
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-      return
-    }
-
-    // Clean up previous subscription
     subscriptionRef.current?.unsubscribe()
+    subscriptionRef.current = undefined
+    if (!activeModel) return
 
-    // Subscribe to service changes
-    const subscription = foundModel.getService().subscribe((snapshot) => {
-      // Force re-render by incrementing version counter
-      setVersion(prev => prev + 1)
+    subscriptionRef.current = activeModel.getService().subscribe(() => {
+      setVersion((prev) => prev + 1)
     })
-    
-    subscriptionRef.current = subscription
 
     return () => {
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
     }
-  }, [isModelIdLookup, foundModel])
+  }, [activeModel])
 
-  // For schemaId + modelName lookup, derive loading/error from useModels
+  if (isModelIdLookup) {
+    return {
+      model,
+      isLoading,
+      error,
+    }
+  }
   return {
     model: foundModel,
     isLoading: modelsLoading,
@@ -336,7 +281,6 @@ export const useModel = (
 export type UseCreateModelOptions = {
   modelFileId?: string
   properties?: { [propertyName: string]: any }
-  registerWithSchema?: boolean
 }
 
 export type UseCreateModelReturn = {
@@ -420,9 +364,6 @@ export const useDestroyModel = (): UseDestroyModelReturn => {
     setIsLoading(true)
     try {
       await model.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = model.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err

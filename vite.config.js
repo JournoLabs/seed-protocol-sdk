@@ -69,6 +69,12 @@ const workspaceSourceAliases = (platform) => {
     exact('@seedprotocol/query/node', 'query/src/node/index.ts'),
     exact('@seedprotocol/query', platform === 'browser' ? 'query/src/index.ts' : 'query/src/index.node.ts'),
     exact('@seedprotocol/react', 'react/src/index.ts'),
+    exact('@seedprotocol/gateway-hyper', 'gateway-hyper/src/index.ts'),
+    // The SDK's package.json `imports` entry points at dist; tests load the matching source.
+    {
+      find: /^#seed-node-platform$/,
+      replacement: src(platform === 'browser' ? 'sdk/src/platform/index.browser.ts' : 'sdk/src/platform/index.node.ts'),
+    },
   ]
 }
 
@@ -93,7 +99,7 @@ export default defineConfig({
         plugins: [
           react(),
           tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
-          ...seedVitePlugin({ autoInit: false, debug: false }),
+          ...seedVitePlugin(),
         ],
         resolve: {
           alias: [
@@ -112,7 +118,6 @@ export default defineConfig({
         optimizeDeps: {
           exclude: [
             '@sqlite.org/sqlite-wasm',
-            '@seedprotocol/cli',
             'drizzle-orm',
             'sqlocal'
           ],
@@ -121,8 +126,9 @@ export default defineConfig({
             'react',
             'react-dom',
             // Imported lazily (some through workspace sources); discovering them mid-run reloads the
-            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
-            // parse5 (SDK dependencies) are root devDependencies too.
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml,
+            // parse5 and @tanstack/query-core (SDK/EAS dependencies) are root devDependencies too.
+            '@tanstack/query-core',
             '@tanstack/react-query',
             'arweave/bundles/web.bundle.js',
             'js-yaml',
@@ -180,7 +186,7 @@ export default defineConfig({
         plugins: [
           react(),
           tsConfigPaths({ projects: ['./packages/react/tsconfig.json', './packages/sdk/tsconfig.json'] }),
-          ...seedVitePlugin({ autoInit: false, debug: false }),
+          ...seedVitePlugin(),
         ],
         resolve: {
           alias: [
@@ -205,8 +211,9 @@ export default defineConfig({
             'react',
             'react-dom',
             // Imported lazily (some through workspace sources); discovering them mid-run reloads the
-            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
-            // parse5 (SDK dependencies) are root devDependencies too.
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml,
+            // parse5 and @tanstack/query-core (SDK/EAS dependencies) are root devDependencies too.
+            '@tanstack/query-core',
             '@tanstack/react-query',
             'arweave/bundles/web.bundle.js',
             'js-yaml',
@@ -265,11 +272,6 @@ export default defineConfig({
             }),
           ],
         },
-        optimizeDeps: {
-          exclude: [
-            '@seedprotocol/cli',
-          ],
-        },
         test: {
           name: 'NodeJS',
           environment: 'node',
@@ -298,10 +300,16 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/Db.test.ts',
             // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
+            'packages/sdk/__tests__/browser/helpers/opfsOverwrite.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
+            'packages/sdk/__tests__/browser/db/notPersistent.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
             'packages/sdk/__tests__/browser/multiTab.e2e.test.ts',
+            // Browser-only: wraps the sqlite-proxy driver; Node's better-sqlite3 session has no async client.
+            'packages/sdk/__tests__/browser/db/insertConflicts.test.ts',
+            'packages/sdk/__tests__/browser/db/importSingleWrite.test.ts',
+            'packages/sdk/__tests__/browser/db/freshInitSingleWrite.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,

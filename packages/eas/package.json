@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/eas",
-  "version": "0.7.0",
-  "description": "EAS GraphQL read client and helpers for Seed Protocol",
+  "version": "0.7.6",
+  "description": "Read-only Ethereum Attestation Service (EAS) GraphQL client for Seed Protocol: seed, version and property attestation queries plus chain/indexer resolution",
+  "keywords": [
+    "seed-protocol",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "easscan",
+    "graphql",
+    "ethereum",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -33,24 +44,39 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
     "test": "vitest run --reporter=default",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js",
+    "codegen": "graphql-codegen --config codegen.ts && node ../../scripts/fix-graphql-codegen-imports.js",
+    "codegen:watch": "graphql-codegen -w --config codegen.ts"
   },
   "dependencies": {
     "@graphql-typed-document-node/core": "^3.2.0",
     "@noble/hashes": "^1.8.0",
+    "@tanstack/query-core": "^5.104.1",
     "debug": "^4.4.1",
     "graphql": "^16.10.0",
     "graphql-request": "^7.3.5"
   },
   "devDependencies": {
+    "@graphql-codegen/cli": "^6.0.1",
+    "@graphql-codegen/client-preset": "^5.2.2",
+    "@graphql-codegen/introspection": "5.0.0",
     "@types/bun": "latest",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/eas"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/eas#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

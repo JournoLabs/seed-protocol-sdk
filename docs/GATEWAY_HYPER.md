@@ -11,8 +11,8 @@ See [GATEWAY_HYPER_SERVER_HANDOFF.md](./GATEWAY_HYPER_SERVER_HANDOFF.md) for opt
 | Concept | Role |
 |---------|------|
 | Operator key (z32) | Stable infrastructure identity (operator Ed25519 public key) |
-| `seed gateway tunnel serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
-| `seed gateway tunnel connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
+| `seed-gateway serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
+| `seed-gateway connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
 | `createGatewayProxy` | App server: dial operator key → Node HTTP handlers for a mount path (Path B) |
 | `DEFAULT_SEED_GATEWAY_HYPER_KEY` | Well-known official operator key (empty until ops publish one) |
 
@@ -24,7 +24,7 @@ Browsers **cannot** run Holepunch natives. They always speak plain HTTP to eithe
 
 | Scenario | What to run | Web `seed.config` |
 |----------|-------------|-------------------|
-| Local dev / Electron | `seed gateway tunnel connect <z32>` | `transport: 'hyper' \| 'hybrid'`, sidecar defaults |
+| Local dev / Electron | `seed-gateway connect <z32>` | `transport: 'hyper' \| 'hybrid'`, sidecar defaults |
 | Hosted web app | Node route using `createGatewayProxy` | `proxyBaseUrl: '/api/seed-gateway'` (Hyper key **server-only**) |
 | Public HTTP only | nothing | `transport: 'http-gateway'` |
 
@@ -35,7 +35,7 @@ Browsers **cannot** run Holepunch natives. They always speak plain HTTP to eithe
 Run on the same machine as the browser (or inside Electron):
 
 ```bash
-seed gateway tunnel connect <z32-key> --port 1984
+seed-gateway connect <z32-key> --port 1984
 ```
 
 ```typescript
@@ -105,7 +105,7 @@ Prefer **Node.js** for `@seedprotocol/gateway-hyper` (Bun may crash on Holepunch
 ## Developer tiers
 
 1. **HTTP on-prem** — `transport: 'http-gateway'`, point `arweaveDomain` / `uploadApiBaseUrl` at your LAN or Tailscale URLs.
-2. **Hyper sidecar** — run `seed gateway tunnel connect <key>`; set `transport: 'hyper'` in seed.config.
+2. **Hyper sidecar** — run `seed-gateway connect <key>`; set `transport: 'hyper'` in seed.config.
 3. **App-server proxy** — `createGatewayProxy` + `proxyBaseUrl` (hosted browsers).
 4. **Hybrid (recommended early cohort)** — `transport: 'hybrid'`: try proxy, then sidecar, then HTTP gateways.
 5. **Library** — `import { serveTunnel, connectTunnel, createGatewayProxy } from '@seedprotocol/gateway-hyper'`.
@@ -166,11 +166,8 @@ only applied when set, so an app's own setter call survives client init.
 Resolve upload + GraphQL URLs once and pass into `initPublish`:
 
 ```typescript
-import {
-  resolveSeedGatewayEndpoints,
-  seedGatewayConfigFromSeedConfig,
-  initPublish,
-} from '@seedprotocol/sdk'
+import { resolveSeedGatewayEndpoints, seedGatewayConfigFromSeedConfig } from '@seedprotocol/sdk'
+import { initPublish } from '@seedprotocol/publish'
 import config from './seed.config'
 
 const gw = await resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))
@@ -188,22 +185,55 @@ initPublish({
 2. On the operator host:
 
    ```bash
-   seed gateway tunnel serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
+   seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
 
-3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional).
+3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional), in both `packages/arweave/src/constants.ts` and `packages/gateway-hyper/src/constants.ts`.
 4. Each SDK user (Path A) runs:
 
    ```bash
-   seed gateway tunnel connect <z32-key> --port 1984
+   seed-gateway connect <z32-key> --port 1984
    ```
 
    Or each app server (Path B) mounts `createGatewayProxy` with that key.
 5. App uses `transport: 'hyper'` or `'hybrid'` (and `proxyBaseUrl` when using Path B).
 
+## Timeouts
+
+A tunnel session opens up to `maxStreams` HyperDHT streams to the operator (default 4, on
+`createGatewayProxy`, `connectTunnel`, or `seed-gateway connect --max-streams`). Each stream
+carries one request at a time, because the framing has no request ids. A request takes an
+idle stream, or opens a new one while fewer than `maxStreams` are open; once every stream is
+busy, requests wait for the first one to come free. Streams open only when needed, so a
+session that sends one request at a time keeps one stream. Every stream to the operator is
+its own HyperDHT connection with its own handshake, and the operator serves each one
+separately, so a client sends the operator up to `maxStreams` upstream requests at once.
+
+A slow request holds up only its own stream, but a request that never finishes would keep
+that stream forever, and enough of them would fill the pool. Two limits prevent that.
+
+The operator answers 504 once its upstream socket has been idle for `upstreamTimeoutMs`
+(default 30 s, `seed-gateway serve --upstream-timeout-ms`), whether it is waiting for headers
+or partway through the body. Other upstream failures get 502. Either way the stream stays
+open for the next request.
+
+The client abandons a request once the stream has sent and received nothing for
+`requestTimeoutMs` (default 60 s, on `createGatewayProxy`, `connectTunnel`, or
+`seed-gateway connect --request-timeout-ms`). It answers its caller 504 and destroys that
+request's stream; the other streams are left alone, and the next request to take the dead
+stream opens a new one. A caller that disconnects, or a `handleFetch` request whose `signal`
+aborts, abandons the request the same way. A request still waiting for a stream is dropped
+without touching any stream. The timer starts once the request has an open stream.
+
+Keep `requestTimeoutMs` above the operator's `upstreamTimeoutMs`, so a slow upstream gets
+the operator's 504 and the stream is kept. The operator buffers the whole upstream response
+before sending it, so the client sees no bytes until the upstream finishes; a response that
+takes longer than `requestTimeoutMs` to arrive at the operator is abandoned even if the
+upstream is still sending.
+
 ## Developer key swap
 
-Each developer runs their own `seed gateway tunnel serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed gateway tunnel connect` when using Path A.
+Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed-gateway connect` when using Path A.
 
 ## CI / tests
 
@@ -213,7 +243,7 @@ Each developer runs their own `seed gateway tunnel serve`, puts their z32 in `ga
 
 ## Manual validation
 
-1. Operator: docker stack + `seed gateway tunnel serve`.
-2. Path A: `seed gateway tunnel connect <key>` then `curl http://127.0.0.1:1984/info`.
+1. Operator: docker stack + `seed-gateway serve`.
+2. Path A: `seed-gateway connect <key>` then `curl http://127.0.0.1:1984/info`.
 3. Path B: mount `createGatewayProxy`, then `curl https://your-app/api/seed-gateway/info`.
 4. Publish via app; confirm `GET /raw/{txId}` through the chosen path serves new uploads immediately.

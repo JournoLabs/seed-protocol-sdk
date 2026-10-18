@@ -3,6 +3,7 @@ import { BaseDb } from '@seedprotocol/sdk'
 import { createActor, setup } from 'xstate'
 import { setConfigRef } from '../../config'
 import { restoreFromDb } from './actors/restoreFromDb'
+import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../test-utils/waitUntil'
 
 const origReady = BaseDb.isAppDbReady.bind(BaseDb)
 const origGet = BaseDb.getAppDb.bind(BaseDb)
@@ -70,7 +71,7 @@ describe('restoreFromDb', () => {
     expect(restores).toBe(1)
     failing.stop()
     restoreDb()
-  })
+  }, TEST_TIMEOUT_MS)
 })
 
 describe('PublishManager on Node', () => {
@@ -99,6 +100,10 @@ describe('PublishManager on Node', () => {
     const actor = await spawned
     expect(actor).toBeDefined()
     expect(PublishManager.getPublish(item.seedLocalId)).toBe(actor)
+    // query only reads: the publish keeps running.
+    expect(PublishManager.query(item.seedLocalId)).toBe(actor!.getSnapshot())
+    expect(PublishManager.getService().getSnapshot().context.publishProcesses.get(item.seedLocalId)).toBe(actor)
+    expect(PublishManager.query('seed-never-published')).toBeUndefined()
 
     const duplicate = await PublishManager.createPublish(item, address)
     expect(duplicate).toBeUndefined()
@@ -107,10 +112,10 @@ describe('PublishManager on Node', () => {
       actor!.send({ type: 'notOwner' })
     }
 
-    await waitFor(() => {
+    await waitUntilOrThrow(() => {
       const ctx = PublishManager.getService().getSnapshot().context
       return !ctx.publishProcesses.has(item.seedLocalId) && ctx.settledPublishes.has(item.seedLocalId)
-    })
+    }, `publish ${item.seedLocalId} to move from publishProcesses to settledPublishes`)
 
     const settled = PublishManager.getPublish(item.seedLocalId)
     expect(settled).toBe(actor)
@@ -121,7 +126,7 @@ describe('PublishManager on Node', () => {
     expect(again).toBeDefined()
     expect(again).not.toBe(actor)
     expect(PublishManager.getService().getSnapshot().context.publishProcesses.has(item.seedLocalId)).toBe(true)
-  })
+  }, TEST_TIMEOUT_MS)
 
   test('createPublish resolves undefined when the address is missing', async () => {
     const { PublishManager } = await import('./index')
@@ -135,14 +140,8 @@ describe('PublishManager on Node', () => {
 })
 
 function waitForValue(actor: { getSnapshot: () => { value: unknown } }, value: string) {
-  return waitFor(() => actor.getSnapshot().value === value)
-}
-
-async function waitFor(predicate: () => boolean) {
-  const deadline = Date.now() + 4000
-  while (Date.now() < deadline) {
-    if (predicate()) return
-    await new Promise((r) => setTimeout(r, 15))
-  }
-  throw new Error('timed out waiting for publish manager condition')
+  return waitUntilOrThrow(
+    () => actor.getSnapshot().value === value,
+    `restoreFromDb test machine to reach '${value}' (still '${String(actor.getSnapshot().value)}')`,
+  )
 }

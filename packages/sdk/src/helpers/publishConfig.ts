@@ -1,10 +1,16 @@
 import type { PublishUpload } from '@/types/publish'
+import type { IItem } from '@/interfaces/IItem'
 
 /**
- * Optional getter for the publisher address when creating new seeds.
- * When provided and the user is connected (e.g. via Thirdweb), new seeds will have
- * publisher set at creation time. If not provided or user is not connected, publisher
- * remains null until attestation (persistSeedUid).
+ * Optional getter for the publisher address when creating new seeds. A seed's publisher is the
+ * wallet the draft belongs to; its versions and property rows take the same one.
+ *
+ * When it returns an address (e.g. a connected wallet), new seeds get it at creation. When there is
+ * no getter, or it returns nothing, a new seed gets the owned address if exactly one is set, and
+ * otherwise no publisher. A draft with no publisher stays editable and goes to the next wallet that
+ * connects (claimUnpublishedDrafts). Register a getter when several owned addresses are set (e.g. an
+ * EOA and its smart account) to give drafts a publisher at creation.
+ * `@seedprotocol/publish` registers one from the connected wallet.
  */
 export type GetPublisherForNewSeeds = () => Promise<string | undefined>
 
@@ -41,15 +47,43 @@ export async function getPublisherForNewSeedsWithTimeout(): Promise<string | und
 }
 
 /**
- * Optional executor for Arweave uploads during publish.
- * When provided, runPublish will call this for each upload, sign/post the transaction,
- * and pass the resulting txIds to getPublishPayload.
- * If not provided, uploadedTransactions remains empty (current behavior).
+ * Options for `item.publish(options)`. The SDK passes them through untouched to the
+ * registered PublishExecutor; with @seedprotocol/publish they are its
+ * `CreatePublishOptions` (signers, Arweave tags, `onPublished`, ...).
+ */
+export type ItemPublishOptions = {
+  /** 'patch' (default) updates the current version; 'new_version' starts one. */
+  publishMode?: 'patch' | 'new_version'
+  [option: string]: unknown
+}
+
+/**
+ * Publishes an item: uploads its files to Arweave and writes its attestations to EAS.
+ * Resolves when the publish has finished and rejects if it failed.
  *
- * Publish flow: The publish package runs ensureEasSchemasForItem before getPublishPayload,
- * which registers EAS schemas and adds naming attestations so EASSCAN displays them.
- * Apps that call item.getPublishPayload() directly (without the publish package flow)
- * must ensure EAS schemas exist and have naming attestations before calling.
+ * The SDK cannot publish on its own. `item.publish()` calls this executor, and
+ * @seedprotocol/publish registers it from `initPublish()` (or `<PublishProvider config>`).
+ * Without that package, `item.publish()` throws.
+ */
+export type PublishExecutor = (item: IItem<any>, options?: ItemPublishOptions) => Promise<void>
+
+let publishExecutor: PublishExecutor | null = null
+
+export function setPublishExecutor(executor: PublishExecutor | null): void {
+  publishExecutor = executor
+}
+
+export function getPublishExecutor(): PublishExecutor | null {
+  return publishExecutor
+}
+
+export const PUBLISH_NOT_CONFIGURED_MESSAGE =
+  'Publishing is not configured. item.publish() needs @seedprotocol/publish: call initPublish() from it, or mount <PublishProvider config={...}>, before publishing.'
+
+/**
+ * @deprecated Nothing calls this executor. `item.publish()` delegates the whole
+ * publish, uploads included, to the PublishExecutor that @seedprotocol/publish
+ * registers. Kept so existing imports compile; it will be removed.
  */
 export type UploadExecutor = (
   upload: PublishUpload,
@@ -57,10 +91,12 @@ export type UploadExecutor = (
 
 let uploadExecutor: UploadExecutor | null = null
 
+/** @deprecated See UploadExecutor. */
 export function setUploadExecutor(executor: UploadExecutor | null): void {
   uploadExecutor = executor
 }
 
+/** @deprecated See UploadExecutor. */
 export function getUploadExecutor(): UploadExecutor | null {
   return uploadExecutor
 }

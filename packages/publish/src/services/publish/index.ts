@@ -18,6 +18,7 @@ import {
   uploadData,
   uploadViaBundler,
   checking,
+  authorizing,
   preparingHtmlEmbedded,
   rewritingHtmlEmbedded,
 } from './actors'
@@ -70,6 +71,7 @@ export const publishMachine = setup({
     createAttestations,
     createAttestationsDirectToEas,
     checking,
+    authorizing,
     preparingHtmlEmbedded,
     rewritingHtmlEmbedded,
   },
@@ -166,6 +168,10 @@ export const publishMachine = setup({
       },
       errorStep : () => 'checking',
     },),
+    assignErrorAuthorizing : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'authorizing',
+    },),
     assignErrorCheckingFailed : assign({
       error : ({ event }) => {
         const ev = event as { error?: unknown }
@@ -178,9 +184,24 @@ export const publishMachine = setup({
 
 },).createMachine({
   id      : 'publish',
-  initial : 'checking',
+  initial : 'authorizing',
   context : ( { input, }, ) => input as PublishMachineContext,
   states  : {
+    // Before checking: checking can already send transactions (EAS schema registration).
+    authorizing : {
+      invoke : {
+        src     : 'authorizing',
+        input   : ( { context } ) => ({ context } as { context: PublishMachineContext }),
+        onDone  : {
+          target  : 'checking',
+          actions : assign({ publishAuthorization : ( { event } ) => event.output }),
+        },
+        onError : {
+          target  : FAILURE,
+          actions : ['assignErrorAuthorizing', 'handleError'],
+        },
+      },
+    },
     checking : {
       on: {
         notOwner: {
@@ -298,6 +319,7 @@ export const publishMachine = setup({
             arweaveTransactions : ( { event, }, ) => event.output.arweaveTransactions as ArweaveTransactionInfo[],
             publishUploads : ( { event, }, ) => event.output.publishUploads as PublishUpload[],
             signedDataItems : ( { event, }, ) => (event.output as { signedDataItems?: { id: string; raw: Uint8Array }[] }).signedDataItems,
+            bundlerUploadNotNeeded : ( { event, }, ) => (event.output as { bundlerUploadNotNeeded?: boolean }).bundlerUploadNotNeeded === true,
           },),
         },
         onError : {
@@ -343,15 +365,6 @@ export const publishMachine = setup({
       on : {
         uploadComplete : [
           {
-            guard: ({ context }) => attestationUsesDirectEas(context),
-            target: 'creatingAttestationsDirectToEas',
-            actions: assign({
-              completionPercentage: 100,
-              signedDataItems: () => undefined,
-              arweaveUploadData: () => undefined,
-            }),
-          },
-          {
             guard: (args) =>
               ((args.context?.htmlEmbeddedDeferredHtmlSeedLocalIds?.length ?? 0) > 0),
             target: 'rewritingHtmlEmbedded',
@@ -360,6 +373,15 @@ export const publishMachine = setup({
                 (context.publishUploads ?? []) as PublishUpload[],
               htmlEmbeddedPhase1ArweaveTransactions: ({ context }) =>
                 (context.arweaveTransactions ?? []) as ArweaveTransactionInfo[],
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesDirectEas(context),
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
               signedDataItems: () => undefined,
               arweaveUploadData: () => undefined,
             }),
@@ -399,6 +421,8 @@ export const publishMachine = setup({
             signedDataItems: ({ event }) =>
               (event.output as { signedDataItems?: PublishMachineContext['signedDataItems'] })
                 .signedDataItems,
+            bundlerUploadNotNeeded: ({ event }) =>
+              (event.output as { bundlerUploadNotNeeded?: boolean }).bundlerUploadNotNeeded === true,
             uploaderState: () => undefined,
             currentTransactionIndex: () => undefined,
           }),
@@ -419,6 +443,16 @@ export const publishMachine = setup({
               completionPercentage: 100,
               signedDataItems: () => undefined,
               arweaveUploadData: () => undefined,
+              publishUploads: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
+                  ...((context.publishUploads ?? []) as PublishUpload[]),
+                ],
+              arweaveTransactions: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                ],
             }),
           },
           {
@@ -467,13 +501,6 @@ export const publishMachine = setup({
         },
         uploadComplete : [
           {
-            guard: ({ context }) => attestationUsesDirectEas(context),
-            target: 'creatingAttestationsDirectToEas',
-            actions: assign({
-              completionPercentage: 100,
-            }),
-          },
-          {
             guard: (args) =>
               ((args.context?.htmlEmbeddedDeferredHtmlSeedLocalIds?.length ?? 0) > 0),
             target: 'rewritingHtmlEmbedded',
@@ -482,6 +509,13 @@ export const publishMachine = setup({
                 (context.publishUploads ?? []) as PublishUpload[],
               htmlEmbeddedPhase1ArweaveTransactions: ({ context }) =>
                 (context.arweaveTransactions ?? []) as ArweaveTransactionInfo[],
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesDirectEas(context),
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
             }),
           },
           {
@@ -528,8 +562,13 @@ export const publishMachine = setup({
         input: ({ context, event }) =>
           ({ context, event }) as { context: PublishMachineContext; event: unknown },
         onDone: {
-          target: 'uploadingDataPhase2',
+          // Phase 2's transactions need funding too, like phase 1's (the operator pays on L1).
+          target: 'sendingReimbursementRequestPhase2',
           actions: assign({
+            // sendReimbursementRequest reuses an existing id: this is a new request.
+            reimbursementTransactionId: () => undefined,
+            requestResponse: () => undefined,
+            reimbursementConfirmed: () => false,
             arweaveTransactions: ({ event }) =>
               (event.output as { arweaveTransactions: ArweaveTransactionInfo[] }).arweaveTransactions,
             publishUploads: ({ event }) =>
@@ -541,6 +580,40 @@ export const publishMachine = setup({
         onError: {
           target: FAILURE,
           actions: ['assignErrorCreatingArweaveTransactionsPhase2', 'handleError'],
+        },
+      },
+    },
+    sendingReimbursementRequestPhase2: {
+      invoke: {
+        src: 'sendReimbursementRequest',
+        input: ({ context, event }) =>
+          ({ context, event }) as { context: PublishMachineContext; event: unknown },
+        onDone: {
+          target: 'pollingForConfirmationPhase2',
+          actions: assign({
+            requestResponse: ({ event }) => event.output as ReimbursementResponse,
+            reimbursementTransactionId: ({ event }) =>
+              (event.output as ReimbursementResponse).transactionId as string,
+          }),
+        },
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorSendingReimbursementRequest', 'handleError'],
+        },
+      },
+    },
+    pollingForConfirmationPhase2: {
+      invoke: {
+        src: 'pollForConfirmation',
+        input: ({ context, event }) =>
+          ({ context, event }) as { context: PublishMachineContext; event: unknown },
+        onDone: {
+          target: 'uploadingDataPhase2',
+          actions: assign({ reimbursementConfirmed: true }),
+        },
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorPollingForConfirmation', 'handleError'],
         },
       },
     },
@@ -564,6 +637,16 @@ export const publishMachine = setup({
             target: 'creatingAttestationsDirectToEas',
             actions: assign({
               completionPercentage: 100,
+              publishUploads: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
+                  ...((context.publishUploads ?? []) as PublishUpload[]),
+                ],
+              arweaveTransactions: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                ],
             }),
           },
           {

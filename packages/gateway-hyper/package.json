@@ -1,9 +1,23 @@
 {
   "name": "@seedprotocol/gateway-hyper",
-  "version": "0.7.0",
-  "description": "Hyperswarm HTTP tunnel for Seed Protocol gateway + upload API infrastructure",
+  "version": "0.7.6",
+  "description": "HyperDHT HTTP tunnel that exposes a Seed Protocol gateway and upload API through a local sidecar or app-server proxy",
+  "keywords": [
+    "seed-protocol",
+    "hyperdht",
+    "holepunch",
+    "p2p",
+    "tunnel",
+    "gateway",
+    "arweave",
+    "cli"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "seed-gateway": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "import": {
@@ -39,10 +53,19 @@
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/gateway-hyper"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/gateway-hyper#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

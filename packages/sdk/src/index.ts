@@ -15,7 +15,7 @@ export type {
   AddressesPersistedPayload,
   LocalCopiesRemovedPayload,
 } from './client/events'
-export { getClient } from './client/ClientManager'
+export { getClient, INIT_CONFIG_CONFLICT_MESSAGE } from './client/ClientManager'
 export { ClientManagerState, MachineIds } from './client/constants'
 export { BaseDb } from './db/Db/BaseDb'
 export { createNewItem } from './db/write/createNewItem'
@@ -62,7 +62,14 @@ export type { ModelValues } from './types/model'
 export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
-export { FileSystemLockedError } from './helpers/FileManager/errors'
+export {
+  ItemCreateValidationError,
+  UnknownModelError,
+  type ItemCreateProblem,
+} from './Item/errors'
+export { ConflictError, type ConflictResult } from './Schema/errors'
+export type { ValidationError, ValidationResult } from './Schema/validation'
+export { DatabaseNotPersistentError, FileSystemLockedError } from './helpers/FileManager/errors'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
@@ -81,7 +88,7 @@ export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
 export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
 export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas'
-export { listRelationEasPropertyName } from './helpers/metadataPropertyNames'
+export { listRelationEasPropertyName, easPropertyNameForPublish } from './helpers/metadataPropertyNames'
 
 export {
   getModelSchemasFromEas,
@@ -148,6 +155,9 @@ export {
 export type { SeedRssImageRelationRef } from '@seedprotocol/arweave'
 export {
   pickLatestPropertyAttestationsByRefAndSchema,
+  easName,
+  matchEasName,
+  type NameMatchLevel,
   isPlaceholderUid,
   isValidEasAttestationUid,
   normalizeBytes32Hex,
@@ -158,11 +168,16 @@ export type {
 } from '@seedprotocol/eas'
 export {
   isItemOwned,
+  assertItemOwned,
+  OwnershipError,
   isLocalUnsealedDraft,
   publisherIsInOwnedSet,
   isSeedRowOwned,
   publisherInAddressListSql,
   ownedPublisherSql,
+  ownedSeedsSql,
+  localUnsealedDraftSql,
+  placeholderUidSql,
 } from './helpers/ownership'
 
 export {
@@ -206,6 +221,7 @@ export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttes
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
 export { applyArweaveL1TransactionIdLocal } from './db/write/applyArweaveL1TransactionIdLocal'
+export { restoreDataItemIdsOverwrittenByL1 } from './db/write/restoreDataItemIdsOverwrittenByL1'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
@@ -250,6 +266,10 @@ export {
   getResolvedArweaveReadBaseUrls,
   fetchArweaveRawFromBaseUrl,
   fetchArweaveRawTextAcrossGateways,
+  setArweaveContentReadTransform,
+  hasArweaveContentReadTransform,
+  transformArweaveContent,
+  readArweaveContentResponse,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
@@ -263,9 +283,15 @@ export type {
   ArweaveUploadStatusResponse,
   ArweaveGatewayTransactionQueryResult,
   ArweaveReadBaseUrlOptions,
+  ArweaveContent,
+  ArweaveContentReadContext,
+  ArweaveContentReadTransform,
 } from '@seedprotocol/arweave'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
+  setPublishExecutor,
+  getPublishExecutor,
+  PUBLISH_NOT_CONFIGURED_MESSAGE,
   setUploadExecutor,
   getUploadExecutor,
   setGetPublisherForNewSeeds,
@@ -275,7 +301,14 @@ export {
   setAdditionalSyncAddresses,
   getGetAdditionalSyncAddresses,
 } from './helpers/publishConfig'
-export type { GetPublisherForNewSeeds, UploadExecutor, RevokeExecutor, GetAdditionalSyncAddresses } from './helpers/publishConfig'
+export type {
+  GetPublisherForNewSeeds,
+  ItemPublishOptions,
+  PublishExecutor,
+  UploadExecutor,
+  RevokeExecutor,
+  GetAdditionalSyncAddresses,
+} from './helpers/publishConfig'
 
 export { 
   createSchema, 
@@ -310,8 +343,17 @@ export {
 } from './db/read/publishDraftGraph'
 export {
   itemHasPublishUploadCandidates,
+  getPublishUploadData,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
+export type { PublishUploadData } from './types/publish'
+export {
+  CONTENT_SHA256_TAG,
+  CONTENT_TYPE_TAG,
+  getContentSha256,
+  contentSha256TagMatches,
+  buildArweaveContentTags,
+} from './helpers/arweaveContentTags'
 export {
   summarizePublishWork,
   getUnpublishedRelatedItems,
@@ -359,12 +401,14 @@ export {
   syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './imports'
-export type { SchemaFileFormat } from './imports'
+export type { SchemaFileFormat, SchemaFileInput, SchemaNameMatch } from './imports'
 
 
 export { client } from './client'
 export type { SyncFromEasOptions } from './events/item/syncDbWithEas'
 export type { EasSyncProcessType } from './seedSchema/EasSyncProcessSchema'
+/** Turn off (or back on) retrying the startup EAS lookup and failed syncs when back online. */
+export { setRetriesWhenOnlineEnabled } from './helpers/retryWhenOnline'
 export {
   easSyncActor,
   startEasSyncActor,

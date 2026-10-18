@@ -20,9 +20,36 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { waitForIdle, type HasService, waitForItemIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
-const waitForItemPropertyIdle = (property: HasService, timeout = 10000) =>
+// Item.create resolves before the item's ItemProperty instances are attached. Fails if they never are.
+async function waitForPropertyInstances(item: HasService, minCount = 1): Promise<void> {
+  const service = item.getService()
+  try {
+    await waitFor(
+      service,
+      (snapshot) => ((snapshot.context.propertyInstances as Map<string, unknown> | undefined)?.size ?? 0) >= minCount,
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+  } catch (error) {
+    const size = (service.getSnapshot().context.propertyInstances as Map<string, unknown> | undefined)?.size ?? 0
+    throw new Error(`Item had ${size} property instances, expected at least ${minCount}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const waitForItemPropertyIdle = (property: HasService, timeout = WAIT_TIMEOUT_MS) =>
   waitForIdle(property, 'ItemProperty', timeout)
+
+// An ItemProperty's propertyDef loads asynchronously, after its first idle. Fails if it never loads.
+async function waitForPropertyDef(property: { propertyDef?: unknown }) {
+  return vi.waitFor(
+    () => {
+      if (!property.propertyDef) throw new Error('ItemProperty propertyDef not loaded yet')
+      return property.propertyDef as { dataType?: string; ref?: string }
+    },
+    { timeout: WAIT_TIMEOUT_MS, interval: 50 },
+  )
+}
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -133,7 +160,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -144,29 +171,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       expect(properties.length).toBeGreaterThan(0)
@@ -218,7 +223,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -229,29 +234,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const contentProperty1 = properties.find(p => p.propertyName === 'content' || p.propertyName === 'Content')
@@ -316,7 +299,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -327,26 +310,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await waitForItemIdle(item)
 
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
 
       const statusProperty = item.properties.find(
         (p) => p.propertyName === 'status' || p.propertyName === 'Status'
@@ -363,7 +327,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           statusProperty.getService(),
           (snapshot) => !snapshot.context.isSaving,
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         const errors = statusProperty.saveValidationErrors
@@ -380,7 +344,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           statusProperty.getService(),
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         expect(statusProperty.saveValidationErrors).toHaveLength(0)
       }
@@ -403,7 +367,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Get property schema from model
@@ -419,29 +383,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const itemProperties = item.properties
       const itemDescriptionProperty = itemProperties.find(p => p.propertyName === 'description' || p.propertyName === 'Description')
@@ -450,24 +392,10 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       if (itemDescriptionProperty) {
         await waitForItemPropertyIdle(itemDescriptionProperty)
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (itemDescriptionProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        // propertyDef might not be loaded yet, but property should exist
-        if (propertyDefLoaded) {
-          expect(itemDescriptionProperty.propertyDef).toBeDefined()
-          expect(itemDescriptionProperty.propertyDef?.dataType).toBe('Text')
-        } else {
-          // At least verify the property exists and has the correct value
-          expect(itemDescriptionProperty.propertyName).toBe('description')
-          expect(itemDescriptionProperty.value).toBe('Test Description')
-        }
+        const propertyDef = await waitForPropertyDef(itemDescriptionProperty)
+        expect(propertyDef.dataType).toBe('Text')
+        expect(itemDescriptionProperty.propertyName).toBe('description')
+        expect(itemDescriptionProperty.value).toBe('Test Description')
       }
     })
   })
@@ -490,7 +418,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -507,6 +435,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       const property = await ItemProperty.find({
         propertyName: 'title',
         seedLocalId,
+        readyTimeout: WAIT_TIMEOUT_MS,
       })
       
       expect(property).toBeDefined()
@@ -538,7 +467,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -559,6 +488,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         propertyName: 'content',
         seedUid: seedUid || undefined,
         seedLocalId: !seedUid ? item.seedLocalId : undefined,
+        readyTimeout: WAIT_TIMEOUT_MS,
       })
       
       expect(property).toBeDefined()
@@ -606,7 +536,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -629,8 +559,12 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Property might not be idle yet since we didn't wait
       const service = property!.getService()
       const state = service.getSnapshot().value
-      // State could be idle (if already loaded) or loading/waitingForDb
-      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+      // Any of propertyMachine's load/ready states (saving is a compound state, so its value is an object)
+      const stateName = typeof state === 'string' ? state : Object.keys(state)[0]
+      expect(['waitingForDb', 'loading', 'hydratingFromDb', 'initializing', 'resolvingRelatedValue', 'idle', 'saving']).toContain(stateName)
+      // It still finishes loading on its own
+      await waitForItemPropertyIdle(property!)
+      expect(property!.value).toBe('Find Me No Wait')
     })
   })
 
@@ -652,7 +586,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       const item = await Item.create({
         modelName: 'TestPost',
@@ -687,7 +621,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       const item = await Item.create({
         modelName: 'TestPost',
@@ -698,7 +632,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       const allProperties = await ItemProperty.all(
         { seedLocalId: item.seedLocalId },
-        { waitForReady: true }
+        { waitForReady: true, readyTimeout: WAIT_TIMEOUT_MS }
       )
       expect(allProperties.length).toBeGreaterThanOrEqual(1)
       for (const p of allProperties) {
@@ -725,7 +659,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -736,29 +670,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -788,7 +700,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -799,29 +711,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -834,7 +724,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Set new value
         titleProperty.value = 'Updated Value'
 
-        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       }
     })
 
@@ -855,7 +745,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -866,29 +756,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -934,7 +802,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -945,29 +813,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -976,18 +822,8 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       if (titleProperty) {
         await waitForItemPropertyIdle(titleProperty)
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (titleProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        if (propertyDefLoaded && titleProperty.propertyDef) {
-          expect(titleProperty.propertyDef.dataType).toBe('Text')
-        }
+        const propertyDef = await waitForPropertyDef(titleProperty)
+        expect(propertyDef.dataType).toBe('Text')
         expect(titleProperty.value).toBe('Text Property')
       }
     })
@@ -1009,7 +845,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1020,29 +856,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const ratingProperty = properties.find(p => p.propertyName === 'rating' || p.propertyName === 'Rating')
@@ -1051,18 +865,8 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       if (ratingProperty) {
         await waitForItemPropertyIdle(ratingProperty)
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (ratingProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        if (propertyDefLoaded && ratingProperty.propertyDef) {
-          expect(ratingProperty.propertyDef.dataType).toBe('Number')
-        }
+        const propertyDef = await waitForPropertyDef(ratingProperty)
+        expect(propertyDef.dataType).toBe('Number')
         expect(ratingProperty.value).toBe('5') // Values are stored as strings in metadata
       }
     })
@@ -1084,7 +888,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1095,29 +899,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const publishedProperty = properties.find(p => p.propertyName === 'published' || p.propertyName === 'Published')
@@ -1126,18 +908,8 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       if (publishedProperty) {
         await waitForItemPropertyIdle(publishedProperty)
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (publishedProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        if (propertyDefLoaded && publishedProperty.propertyDef) {
-          expect(publishedProperty.propertyDef.dataType).toBe('Boolean')
-        }
+        const propertyDef = await waitForPropertyDef(publishedProperty)
+        expect(propertyDef.dataType).toBe('Boolean')
         expect(publishedProperty.value).toBe('true') // Values are stored as strings
       }
     })
@@ -1169,14 +941,14 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         authorModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create author first
@@ -1198,29 +970,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(post)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = post.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = post.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 10000) // Increase timeout for relation properties
-      })
+      await waitForPropertyInstances(post)
       
       const properties = post.properties
       
@@ -1237,29 +987,10 @@ testDescribe('ItemProperty Integration Tests', () => {
       if (authorProperty) {
         // Wait for ItemProperty to be idle (the improved waitForItemPropertyIdle checks current state first)
         await waitForItemPropertyIdle(authorProperty, 15000) // Increase timeout for relation properties
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (authorProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
+        const propertyDef = await waitForPropertyDef(authorProperty)
         
-        // If propertyDef is loaded, verify its type
-        if (propertyDefLoaded && authorProperty.propertyDef) {
-          expect(authorProperty.propertyDef.dataType).toBe('Relation')
-          expect(authorProperty.propertyDef.ref).toBe('Author')
-        } else {
-          // If propertyDef not loaded yet, at least verify we found a relation property
-          // Relation properties typically have "Id" suffix or alias
-          expect(
-            authorProperty.propertyName?.endsWith('Id') || 
-            authorProperty.alias === 'author' ||
-            authorProperty.propertyName?.toLowerCase().includes('author')
-          ).toBeTruthy()
-        }
+        expect(propertyDef.dataType).toBe('Relation')
+        expect(propertyDef.ref).toBe('Author')
       }
     }, 30000) // Increase timeout to 30 seconds for relation properties
 
@@ -1289,14 +1020,14 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         tagModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create tags first
@@ -1326,29 +1057,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(post)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = post.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = post.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(post)
       
       const properties = post.properties
       // For List properties, the propertyName gets transformed (e.g., "tagTagIds")
@@ -1365,15 +1074,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       if (tagsProperty) {
         await waitForItemPropertyIdle(tagsProperty)
-        // Wait for propertyDef to be loaded (it loads asynchronously)
-        let propertyDefLoaded = false
-        for (let i = 0; i < 50; i++) {
-          if (tagsProperty.propertyDef) {
-            propertyDefLoaded = true
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
+        const propertyDef = await waitForPropertyDef(tagsProperty)
         
         // Verify it's a List property - check alias or propertyDef
         if (tagsProperty.alias === 'tags') {
@@ -1381,14 +1082,8 @@ testDescribe('ItemProperty Integration Tests', () => {
           expect(tagsProperty.alias).toBe('tags')
         }
         
-        // If propertyDef is loaded, verify its type
-        if (propertyDefLoaded && tagsProperty.propertyDef) {
-          expect(tagsProperty.propertyDef.dataType).toBe('List')
-          expect(tagsProperty.propertyDef.ref).toBe('Tag')
-        } else {
-          // If propertyDef not loaded yet, at least verify we found the right property
-          expect(tagsProperty.alias || tagsProperty.propertyName?.toLowerCase().includes('tag')).toBeTruthy()
-        }
+        expect(propertyDef.dataType).toBe('List')
+        expect(propertyDef.ref).toBe('Tag')
       }
     })
   })
@@ -1411,7 +1106,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1422,29 +1117,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -1464,7 +1137,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           titleProperty.getService(),
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-          { timeout: 10000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         
         // Verify value was saved in the property
@@ -1473,11 +1146,11 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Verify in database - check latest metadata entry
         // Note: The save might create a new version, so we check the latest entry
         const db = BaseDb.getAppDb()
-        if (db) {
-          // Try multiple times as database write might be async
-          let foundUpdatedValue = false
-          for (let attempt = 0; attempt < 5; attempt++) {
-            const metadataRows = await db
+        expect(db).toBeTruthy()
+        // The metadata row can land after the property is back to idle: wait for it
+        await vi.waitFor(
+          async () => {
+            const metadataRows = await db!
               .select()
               .from(metadata)
               .where(
@@ -1488,25 +1161,10 @@ testDescribe('ItemProperty Integration Tests', () => {
               )
               .orderBy(sql`COALESCE(created_at, attestation_created_at) DESC`)
               .limit(1)
-            
-            if (metadataRows.length > 0 && metadataRows[0].propertyValue === 'Updated Title') {
-              foundUpdatedValue = true
-              break
-            }
-            
-            // Wait before next attempt
-            await new Promise(resolve => setTimeout(resolve, 500))
-          }
-          
-          // If we couldn't find it in database, at least verify the property value was updated
-          // (the save might be working but database query timing might be off)
-          if (!foundUpdatedValue) {
-            // At minimum, verify the property value itself was updated
-            expect(titleProperty.value).toBe('Updated Title')
-          } else {
-            expect(foundUpdatedValue).toBe(true)
-          }
-        }
+            expect(metadataRows[0]?.propertyValue).toBe('Updated Title')
+          },
+          { timeout: WAIT_TIMEOUT_MS, interval: 100 },
+        )
       }
     })
   })
@@ -1529,7 +1187,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1540,29 +1198,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -1602,7 +1238,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1613,29 +1249,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -1656,7 +1270,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'New Value'
         
-        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
         
         // Unsubscribe
         subscription.unsubscribe()
@@ -1685,7 +1299,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1696,29 +1310,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -1765,7 +1357,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1778,29 +1370,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 3) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 3) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 3)
       
       const properties = item.properties
       expect(properties.length).toBeGreaterThanOrEqual(3)
@@ -1833,7 +1403,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1844,29 +1414,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size > 0) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item)
       
       const properties = item.properties
       const titleProperty = properties.find(p => p.propertyName === 'title' || p.propertyName === 'Title')
@@ -1880,7 +1428,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         titleProperty.value = 'Updated'
         
         // Property value should be updated
-        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       }
     })
   })
@@ -1908,7 +1456,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const htmlContent = '<p>Hello World</p>'

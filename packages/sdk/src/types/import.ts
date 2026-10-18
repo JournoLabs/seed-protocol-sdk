@@ -1,15 +1,31 @@
+import type { NameMatchLevel } from '@seedprotocol/eas'
+
+/**
+ * How strictly names from EAS (other publishers' model and property names) match a local model or
+ * property (ADR 0009): `'exact'`, `'normalized'` (case and separators) or `'fuzzy'` (also plural `s`
+ * and a relation's `id`/`ids`). Set on a property, a model or the schema; the first one set wins.
+ * Default `'fuzzy'`.
+ */
+export type SchemaNameMatch = NameMatchLevel
+
 /**
  * Import JSON schema format (input)
  */
 export type JsonImportSchema = {
   name: string
+  /** Default {@link SchemaNameMatch} for this schema's models and properties. */
+  nameMatch?: SchemaNameMatch
   models: {
     [modelName: string]: {
       description?: string
+      /** {@link SchemaNameMatch} for the model's name, and the default for its properties. */
+      nameMatch?: SchemaNameMatch
       properties: {
         [propertyName: string]: {
           type: string
           required?: boolean
+          /** {@link SchemaNameMatch} for this property's name. */
+          nameMatch?: SchemaNameMatch
           description?: string
           storage?: {
             type: string
@@ -45,6 +61,8 @@ export type SchemaFileFormat = {
   $schema: string
   version: number
   id?: string // Schema ID generated when first written to JSON file
+  /** Default {@link SchemaNameMatch} for this schema's models and properties. */
+  nameMatch?: SchemaNameMatch
   metadata: {
     name: string
     createdAt: string
@@ -54,9 +72,13 @@ export type SchemaFileFormat = {
     [modelName: string]: {
       id?: string // Model ID generated when first written to JSON file
       description?: string
+      /** {@link SchemaNameMatch} for the model's name, and the default for its properties. */
+      nameMatch?: SchemaNameMatch
       properties: {
         [propertyName: string]: {
           id?: string // Property ID generated when first written to JSON file
+          /** {@link SchemaNameMatch} for this property's name. */
+          nameMatch?: SchemaNameMatch
           [key: string]: any
         }
       }
@@ -66,10 +88,30 @@ export type SchemaFileFormat = {
   enums: {
     [enumName: string]: any
   }
+  /**
+   * A record of the schema's changes, stored and returned as written. The SDK doesn't run them:
+   * local data isn't transformed when a schema's version changes (ADR 0008).
+   */
   migrations: Array<{
     version: number
     timestamp: string
     description: string
     changes: any[]
   }>
+}
+
+/**
+ * A schema as `SeedConfig.schema` accepts it: a {@link SchemaFileFormat} whose bookkeeping fields
+ * may be left out. Only `metadata.name` and `models` are required; `version` defaults to 1.
+ */
+export type SchemaFileInput = Omit<SchemaFileFormat, '$schema' | 'version' | 'metadata' | 'enums' | 'migrations'> & {
+  $schema?: string
+  version?: number
+  metadata: {
+    name: string
+    createdAt?: string
+    updatedAt?: string
+  }
+  enums?: SchemaFileFormat['enums']
+  migrations?: SchemaFileFormat['migrations']
 }

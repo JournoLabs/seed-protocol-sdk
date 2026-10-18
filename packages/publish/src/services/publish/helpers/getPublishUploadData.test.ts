@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Item, importJsonSchema, generateId } from '@seedprotocol/sdk'
+import { createHash } from 'node:crypto'
+import { Item, importJsonSchema, generateId, getContentSha256 } from '@seedprotocol/sdk'
 import { getPublishUploadData } from './getPublishUploadData'
 import {
   setupTestEnvironment,
@@ -94,6 +95,12 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
     expect(bHtmlSeed).toBeTruthy()
     const uploads = await getPublishUploadData(root as any)
     expect(uploads.map((u) => u.seedLocalId)).toContain(bHtmlSeed)
+
+    // Content-SHA-256 is SHA-256 of the uploaded bytes, and the first tag.
+    const html = uploads.find((u) => u.seedLocalId === bHtmlSeed)!
+    expect(html.contentHash).toBe(getContentSha256(html.data))
+    expect(html.contentHash).toBe(createHash('sha256').update(html.data).digest('hex'))
+    expect(html.tags[0]).toEqual({ name: 'Content-SHA-256', value: html.contentHash })
   }, 60000)
 })
 

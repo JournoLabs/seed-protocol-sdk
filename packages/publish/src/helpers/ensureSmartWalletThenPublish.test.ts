@@ -8,7 +8,8 @@ const getConnectedManagedAccountAddressMock = mock(() =>
 const getConnectedModularAccountMock = mock(() =>
   Promise.resolve({ address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account),
 )
-const createPublishMock = mock(() => {})
+// createPublish resolves the spawned publish actor.
+const createPublishMock = mock(async () => ({ id: 'publish-actor' }))
 const resolveSmartWalletForPublishMock = mock(() => Promise.resolve({ needsDeploy: true as const }))
 const ensureEip7702ModularAccountReadyMock = mock(() => Promise.resolve())
 
@@ -105,7 +106,7 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
 
     const result = await ensureSmartWalletThenPublish(itemStub, null, async () => '0xany')
 
-    expect(result).toEqual({ outcome: 'started' })
+    expect(result.outcome).toBe('started')
     expect(createPublishMock).toHaveBeenCalledTimes(1)
     const [it, address, account, opts] = createPublishMock.mock.calls[0] as [
       typeof itemStub,
@@ -129,7 +130,7 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
 
     const result = await ensureSmartWalletThenPublish(itemStub, null, async () => '0xany')
 
-    expect(result).toEqual({ outcome: 'started' })
+    expect(result.outcome).toBe('started')
     expect(createPublishMock).toHaveBeenCalledTimes(1)
     expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
   })
@@ -164,7 +165,7 @@ describe('ensureSmartWalletThenPublish (non-modular)', () => {
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     const result = await ensureSmartWalletThenPublish(itemStub, resolvedAccount, async () => '0xany')
 
-    expect(result).toEqual({ outcome: 'started' })
+    expect(result.outcome).toBe('started')
     expect(createPublishMock).toHaveBeenCalledTimes(1)
     const [, address, account] = createPublishMock.mock.calls[0] as [
       unknown,

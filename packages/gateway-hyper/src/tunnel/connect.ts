@@ -1,50 +1,7 @@
 import http from 'node:http'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import {
-  flattenRequestHeaders,
-} from './protocol'
+import { forwardNodeRequest } from './forward'
 import { createTunnelSession } from './session'
 import type { ConnectTunnelOptions, ConnectTunnelResult } from '../types'
-
-async function readRequestBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
-function createLocalServer(
-  forwardHttp: (
-    meta: { method: string; path: string; headers: Record<string, string> },
-    body: Buffer,
-  ) => Promise<{ meta: { status: number; headers: Record<string, string> }; body: Buffer }>,
-): http.Server {
-  return http.createServer((req, res) => {
-    void (async () => {
-      try {
-        const body = await readRequestBody(req)
-        const path = req.url ?? '/'
-        const meta = {
-          method: req.method ?? 'GET',
-          path,
-          headers: flattenRequestHeaders(req.headers as Record<string, string | string[] | undefined>),
-        }
-
-        const { meta: responseMeta, body: responseBody } = await forwardHttp(meta, body)
-
-        res.writeHead(responseMeta.status, responseMeta.headers)
-        res.end(responseBody)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        if (!res.headersSent) {
-          res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' })
-        }
-        res.end(`Gateway Hyper tunnel error: ${message}`)
-      }
-    })()
-  })
-}
 
 /**
  * Client: dial operator key and expose a localhost HTTP server that forwards through the tunnel.
@@ -56,9 +13,14 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
   const session = await createTunnelSession({
     key: options.key,
     storePath: options.storePath,
+    requestTimeoutMs: options.requestTimeoutMs,
+    connectTimeoutMs: options.connectTimeoutMs,
+    maxStreams: options.maxStreams,
   })
 
-  const server = createLocalServer((meta, body) => session.forwardHttp(meta, body))
+  const server = http.createServer((req, res) => {
+    void forwardNodeRequest(session, req, res, '')
+  })
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)

@@ -17,6 +17,7 @@ import {
   ensurePropertySchemaUidsForGetPublishPayloadTest,
   waitForPropertyInstances,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // PermaPress: Publication admins/staff (List of Relation → Identity) attested as `bytes32[] staff`
 // or `bytes32[] staff_identity_ids` depending on load order. Publish must always use the storage name.
@@ -73,7 +74,7 @@ testDescribe('List-of-relation EAS name', () => {
     staffUid = (await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32[] staff_identity_ids' }))!
     adminsUid = (await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32[] admin_identity_ids' }))!
     for (const name of ['Identity', 'Publication']) {
-      await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: 10_000 })
+      await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
     }
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -83,13 +84,13 @@ testDescribe('List-of-relation EAS name', () => {
 
   const createIdentity = async () => {
     const identity = await Item.create({ modelName: 'Identity', displayName: 'Someone' } as any)
-    await waitForEntityIdle(identity, { timeout: 10_000 })
+    await waitForEntityIdle(identity, { timeout: WAIT_TIMEOUT_MS })
     return identity.seedLocalId!
   }
 
   const loadPublication = async (seedLocalId: string) => {
     const item = (await Item.find({ seedLocalId, modelName: 'Publication' }))!
-    await waitForEntityIdle(item, { timeout: 10_000 })
+    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     return item
   }

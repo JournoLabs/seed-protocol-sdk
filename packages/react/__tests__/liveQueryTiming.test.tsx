@@ -20,7 +20,8 @@ import { eq, and, isNotNull } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { Observable } from 'rxjs'
 import { waitForItemPersisted } from './test-utils/persistence'
-import { waitUntilOrThrow } from './test-utils/waitUntil'
+import { waitUntil, waitUntilOrThrow } from './test-utils/waitUntil'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema
 const testSchema: SchemaFileFormat = {
@@ -138,7 +139,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -150,7 +151,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Test Item', value: 'Test Value' })
@@ -258,7 +259,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -270,7 +271,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Existing Item', value: 'Existing Value' })
@@ -375,7 +376,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -387,7 +388,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Transaction Test Item', value: 'Initial Value' })
@@ -431,8 +432,9 @@ describe('LiveQuery Timing Investigation', () => {
         },
       })
 
-      // Wait for initial emission
-      await waitUntilOrThrow(() => emissionCount >= 1, 'the reactive query to emit', 5000)
+      // Wait for initial emission. It takes ~10ms; the long timeout only covers a stalled DB worker
+      // under heavy load (finding 21), where the shorter one failed once.
+      await waitUntilOrThrow(() => emissionCount >= 1, 'the reactive query to emit', 10000)
 
       console.log(`[Transaction Test] Initial emission count: ${emissionCount}`)
       console.log(`[Transaction Test] Initial emission records: ${initialEmission?.length || 0}`)
@@ -451,19 +453,33 @@ describe('LiveQuery Timing Investigation', () => {
         await xstateWaitFor(
           nameProperty.getService(),
           (snapshot) => snapshot.value === 'idle',
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         const updateTime = performance.now() - updateStart
 
         console.log(`[Transaction Test] Property update took ${updateTime.toFixed(2)}ms`)
 
+        // A missing update emission is only a reactive-query failure once the row is committed, so
+        // check the database first: a timeout here means the write was slow, not the live query.
+        await waitUntilOrThrow(
+          async () =>
+            (await query).some((r: any) => r.propertyName === 'name' && r.propertyValue === 'Updated Name'),
+          'the updated name to reach the database',
+          10000,
+        )
+
         // Wait for reactive query to detect change
         // Used to tolerate the update never arriving (it only logged a warning)
-        await waitUntilOrThrow(
+        const emittedUpdate = await waitUntil(
           () => !!latestEmission?.some((r: any) => r.propertyName === 'name' && r.propertyValue === 'Updated Name'),
-          'the reactive query to emit the updated name',
           5000,
         )
+        if (!emittedUpdate) {
+          throw new Error(
+            `Timed out after 5000ms waiting for the reactive query to emit the committed updated name ` +
+              `(${emissionCount} emissions, latest: ${JSON.stringify(latestEmission)})`,
+          )
+        }
 
         console.log(`[Transaction Test] Total emissions: ${emissionCount}`)
         console.log(`[Transaction Test] Update emission records: ${updateEmission?.length || 0}`)
@@ -497,7 +513,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -509,7 +525,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Drizzle Test Item', value: 'Drizzle Test Value' })

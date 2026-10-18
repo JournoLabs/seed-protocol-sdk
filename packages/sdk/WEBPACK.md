@@ -1,20 +1,5 @@
 # Webpack / Next.js integration
 
-Use `withSeed` from `@seedprotocol/sdk/node` in Next.js (or other webpack) configs so client bundles can resolve Seed SDK browser shims.
+Use [`@seedprotocol/next`](../next/README.md) for Next.js apps. It covers Turbopack (the Next.js 16 default) and webpack.
 
-```js
-// next.config.mjs
-import { withSeed } from '@seedprotocol/sdk/node'
-import webpack from 'webpack'
-
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  webpack: (config, { isServer }) => {
-    return withSeed(config, webpack, isServer)
-  },
-}
-
-export default nextConfig
-```
-
-> `@seedprotocol/webpack` is experimental and private — do not depend on or publish it.
+`withSeed(config, webpack, isServer)` from `@seedprotocol/sdk/node` is deprecated. It predates the current SDK layout, doesn't cover Turbopack, and doesn't set the cross-origin isolation headers OPFS needs.

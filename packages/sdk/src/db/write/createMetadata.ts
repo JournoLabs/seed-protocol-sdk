@@ -3,12 +3,12 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { generateId } from '@/helpers'
 import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
 import { PropertyType } from '@/types'
-import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
-import { normalizePublisher } from '@/helpers/addresses'
+import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { BaseDb } from '../Db/BaseDb'
 import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
+import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 
@@ -47,13 +47,14 @@ export const createMetadata: CreateMetadata = async (
 
   metadataValues.localId = generateId()
 
-  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  // A property row belongs to its seed's wallet (none yet for a draft made with no wallet connected).
+  const publisher = await getSeedPublisher(metadataValues.seedLocalId)
   if (publisher) {
     metadataValues.publisher = publisher
   }
 
   if (!metadataValues.modelType && metadataValues.modelName) {
-    metadataValues.modelType = toSnakeCase(metadataValues.modelName)
+    metadataValues.modelType = easName(metadataValues.modelName)
   }
 
   // List of Relation rows live under the storage name (authors → authorIdentityIds), never the schema key.
@@ -126,7 +127,11 @@ export const createMetadata: CreateMetadata = async (
         const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
 
         if (easDataType) {
-          const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
+          // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
+          const propertyNameSnakeCase = easPropertyNameForPublish(
+            metadataValues.propertyName,
+            propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
+          )
           // Cached, including misses: every item of a model looks up the same property schemas.
           const schemaUid = await getEasSchemaUidForExactDefinition(
             `${easDataType} ${propertyNameSnakeCase}`,

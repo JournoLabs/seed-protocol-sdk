@@ -8,7 +8,8 @@ import {
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
-import { PublishManager } from '../services/publishManager'
+import { startPublish } from './ensureWalletThenPublish'
+import { getPublishWallet } from './publishWalletRegistry'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
@@ -16,7 +17,7 @@ import { getPublishThirdwebChain } from './thirdwebChain'
 import { getPublishChainName } from './chainConfig'
 
 export type EnsureSmartWalletResult =
-  | { outcome: 'started' }
+  | Extract<import('./ensureWalletThenPublish').EnsureWalletThenPublishResult, { outcome: 'started' | 'already_publishing' }>
   | { outcome: 'no_address' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
@@ -77,22 +78,22 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    const wallet = fromThirdwebAccount(modularAccount)
-    PublishManager.createPublish(item, managedAddress, wallet, {
+    const wallet = fromThirdwebAccount(modularAccount, { kind: 'smart' })
+    return startPublish(item, managedAddress, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
-    return { outcome: 'started' }
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
-    const wallet = fromThirdwebAccount(resolved.account)
-    PublishManager.createPublish(item, resolved.address, wallet, {
+    const wallet = fromThirdwebAccount(resolved.account, { kind: 'smart' })
+    return startPublish(item, resolved.address, wallet, {
       ...options,
-      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
+      // The smart account can't sign data items; ConnectButton registers its admin EOA for that.
+      dataItemSigner:
+        coerceDataItemSigner(options?.dataItemSigner) ?? getPublishWallet()?.dataItemSigner,
     })
-    return { outcome: 'started' }
   }
   return { outcome: 'needs_deploy' }
 }

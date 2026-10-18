@@ -1,10 +1,16 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test'
 import type { IItem } from '@seedprotocol/sdk'
 import { itemPublishFingerprint, watchPublishCost } from './watchPublishCost'
 import type { PublishCostEstimate } from './types'
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+// Lets the mocked estimate/reprice promises settle. Timers are fake, so time only moves via advance().
+async function flush(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+}
+
+async function advance(ms: number): Promise<void> {
+  jest.advanceTimersByTime(ms)
+  await flush()
 }
 
 function makeEstimate(totalUsd: number): PublishCostEstimate {
@@ -74,6 +80,14 @@ describe('itemPublishFingerprint', () => {
 })
 
 describe('watchPublishCost', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
   test('emits an immediate first estimate', async () => {
     const item = createMockItem()
     const totals: number[] = []
@@ -88,7 +102,7 @@ describe('watchPublishCost', () => {
         estimate: async () => makeEstimate(4),
       },
     )
-    await sleep(20)
+    await flush()
     expect(totals).toContain(4)
     handle.dispose()
   })
@@ -108,14 +122,15 @@ describe('watchPublishCost', () => {
         },
       },
     )
-    await sleep(20)
+    await flush()
     expect(estimateCalls).toBe(1)
     item.setTitle('edit-1')
-    await sleep(40)
+    await advance(40)
     item.setTitle('edit-2')
-    await sleep(40)
+    // 80ms after edit-1, but only 40ms after edit-2 restarted the timer
+    await advance(40)
     expect(estimateCalls).toBe(1)
-    await sleep(60)
+    await advance(40)
     expect(estimateCalls).toBe(2)
     handle.dispose()
   })
@@ -143,9 +158,9 @@ describe('watchPublishCost', () => {
         },
       },
     )
-    await sleep(20)
+    await flush()
     expect(estimateCalls).toBe(1)
-    await sleep(60)
+    await advance(40)
     expect(estimateCalls).toBe(1)
     expect(repriceCalls).toBeGreaterThanOrEqual(1)
     expect(lastTotal).toBe(99)

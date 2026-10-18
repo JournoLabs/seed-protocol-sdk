@@ -3,6 +3,7 @@
  * without building transactions or requiring a valid payload.
  */
 import { BaseFileManager } from '@/helpers'
+import { getStorageDirForDataType } from '@/helpers/storageDir'
 import { INTERNAL_PROPERTY_NAMES, ZERO_BYTES32 } from '@/helpers/constants'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -11,7 +12,7 @@ import {
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import { getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
+import { findEmbeddedImageFilePath, getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'
 
 /** The parts of the publish's draft graph that decide which refs a publish leaves for later. */
@@ -45,6 +46,8 @@ export type PublishWorkSummary = {
   attestationCount: number
   uploadCount: number
   uploadBytes: number
+  /** Size of each upload, in bytes (Arweave charges per transaction, not only per byte). */
+  uploadSizes: number[]
   /**
    * References the publish would attest to items whose seed was unpublished. When non-empty,
    * publishing fails with RelatedItemUnpublishedError before anything is sent.
@@ -133,20 +136,6 @@ export function shouldAttestProperty(
   return true
 }
 
-function getStorageDirForDataType(dataType: string): string {
-  switch (normalizeDataType(dataType)) {
-    case 'Image':
-      return BaseFileManager.getFilesPath('images')
-    case 'File':
-      return BaseFileManager.getFilesPath('files')
-    case 'Html':
-      return BaseFileManager.getFilesPath('html')
-    case 'Json':
-      return BaseFileManager.getFilesPath('json')
-    default:
-      return BaseFileManager.getFilesPath('images')
-  }
-}
 
 async function addUpload(
   acc: PublishWorkSummary,
@@ -158,6 +147,7 @@ async function addUpload(
   seen.add(key)
   acc.uploadCount += 1
   acc.uploadBytes += bytes
+  acc.uploadSizes.push(bytes)
 }
 
 async function addUploadFromPath(
@@ -363,16 +353,8 @@ async function appendCoPublishImages(
     // and reported by collectUnpublishedEmbeddedImages) is not co-published.
     if (!imageItem || !isZeroUid(imageItem.seedUid)) continue
 
-    const st =
-      imageItem.internalProperties['storageTransactionId'] ??
-      imageItem.allProperties['storageTransactionId']
-    const stCtx = st ? propertyContext(st) : null
-    const stValue =
-      typeof stCtx?.propertyValue === 'string' ? (stCtx.propertyValue as string) : ''
-    const dataUriBytes = estimateDataUriByteLength(stValue)
-    if (dataUriBytes != null && dataUriBytes > 0) {
-      await addUpload(acc, seen, `seed:${imageItem.seedLocalId}`, dataUriBytes)
-    }
+    const filePath = await findEmbeddedImageFilePath(imageItem.seedLocalId)
+    if (filePath) await addUploadFromPath(acc, seen, filePath, `seed:${imageItem.seedLocalId}`)
 
     await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph)
   }
@@ -524,6 +506,7 @@ export const summarizePublishWork = async (
     attestationCount: 0,
     uploadCount: 0,
     uploadBytes: 0,
+    uploadSizes: [],
     unpublishedRelatedItems: [],
   }
   const graph = await getPublishDraftGraph(item, { forceFullSnapshot })

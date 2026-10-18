@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import {
   useModel,
@@ -24,6 +24,7 @@ import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitUntilOrThrow } from './test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with multiple models
 const testSchemaWithModels: SchemaFileFormat = {
@@ -226,7 +227,12 @@ function UseDestroyModelTest({ model }: { model: Model | null }) {
   const handleDestroy = async () => {
     if (!model) return
     setStatus('destroying')
-    await destroy(model)
+    try {
+      await destroy(model)
+    } catch {
+      // The hook rejects and also sets `error`, which the test reads
+      return
+    }
     setStatus('destroyed')
   }
 
@@ -311,11 +317,11 @@ describe('React Model Hooks Integration Tests', () => {
         const allSchemas = await loadAllSchemasFromDb()
         expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')).toBe(true)
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
     // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
     schemaId = schema.id ?? null
 
     // Wait for models to be populated (they're loaded asynchronously)
@@ -324,7 +330,7 @@ describe('React Model Hooks Integration Tests', () => {
         const models = schema.models || []
         expect(models.length).toBeGreaterThanOrEqual(3) // At least Post, Article, Comment
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
   })
 
@@ -390,7 +396,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('models-count')
@@ -406,7 +412,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('models-count')
@@ -431,7 +437,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const initialCount = screen.getByTestId('models-count')
@@ -445,7 +451,7 @@ describe('React Model Hooks Integration Tests', () => {
           const count = screen.getByTestId('models-count')
           expect(parseInt(count.textContent || '0')).toBe(0)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
   })
@@ -463,7 +469,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const nullIndicator = screen.getByTestId('model-null')
@@ -480,7 +486,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const modelName = screen.getByTestId('model-name')
@@ -501,7 +507,7 @@ describe('React Model Hooks Integration Tests', () => {
         () => {
           expect(screen.queryByTestId('model-name')?.textContent).toBe('Post')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Change model name
@@ -512,7 +518,7 @@ describe('React Model Hooks Integration Tests', () => {
           const modelName = screen.getByTestId('model-name')
           expect(modelName.textContent).toBe('Article')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -528,7 +534,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const modelName = screen.queryByTestId('model-name')
@@ -545,7 +551,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const nullIndicator = screen.getByTestId('model-null')
@@ -560,7 +566,7 @@ describe('React Model Hooks Integration Tests', () => {
       // First get the model by name to get its ID
       const schema = Schema.create('Test Schema Models', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
 
       // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
@@ -629,13 +635,13 @@ describe('React Model Hooks Integration Tests', () => {
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Get schema instance
       const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
 
       // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
       render(<UseModelsTest schemaId="Test Schema Dynamic" />, {
@@ -649,7 +655,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Verify initial state is empty
@@ -687,7 +693,7 @@ describe('React Model Hooks Integration Tests', () => {
           }
           expect(isIdle).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Check if model was written to DB
@@ -702,26 +708,27 @@ describe('React Model Hooks Integration Tests', () => {
       }
 
       // Wait for the model to appear in useModels - this is the critical test
-      // Wait for query cache first (broadcast triggers refetch), then flush React and assert on DOM.
-      await new Promise((r) => setTimeout(r, 200))
+      // Wait for query cache first (broadcast triggers refetch), then for React to render it.
       const queryKey = ['seed', 'models', 'Test Schema Dynamic'] as const
       await waitFor(
         () => {
           const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
           expect(Array.isArray(data) && data.length >= 1).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0))
-      })
-      const finalCount = screen.getByTestId('models-count')
-      expect(parseInt(finalCount.textContent || '0')).toBeGreaterThanOrEqual(1)
+      await waitFor(
+        () => {
+          const finalCount = screen.getByTestId('models-count')
+          expect(parseInt(finalCount.textContent || '0')).toBeGreaterThanOrEqual(1)
 
-      // Verify the specific model name appears
-      const modelElements = screen.getAllByTestId(/^model-\d+$/)
-      const modelNames = modelElements.map((el) => el.textContent)
-      expect(modelNames).toContain('DynamicModel')
+          // Verify the specific model name appears
+          const modelElements = screen.getAllByTestId(/^model-\d+$/)
+          const modelNames = modelElements.map((el) => el.textContent)
+          expect(modelNames).toContain('DynamicModel')
+        },
+        { timeout: WAIT_TIMEOUT_MS }
+      )
 
     })
   })
@@ -735,7 +742,7 @@ describe('React Model Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-model-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('create-model-is-loading').textContent).toBe('false')
@@ -750,7 +757,7 @@ describe('React Model Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-model-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-model-button').click()
@@ -760,7 +767,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('create-model-status')
           expect(status.textContent).toBe('created')
         },
-        { timeout: 3000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const createdName = screen.getByTestId('created-model-name')
@@ -778,7 +785,7 @@ describe('React Model Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(true)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
@@ -793,7 +800,7 @@ describe('React Model Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -801,7 +808,7 @@ describe('React Model Hooks Integration Tests', () => {
           expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('destroy-model-error').textContent).toBe('stub destroy failed')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-model-reset-error').click()
@@ -827,7 +834,7 @@ describe('React Model Hooks Integration Tests', () => {
             expect(btn).toBeTruthy()
             expect(btn.hasAttribute('disabled')).toBe(false)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         screen.getByTestId('destroy-model-button').click()
@@ -836,7 +843,7 @@ describe('React Model Hooks Integration Tests', () => {
           () => {
             expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
           },
-          { timeout: 2000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         await waitFor(

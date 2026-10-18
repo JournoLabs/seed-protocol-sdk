@@ -19,6 +19,7 @@ import {
   waitForPropertyInstances,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForIdle } from '../../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 /**
  * A publish carries along every draft item reachable from the published one through relation and
@@ -81,7 +82,7 @@ const setValue = async (item: Item<any>, propertyName: string, value: unknown) =
   await vi.waitFor(() => {
     const ctx = (prop.getService().getSnapshot() as any).context
     expect(ctx.propertyValue).toBe(value)
-  })
+  }, { timeout: WAIT_TIMEOUT_MS })
 }
 
 /** Gives a draft a live published seed (as a publish would). */

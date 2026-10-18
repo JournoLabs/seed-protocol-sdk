@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, type ReactNode } from 'react'
 import { client } from '@seedprotocol/sdk'
-import type { SeedConstructorOptions, SeedConfig, SchemaFileFormat } from '@seedprotocol/sdk'
+import type { SeedConstructorOptions, SeedConfig, SchemaFileInput } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 
-/** Schema input: path string or SchemaFileFormat object. Merged into config.schema at init. */
-type SchemaInput = string | SchemaFileFormat
+/** Schema input: path string or schema object. Merged into config.schema at init. */
+type SchemaInput = string | SchemaFileInput
 
 function DefaultLoading() {
   return (
@@ -29,7 +29,7 @@ export type SeedClientGateProps = {
   schema?: SchemaInput
   /** Custom loading UI. Default: simple centered "Loading..." text. */
   loadingComponent?: ReactNode
-  /** @deprecated Schema is now loaded at init via config.schema; no separate import. Kept for backward compatibility. */
+  /** @deprecated Never called. Schema loads at init via config.schema, and a schema that fails to load fails init: handle it in `onInitError`. */
   onSchemaImportError?: (err: unknown) => void
   /**
    * Called when client init fails; children stay hidden behind the loading UI. A

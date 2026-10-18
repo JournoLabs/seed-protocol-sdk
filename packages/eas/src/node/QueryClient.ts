@@ -1,21 +1,9 @@
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
-import type { FetchQueryOptions, IQueryClient } from '../QueryClient/IQueryClient.js'
-import type { IQueryClientFactory } from '../QueryClient/IQueryClientFactory.js'
+import { DefaultQueryClient } from '../default/QueryClient.js'
 
-export class NodeQueryClient implements IQueryClientFactory {
-  getQueryClient(): IQueryClient {
-    return {
-      fetchQuery: async <T>({ queryFn }: FetchQueryOptions<T>): Promise<T> => queryFn(),
-      getQueryData: () => undefined,
-      removeQueries: async () => {},
-    }
-  }
-}
+export class NodeQueryClient extends DefaultQueryClient {}
 
 /** @deprecated Prefer NodeQueryClient */
 export const QueryClient = NodeQueryClient
 
 BaseQueryClient.configure(new NodeQueryClient())
-
-const _check: IQueryClientFactory = new NodeQueryClient()
-void _check

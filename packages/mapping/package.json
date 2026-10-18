@@ -1,9 +1,19 @@
 {
   "name": "@seedprotocol/mapping",
-  "version": "0.7.0",
-  "description": "Source-to-model-property field mapping helpers and UI for Seed Protocol",
+  "version": "0.7.6",
+  "description": "Map markdown and RSS/Atom sources onto Seed Protocol model properties: headless mapping helpers plus an optional React FieldMapper UI",
+  "keywords": [
+    "seed-protocol",
+    "mapping",
+    "field-mapping",
+    "rss",
+    "markdown",
+    "import",
+    "react"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -47,7 +57,7 @@
     "react-dom": "^19.0.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
@@ -63,6 +73,15 @@
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/mapping"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/mapping#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

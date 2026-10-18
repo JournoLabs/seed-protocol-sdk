@@ -26,6 +26,8 @@ function makeRecord(
   }
 }
 
+const deps = (seedUid: string) => ({ refUIDs: [seedUid, `v-${seedUid}`], ids: [seedUid] })
+
 describe('buildAssembleOptionsKey', () => {
   it('defaults expand+hydrate to true', () => {
     expect(buildAssembleOptionsKey()).toBe('e1-h1')
@@ -69,19 +71,75 @@ describe('CacheManager collection + item', () => {
     rmSync(cacheDir, { recursive: true, force: true })
   })
 
-  it('stores and retrieves a collection with etag', async () => {
-    const items = [makeRecord('0xa', 100), makeRecord('0xb', 200)]
-    const stored = await cache.setCollection('post', items)
-    expect(stored?.etag).toMatch(/^"[a-f0-9]{16}"$/)
-    expect(stored?.lastProcessedTimestamp).toBe(200)
-    expect(stored?.lastProcessedItemId).toBe('0xb')
+  const KEY = buildAssembleOptionsKey()
 
-    const got = await cache.getCollection('post')
-    expect(got?.items).toHaveLength(2)
-    expect(got?.etag).toBe(stored?.etag)
+  const collection = (items: SeedRecord[], lastUpdated = Math.floor(Date.now() / 1000)) => ({
+    items,
+    meta: Object.fromEntries(
+      items.map((r) => [r.seedUid, { dependencies: deps(r.seedUid), builtAt: lastUpdated }]),
+    ),
+    checkedAt: lastUpdated - 600,
+    seenChangeKeys: [],
+    lastUpdated,
   })
 
-  it('expires collection after TTL', async () => {
+  const item = (record: SeedRecord, optionsKey = KEY) => ({
+    record,
+    optionsKey,
+    dependencies: deps(record.seedUid),
+    checkedAt: 0,
+    seenChangeKeys: [],
+    lastUpdated: Math.floor(Date.now() / 1000),
+  })
+
+  it('stores and retrieves a collection per options key, with a content etag', async () => {
+    const items = [makeRecord('0xa', 100), makeRecord('0xb', 200)]
+    const stored = await cache.setCollection('post', KEY, collection(items))
+    expect(stored?.etag).toMatch(/^"[a-f0-9]{16}"$/)
+
+    const got = await cache.getCollection('post', KEY)
+    expect(got?.items).toHaveLength(2)
+    expect(got?.etag).toBe(stored?.etag)
+    expect(got?.meta['0xa']?.dependencies).toEqual(deps('0xa'))
+    expect(await cache.getCollection('post', buildAssembleOptionsKey({ hydrateStorage: false }))).toBeNull()
+  })
+
+  it('collection etag changes when a record changes without a new versionUid', async () => {
+    const before = await cache.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
+    const after = await cache.setCollection(
+      'post',
+      KEY,
+      collection([makeRecord('0xa', 100, { data: { title: 'patched' } })]),
+    )
+    expect(after?.etag).not.toBe(before?.etag)
+  })
+
+  it('item etag ignores key order', async () => {
+    const a = await cache.setItem(item(makeRecord('0xa', 1, { data: { x: 1, y: { p: 1, q: 2 } } })))
+    const b = await cache.setItem(item(makeRecord('0xa', 1, { data: { y: { q: 2, p: 1 }, x: 1 } })))
+    expect(a?.etag).toBe(b?.etag)
+  })
+
+  it('reads the collection back from disk in a new manager', async () => {
+    await cache.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
+    const config = { enabled: true, ttl: 3600, cacheDir, backgroundRefresh: false, refreshInterval: 300 }
+    const fresh = createQueryCacheManager(config, new FileCache(config))
+    expect((await fresh.getCollection('post', KEY))?.items[0]?.seedUid).toBe('0xa')
+  })
+
+  it('treats a collection file from before change tracking as a miss', async () => {
+    const config = { enabled: true, ttl: 3600, cacheDir, backgroundRefresh: false, refreshInterval: 300 }
+    const files = new FileCache(config)
+    await files.setCollection('post', KEY, {
+      items: [makeRecord('0xa', 100)],
+      lastProcessedTimestamp: 100,
+      lastUpdated: Math.floor(Date.now() / 1000),
+      etag: '"x"',
+    } as never)
+    expect(await createQueryCacheManager(config, files).getCollection('post', KEY)).toBeNull()
+  })
+
+  it('expires collection TTL seconds after its last full assembly', async () => {
     const shortConfig = {
       enabled: true,
       ttl: 1,
@@ -90,36 +148,14 @@ describe('CacheManager collection + item', () => {
       refreshInterval: 300,
     }
     const short = createQueryCacheManager(shortConfig, new FileCache(shortConfig))
-    await short.setCollection('post', [makeRecord('0xa', 100)])
-    expect(await short.getCollection('post')).not.toBeNull()
+    await short.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
+    expect(await short.getCollection('post', KEY)).not.toBeNull()
 
     vi.useFakeTimers()
     const nowSec = Math.floor(Date.now() / 1000)
     vi.setSystemTime((nowSec + 5) * 1000)
-    expect(await short.getCollection('post')).toBeNull()
+    expect(await short.getCollection('post', KEY)).toBeNull()
     vi.useRealTimers()
-  })
-
-  it('mergeRecords dedupes by seedUid and sorts by timeCreated desc', () => {
-    const cached = [makeRecord('0xa', 100), makeRecord('0xb', 50)]
-    const newer = [
-      makeRecord('0xa', 300, { data: { title: 'updated' } }),
-      makeRecord('0xc', 250),
-    ]
-    const merged = cache.mergeRecords(cached, newer)
-    expect(merged.map((r) => r.seedUid)).toEqual(['0xa', '0xc', '0xb'])
-    expect(merged[0].data.title).toBe('updated')
-  })
-
-  it('filterNewRecords keeps only newer than watermark', () => {
-    const items = [
-      makeRecord('0xa', 100),
-      makeRecord('0xb', 200),
-      makeRecord('0xc', 150),
-    ]
-    expect(cache.filterNewRecords(items, 150).map((r) => r.seedUid)).toEqual([
-      '0xb',
-    ])
   })
 
   it('withRefreshLock single-flights concurrent callers', async () => {
@@ -140,24 +176,25 @@ describe('CacheManager collection + item', () => {
     expect(runs).toBe(1)
   })
 
-  it('stores and retrieves items by options key', async () => {
+  it('stores, retrieves and clears items by options key', async () => {
     const record = makeRecord('0xseed', 123)
-    const key = buildAssembleOptionsKey()
-    await cache.setItem(record, key)
-    const got = await cache.getItem('0xseed', key)
+    await cache.setItem(item(record))
+    const got = await cache.getItem('0xseed', KEY)
     expect(got?.record.seedUid).toBe('0xseed')
-    expect(got?.optionsKey).toBe(key)
+    expect(got?.optionsKey).toBe(KEY)
+    expect(got?.dependencies).toEqual(deps('0xseed'))
 
     const otherKey = buildAssembleOptionsKey({ expandRelations: false })
     expect(await cache.getItem('0xseed', otherKey)).toBeNull()
+
+    await cache.clearItem('0xseed', KEY)
+    expect(await cache.getItem('0xseed', KEY)).toBeNull()
   })
 
   it('writeThroughItems populates item cache', async () => {
-    const items = [makeRecord('0x1', 1), makeRecord('0x2', 2)]
-    const key = buildAssembleOptionsKey()
-    await cache.writeThroughItems(items, key)
-    expect((await cache.getItem('0x1', key))?.record.seedUid).toBe('0x1')
-    expect((await cache.getItem('0x2', key))?.record.seedUid).toBe('0x2')
+    await cache.writeThroughItems([item(makeRecord('0x1', 1)), item(makeRecord('0x2', 2))])
+    expect((await cache.getItem('0x1', KEY))?.record.seedUid).toBe('0x1')
+    expect((await cache.getItem('0x2', KEY))?.record.seedUid).toBe('0x2')
   })
 
   it('returns null when disabled', async () => {
@@ -166,8 +203,8 @@ describe('CacheManager collection + item', () => {
       ttl: 3600,
       cacheDir,
     })
-    await disabled.setCollection('post', [makeRecord('0xa', 1)])
-    expect(await disabled.getCollection('post')).toBeNull()
+    await disabled.setCollection('post', KEY, collection([makeRecord('0xa', 1)]))
+    expect(await disabled.getCollection('post', KEY)).toBeNull()
   })
 
   it('memory-only manager still stores collections without FileCache', async () => {
@@ -175,7 +212,81 @@ describe('CacheManager collection + item', () => {
       { enabled: true, ttl: 3600, cacheDir },
       null,
     )
-    await memoryOnly.setCollection('post', [makeRecord('0xa', 100)])
-    expect(await memoryOnly.getCollection('post')).not.toBeNull()
+    await memoryOnly.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
+    expect(await memoryOnly.getCollection('post', KEY)).not.toBeNull()
+  })
+})
+
+describe('cached records are frozen outside production', () => {
+  let cacheDir: string
+  const KEY = buildAssembleOptionsKey()
+
+  beforeEach(() => {
+    cacheDir = mkdtempSync(join(tmpdir(), 'query-cache-freeze-'))
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(cacheDir, { recursive: true, force: true })
+  })
+
+  const fileConfig = () => ({
+    enabled: true,
+    ttl: 3600,
+    cacheDir,
+    backgroundRefresh: false,
+    refreshInterval: 300,
+  })
+
+  const item = (record: SeedRecord) => ({
+    record,
+    optionsKey: KEY,
+    dependencies: deps(record.seedUid),
+    checkedAt: 0,
+    seenChangeKeys: [],
+    lastUpdated: Math.floor(Date.now() / 1000),
+  })
+
+  const nested = () =>
+    makeRecord('0xa', 1, { data: { title: 'T', author: { name: 'A' }, tags: ['x'] } })
+
+  it('deep-freezes items and collections as they are stored', async () => {
+    const cache = createQueryCacheManager({ enabled: true, ttl: 3600, cacheDir }, null)
+    const record = (await cache.setItem(item(nested())))!.record
+    expect(() => {
+      ;(record.data as Record<string, unknown>).title = 'changed'
+    }).toThrow(TypeError)
+    expect(() => {
+      ;(record.data.author as { name: string }).name = 'changed'
+    }).toThrow(TypeError)
+    expect(() => (record.data.tags as string[]).push('y')).toThrow(TypeError)
+
+    await cache.setCollection('post', KEY, {
+      items: [nested()],
+      meta: {},
+      checkedAt: 0,
+      seenChangeKeys: [],
+      lastUpdated: Math.floor(Date.now() / 1000),
+    })
+    const got = (await cache.getCollection('post', KEY))!.items[0]!
+    expect(Object.isFrozen(got)).toBe(true)
+    expect(Object.isFrozen(got.data.author)).toBe(true)
+  })
+
+  it('freezes records loaded from the persistent layer', async () => {
+    const writer = createQueryCacheManager(fileConfig(), new FileCache(fileConfig()))
+    await writer.setItem(item(nested()))
+    const reader = createQueryCacheManager(fileConfig(), new FileCache(fileConfig()))
+    const record = (await reader.getItem('0xa', KEY))!.record
+    expect(Object.isFrozen(record.data.author)).toBe(true)
+  })
+
+  it('skips freezing in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const cache = createQueryCacheManager({ enabled: true, ttl: 3600, cacheDir }, null)
+    expect(cache.getConfig().freezeRecords).toBe(false)
+    const record = (await cache.setItem(item(nested())))!.record
+    expect(Object.isFrozen(record)).toBe(false)
+    expect(Object.isFrozen(record.data.author)).toBe(false)
   })
 })

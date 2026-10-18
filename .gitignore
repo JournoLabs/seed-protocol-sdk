@@ -146,13 +146,7 @@ vite/app-files
 !__mocks__/**/node_modules/**/*
 **/__screenshots__/
 
-packages/cli/dist
-packages/sdk/dist
-packages/feed/dist
-packages/query/dist
-packages/publish/dist
-packages/react/dist
-packages/mapping/dist
+packages/*/dist
 
 # Local-only partner handoffs (not for public docs)
 docs/private/
@@ -161,3 +155,7 @@ docs/private/
 
 # Vitest browser-mode failure screenshots
 .vitest-attachments/
+
+# Local deep-research output
+/research_notes/
+/reports/

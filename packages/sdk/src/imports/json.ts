@@ -1,13 +1,16 @@
 import { BaseFileManager } from '../helpers/FileManager/BaseFileManager'
 import { isNode } from '../helpers/environment'
 import { isInternalSchema, INTERNAL_SCHEMA_IDS } from '../helpers/constants'
-import { JsonImportSchema, SchemaFileFormat } from '../types/import'
+import { JsonImportSchema, SchemaFileFormat, SchemaFileInput } from '../types/import'
 import { Static } from '@sinclair/typebox'
 import { ModelPropertyDataTypes, normalizeDataType, TProperty } from '@/helpers/property'
 import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
+import { easName } from '@seedprotocol/eas'
+import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
+import { clearNameMatchLevels, warnOnInvalidNameMatch } from '@/db/read/nameMatchLevels'
 import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
@@ -226,6 +229,7 @@ function getSchemaContentForComparison(schema: SchemaFileFormat): string {
     version: schema.version,
     models: {},
     enums: schema.enums || {},
+    nameMatch: schema.nameMatch,
   }
   for (const modelName of Object.keys(schema.models || {}).sort()) {
     const model = schema.models![modelName]
@@ -239,10 +243,12 @@ function getSchemaContentForComparison(schema: SchemaFileFormat): string {
         refValueType: prop.refValueType ?? items?.type,
         model: prop.model ?? items?.model,
         storage: prop.storage,
+        nameMatch: prop.nameMatch,
       }
     }
     ;(normalized.models as Record<string, unknown>)[modelName] = {
       description: model.description,
+      nameMatch: model.nameMatch,
       properties: props,
     }
   }
@@ -313,6 +319,7 @@ export const transformImportToSchemaFile = (
     $schema: 'https://seedprotocol.org/schemas/data-model/v1',
     version,
     id: schemaId,
+    ...(importData.nameMatch !== undefined && { nameMatch: importData.nameMatch }),
     metadata: {
       name: importData.name,
       createdAt: now,
@@ -346,17 +353,11 @@ export const parseJsonImportContent = (
   try {
     const data = JSON.parse(content) as any
 
-    // Determine the format and extract name
-    let schemaName: string | undefined
-    
-    // Check if it's a complete schema format (has $schema field)
-    if (data.$schema) {
-      // Complete schema format: name is in metadata.name
-      schemaName = data.metadata?.name
-    } else {
-      // Minimal format: name is at top level
-      schemaName = data.name
-    }
+    // Complete schema format keeps the name in metadata.name, minimal format at the top level.
+    // A schema file without $schema (SchemaFileInput) still has metadata.name.
+    const schemaName: string | undefined = data.$schema
+      ? data.metadata?.name
+      : (data.name ?? data.metadata?.name)
 
     if (!schemaName) {
       throw new Error('Schema name is required (either at top level or in metadata.name)')
@@ -366,6 +367,7 @@ export const parseJsonImportContent = (
     const models = normalizeSchemaModels(data.models) as JsonImportSchema['models']
     return {
       name: schemaName,
+      ...(data.nameMatch !== undefined && { nameMatch: data.nameMatch }),
       models,
     }
   } catch (error) {
@@ -443,6 +445,19 @@ const getSchemaFilePath = (workingDir: string, name: string, version: number, sc
   return path.join(workingDir, filename)
 }
 
+/** The complete schema stored at filePath, or undefined when it can't be read or isn't complete. */
+const readCompleteSchemaFile = async (filePath: string): Promise<SchemaFileFormat | undefined> => {
+  try {
+    const schema = JSON.parse(await BaseFileManager.readFileAsString(filePath)) as SchemaFileFormat
+    if (!schema.$schema) return undefined
+    if (schema.models) schema.models = normalizeSchemaModels(schema.models)
+    return schema
+  } catch (error) {
+    logger(`Could not read schema file ${filePath}:`, error)
+    return undefined
+  }
+}
+
 /**
  * Import a JSON schema file and save it in the full schema file format
  * Also converts the JSON models to Model classes and adds them to the database
@@ -451,6 +466,38 @@ const getSchemaFilePath = (workingDir: string, name: string, version: number, sc
  * @returns The file path where the schema was saved
  * @throws Error if import file cannot be read, parsed, or if schema already exists
  */
+/**
+ * Warns when two models, or two properties of one model, have the same EAS name (ADR 0008): they
+ * would publish to the same EAS schema (`HTMLPage` and `HtmlPage` are both `html_page`). A warning,
+ * not an error, so schema files that already load keep loading.
+ */
+export function warnOnEasNameCollisions(schemaFile: Pick<SchemaFileFormat, 'models'> & { metadata?: { name?: string } }): string[] {
+  const warnings: string[] = []
+  const collisions = (names: [string, string][]) => {
+    const byEasName = new Map<string, string[]>()
+    for (const [name, eas] of names) byEasName.set(eas, [...(byEasName.get(eas) ?? []), name])
+    return [...byEasName.entries()].filter(([, group]) => group.length > 1)
+  }
+  const models = Object.entries(schemaFile.models ?? {})
+  for (const [eas, group] of collisions(models.map(([name]) => [name, easName(name)]))) {
+    warnings.push(`models ${group.join(', ')} all publish as "bytes32 ${eas}"`)
+  }
+  for (const [modelName, model] of models) {
+    const properties = Object.entries((model as { properties?: Record<string, any> })?.properties ?? {})
+    const named = properties.map(([key, def]): [string, string] => [
+      key,
+      easPropertyNameForPublish(key, { ...def, dataType: def?.dataType ?? def?.type, name: key }),
+    ])
+    for (const [eas, group] of collisions(named)) {
+      warnings.push(`${modelName} properties ${group.join(', ')} all publish as "${eas}"`)
+    }
+  }
+  for (const warning of warnings) {
+    console.warn(`[seed] schema ${schemaFile.metadata?.name ?? ''}: ${warning}; EAS can't tell them apart.`)
+  }
+  return warnings
+}
+
 export async function importJsonSchema(
   importFilePath: string,
   version?: number,
@@ -470,6 +517,23 @@ export async function importJsonSchema(
 export async function importJsonSchema(
   importFilePathOrContents: string | { contents: string },
   version: number = 1,
+): Promise<string> {
+  return importSchema(importFilePathOrContents, version, { replaceStoredFile: false })
+}
+
+type ImportSchemaOptions = {
+  /**
+   * When a stored schema file has this schema's id and version but different content, write the
+   * new content over it. syncSchemaFromSource sets it: the app's schema is canonical and the stored
+   * file is a cache of it. Other imports throw instead.
+   */
+  replaceStoredFile: boolean
+}
+
+async function importSchema(
+  importFilePathOrContents: string | { contents: string },
+  version: number,
+  options: ImportSchemaOptions,
 ): Promise<string> {
   // Determine if we have a file path or file contents
   let importData: JsonImportSchema | undefined
@@ -502,6 +566,7 @@ export async function importJsonSchema(
 
   // Use original schema file if available, otherwise transform from import format
   let schemaFile: SchemaFileFormat
+  let replacingStoredFile = false
   if (originalSchemaFile) {
     schemaFile = originalSchemaFile
     // Normalize models if provided as array (some tools output array format)
@@ -580,16 +645,27 @@ export async function importJsonSchema(
       logger(`Generated deterministic schema ID for ${schemaFile.metadata!.name}:`, schemaFile.id)
     }
     
-    // Before generating IDs, check if a file already exists with this schemaFileId
-    // This handles the case where the schema was already loaded via loadSchemaFromFile
+    // A file with this schemaFileId and version is reused only when its content matches. A pinned id
+    // (one the schema file sets) keeps the same path when the content changes.
     const workingDir = BaseFileManager.getWorkingDir()
-    const path = BaseFileManager.getPathModule()
     const existingFilePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, schemaFile.version, schemaFile.id)
-    const existingFileExists = await BaseFileManager.pathExists(existingFilePath)
-    if (existingFileExists) {
-      // File already exists with this schemaFileId - just load it instead of creating a new one
-      logger(`Schema file already exists with schemaFileId ${schemaFile.id}, loading it instead of creating new file`)
-      return await loadSchemaFromFile(existingFilePath)
+    if (await BaseFileManager.pathExists(existingFilePath)) {
+      const storedSchema = await readCompleteSchemaFile(existingFilePath)
+      if (storedSchema && compareSchemaContent(schemaFile, storedSchema)) {
+        logger(`Schema file already exists with schemaFileId ${schemaFile.id} and the same content, loading it`)
+        return await loadSchemaFromFile(existingFilePath)
+      }
+      if (!options.replaceStoredFile) {
+        throw new Error(
+          `Schema ${schemaFile.metadata.name} v${schemaFile.version} already exists with different content ` +
+            `(schema id ${schemaFile.id}). Bump the schema's version, or delete the existing file first.`,
+        )
+      }
+      console.warn(
+        `[seed] schema ${schemaFile.metadata.name} v${schemaFile.version}: content changed but id ` +
+          `${schemaFile.id} and version did not; replacing the stored schema file. Bump "version" when the schema changes.`,
+      )
+      replacingStoredFile = true
     }
     
     // Generate missing model and property IDs.
@@ -690,6 +766,9 @@ export async function importJsonSchema(
       schemaFile = transformImportToSchemaFile(importData, version)
     }
   }
+
+  warnOnEasNameCollisions(schemaFile)
+  warnOnInvalidNameMatch(schemaFile)
 
   // Check if this is an internal SDK schema (should not create files in app directory)
   const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
@@ -796,8 +875,15 @@ export async function importJsonSchema(
       }
     }
 
-    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-    const modelDefinitions = await createModelsFromJson(importDataForInternal, modelFileIds, propertyFileIds)
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+    // addModelsToDb below writes their rows; the models adopt them once it has run.
+    const rowsWritten = createRowsWrittenSignal()
+    const modelDefinitions = await createModelsFromJson(
+      importDataForInternal,
+      modelFileIds,
+      propertyFileIds,
+      rowsWritten.promise,
+    )
 
     logger('loadSchemaFromFile (internal) - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -941,6 +1027,8 @@ export async function importJsonSchema(
     } catch (dbError) {
       // Database not available - log warning but continue
       logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    } finally {
+      rowsWritten.settle()
     }
 
     // Models are now Model instances, no registration needed
@@ -968,7 +1056,7 @@ export async function importJsonSchema(
   const filePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, version, schemaFile.id)
   
   // Check if schema already exists
-  const exists = await BaseFileManager.pathExists(filePath)
+  const exists = !replacingStoredFile && (await BaseFileManager.pathExists(filePath))
   if (exists) {
     // If we have a file path and the import file is the same as the target file,
     // and it's already a complete schema, just load it without writing
@@ -1060,6 +1148,7 @@ async function applySchemaToDb(
   modelDefinitions: ModelDefinitions,
   modelFileIds: Map<string, string>,
   propertyFileIds: Map<string, Map<string, string>>,
+  propertyDefinitions?: Map<string, { [propName: string]: any }>,
 ): Promise<{ schemaRecord: Awaited<ReturnType<typeof import('../helpers/db').addSchemaToDb>> }> {
   const schemaName = schemaFile.metadata?.name
   const version = schemaFile.version
@@ -1083,6 +1172,8 @@ async function applySchemaToDb(
     throw new Error('Database not found')
   }
 
+  warnOnInvalidNameMatch(schemaFile)
+  const droppedModelNames = await getModelsDroppedFromStoredSchema(db, schemaFile)
   const schemaData = JSON.stringify(schemaFile, null, 2)
   const schemaRecord = await addSchemaToDb(schemaInput, schemaFile.id, schemaData, false)
 
@@ -1091,22 +1182,72 @@ async function applySchemaToDb(
       schemaFileId: schemaFile.id!,
       modelFileIds,
       propertyFileIds,
+      propertyDefinitions,
     })
     await new Promise(resolve => setTimeout(resolve, 200))
+  }
+
+  if (droppedModelNames.length > 0 && schemaRecord.id) {
+    await unlinkModelsFromSchema(db, schemaRecord.id, droppedModelNames)
   }
 
   return { schemaRecord }
 }
 
 /**
+ * Names of the models the stored published schema of this name has and schemaFile drops. A model
+ * whose id is still in schemaFile was renamed, not dropped. Returns none when the stored row is a
+ * draft (its edits aren't the app's to undo) or a newer version than schemaFile.
+ */
+async function getModelsDroppedFromStoredSchema(db: any, schemaFile: SchemaFileFormat): Promise<string[]> {
+  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+  const { eq } = await import('drizzle-orm')
+  const rows = await db
+    .select({ version: schemasTable.version, isDraft: schemasTable.isDraft, schemaData: schemasTable.schemaData })
+    .from(schemasTable)
+    .where(eq(schemasTable.name, schemaFile.metadata.name))
+  if (rows.length === 0 || rows.some((row: { isDraft: boolean | null }) => row.isDraft)) return []
+  const stored = rows.reduce((a: { version: number }, b: { version: number }) => (b.version > a.version ? b : a))
+  if (!stored.schemaData || stored.version > schemaFile.version) return []
+
+  let storedModels: SchemaFileFormat['models']
+  try {
+    storedModels = normalizeSchemaModels((JSON.parse(stored.schemaData) as SchemaFileFormat).models ?? {})
+  } catch {
+    return []
+  }
+  const models = schemaFile.models ?? {}
+  const modelIds = new Set(Object.values(models).map((model) => model.id).filter(Boolean))
+  return Object.entries(storedModels)
+    .filter(([name, model]) => !(name in models) && !(model.id && modelIds.has(model.id)))
+    .map(([name]) => name)
+}
+
+/** Delete the model_schemas rows linking the named models to the schema. The models and their items stay. */
+async function unlinkModelsFromSchema(db: any, schemaId: number, modelNames: string[]): Promise<void> {
+  const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+  const { models: modelsTable } = await import('../seedSchema/ModelSchema')
+  const { and, eq, inArray } = await import('drizzle-orm')
+  const links = await db
+    .select({ id: modelSchemas.id })
+    .from(modelSchemas)
+    .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+    .where(and(eq(modelSchemas.schemaId, schemaId), inArray(modelsTable.name, modelNames)))
+  if (links.length === 0) return
+  await db.delete(modelSchemas).where(inArray(modelSchemas.id, links.map((link: { id: number }) => link.id)))
+  logger(`Unlinked models dropped from the schema (schema id ${schemaId}): ${modelNames.join(', ')}`)
+}
+
+/**
  * Sync a canonical schema from a file path or inlined object to the database.
- * Uses add/update semantics: no "already exists with different content" errors, no ID-based file copy.
+ * A stored schema file with the same id and version but different content is overwritten (with a
+ * warning) instead of reused, and models dropped from the schema are unlinked from it.
  * Called automatically at init when config.schema is provided.
  *
  * @param source - File path (string) or complete SchemaFileFormat object
  */
 export async function syncSchemaFromSource(
-  source: string | SchemaFileFormat,
+  source: string | SchemaFileInput,
 ): Promise<void> {
   if (typeof source === 'string') {
     const path = BaseFileManager.getPathModule()
@@ -1118,10 +1259,10 @@ export async function syncSchemaFromSource(
     const content = await BaseFileManager.readFileAsString(resolvedPath)
     const parsed = JSON.parse(content) as { version?: number }
     const version = parsed?.version ?? 1
-    await importJsonSchema({ contents: content }, version)
+    await importSchema({ contents: content }, version, { replaceStoredFile: true })
   } else {
-    const version = (source as SchemaFileFormat).version ?? 1
-    await importJsonSchema({ contents: JSON.stringify(source) }, version)
+    const version = source.version ?? 1
+    await importSchema({ contents: JSON.stringify(source) }, version, { replaceStoredFile: true })
   }
 }
 
@@ -1252,8 +1393,10 @@ export const loadSchemaFromFile = async (
       }
     }
 
-    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-    const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+    // applySchemaToDb below writes their rows; the models adopt them once it has run.
+    const rowsWritten = createRowsWrittenSignal()
+    const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds, rowsWritten.promise)
 
     logger('loadSchemaFromFile - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -1261,7 +1404,22 @@ export const loadSchemaFromFile = async (
     try {
       const db = BaseDb.getAppDb()
       if (db) {
-        const { schemaRecord } = await applySchemaToDb(schemaFile, modelDefinitions, modelFileIds, propertyFileIds)
+        // A model already in the instance cache keeps its old properties (Model.create ignores the
+        // ones passed), so give addModelsToDb this file's definitions: a renamed or changed property
+        // must come from the file, not from the cached model.
+        const propertyDefinitions = new Map(
+          Object.entries(importData.models).map(([modelName, modelDef]) => [
+            modelName,
+            jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds.get(modelName)),
+          ]),
+        )
+        const { schemaRecord } = await applySchemaToDb(
+          schemaFile,
+          modelDefinitions,
+          modelFileIds,
+          propertyFileIds,
+          propertyDefinitions,
+        ).finally(rowsWritten.settle)
           
           // Query the database to get model IDs that were just created
           const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
@@ -1385,6 +1543,7 @@ export const loadSchemaFromFile = async (
             .update(schemasTable)
             .set({ schemaData: updatedSchemaData })
             .where(eq(schemasTable.id, schemaRecord.id))
+          clearNameMatchLevels()
           
           if (schemaFileUpdated) {
             logger(`Updated schemaData in database with actual property IDs for schema "${schemaName}"`)
@@ -1395,6 +1554,8 @@ export const loadSchemaFromFile = async (
     } catch (dbError) {
       // Database not available - log warning but continue
       logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    } finally {
+      rowsWritten.settle()
     }
 
     // Models are now Model instances, no registration needed
@@ -1415,23 +1576,16 @@ export const loadSchemaFromFile = async (
 }
 
 /**
- * Create a Model class from a JSON model definition
- * @param modelName - The name of the model
+ * Convert a JSON model's properties to the schema property format Model.create and addModelsToDb take
+ * @param modelName - The name of the model (for error messages)
  * @param modelDef - The JSON model definition
- * @param schemaName - The name of the schema this model belongs to
- * @returns A Model class that can be used with the SDK
+ * @param propertyFileIds - Optional map of property names to their file IDs from the JSON file
  */
-export const createModelFromJson = async (
+export const jsonPropertiesToSchemaProperties = (
   modelName: string,
   modelDef: JsonImportSchema['models'][string],
-  schemaName: string,
-  modelFileId?: string, // Optional modelFileId from JSON file
-  propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
-): Promise<any> => {
-  const modelMod = await import('../Model/Model')
-  const { Model } = modelMod
-
-  // Convert JSON properties to schema format
+  propertyFileIds?: Map<string, string>,
+): { [propName: string]: any } => {
   const convertedProperties: { [propName: string]: any } = {}
   if (modelDef.properties) {
     for (const [propName, propDef] of Object.entries(modelDef.properties)) {
@@ -1500,6 +1654,42 @@ export const createModelFromJson = async (
     }
   }
 
+  return convertedProperties
+}
+
+/**
+ * For callers of createModelsFromJson that write the models with addModelsToDb: pass `promise` as its
+ * persistedBy and call `settle` once addModelsToDb has run or failed (in a finally). The new models wait
+ * for it, then adopt the rows addModelsToDb wrote; any model it didn't write writes itself.
+ */
+export const createRowsWrittenSignal = (): { promise: Promise<void>; settle: () => void } => {
+  let settle!: () => void
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+  return { promise, settle }
+}
+
+/**
+ * Create a Model class from a JSON model definition
+ * @param modelName - The name of the model
+ * @param modelDef - The JSON model definition
+ * @param schemaName - The name of the schema this model belongs to
+ * @returns A Model class that can be used with the SDK
+ */
+export const createModelFromJson = async (
+  modelName: string,
+  modelDef: JsonImportSchema['models'][string],
+  schemaName: string,
+  modelFileId?: string, // Optional modelFileId from JSON file
+  propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
+  persistedBy?: Promise<unknown>, // Settles once the caller's addModelsToDb has run; see createRowsWrittenSignal
+): Promise<any> => {
+  const modelMod = await import('../Model/Model')
+  const { Model } = modelMod
+
+  const convertedProperties = jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds)
+
   // Create Model instance with the definition
   // Pass id (schemaFileId) if provided to ensure Model instance uses correct ID
   // Note: indexes and description are ignored - they remain in JSON for schema file format compliance but are not used by Model instances
@@ -1513,6 +1703,7 @@ export const createModelFromJson = async (
     id: modelFileId, // Also pass as id for backward compatibility
     properties: convertedProperties,
     waitForReady: false,
+    persistedBy,
   }) as import('@/Model/Model').Model
 
   return modelInstance
@@ -1523,12 +1714,15 @@ export const createModelFromJson = async (
  * @param importData - The JSON import data
  * @param modelFileIds - Optional map of model names to their file IDs from the JSON file
  * @param propertyFileIds - Optional map of model names to maps of property names to their file IDs from the JSON file
+ * @param persistedBy - When the caller writes the models with addModelsToDb: a promise that settles once
+ *   that has run (see createRowsWrittenSignal). New models then adopt those rows instead of writing them too.
  * @returns ModelDefinitions object with Model classes
  */
 export const createModelsFromJson = async (
   importData: JsonImportSchema,
   modelFileIds?: Map<string, string>,
   propertyFileIds?: Map<string, Map<string, string>>,
+  persistedBy?: Promise<unknown>,
 ): Promise<ModelDefinitions> => {
   const modelDefinitions: ModelDefinitions = {}
   const schemaName = importData.name
@@ -1543,7 +1737,14 @@ export const createModelsFromJson = async (
     }
     // Get propertyFileIds for this model if available
     const modelPropertyFileIds = propertyFileIds?.get(modelName)
-    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName, finalModelFileId, modelPropertyFileIds)
+    const ModelClass = await createModelFromJson(
+      modelName,
+      modelDef,
+      schemaName,
+      finalModelFileId,
+      modelPropertyFileIds,
+      persistedBy,
+    )
     
     modelDefinitions[modelName] = ModelClass as unknown as ModelClassType
   }

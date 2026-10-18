@@ -2,7 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { generateId } from '@/helpers'
 import { addModelsToDb } from '@/helpers/db'
-import { createModelsFromJson } from '@/imports/json'
+import { createModelsFromJson, createRowsWrittenSignal } from '@/imports/json'
 import debug from 'debug'
 import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -178,8 +178,10 @@ export const writeModelsToDb = fromCallback<
         }
       }
 
-      // Convert JSON models to Model classes
-      const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+      // Convert JSON models to Model classes. addModelsToDb below writes their rows; the models adopt them
+      // once it has run.
+      const rowsWritten = createRowsWrittenSignal()
+      const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds, rowsWritten.promise)
       
       // Add models to database
       if (Object.keys(modelDefinitions).length > 0) {
@@ -187,7 +189,7 @@ export const writeModelsToDb = fromCallback<
           schemaFileId: schema.id,
           modelFileIds,
           propertyFileIds,
-        })
+        }).finally(rowsWritten.settle)
         logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database`)
       }
 

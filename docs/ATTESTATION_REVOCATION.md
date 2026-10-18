@@ -80,7 +80,7 @@ Sync fetches revoked attestations too and keeps local metadata on the canonical 
 
 ## Republishing
 
-To make content visible again, call `item.publish()`. This creates **new** attestations (a new `seedUid`). There is no "unrevoke" – republishing is a fresh publish.
+To make content visible again, call `item.publish()` (with `@seedprotocol/publish` initialised, as for unpublish). This creates **new** attestations (a new `seedUid`). There is no "unrevoke" – republishing is a fresh publish.
 
 When the item's seed is revoked (`seeds.revoked_at` set), the publish payload asks for a new seed (`seedUid` is zero) and a new version, and it attests every property, as a `new_version` publish does, because the new seed has no property attestations yet. `summarizePublishWork` counts the new seed and version. The local item stays the same item, with the same `seedLocalId`. After the publish:
 

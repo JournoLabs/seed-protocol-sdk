@@ -16,9 +16,8 @@ import {
 } from "@/helpers";
 import { setPreferredArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { configureEasReadChain } from '@seedprotocol/eas'
-import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
-import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
+import { applySeedConfigDefaults } from '../seedConfigDefaults'
 import { startTabCoordination } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -27,6 +26,8 @@ type InitEvent = {
   type: 'init'
   options: SeedConstructorOptions
 }
+
+export { isUnderDotSeed } from '@/helpers/dotSeedPath'
 
 export const platformClassesInit = fromCallback<
 EventObject, 
@@ -46,11 +47,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     return
   }
 
-  // Validate synchronously before starting async operations
-  // This ensures errors are handled immediately, preventing unhandled rejections
-  const { config } = options
-  const { endpoints } = config || {}
-  
   // Track if the operation is cancelled
   let cancelled = false
 
@@ -64,22 +60,20 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     }
 
     const { addresses } = options
-    const config = normalizeSeedConfigEndpoints(options.config)
-
-    // Validate required endpoints - this should happen early in the initialization process.
-    // Node fills these from filesDir; browser callers still pass them.
-    if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
-      throw new Error('Config must include endpoints with filePaths and files')
+    const config = applySeedConfigDefaults(options.config)
+    if (!config) {
+      throw new Error('client.init requires a config')
     }
 
-    // Prefer the condition-resolved factory when available; fall back to explicit
-    // platform imports so source/vitest resolution stays reliable.
     const { configurePlatform } = await import('../../platform/configurePlatform')
     if (isBrowser()) {
       const { createPlatformServices } = await import('../../platform/index.browser')
       configurePlatform(createPlatformServices())
     } else if (isNode()) {
-      const { createPlatformServices } = await import('../../platform/index.node')
+      // `#seed-node-platform` (package.json `imports`) maps to the browser platform under
+      // the `browser` condition, so browser bundles never contain the Node platform
+      // (libsql, node:fs). A relative import here would ship it to every browser app.
+      const { createPlatformServices } = await import('#seed-node-platform')
       configurePlatform(createPlatformServices())
     } else {
       throw new Error(
@@ -110,49 +104,16 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     setResolvedSeedGatewayEndpoints(resolvedGateway)
     BaseArweaveClient.setHost(`${resolvedGateway.arweaveProtocol}://${resolvedGateway.arweaveHost}`)
 
-    // Note: Validation already happened above, but we have endpoints here for path normalization
+    // filesDir falls back to endpoints.files (applySeedConfigDefaults fills both)
 
-    // Normalize filesDir for Node.js environment
-    // In Node.js, filesDir should be resolved relative to .seed directory at project root
     let normalizedFilesDir = filesDir || endpoints?.files
     // jsdom (and any env with both Node + window) is "browser" for SDK: PathResolver is OPFS/virtual.
     // Do not run real fs against those paths (e.g. mkdir '/.seed').
     if (isNode() && !isBrowser() && normalizedFilesDir) {
-      const path = (await import('node:path')).default
-      const fs = (await import('node:fs')).default
-      const dotSeedDir = BasePathResolver.getDotSeedDir()
-      
-      // Ensure .seed directory exists
-      if (!fs.existsSync(dotSeedDir)) {
-        fs.mkdirSync(dotSeedDir, { recursive: true })
-      }
-      
-      // Check if filesDir is a browser OPFS-style path (absolute path starting with '/'
-      // that is a simple single-level path like '/app-files', not a real filesystem path)
-      // Browser OPFS paths are typically simple like '/app-files', '/files', etc.
-      const pathWithoutLeadingSlash = normalizedFilesDir.slice(1)
-      const isBrowserOpfsPath = path.isAbsolute(normalizedFilesDir) && 
-                                 normalizedFilesDir.startsWith('/') &&
-                                 pathWithoutLeadingSlash.length > 0 &&
-                                 !pathWithoutLeadingSlash.includes('/') && // Single directory name, no subdirectories
-                                 !fs.existsSync(normalizedFilesDir) // Doesn't exist on filesystem
-      
-      if (isBrowserOpfsPath) {
-        // Convert browser OPFS path to .seed subdirectory
-        // e.g., '/app-files' -> '.seed/app-files'
-        const dirName = normalizedFilesDir.slice(1) || 'app-files'
-        normalizedFilesDir = path.join(dotSeedDir, dirName)
-      } else if (!path.isAbsolute(normalizedFilesDir)) {
-        // If it's a relative path, check if it already starts with .seed
-        if (normalizedFilesDir.startsWith('.seed') || normalizedFilesDir.startsWith('.seed/')) {
-          // Already relative to project root, resolve it
-          normalizedFilesDir = path.resolve(normalizedFilesDir)
-        } else {
-          // Resolve relative to .seed directory
-          normalizedFilesDir = path.join(dotSeedDir, normalizedFilesDir)
-        }
-      }
-      // If it's an absolute path that exists or is a valid filesystem path, use it as-is
+      // Lives in the Node platform so browser bundles (and Next.js server builds, which
+      // alias it to the browser platform) carry no fs code with computed paths.
+      const { resolveFilesDir } = await import('#seed-node-platform')
+      normalizedFilesDir = resolveFilesDir(normalizedFilesDir)
     }
 
     const normalizedAddresses = normalizeAddressConfig(addresses)
@@ -167,6 +128,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       gatewaySidecarPort: gatewayConfig.hyper?.localSidecarPort,
       gatewayProxyBaseUrl: resolvedGateway.proxyBaseUrl ?? gatewayConfig.proxyBaseUrl,
       addresses: normalizedAddresses.owned,
+      addressesProvided: addresses !== undefined,
       ownedAddresses: normalizedAddresses.owned,
       watchedAddresses: normalizedAddresses.watched,
       filesDir: normalizedFilesDir,

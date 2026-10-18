@@ -15,14 +15,15 @@ import { properties as propertiesTable, models as modelsTable } from '@/seedSche
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { getSchemaNameFromModel } from './service/actors/saveToSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
+import { setCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
@@ -47,9 +48,14 @@ const TPropertyKeys = [
 ] as const
 
 export class ModelProperty {
+  /**
+   * `refCount` counts app holders (ModelProperty.create callers that haven't unloaded). `modelOwned`
+   * marks an instance its model created or loaded: the model keeps it until the model is evicted,
+   * so it isn't stopped when the app's holders unload it.
+   */
   protected static instanceCache: Map<
     string,
-    { instance: ModelProperty; refCount: number }
+    { instance: ModelProperty; refCount: number; modelOwned?: boolean }
   > = new Map()
 
   /**
@@ -72,6 +78,8 @@ export class ModelProperty {
   
   protected readonly _service: ModelPropertyService
 
+  /** The property's schemaFileId (its id in schema files). */
+  id?: string
   name?: string
   dataType?: ModelPropertyDataTypes
   ref?: string
@@ -541,7 +549,7 @@ export class ModelProperty {
 
   static create(
     property: Static<typeof TProperty>,
-    options?: { waitForReady?: false; schemaName?: string },
+    options: { waitForReady: false; schemaName?: string },
   ): ModelProperty
   static create(
     property: Static<typeof TProperty>,
@@ -556,7 +564,7 @@ export class ModelProperty {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
     const schemaName = options?.schemaName
 
     // Handle 'type' field from JSON schema format - convert to 'dataType'
@@ -623,7 +631,8 @@ export class ModelProperty {
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
-      const { instance, refCount } = this.instanceCache.get(cacheKey)!
+      const cachedEntry = this.instanceCache.get(cacheKey)!
+      const { instance, refCount } = cachedEntry
       const cachedContext = instance._getSnapshotContext()
       
       // Update cached instance if new property data has fields that the cached instance doesn't have
@@ -638,6 +647,14 @@ export class ModelProperty {
       if (propertyWithId.refModelId && !cachedContext.refModelId) {
         needsUpdate.refModelId = propertyWithId.refModelId
       }
+      // Rules defined in code exist only on the instance: an instance cached from the DB row first
+      // (which has no column for them) must still take them.
+      if (propertyWithId.validation && !cachedContext.validation) {
+        needsUpdate.validation = propertyWithId.validation
+      }
+      if (propertyWithId.htmlEmbeddedDataUriPolicy && !cachedContext.htmlEmbeddedDataUriPolicy) {
+        needsUpdate.htmlEmbeddedDataUriPolicy = propertyWithId.htmlEmbeddedDataUriPolicy
+      }
       
       if (Object.keys(needsUpdate).length > 0) {
         instance._service.send({
@@ -647,7 +664,7 @@ export class ModelProperty {
       }
       
       this.instanceCache.set(cacheKey, {
-        instance,
+        ...cachedEntry,
         refCount: refCount + 1,
       })
       if (!waitForReady) return instance
@@ -699,7 +716,16 @@ export class ModelProperty {
     // there's nothing to write. Writing it back anyway raced deletes of that row's model (FK error).
     const isPersisted = typeof (propertyWithId as { _dbId?: unknown })._dbId === 'number'
 
+    // Settles when the row write finishes; create() waits for it when waitForReady is on, so a
+    // failed write rejects create() instead of resolving with nothing in the DB.
+    let writeDone: Promise<void> = Promise.resolve()
     if (hasModelId && propertyFileId && !isPersisted) {
+      let resolveWrite!: () => void
+      let rejectWrite!: (error: Error) => void
+      writeDone = new Promise<void>((resolve, reject) => {
+        resolveWrite = resolve
+        rejectWrite = reject
+      })
       // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
       // Retry a few times if writeProcess isn't available yet
       let retries = 0
@@ -708,7 +734,10 @@ export class ModelProperty {
         const service = proxiedInstance.getService()
         const snapshot = service.getSnapshot()
         // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
-        if (isActorStopped(service)) return
+        if (isActorStopped(service)) {
+          resolveWrite()
+          return
+        }
         
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
           const writeProcess = snapshot.context.writeProcess
@@ -748,11 +777,19 @@ export class ModelProperty {
             logger(`ERROR: Cannot write property "${property.name}" - no modelId available`)
             console.error(`[ModelProperty.create] ERROR: Cannot write property "${property.name}" - no modelId available. modelId: ${propertyWithId.modelId}, modelName: ${propertyWithId.modelName}`)
             // Don't clear pending write here - it might resolve later
+            rejectWrite(
+              new Error(
+                `Cannot write property "${property.name}": model ${propertyWithId.modelName ?? propertyWithId.modelId} has no database row`,
+              ),
+            )
             return
           }
 
           // Resolving the modelId awaited the DB; the instance may have been stopped meanwhile
-          if (isActorStopped(service)) return
+          if (isActorStopped(service)) {
+            resolveWrite()
+            return
+          }
           
           // Track pending write now that we have the resolved modelId
           this.trackPendingWrite(propertyFileId, resolvedModelId)
@@ -765,6 +802,7 @@ export class ModelProperty {
           if (currentWriteState.value === 'success') {
             // Write already succeeded
             void this.completePendingWrite(propertyFileId, resolvedModelId)
+            resolveWrite()
           } else {
             // Set up subscription to catch future state changes
             const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
@@ -772,6 +810,7 @@ export class ModelProperty {
                 writeSubscription.unsubscribe()
                 logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
                 void this.completePendingWrite(propertyFileId, resolvedModelId)
+                resolveWrite()
               } else if (writeSnapshot.value === 'error') {
                 writeSubscription.unsubscribe()
                 const errorContext = writeSnapshot.context
@@ -779,6 +818,11 @@ export class ModelProperty {
                 logger(`Write process error details:`, errorContext.error)
                 // Mark pending write as error
                 this.clearPendingWrite(propertyFileId, 'error')
+                rejectWrite(
+                  new Error(
+                    `Failed to write property "${property.name}": ${errorContext.error?.message || 'Unknown error'}`,
+                  ),
+                )
               }
             })
           }
@@ -807,6 +851,7 @@ export class ModelProperty {
           console.error(`[ModelProperty.create] ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
           // Mark as error if we couldn't even start the write process
           this.clearPendingWrite(propertyFileId, 'error')
+          rejectWrite(new Error(`Failed to write property "${property.name}": its write process never started`))
         }
       }
       
@@ -814,8 +859,22 @@ export class ModelProperty {
       setTimeout(checkAndSend, 0)
     }
     
-    if (!waitForReady) return proxiedInstance
-    return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+    if (!waitForReady) {
+      // Nobody awaits the write; failures are already logged above.
+      writeDone.catch(() => {})
+      return proxiedInstance
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const writeWithin = Promise.race([
+      writeDone,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Property "${property.name}" was not written within ${readyTimeout}ms`)),
+          readyTimeout,
+        )
+      }),
+    ]).finally(() => clearTimeout(timer))
+    return Promise.all([waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }), writeWithin]).then(
       () => proxiedInstance,
     )
   }
@@ -850,6 +909,18 @@ export class ModelProperty {
       indexedId = id
       index(id)
     })
+  }
+
+  /**
+   * Turns the caller's hold from the create call just made into model ownership: the instance stays
+   * cached and running for its model, and app holders' unload calls don't stop it.
+   * @internal Used by the model's property loading.
+   */
+  static adoptForModel(instance: ModelProperty): void {
+    for (const [key, entry] of this.instanceCache) {
+      if (entry.instance._service !== instance._service) continue
+      this.instanceCache.set(key, { ...entry, refCount: Math.max(0, entry.refCount - 1), modelOwned: true })
+    }
   }
 
   /**
@@ -984,6 +1055,8 @@ export class ModelProperty {
 
     // Create ModelProperty instance (sync for createById so we can send updateContext)
     const instance = this.create(propertyData, { waitForReady: false })
+    // Loaded for its model (Model's property list, the model machine), not held by a caller.
+    this.adoptForModel(instance)
     
     // Set isEdited from database after creation
     if (isEditedFromDb) {
@@ -997,6 +1070,90 @@ export class ModelProperty {
   }
 
   /**
+   * Give cached instances of these properties the values their rows now have (e.g. after a schema
+   * update reloaded them: renamed, dataType or storage changed). Nothing else updates them: createById
+   * and the Model's property refresh return a cached instance as is. A renamed instance's
+   * "modelName:oldName" cache entry is re-keyed so creating the property by its new name finds it.
+   * Instances with unsaved edits are left alone, as addModelsToDb leaves edited rows alone.
+   */
+  static async refreshFromDb(propertyFileIds: string[]): Promise<void> {
+    const ids = new Set(propertyFileIds.filter(Boolean))
+    if (ids.size === 0) return
+    const db = BaseDb.getAppDb()
+    if (!db) return
+
+    const rows = await db
+      .select({
+        schemaFileId: propertiesTable.schemaFileId,
+        name: propertiesTable.name,
+        dataType: propertiesTable.dataType,
+        refModelId: propertiesTable.refModelId,
+        refModelName: modelsTable.name,
+        refValueType: propertiesTable.refValueType,
+        required: propertiesTable.required,
+        storageType: propertiesTable.storageType,
+        localStorageDir: propertiesTable.localStorageDir,
+        filenameSuffix: propertiesTable.filenameSuffix,
+      })
+      .from(propertiesTable)
+      .leftJoin(modelsTable, eq(modelsTable.id, propertiesTable.refModelId))
+      .where(inArray(propertiesTable.schemaFileId, [...ids]))
+
+    for (const row of rows) {
+      const propertyFileId = row.schemaFileId
+      if (!propertyFileId || !row.name) continue
+      const dataType = row.dataType as ModelPropertyDataTypes
+      const rowValues: Partial<Static<typeof TProperty>> = {
+        name: row.name,
+        dataType,
+        refValueType: (row.refValueType as ModelPropertyDataTypes | null) ?? undefined,
+        required: row.required ?? false,
+        storageType: (row.storageType as StorageType | null) ?? undefined,
+        localStorageDir: row.localStorageDir ?? undefined,
+        filenameSuffix: row.filenameSuffix ?? undefined,
+      }
+      if (row.refModelId) {
+        rowValues.refModelId = row.refModelId
+        if (row.refModelName) {
+          rowValues.ref = row.refModelName
+          rowValues.refModelName = row.refModelName
+        }
+      } else if (dataType !== ModelPropertyDataTypes.Relation && dataType !== ModelPropertyDataTypes.List) {
+        // No longer a reference. (A Relation/List row without refModelId may just not have its
+        // referenced model's row yet, so keep the instance's ref then.)
+        rowValues.refModelId = undefined
+        rowValues.ref = undefined
+        rowValues.refModelName = undefined
+      }
+
+      for (const [cacheKey, entry] of [...this.instanceCache.entries()]) {
+        const { instance } = entry
+        if (isActorStopped(instance._service)) continue
+        const context = instance._getSnapshotContext()
+        if (context.id !== propertyFileId || context._isEdited) continue
+
+        const changed = Object.fromEntries(
+          Object.entries(rowValues).filter(
+            ([key, value]) => (context as Record<string, unknown>)[key] !== value,
+          ),
+        ) as Partial<Static<typeof TProperty>>
+        if (Object.keys(changed).length === 0) continue
+
+        instance._service.send({ type: 'syncedFromStorage', values: changed })
+
+        const newCacheKey = changed.name && context.modelName ? `${context.modelName}:${changed.name}` : undefined
+        if (newCacheKey && cacheKey === `${context.modelName}:${context.name}` && !this.instanceCache.has(newCacheKey)) {
+          this.instanceCache.delete(cacheKey)
+          this.instanceCache.set(newCacheKey, entry)
+          if (this.idIndex.get(propertyFileId)?.instance === instance) {
+            this.idIndex.set(propertyFileId, { cacheKey: newCacheKey, instance })
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Find ModelProperty instance by propertyFileId
    * Waits for the property to be fully loaded (idle state) by default
    * @param options - Find options including propertyFileId and wait configuration
@@ -1005,7 +1162,7 @@ export class ModelProperty {
   static async find({
     propertyFileId,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: {
     propertyFileId: string
     waitForReady?: boolean
@@ -1036,7 +1193,7 @@ export class ModelProperty {
     modelFileId: string,
     options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<ModelProperty[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
     if (!modelFileId) {
       return []
     }
@@ -1272,9 +1429,24 @@ export class ModelProperty {
     }
   }
 
+  /**
+   * Releases this caller's hold. The instance is shared: it keeps running while other callers hold
+   * it, or while its model owns it (a model's properties are stopped when the model is evicted).
+   * An instance nobody else holds is stopped and leaves the cache.
+   */
   unload(): void {
-    // ModelProperty doesn't have liveQuery subscriptions or complex cache management
-    // Just stop the service
+    const entries = [...ModelProperty.instanceCache.entries()].filter(
+      ([, entry]) => entry.instance._service === this._service,
+    )
+    if (entries.length > 0) {
+      const [, first] = entries[0]
+      const refCount = Math.max(0, first.refCount - 1)
+      if (refCount > 0 || first.modelOwned) {
+        for (const [key, entry] of entries) ModelProperty.instanceCache.set(key, { ...entry, refCount })
+        return
+      }
+      for (const [key] of entries) ModelProperty.instanceCache.delete(key)
+    }
     try {
       this._service.stop()
     } catch (error) {
@@ -1338,6 +1510,8 @@ export class ModelProperty {
             )
             .limit(1)
           if (propertyRecords.length > 0 && propertyRecords[0].propertyId != null) {
+            const { detachPropertyRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+            await detachPropertyRows(db, [propertyRecords[0].propertyId])
             await db
               .delete(propertiesTable)
               .where(eq(propertiesTable.id, propertyRecords[0].propertyId))
@@ -1361,3 +1535,5 @@ export class ModelProperty {
     })
   }
 }
+
+setCachedPropertyRefresher((propertyFileIds) => ModelProperty.refreshFromDb(propertyFileIds))

@@ -59,7 +59,7 @@ describe('ownership helpers', () => {
     ).toBe(false)
   })
 
-  it('isSeedRowOwned: non-empty owned matches publisher only (null is not owned)', () => {
+  it('isSeedRowOwned: non-empty owned matches publisher; a local draft with none is owned too', () => {
     const owned = ['0xabc0000000000000000000000000000000000001']
     expect(
       isSeedRowOwned(
@@ -71,9 +71,10 @@ describe('ownership helpers', () => {
         owned,
       ),
     ).toBe(true)
+    // Belongs to no wallet yet: editable until the next connection claims it.
     expect(
       isSeedRowOwned({ publisher: null, uid: null, attestationRaw: null }, owned),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       isSeedRowOwned(
         {

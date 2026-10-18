@@ -12,6 +12,10 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     getSeedsBySchemaName: (...args: unknown[]) => mockGetSeedsBySchemaName(...args),
     getItemVersionsFromEas: (...args: unknown[]) => mockGetItemVersionsFromEas(...args),
     getItemPropertiesFromEas: (...args: unknown[]) => mockGetItemPropertiesFromEas(...args),
+    // Seeds by uid answer from the same mocked request as before (fixtures carry their schema names).
+    getAttestationChangesSince: async () => [],
+    getSeedsByUidsFromEas: async (...args: unknown[]) =>
+      ((await mockRequest(...args)) as { itemSeeds?: unknown[] } | undefined)?.itemSeeds ?? [],
     EasClient: {
       getEasClient: () => ({ request: mockRequest }),
     },
@@ -80,6 +84,10 @@ function makeLocalFixture(opts: {
     },
     async listSeedsBySchemaName(name, { limit, skip }) {
       if (name !== schemaName) return []
+      return [seed].slice(skip, skip + limit)
+    },
+    async listSeedsByUidPrefix(name, uidPrefix, { limit, skip }) {
+      if (name !== schemaName || !opts.seedUid.startsWith(uidPrefix)) return []
       return [seed].slice(skip, skip + limit)
     },
     async listSeedsBySchemaNameForMonth(name) {
@@ -182,6 +190,25 @@ describe('query source local / remote / auto', () => {
     expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
   })
 
+  it('source remote never reads a registered local source', async () => {
+    // A page running the SDK registers a local source; Preview-style callers still want EAS only.
+    registerLocalQuerySource(
+      makeLocalFixture({
+        seedUid: '0xlocalonly',
+        versionUid: '0xlocalonlyver',
+        title: 'Local Only',
+        timeCreated: 100,
+      }),
+    )
+
+    const { items } = await queryBySchema('post', { source: 'remote', limit: 10 })
+    expect(items).toHaveLength(0)
+    expect(mockGetSeedsBySchemaName).toHaveBeenCalled()
+
+    expect(await getSeed('0xlocalonly', { source: 'remote' })).toBeNull()
+    expect(mockRequest).toHaveBeenCalled()
+  })
+
   it('source auto uses local when present', async () => {
     registerLocalQuerySource(
       makeLocalFixture({
@@ -195,6 +222,20 @@ describe('query source local / remote / auto', () => {
     const one = await getSeed('0xautoseed', { source: 'auto' })
     expect(one?.data.title).toBe('Auto Local')
     expect(mockRequest).not.toHaveBeenCalled()
+  })
+
+  it('uidPrefix reads the local source, and auto falls back to remote when nothing matches', async () => {
+    const localUid = '0xabcd' + '1'.repeat(60)
+    registerLocalQuerySource(
+      makeLocalFixture({ seedUid: localUid, versionUid: '0xv', title: 'Local Match', timeCreated: 1 }),
+    )
+
+    const local = await queryBySchema('post', { source: 'local', uidPrefix: 'ABCD' })
+    expect(local.items.map((r) => r.data.title)).toEqual(['Local Match'])
+    expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+
+    await queryBySchema('post', { source: 'auto', uidPrefix: '0xffff' })
+    expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 100, 0, { uidPrefix: '0xffff' })
   })
 
   it('source auto falls back to remote on local miss', async () => {

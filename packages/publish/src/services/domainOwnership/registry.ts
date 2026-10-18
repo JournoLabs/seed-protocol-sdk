@@ -25,6 +25,11 @@ export function normalizeRegistrableDomain(input: string): string {
   return normalized.toLowerCase()
 }
 
+/** Lowercased hostname without a trailing dot. No eTLD+1 normalization. */
+export function normalizeHostname(input: string): string {
+  return input.trim().toLowerCase().replace(/\.$/, '')
+}
+
 /**
  * Fetch RDAP/WHOIS registry snapshot and compute fingerprint inputs.
  */

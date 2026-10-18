@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserQueryClient } from '@/browser/helpers/QueryClient'
 import { generateId } from '@/helpers'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 // The browser query client used to build a new TanStack client per call, so nothing was shared:
 // concurrent identical requests each went out, and a caller's staleTime never applied to a later
@@ -19,7 +20,7 @@ describe('BrowserQueryClient', () => {
 
     const first = factory.getQueryClient().fetchQuery({ queryKey: key, queryFn })
     const second = factory.getQueryClient().fetchQuery({ queryKey: key, queryFn })
-    await vi.waitFor(() => expect(queryFn).toHaveBeenCalled())
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalled(), { timeout: WAIT_TIMEOUT_MS })
     resolve('result')
 
     expect(await first).toBe('result')

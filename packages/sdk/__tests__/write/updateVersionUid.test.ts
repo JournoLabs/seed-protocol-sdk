@@ -105,11 +105,13 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
     expect(final).toHaveLength(before.length)
   })
 
-  it('createVersion sets publisher when getPublisherForNewSeeds is configured', async () => {
-    const testPublisher = '0xCreateVersionPublisher1234567890abcdef12'
-    const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'e'.repeat(64) })
-    setGetPublisherForNewSeeds(async () => testPublisher)
+  it("createVersion takes the seed's publisher, not the getter's current address", async () => {
+    const seedPublisher = '0x' + 'a'.repeat(40)
+    const laterSession = '0x' + 'b'.repeat(40)
+    setGetPublisherForNewSeeds(async () => seedPublisher)
     try {
+      const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'e'.repeat(64) })
+      setGetPublisherForNewSeeds(async () => laterSession)
       const versionLocalId = await createVersion({
         seedLocalId,
         seedType: 'test_post',
@@ -119,7 +121,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         .select({ publisher: versions.publisher })
         .from(versions)
         .where(eq(versions.localId, versionLocalId))
-      expect(row?.publisher).toBe(testPublisher.toLowerCase())
+      expect(row?.publisher).toBe(seedPublisher)
     } finally {
       setGetPublisherForNewSeeds(null)
     }
@@ -145,15 +147,17 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
     }
   })
 
-  it('createMetadata sets publisher when getPublisherForNewSeeds is configured', async () => {
-    const testPublisher = '0xCreateMetadataPublisher1234567890abcdef'
-    const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + '1'.repeat(64) })
-    const versionLocalId = await createVersion({
-      seedLocalId,
-      seedType: 'test_post',
-    })
-    setGetPublisherForNewSeeds(async () => testPublisher)
+  it("createMetadata takes the seed's publisher, not the getter's current address", async () => {
+    const seedPublisher = '0x' + 'c'.repeat(40)
+    const laterSession = '0x' + 'd'.repeat(40)
+    setGetPublisherForNewSeeds(async () => seedPublisher)
     try {
+      const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + '1'.repeat(64) })
+      const versionLocalId = await createVersion({
+        seedLocalId,
+        seedType: 'test_post',
+      })
+      setGetPublisherForNewSeeds(async () => laterSession)
       const result = await createMetadata({
         seedLocalId,
         versionLocalId,
@@ -167,7 +171,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         .select({ publisher: metadata.publisher })
         .from(metadata)
         .where(eq(metadata.localId, result.localId!))
-      expect(row?.publisher).toBe(testPublisher.toLowerCase())
+      expect(row?.publisher).toBe(seedPublisher)
     } finally {
       setGetPublisherForNewSeeds(null)
     }

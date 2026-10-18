@@ -4,6 +4,7 @@ import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -42,7 +43,7 @@ testDescribe('ModelProperty schema name lookup', () => {
 
     const property = await ModelProperty.createById(titleId)
     expect(property).toBeDefined()
-    await vi.waitFor(() => expect(property!._getSnapshotContext()._schemaName).toBe(schemaName))
+    await vi.waitFor(() => expect(property!._getSnapshotContext()._schemaName).toBe(schemaName), { timeout: WAIT_TIMEOUT_MS })
     expect(readFile).not.toHaveBeenCalled()
   })
 })

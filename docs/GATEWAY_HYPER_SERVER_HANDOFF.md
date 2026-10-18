@@ -8,7 +8,7 @@ This document is for **seed-protocol-server** developers. Implementation lives i
 2. On the same host (or a machine with network access to Traefik):
 
    ```bash
-   seed gateway tunnel serve --upstream http://127.0.0.1:80
+   seed-gateway serve --upstream http://127.0.0.1:80
    ```
 
    If the tunnel runs inside Docker on the compose network, use `--upstream http://traefik:80` (or the service name that fronts gateway + seed API).
@@ -34,8 +34,8 @@ This document is for **seed-protocol-server** developers. Implementation lives i
 
 1. Via Traefik: `curl http://127.0.0.1/api/upload/arweave/status/{dataItemId}` (or your routed host).
 2. Via Traefik: `curl http://127.0.0.1/raw/{txId}` serves a freshly uploaded item.
-3. Operator: `seed gateway tunnel serve --upstream http://127.0.0.1:80`.
-4. Client machine: `seed gateway tunnel connect <z32>`.
+3. Operator: `seed-gateway serve --upstream http://127.0.0.1:80`.
+4. Client machine: `seed-gateway connect <z32>`.
 5. Client: repeat curls against `http://127.0.0.1:1984/...`.
 
 ## What SDK users configure
@@ -51,7 +51,7 @@ export const gateway = {
 }
 ```
 
-**Path A:** They must run `seed gateway tunnel connect <key>` before the app starts when using `hyper` or when `hybrid` should prefer P2P on the local machine.
+**Path A:** They must run `seed-gateway connect <key>` before the app starts when using `hyper` or when `hybrid` should prefer P2P on the local machine.
 
 **Path B:** Their Node app mounts `createGatewayProxy` from `@seedprotocol/gateway-hyper` with `SEED_GATEWAY_HYPER_KEY`; the browser only configures `proxyBaseUrl`.
 

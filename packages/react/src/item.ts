@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import {
   getAddressesForItemsFilter,
+  ownedSeedsSql,
+  placeholderUidSql,
   publisherInAddressListSql,
   Item,
   eventEmitter,
@@ -11,14 +13,15 @@ import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
-import type { IItem } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
+import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/sdk'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -39,165 +42,145 @@ type UseItemProps = {
 
 type UseItem = <T extends ModelValues<T>>(props: UseItemProps) => UseItemReturn<T>
 
+/** Query key for one item: `useItem`'s query. Invalidated alongside `['seed', 'items']`. */
+export const getItemQueryKey = (id: string | undefined) => ['seed', 'item', id ?? null] as const
+
+/**
+ * Loads one Item by seedLocalId or seedUid.
+ *
+ * - An Item already in the instance cache and ready (`Item.peekReady`) comes back on the first
+ *   render with `isLoading: false`, then `Item.find()` refreshes it in the background.
+ * - Changing the id never returns the previous id's item.
+ * - The item updates in place (its state machine), so the hook also re-renders on its changes.
+ */
 export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLocalId, seedUid }: UseItemProps) => {
-  const [item, setItem] = useState<Item<T> | undefined>()
+  const id = seedLocalId || seedUid
   /** Bumped when EAS sync updates SQLite so cached `Item` instances re-render after in-place hydration. */
   const [, setEasHydrationTick] = useState(0)
-  const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
-  const [error, setError] = useState<Error | null>(null)
-  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  /** Bumped when one of the item's property values changes. */
+  const [, setPropertyValuesTick] = useState(0)
+  const [isMachineBusy, setIsMachineBusy] = useState(false)
+  const [machineError, setMachineError] = useState<Error | null>(null)
   const hasSeenIdleRef = useRef(false)
 
   const isClientReady = useIsClientReady()
-  const addressRevision = useSeedAddressRevision()
+  const queryClient = useSeedQueryClient()
+  const queryKey = useMemo(() => getItemQueryKey(id), [id])
+  const queryKeyRef = useRef(queryKey)
+  queryKeyRef.current = queryKey
 
-  const modelNameRef = useRef<string>(modelName)
-  const seedLocalIdRef = useRef<string | undefined>(seedLocalId)
-  const seedUidRef = useRef<string | undefined>(seedUid)
-
-  // Determine if we should be loading based on parameters - use useMemo to stabilize
-  // Use refs to check current values to avoid dependency issues
-  const shouldLoad = useMemo(() => {
-    if (!isClientReady) return false
-    return !!(seedLocalIdRef.current || seedUidRef.current)
-  }, [isClientReady, seedLocalId, seedUid])
-
-  const loadItem = useCallback(async () => {
-    // Check shouldLoad inside the function to avoid recreating the callback
-    const currentShouldLoad = !!(isClientReady && (seedLocalIdRef.current || seedUidRef.current))
-    if (!currentShouldLoad) {
-      setItem(undefined)
-      setIsLoading(false)
-      setError(null)
-      return
-    }
-
-    try {
-      // Don't set isLoading here - let the subscription effect handle it
-      // This avoids race conditions where isLoading is set to true but then
-      // the subscription effect hasn't run yet to set it to false
-      setError(null)
-
-      const foundItem = await Item.find({
-        modelName: modelNameRef.current,
-        seedLocalId: seedLocalIdRef.current,
-        seedUid: seedUidRef.current,
-      }) as Item<T> | undefined
-
-      if (!foundItem) {
-        logger('[useItem] [loadItem] no item found', modelNameRef.current, seedLocalIdRef.current)
-        // Don't clear item if we already have one for the same request (e.g. duplicate loadItem from effect re-run)
-        setItem((prev) => {
-          if (!prev) return undefined
-          const match = (prev.seedLocalId && prev.seedLocalId === seedLocalIdRef.current) ||
-            (prev.seedUid && prev.seedUid === seedUidRef.current)
-          return match ? prev : undefined
-        })
-        setIsLoading(false)
-        setError(null)
-        return
-      }
-
-      // Item.find() now waits for idle by default, so the item should be ready
-      setItem(foundItem)
-      setIsLoading(false) // Item is ready since find() waited for idle
-      setError(null)
-    } catch (error) {
-      logger('[useItem] Error loading item:', error)
-      setItem(undefined)
-      setIsLoading(false)
-      setError(error as Error)
-    }
-  }, [isClientReady])
-
-  const loadItemRef = useRef(loadItem)
-  useEffect(() => {
-    loadItemRef.current = loadItem
-  }, [loadItem])
-
-  useEffect(() => {
-    modelNameRef.current = modelName
-    seedLocalIdRef.current = seedLocalId
-    seedUidRef.current = seedUid
-  }, [modelName, seedLocalId, seedUid])
+  const query = useQuery(
+    {
+      queryKey,
+      queryFn: async (): Promise<Item<T> | null> => {
+        // A ready cached item is what find() would return, minus the cache hold find() takes.
+        const found = (Item.peekReady(id) ??
+          (await Item.find({ modelName, seedLocalId, seedUid }))) as Item<T> | undefined
+        if (found) return found
+        logger('[useItem] no item found', modelName, id)
+        // find() also returns undefined when the item doesn't settle in time; keep what we have,
+        // unless it was unloaded (e.g. a local purge stops the instance and deletes its rows).
+        const previous = queryClient.getQueryData<Item<T> | null>(queryKey)
+        return previous && previous.getService().getSnapshot().status === 'active' ? previous : null
+      },
+      // The Item instance cache is the cache. A ready cached item is the first render's data and
+      // staleTime 0 refreshes it in the background; gcTime 0 drops the query once unused, so it
+      // never hands out an instance that was unloaded since.
+      initialData: () => Item.peekReady(id) as Item<T> | undefined,
+      staleTime: 0,
+      gcTime: 0,
+      // An Item is a live actor-backed object, not data to compare field by field.
+      structuralSharing: false,
+      retry: false,
+      enabled: isClientReady && !!id,
+    },
+    queryClient,
+  )
+  const item = query.data ?? undefined
 
   useEffect(() => {
     const onEasSynced = () => {
       setEasHydrationTick((n) => n + 1)
-      void loadItemRef.current()
+      void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
     }
     eventEmitter.on(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
     return () => {
       eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
     }
-  }, [])
+  }, [queryClient])
 
-  // Fetch/refetch when parameters change or client becomes ready
+  // Follow the item's machine: busy after a real transition out of idle (reload), or error.
   useEffect(() => {
-    // Only clear item if we don't have parameters to load
-    // Don't clear if shouldLoad is false but we have an item - it might just be a timing issue
-    if (!shouldLoad) {
-      // Only clear if we actually don't have parameters (not just client not ready)
-      if (!seedLocalId && !seedUid) {
-        setItem(undefined)
-        setIsLoading(false)
-        setError(null)
-      }
-      return
-    }
-    loadItem()
-  }, [shouldLoad, loadItem, seedLocalId, seedUid, addressRevision])
-
-  // Subscribe to service changes when item is available
-  useEffect(() => {
-    if (!item) {
-      // Clean up subscription if item is not available
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-      hasSeenIdleRef.current = false
-      return
-    }
-
-    // Clean up previous subscription
-    subscriptionRef.current?.unsubscribe()
     hasSeenIdleRef.current = false
+    setIsMachineBusy(false)
+    setMachineError(null)
+    if (!item) return
 
-    // Subscribe to service changes. Only set isLoading to true after we've seen idle at least
-    // once, so we don't overwrite the ready state that loadItem() just set (find() waits for idle).
-    const service = item.getService()
-
-    const subscription = service.subscribe((snapshot: any) => {
-      // Update loading state based on service state changes
-      if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
-        const isIdle = snapshot.value === 'idle'
-        if (isIdle) {
-          hasSeenIdleRef.current = true
-          setIsLoading(false)
-          setError(null)
-        } else if (snapshot.value === 'error') {
-          setError(new Error('Item service error'))
-          setIsLoading(false)
-        } else {
-          // Only show loading if we've already seen idle (real transition to loading)
-          if (hasSeenIdleRef.current) {
-            setIsLoading(true)
-          }
-        }
+    const subscription: Subscription = item.getService().subscribe((snapshot: any) => {
+      if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
+      if (snapshot.value === 'idle') {
+        hasSeenIdleRef.current = true
+        setIsMachineBusy(false)
+        setMachineError(null)
+      } else if (snapshot.value === 'error') {
+        setMachineError(new Error('Item service error'))
+        setIsMachineBusy(false)
+      } else if (hasSeenIdleRef.current) {
+        // Only after idle, so the transitions find() already waited out don't count as loading.
+        setIsMachineBusy(true)
       }
     })
-    
-    subscriptionRef.current = subscription
+    return () => subscription.unsubscribe()
+  }, [item])
 
+  // Re-render when a property's value changes: the item reads them from its property instances,
+  // which update without the item's own machine changing. The item adds instances as they load
+  // (same Map, mutated), so recheck the set on each item snapshot.
+  useEffect(() => {
+    if (!item) return
+    const itemService = item.getService()
+    const propertySubscriptions = new Map<unknown, Subscription>()
+
+    const followProperties = (propertyInstances: Map<PropertyKey, IItemProperty<any>> | undefined) => {
+      const current = new Set(propertyInstances?.values() ?? [])
+      for (const [instance, subscription] of propertySubscriptions) {
+        if (!current.has(instance as IItemProperty<any>)) {
+          subscription.unsubscribe()
+          propertySubscriptions.delete(instance)
+        }
+      }
+      for (const instance of current) {
+        if (propertySubscriptions.has(instance)) continue
+        const service = instance.getService()
+        let { propertyValue, renderValue } = (service.getSnapshot() as any).context ?? {}
+        propertySubscriptions.set(
+          instance,
+          service.subscribe((snapshot: any) => {
+            const ctx = snapshot?.context
+            if (!ctx) return
+            if (Object.is(ctx.propertyValue, propertyValue) && Object.is(ctx.renderValue, renderValue)) return
+            propertyValue = ctx.propertyValue
+            renderValue = ctx.renderValue
+            setPropertyValuesTick((n) => n + 1)
+          }),
+        )
+      }
+    }
+
+    followProperties(itemService.getSnapshot().context.propertyInstances)
+    const itemSubscription: Subscription = itemService.subscribe((snapshot: any) => {
+      followProperties(snapshot?.context?.propertyInstances)
+    })
     return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
+      itemSubscription.unsubscribe()
+      for (const subscription of propertySubscriptions.values()) subscription.unsubscribe()
     }
   }, [item])
 
   return {
     item,
-    isLoading,
-    error,
+    isLoading: (!!id && query.isPending) || isMachineBusy,
+    error: machineError ?? (query.error as Error | null),
   }
 }
 
@@ -332,13 +315,16 @@ export const useItems: UseItems = ({
       if (addressesForFilter === null) return null
     }
     const conditions: any[] = []
+    // Same predicates as getItemsData, so the live query and the fetched list agree.
     if (!includeEas) {
-      conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as any)
+      conditions.push(placeholderUidSql(seeds.uid) as any)
     }
     if (modelName) {
-      conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+      conditions.push(eq(seeds.type, easName(modelName)))
     }
-    if (addressFilter === 'owned' || addressFilter === 'watched') {
+    if (addressFilter === 'owned') {
+      conditions.push(ownedSeedsSql(addressesForFilter ?? []) as any)
+    } else if (addressFilter === 'watched') {
       conditions.push(
         publisherInAddressListSql(seeds.publisher, addressesForFilter ?? []) as any,
       )
@@ -430,18 +416,27 @@ export const useItems: UseItems = ({
     queryClient.invalidateQueries({ queryKey })
   }, [isClientReady, seedsTableData, queryClient, queryKey])
 
+  // Same array while the data is the same, so `items` can be an effect/memo dependency.
+  const sortedItems = useMemo(
+    () =>
+      orderBy(
+        items,
+        [
+          (item) =>
+            item.lastVersionPublishedAt ||
+            item.attestationCreatedAt ||
+            item.createdAt,
+        ],
+        ['desc'],
+      ),
+    [items],
+  )
+
   return {
-    items: orderBy(
-      items,
-      [
-        (item) =>
-          item.lastVersionPublishedAt ||
-          item.attestationCreatedAt ||
-          item.createdAt,
-      ],
-      ['desc'],
-    ),
-    isLoading,
+    items: sortedItems,
+    // Before the client is ready the query is disabled, which TanStack reports as not loading:
+    // count it as loading so an empty list isn't shown as "no items" first.
+    isLoading: isLoading || !isClientReady,
     error: queryError as Error | null,
   }
 }
@@ -456,15 +451,18 @@ export type UseCreateItemReturn = {
 export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
+  const inFlightRef = useRef(false)
 
   const resetError = useCallback(() => setError(null), [])
 
   const createItem = useCallback(
     async (modelName: string, itemData?: Record<string, any>): Promise<Item<any> | undefined> => {
-      if (isLoading) {
+      if (inFlightRef.current) {
         logger('[useCreateItem] [createItem] already creating item, skipping')
         return undefined
       }
+      inFlightRef.current = true
 
       setError(null)
       // Flush loading=true synchronously so the UI (and tests) can observe it before async work runs.
@@ -480,12 +478,13 @@ export const useCreateItem = (): UseCreateItemReturn => {
         setError(err instanceof Error ? err : new Error(String(err)))
         return undefined
       } finally {
+        inFlightRef.current = false
         // Defer clearing loading so React can commit the loading=true render first.
         // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
         queueMicrotask(() => setIsLoading(false))
       }
     },
-    [isLoading],
+    [],
   )
 
   return {
@@ -497,7 +496,11 @@ export const useCreateItem = (): UseCreateItemReturn => {
 }
 
 type UsePublishItemReturn = {
-  publishItem: (item: Item<any> | undefined) => void
+  /**
+   * Calls `item.publish(options)`, which needs @seedprotocol/publish: `initPublish()` or
+   * `<PublishProvider config>` must have run, or `error` reports that publishing is not configured.
+   */
+  publishItem: (item: Item<any> | undefined, options?: ItemPublishOptions) => void
   isLoading: boolean
   error: Error | null
   resetError: () => void
@@ -511,12 +514,14 @@ export const usePublishItem = (): UsePublishItemReturn => {
 
   const resetError = useCallback(() => setError(null), [])
 
-  const publishItem = useCallback((item: Item<any> | undefined) => {
+  const publishItem = useCallback((item: Item<any> | undefined, options?: ItemPublishOptions) => {
     if (!item) return
     setPublishingItem(item)
     setError(null)
-    item.publish().catch(() => {
-      // Error is surfaced via service state subscription; avoid unhandled rejection
+    // The promise is the one source of errors: it also rejects before the item machine
+    // starts (publishing not configured, item not owned, already publishing).
+    item.publish(options).catch((err: unknown) => {
+      setError(err instanceof Error ? err : new Error(String(err)))
     })
   }, [])
 
@@ -531,19 +536,11 @@ export const usePublishItem = (): UsePublishItemReturn => {
     subscriptionRef.current?.unsubscribe()
     const service = publishingItem.getService()
     const subscription = service.subscribe((snapshot: any) => {
-      const value = snapshot?.value
-      const ctx = snapshot?.context
-      setIsLoading(value === 'publishing')
-      const publishError = ctx?._publishError
-      setError(publishError ? new Error(publishError.message) : null)
+      setIsLoading(snapshot?.value === 'publishing')
     })
 
     subscriptionRef.current = subscription
-    const snap = service.getSnapshot()
-    setIsLoading(snap?.value === 'publishing')
-    const ctx = snap?.context
-    const publishError = ctx?._publishError
-    setError(publishError ? new Error(publishError.message) : null)
+    setIsLoading(service.getSnapshot()?.value === 'publishing')
 
     return () => {
       subscriptionRef.current?.unsubscribe()

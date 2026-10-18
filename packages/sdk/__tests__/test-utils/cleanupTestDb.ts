@@ -15,6 +15,7 @@ import { versions } from '@/seedSchema/VersionSchema'
 import { publishProcesses } from '@/seedSchema/PublishProcessSchema'
 import { cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
 import { waitForInFlightWrites } from '@/services/write/actors/writeToDatabase'
+import { WAIT_TIMEOUT_MS } from './timeouts'
 
 export type CleanupTestSchemaDataOptions = {
   /** How many times to retry after an FK failure before giving up (default 10). */
@@ -58,7 +59,7 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
     .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
   evictTestSchemaInstances(testSchemaRows)
   // Evicting stops new writes but can't cancel running ones; deleting under them fails their join/FK steps
-  await waitForInFlightWrites()
+  await waitForInFlightWrites(WAIT_TIMEOUT_MS)
 
   for (let attempt = 0; ; attempt++) {
     try {

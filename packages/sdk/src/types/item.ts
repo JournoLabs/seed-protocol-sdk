@@ -1,4 +1,3 @@
-import { tags } from 'typia';
 import { ModelSchema } from '@/types'
 import { PropertyType as PropertySchemaType } from '@/types/property'
 import type { Attestation } from '@seedprotocol/eas'
@@ -66,20 +65,20 @@ export interface ItemData {
   /** schemaFileId of the item's models row (seeds.model_file_id). */
   modelFileId?: string;
   schemaUid?: string;
-  attestationCreatedAt?: number & tags.Type<"int64">;
+  attestationCreatedAt?: number;
   latestVersionUid?: string;
   latestVersionLocalId?: string;
   /** Newest non-revoked version row whose `uid` is a valid EAS attestation id (see getLatestPublishedVersionRow). */
   publishedVersionUid?: string;
   publishedVersionLocalId?: string;
-  versionsCount?: number & tags.Type<"int32">;
-  lastVersionPublishedAt?: number & tags.Type<"int64">;
-  lastLocalUpdateAt?: number & tags.Type<"int64">;
+  versionsCount?: number;
+  lastVersionPublishedAt?: number;
+  lastLocalUpdateAt?: number;
   type?: string;
-  createdAt?: number & tags.Type<"int64">;
-  updatedAt?: number & tags.Type<"int64">;
+  createdAt?: number;
+  updatedAt?: number;
   publisher?: string;
-  revokedAt?: number & tags.Type<"int64">;
+  revokedAt?: number;
 }
 
 export type ItemFindProps = {

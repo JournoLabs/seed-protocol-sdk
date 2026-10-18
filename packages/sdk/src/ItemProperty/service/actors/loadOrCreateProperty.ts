@@ -4,7 +4,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, models, properties, type MetadataType } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import {
@@ -87,7 +87,7 @@ export const loadOrCreateProperty = fromCallback<
           })
           let model = await Model.resolveAsync(normalizedModelName, { modelFileId: itemModelFileId })
           if (!model?.properties?.length && !itemModelFileId) {
-            model = Model.findByModelType(toSnakeCase(modelNameForNew))
+            model = Model.findByModelType(easName(modelNameForNew))
           }
           if (model?.properties?.length) {
             const schemas = modelPropertiesToObject(model.properties)
@@ -184,41 +184,13 @@ export const loadOrCreateProperty = fromCallback<
               filenameSuffix: propRecord.filenameSuffix || undefined,
               required: (propRecord as { required?: boolean }).required ?? undefined,
             }
-            // Merge with schema from file/DB to get validation rules (enum, pattern, etc.) - properties table doesn't store these
-            try {
-              const { getPropertySchema } = await import('../../../helpers/property')
-              let schemaFromFile = await getPropertySchema(normalizedModelName, propertyName, {
-                modelFileId: modelRecord?.schemaFileId ?? modelFileId,
-              })
-              if (!schemaFromFile?.validation) {
-                // Fallback: get validation from schemaData in database (Schema context may not be loaded yet)
-                const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
-                const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
-                const modelSchemaRows = await db
-                  .select({ schemaId: modelSchemas.schemaId })
-                  .from(modelSchemas)
-                  .where(eq(modelSchemas.modelId, modelRecords[0].id))
-                  .limit(1)
-                if (modelSchemaRows.length > 0 && modelSchemaRows[0].schemaId) {
-                  const schemaRows = await db
-                    .select({ schemaData: schemasTable.schemaData })
-                    .from(schemasTable)
-                    .where(eq(schemasTable.id, modelSchemaRows[0].schemaId))
-                    .limit(1)
-                  if (schemaRows.length > 0 && schemaRows[0].schemaData) {
-                    const parsed = JSON.parse(schemaRows[0].schemaData) as { models?: Record<string, { properties?: Record<string, { validation?: unknown }> }> }
-                    const modelDef = parsed?.models?.[normalizedModelName]
-                    const propDef = modelDef?.properties?.[propertyName]
-                    if (propDef?.validation) {
-                      propertyRecordSchema = { ...propertyRecordSchema, validation: propDef.validation }
-                    }
-                  }
-                }
-              } else {
-                propertyRecordSchema = { ...propertyRecordSchema, validation: schemaFromFile.validation }
-              }
-            } catch {
-              // Schema not loaded or lookup failed - continue with DB schema only
+            // Validation rules (enum, pattern, ...) aren't in the properties table
+            const { resolvePropertyValidationRules } = await import('../../../helpers/propertyValidationRules')
+            const validation = await resolvePropertyValidationRules(normalizedModelName, propertyName, {
+              modelFileId: modelRecord?.schemaFileId ?? modelFileId,
+            })
+            if (validation) {
+              propertyRecordSchema = { ...propertyRecordSchema, validation }
             }
           }
         }
@@ -238,7 +210,7 @@ export const loadOrCreateProperty = fromCallback<
         // Try PascalCase first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
         let model = Model.resolve(normalizedModelName, { modelFileId })
         if (!model?.properties?.length && !modelFileId) {
-          model = Model.findByModelType(toSnakeCase(modelName))
+          model = Model.findByModelType(easName(modelName))
         }
         if (model?.properties?.length) {
           const schemas = modelPropertiesToObject(model.properties)
@@ -401,7 +373,8 @@ export const loadOrCreateProperty = fromCallback<
           filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
         }
         if (filePath) {
-          renderValue = await BaseFileManager.readFileAsString(filePath)
+          // The content URL saveFile and hydrateFromDb set, so the value reads the same everywhere.
+          renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
         }
       } catch (e) {
         logger(`Failed to resolve File for ${propertyName}: ${e}`)

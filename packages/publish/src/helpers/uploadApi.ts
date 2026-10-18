@@ -98,15 +98,19 @@ export function uploadNetworkErrorMessage(technicalMessage?: string | null): str
 export async function postUploadArweaveStart(
   url: string,
   formData: FormData,
-  uploadApiBaseUrl: string
+  uploadApiBaseUrl: string,
+  /** Extra request headers, e.g. the publish authorization token. */
+  headers: Record<string, string> = {},
 ): Promise<PostUploadResult> {
-  const api = typeof window !== 'undefined' ? (window as Window & { Main?: { uploadArweaveStart?: (url: string, parts: UploadFormPart[]) => Promise<PostUploadResult> } }).Main : undefined
+  const api = typeof window !== 'undefined' ? (window as Window & { Main?: { uploadArweaveStart?: (url: string, parts: UploadFormPart[], headers?: Record<string, string>) => Promise<PostUploadResult> } }).Main : undefined
   if (api?.uploadArweaveStart) {
     const parts = await formDataToSerializableParts(formData)
-    return api.uploadArweaveStart(url, parts)
+    // Older Electron proxies take two arguments and drop the headers.
+    return api.uploadArweaveStart(url, parts, headers)
   }
   const res = await fetch(url, {
     method: 'POST',
+    headers,
     body: formData,
   })
   const body = await res.json().catch(() => ({}))

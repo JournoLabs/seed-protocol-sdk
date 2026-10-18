@@ -6,6 +6,8 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
+import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQueue'
+import { rowContext } from './rowContext'
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { normalizeDataType } from '@/helpers/property'
@@ -54,7 +56,20 @@ export const analyzeInput = fromCallback<
     throw new Error('Missing propertyRecordSchema')
   }
 
+  // Reserved now, before the async checks below, so a newer save always replaces this one.
+  const writeKey = propertyWriteKey(seedLocalId ?? context.seedUid, propertyNameRaw)
+  const writeSlot = writeKey ? reservePropertyWrite(writeKey) : undefined
+  const writeValue = <T>(write: () => Promise<T>) =>
+    writeSlot ? writeSlot.run(write) : write().then((result) => ({ skipped: false as const, result }))
+
   const _analyzeInput = async (): Promise<boolean> => {
+    // Assignment writes straight to the DB, so check ownership here as save()/destroy()/publish() do.
+    const { isItemOwned, OwnershipError } = await import('@/helpers/ownership')
+    if (!(await isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }))) {
+      sendBack({ type: 'saveFailed', error: new OwnershipError() })
+      return false
+    }
+
     // Use dynamic import to break circular dependency
     const schemaMod = await import('../../../../Schema')
     const { ModelPropertyDataTypes } = schemaMod
@@ -167,7 +182,7 @@ export const analyzeInput = fromCallback<
     // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])
     if (normalizedDataType === ModelPropertyDataTypes.List && Array.isArray(newValue)) {
       const stringValue = JSON.stringify(newValue)
-      const result = await updateItemPropertyValue({
+      const written = await writeValue(() => updateItemPropertyValue({
         localId,
         propertyName: propertyName!,
         newValue: stringValue,
@@ -178,7 +193,10 @@ export const analyzeInput = fromCallback<
         schemaUid,
         dataType: propertyRecordSchema.dataType,
         refValueType: propertyRecordSchema.refValueType,
-      } as any)
+      } as any))
+      // A newer save replaced this one: it writes, and sets the context, instead.
+      if (written.skipped) return true
+      const result = written.result
 
       const updatedContext: Partial<PropertyMachineContext> = {
         propertyValue: newValue,
@@ -186,7 +204,7 @@ export const analyzeInput = fromCallback<
       }
       if (localId) updatedContext.localId = localId
       if (schemaUid) updatedContext.schemaUid = schemaUid
-      if (!localId && result?.localId) updatedContext.localId = result.localId
+      Object.assign(updatedContext, rowContext(result))
       if (!schemaUid && result?.schemaUid) updatedContext.schemaUid = result.schemaUid
 
       sendBack({ type: 'updateContext', ...updatedContext })
@@ -198,7 +216,7 @@ export const analyzeInput = fromCallback<
       ? (typeof newValue === 'string' ? newValue : String(newValue))
       : null
 
-    const result = await updateItemPropertyValue({
+    const written = await writeValue(() => updateItemPropertyValue({
       localId,
       propertyName: propertyName!,
       newValue: stringValue,
@@ -209,7 +227,9 @@ export const analyzeInput = fromCallback<
       schemaUid,
       dataType: propertyRecordSchema.dataType,
       refValueType: propertyRecordSchema.refValueType,
-    } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
+    } as any)) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
+    if (written.skipped) return true
+    const result = written.result
 
     const stringValueForContext =
       typeof newValue === 'string' ? newValue : (newValue !== null && newValue !== undefined ? String(newValue) : undefined)
@@ -226,9 +246,7 @@ export const analyzeInput = fromCallback<
       updatedContext.schemaUid = schemaUid
     }
 
-    if (!localId && result?.localId) {
-      updatedContext.localId = result.localId
-    }
+    Object.assign(updatedContext, rowContext(result))
 
     if (!schemaUid && result?.schemaUid) {
       updatedContext.schemaUid = result.schemaUid
@@ -242,9 +260,14 @@ export const analyzeInput = fromCallback<
     return true
   }
 
-  _analyzeInput().then((isDone) => {
-    if (isDone) {
-      sendBack({ type: 'saveValueToDbSuccess' })
-    }
-  })
+  _analyzeInput().finally(() => writeSlot?.release()).then(
+    (isDone) => {
+      if (isDone) {
+        sendBack({ type: 'saveValueToDbSuccess' })
+      }
+    },
+    (error: unknown) => {
+      sendBack({ type: 'saveFailed', error })
+    },
+  )
 })

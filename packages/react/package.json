@@ -1,7 +1,18 @@
 {
   "name": "@seedprotocol/react",
-  "version": "0.7.0",
-  "description": "React hooks and components for Seed Protocol",
+  "version": "0.7.6",
+  "description": "React hooks and components for Seed Protocol: live schemas, models, items and properties from @seedprotocol/sdk, backed by TanStack Query",
+  "keywords": [
+    "seed-protocol",
+    "react",
+    "react-hooks",
+    "local-first",
+    "tanstack-query",
+    "sqlite",
+    "opfs",
+    "eas",
+    "arweave"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -29,7 +40,7 @@
     "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser"
   },
   "peerDependencies": {
-    "@seedprotocol/sdk": "^0.6.0",
+    "@seedprotocol/sdk": "workspace:*",
     "react": "^18 || ^19",
     "@tanstack/react-query": "^5"
   },
@@ -46,7 +57,7 @@
   "devDependencies": {
     "@seedprotocol/sdk": "workspace:*",
     "vite-plugin-dts": "^4.5.4",
-    "@tanstack/react-query": "^5.90.15",
+    "@tanstack/react-query": "^5.104.1",
     "@testing-library/react": "^16.3.1",
     "@types/react": "^19.0.2",
     "react": "^19.0.0",
@@ -57,6 +68,15 @@
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

@@ -91,17 +91,19 @@ export function normalizePropertyRecordSchema<T>(def: T): T {
   return out as T
 }
 
+// String literals, not enum members: PropertyDataType must accept plain strings
+// such as `{ dataType: 'Text' }`. ModelPropertyDataTypes members still fit.
 export const TPropertyDataType = Type.Union([
-  Type.Literal(ModelPropertyDataTypes.Text),
-  Type.Literal(ModelPropertyDataTypes.Number),
-  Type.Literal(ModelPropertyDataTypes.List),
-  Type.Literal(ModelPropertyDataTypes.Relation),
-  Type.Literal(ModelPropertyDataTypes.Image),
-  Type.Literal(ModelPropertyDataTypes.Json),
-  Type.Literal(ModelPropertyDataTypes.File),
-  Type.Literal(ModelPropertyDataTypes.Boolean),
-  Type.Literal(ModelPropertyDataTypes.Date),
-  Type.Literal(ModelPropertyDataTypes.Html),
+  Type.Literal('Text'),
+  Type.Literal('Number'),
+  Type.Literal('List'),
+  Type.Literal('Relation'),
+  Type.Literal('Image'),
+  Type.Literal('Json'),
+  Type.Literal('File'),
+  Type.Literal('Boolean'),
+  Type.Literal('Date'),
+  Type.Literal('Html'),
 ])
 
 export const TStorageType = Type.Union([
@@ -199,37 +201,3 @@ export const Property = {
   Html: htmlPropertyFactory,
   /** `Html` opts are not representable in `TPropertyConstructor`; keep runtime shape via double assert. */
 } as unknown as PropertyDefs
-
-export const PropertyMetadataKey = Symbol('property')
-
-export const PropertyConstructor = (propertyType: Static<typeof TProperty>) => {
-  return function (parentClassPrototype: any, propertyKey: string) {
-    const existingProperties =
-      Reflect.getMetadata(PropertyMetadataKey, parentClassPrototype) || []
-
-    existingProperties.push({ propertyKey, propertyType })
-    Reflect.defineMetadata(
-      PropertyMetadataKey,
-      existingProperties,
-      parentClassPrototype,
-    )
-  }
-}
-
-export const Text = (
-  storageType?: StorageType,
-  srcDir?: string,
-  filenameSuffix?: string,
-) => PropertyConstructor(Property.Text(storageType, srcDir, filenameSuffix))
-export const Number = () => PropertyConstructor(Property.Number())
-export const Json  = () => PropertyConstructor(Property.Json())
-export const File  = () => PropertyConstructor(Property.File())
-export const Image = () => PropertyConstructor(Property.Image())
-export const Relation = (ref: string, refValueType?: PropertyDataType, required?: boolean) =>
-  PropertyConstructor(Property.Relation(ref, refValueType, required)) // Adjust for actual relation type
-export const List = (refValueType: PropertyDataType, ref?: string) =>
-  PropertyConstructor(Property.List(refValueType, ref))
-export const Boolean = () => PropertyConstructor(Property.Boolean())
-export const Date = () => PropertyConstructor(Property.Date())
-export const Html = (opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy }) =>
-  PropertyConstructor(htmlPropertyFactory(opts))

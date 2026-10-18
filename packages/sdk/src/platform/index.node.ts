@@ -16,3 +16,7 @@ export function createPlatformServices(): PlatformServices {
     queryClient: new NodeQueryClient(),
   }
 }
+
+export { configurePlatform } from './configurePlatform'
+export { resolveFilesDir } from '@/node/helpers/resolveFilesDir'
+export type { PlatformServices } from './types'

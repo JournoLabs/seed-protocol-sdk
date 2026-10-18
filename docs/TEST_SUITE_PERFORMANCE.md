@@ -71,6 +71,18 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
     It returns `false` on timeout. If the test needs the condition, use
     `waitUntilOrThrow(cond, description, timeout)` from the same files, so a timeout fails the test
     instead of being ignored (finding 7).
+- **Use `WAIT_TIMEOUT_MS` for waits on things that should happen** (`test-utils/timeouts.ts`, 15s;
+  React tests import it from `../../sdk/__tests__/test-utils/timeouts`). It's the default for
+  `waitForIdle` and `waitUntilOrThrow`; pass it to xstate `waitFor`, `vi.waitFor` (whose default is
+  only 1s) and Testing Library's `waitFor`. The Release workflow's GitHub runner takes ~2× as long
+  as a dev machine for the suite, and 1–5s waits sized locally failed there (later 10s ones too,
+  under heavy local load). A wait that never succeeds still fails before the 30s `testTimeout`,
+  with its own message. Don't give a test its own timeout below that default: it only makes the
+  test fail sooner on a slow machine.
+- **Don't wait for a transient state.** The write process's `success` state returns to `idle` after
+  2s, so a test that waits for `success` after doing other work hangs on a slow run: the write
+  already finished. Wait on something that stays put (`context.writeStatus`), or start waiting
+  before triggering the work.
 - **Don't wait for a state with `service.subscribe()` alone.** XState's `subscribe` doesn't replay the
   current snapshot, so if the entity is already in that state the wait never fires and sits out its
   whole fallback timeout. This cost 5s per test in `model.test.tsx`. Check the current snapshot first
@@ -101,6 +113,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   per test (items only): evicting and re-importing per test makes the next import ~2s and each
   `Item.create` ~0.4s slower, because the models are rebuilt cold. Old helpers that skipped eviction
   looked faster only because they reused Model instances bound to rows they had just deleted.
+- **Create items once for tests that only read them.** Group read-only tests under a `beforeAll`
+  that creates the items, and give only the tests that edit, create, delete or uncache items their
+  own per test (react `item.test.tsx` does this, finding 24). Each `Item.create` costs ~0.4–0.8s
+  locally and several times that on the CI runner.
 - **React tests are unmounted for you.** `packages/react/__tests__/setup.browser.ts` calls Testing
   Library's `cleanup()` after each test. Vitest runs without `globals`, so Testing Library doesn't
   register it itself; before that was added, every tree a test rendered stayed mounted for the rest
@@ -238,14 +254,76 @@ their number so references to them stay valid.
    file on the worker, and their unstamped drafts become read-only (seen in
    `browser/db/read/getPublishPayload.test.ts`). Fixed on branch `claude/multi-tab-phase-b`:
    `setupTestEnvironment` deletes the stored `addresses` row in browser files that pass none.
-20. **Flaky on `main`: `Item/getItems.test.ts`** — "returns only local items (no seedUid) by
-    default" and "does not turn publishedVersion* list metadata into ItemProperty…" fail together
-    in about 1 of 4 full browser-project runs (the item just created isn't in `getItemsData`'s
-    result); both pass when the file runs alone or with only `Item/`. Not investigated.
+20. **Fixed** by `dee7948` (finding 14's first case). `Item/getItems.test.ts`: "returns only local
+    items (no seedUid) by default" and "does not turn publishedVersion* list metadata into
+    ItemProperty…" failed together in about 1 of 4 full browser-project runs (the item just created
+    isn't in `getItemsData`'s result); both passed when the file ran alone or with only `Item/`. It
+    was recorded on the Phase B branch, which didn't have `dee7948` yet. The getPublishPayload
+    fixture generates new model ids on every import, and `importJsonSchema` ignores ids when it
+    matches a same-named schema, so a re-import could get the previous file's Post `Model` back:
+    the item was recorded under one id and the test filtered by another. Rechecked 2026-10-08 on
+    `cd25688`: 0 failures in 8 full browser-project runs (4 of them with `c21c443`'s teardown
+    cleanup reverted, so that change isn't what fixed it).
 21. **Flaky under load: `react/__tests__/liveQueryTiming.test.tsx`** "should detect changes after
     transaction commits" timed out (5 s) waiting for the reactive query once, in a slow full run
     (395 s against the usual ~280 s) on branch `claude/multi-tab-phase-c`. It passed alone and in
-    a rerun of the whole browser-react project. Not investigated.
+    a rerun of the whole browser-react project. **Not reproduced; the test now says which wait
+    failed.** Rechecked 2026-10-09: 0 failures in 3 full browser + browser-react runs (160–247 s),
+    where the property update took 22–32 ms and every live query emitted within 6–12 ms, so 5 s is
+    ~200× headroom. SQLocal's change notification has no gap that would drop an update (effects
+    are debounced 32 ms with a 180 ms `maxWait`), and Phase C didn't touch live queries. The failure
+    was more likely a stalled DB worker than a missed emission, but the old test couldn't tell
+    which wait timed out. Now the initial-emission wait is 10 s, the test first waits (10 s) for
+    the updated name to be in the database ("…to reach the database" = slow write), and only then
+    gives the live query 5 s, failing with the emission count and latest rows ("…emit the committed
+    updated name" = a real missed emission). Reopen with that message if it recurs.
+22. **Fixed** (2026-10-10). The Release workflow's first test runs (GitHub `ubuntu-latest`, suite
+    ~485–525s against ~265s locally) failed on one test each:
+    - `Item.test.ts` "should not take properties from another schema when its own cached model was
+      reimported" failed in both attempts of run 38069952544 (browser project, `Timeout of 5000 ms
+      exceeded`). It waited for each model's write process to be in `success`, which returns to
+      `idle` after 2s; on the slow runner the first model's write was done before the test looked.
+      With a 3s delay added before the wait, the old check timed out locally even at 15s. It now
+      waits on `context.writeStatus`.
+    - `browser/helpers/tabEvents.test.ts` "tells other tabs about events and saves from this tab"
+      saw nothing from the other tab in one local full run. Its `vi.waitFor` used the 1s default.
+      A lost BroadcastChannel subscription (the worker's channel not registered yet when this tab
+      posts) didn't happen in 400 tries locally, so the 1s timeout was taken for the cause and all
+      test waits that should succeed now use `WAIT_TIMEOUT_MS` (see "Writing tests that stay
+      fast"). That was only part of it: in CI run 38092037319 the other tab received the second of
+      the two messages but not the first, even with 15s. A new BroadcastChannel registers
+      asynchronously in Chromium, so `otherTab`'s "listening" reply could arrive before it really
+      was. `otherTab().listen(channel)` now posts probes on the channel until one arrives.
+      `tabCoordinator.test.ts` also asserted the other tab's messages after a fixed 20ms; it now
+      waits for them.
+    After the first fixes: 4 full runs with `CI=true` passed (274–398s, load average 30–80), and
+    `validation-timeout.test.ts` passed in all of them.
+    `packages/query`'s tests also couldn't import `@seedprotocol/eas` / `arweave` in CI, which builds
+    only the vite plugin. They now load those packages from source.
+23. **Fixed** (2026-10-10, SDK bug). `getPublishPayload.test.ts` "all property types" failed in CI
+    run 38092037319 with `invalid BytesLike value (… value="0xYVM3w1mf")`. Local ids are 10 random
+    alphanumerics, so about 1 in 3,844 starts with "0x", and `getPublishPayload` took any
+    0x-prefixed list member for an EAS uid and encoded it as-is (a relation to such an item also
+    lost its resolution hint). It now recognizes a uid by its full shape (0x + 64 chars), and
+    `generateId` never starts an id with "0x". Tests: `browser/db/read/getPublishPayload.hexLocalId.test.ts`
+    (mocks `generateId` to produce such ids), `helpers/generateId.test.ts`.
+24. **Fixed** (2026-10-11). React `item.test.tsx`'s `beforeEach` passed the 30s hook timeout in CI
+    run 38100553317 ("useItems > should handle deleted flag"). Every one of its 29 tests created
+    three Posts and an Article first: ~2.3s per test alone locally, and the file took 430–450s in
+    each CI run (131–136s in a local full run), the longest in the suite. The 20 tests that only read
+    the items now share one set created in `beforeAll`; the 5 that edit, create, delete or uncache
+    items get fresh ones per test, and 4 need none. The file now takes ~19s in a local full run.
+    A loaded local full run (load average ~100) then failed `unpublish.integration.test.tsx`: its
+    fixed 10s wait for the revoke ran out inside a 15s test timeout. The remaining 10s waits now
+    use `WAIT_TIMEOUT_MS`, and the 28 tests with their own timeout below 30s use the default. That
+    wasn't the cause, though: it failed again with 15s. Logging each step of `Item.unpublish`
+    showed the DB work taking ~20ms and `await import('@/db/read/getLatestVersionRow')` taking
+    0.3–9s, and longer when it failed. In browser tests a module that nothing has loaded yet is
+    transformed by the Vite dev server when first imported, and under load those requests queue
+    for seconds. `Item` already imported everything that module needs, so it now imports it
+    statically. Other lazy `await import('@/…')` calls in SDK code can stall the same way the
+    first time a test reaches them; prefer static imports unless the split breaks a cycle or
+    keeps a heavy dependency out of a bundle.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".

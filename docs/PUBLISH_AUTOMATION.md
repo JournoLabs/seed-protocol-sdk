@@ -81,7 +81,7 @@ A browser `thirdwebClientId` is usually locked to app origins. From a server, Th
 
 Node does not start `PublishManager` on import. `await PublishManager.ready()` starts it and resolves when the machine value is `active` (`snapshot.status` is not that signal). `createPublish` returns a promise of the spawned actor (`undefined` if it did not start). That promise settles when the process is spawned. `getPublish` keeps the last finished actor, including a fast failure, until the next publish of that seed.
 
-eas-sdk 2.10’s ESM build named-imports CommonJS `lodash`, which Node rejects. Start the process with `node --import @seedprotocol/sdk/node-eas-lodash`. The hook loads `lodash-es` (the ESM package) for those eas-sdk imports only.
+eas-sdk 2.10’s ESM build named-imports CommonJS `lodash`, which Node rejects. `@seedprotocol/publish` imports eas-sdk, so start the process with `node --import @seedprotocol/sdk/node-eas-lodash`. (`@seedprotocol/sdk` alone doesn’t need the hook from 0.7.4: it loads eas-sdk’s CommonJS build on Node.) The hook loads `lodash-es` (the ESM package) for those eas-sdk imports only.
 
 ```ts
 initPublish({
@@ -150,6 +150,8 @@ const dataItemWallet = fromEthersWallet(automationWallet)
 const onChainWallet: PublishWallet = /* session-key UserOp PublishWallet */
 
 await PublishManager.ready()
+// dataItemSigner signs uploads on the bundler path (useArweaveBundler: true). On the L1 path, an
+// item with files also needs an Arweave key: pass arweaveJwk or signArweaveTransactions.
 const actor = await PublishManager.createPublish(item, managedAddress, onChainWallet, {
   dataItemSigner: dataItemWallet.signer,
 })

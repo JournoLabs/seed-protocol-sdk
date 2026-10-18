@@ -17,7 +17,10 @@ import { userOpFailureError } from '../describeRevert'
 export type CreatePermissionlessTxSenderOptions = {
   signer: SeedSigner
   bundlerUrl: string
+  /** Sponsoring paymaster. Defaults to `bundlerUrl`. */
   paymasterUrl?: string
+  /** `false` sends without a paymaster: the account pays its own gas. Default `true`. */
+  sponsored?: boolean
 }
 
 function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
@@ -69,13 +72,14 @@ export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Pro
 }
 
 /**
- * Sponsored EIP-7702 `SeedTxSender` via permissionless `to7702SimpleSmartAccount`.
+ * EIP-7702 `SeedTxSender` via permissionless `to7702SimpleSmartAccount`, sponsored by a paymaster
+ * unless `sponsored` is false.
  * @throws when `bundlerUrl` reports no EntryPoint v0.8 support
  */
 export async function createPermissionlessTxSender(
   options: CreatePermissionlessTxSenderOptions,
 ): Promise<SeedTxSender> {
-  const { signer, bundlerUrl, paymasterUrl } = options
+  const { signer, bundlerUrl, paymasterUrl, sponsored = true } = options
   await assertBundlerSupportsEntryPoint08(bundlerUrl)
   const chain = getPublishViemChain()
   const rpcUrl = getPublishRpcUrl()
@@ -110,7 +114,7 @@ export async function createPermissionlessTxSender(
     account: simpleAccount,
     chain,
     bundlerTransport: http(bundlerUrl),
-    paymaster: pimlicoClient,
+    ...(sponsored ? { paymaster: pimlicoClient } : {}),
     userOperation: {
       estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
     },

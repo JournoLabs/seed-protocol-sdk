@@ -1,10 +1,10 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
 import { startCase } from 'lodash-es'
 import type {
   AttestationLike,
   QueryDataSource,
 } from '@seedprotocol/query'
-import { isValidEasAttestationUid } from '@seedprotocol/eas'
+import { easName, isValidEasAttestationUid } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { seeds, versions, metadata } from '@/seedSchema'
@@ -20,12 +20,6 @@ function msToUnixSeconds(ms: number | null | undefined): number {
   return Math.floor(ms)
 }
 
-function toSnakeCaseName(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase()
-}
 
 function parsePropertyValue(raw: string | null | undefined): unknown {
   if (raw == null) return ''
@@ -200,7 +194,7 @@ function metadataRowToAttestation(row: {
   }
 
   const name = row.propertyName
-    ? toSnakeCaseName(row.propertyName)
+    ? easName(row.propertyName)
     : 'unknown'
   const value = parsePropertyValue(row.propertyValue)
   const type = row.easDataType || 'string'
@@ -254,7 +248,7 @@ function monthBoundsUnix(year: number, month: number): {
 
 async function listPublishedSeedRows(
   schemaName: string,
-  opts?: { startTs?: number; endTs?: number },
+  opts?: { startTs?: number; endTs?: number; uidPrefix?: string },
 ): Promise<AttestationLike[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return []
@@ -286,6 +280,8 @@ async function listPublishedSeedRows(
       and(
         inArray(seeds.type, typeCandidates),
         isNotNull(seeds.uid),
+        // The query layer passes `0x` + hex only, so no LIKE wildcards to escape.
+        opts?.uidPrefix ? like(seeds.uid, `${opts.uidPrefix}%`) : undefined,
         or(isNull(seeds.revokedAt), eq(seeds.revokedAt, 0)),
         or(
           isNull(seeds._markedForDeletion),
@@ -378,6 +374,15 @@ export function createLocalQueryDataSource(): QueryDataSource {
     ): Promise<AttestationLike[]> {
       const all = await listPublishedSeedRows(schemaName)
       return all.slice(opts.skip, opts.skip + opts.limit)
+    },
+
+    async listSeedsByUidPrefix(
+      schemaName: string,
+      uidPrefix: string,
+      opts: { limit: number; skip: number },
+    ): Promise<AttestationLike[]> {
+      const matching = await listPublishedSeedRows(schemaName, { uidPrefix })
+      return matching.slice(opts.skip, opts.skip + opts.limit)
     },
 
     async listSeedsBySchemaNameForMonth(

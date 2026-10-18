@@ -21,8 +21,17 @@ export type TabMessage =
   | { type: 'eas-sync-address-change'; addresses: string[] }
   /** An event-bus event emitted in another tab (see helpers/tabEvents.ts). */
   | { type: 'event'; name: string; payload?: unknown }
-  /** OPFS paths another tab (or its workers) wrote. */
+  /** OPFS paths another tab (or its workers) wrote or removed, coalesced (helpers/tabEvents.ts). */
   | { type: 'files-changed'; paths: string[] }
+
+/** A message as sent: `from` is the sending tab's TAB_ID, so a tab can drop its own messages. */
+type SentTabMessage = TabMessage & { from?: string }
+
+/** Identifies this tab (this page's SDK instance) in the messages it sends. */
+export const TAB_ID: string =
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
 type CoordinationState = {
   dbKey: string
@@ -50,7 +59,10 @@ export function startTabCoordination({ filesDir, mode = 'coordinate' }: { filesD
   }
 
   const channel = new BroadcastChannel(`seed:tabs:${dbKey}`)
-  channel.onmessage = (event: MessageEvent<TabMessage>) => {
+  channel.onmessage = (event: MessageEvent<SentTabMessage>) => {
+    // A BroadcastChannel never hears itself, but another channel object in this page would (a
+    // second channel opened by a test, or the same module loaded twice): skip our own messages.
+    if (event.data?.from === TAB_ID) return
     for (const handler of messageHandlers) handler(event.data)
   }
   state.channel = channel
@@ -88,7 +100,12 @@ export function whenLeaderTab(): Promise<void> {
 
 /** Sends to the other tabs of this database; a no-op when not coordinating. */
 export function postTabMessage(message: TabMessage): void {
-  state?.channel?.postMessage(message)
+  state?.channel?.postMessage({ ...message, from: TAB_ID } satisfies SentTabMessage)
+}
+
+/** Whether postTabMessage reaches other tabs (a browser tab coordinating with Web Locks). */
+export function isPostingTabMessages(): boolean {
+  return !!state?.channel
 }
 
 export function onTabMessage(handler: (message: TabMessage) => void): () => void {

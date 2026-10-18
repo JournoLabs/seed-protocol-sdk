@@ -9,10 +9,18 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getItemPropertyData } from '@/db/read/getItemProperty'
 import { getItemData } from '@/db/read/getItemData'
 import { and, eq } from 'drizzle-orm'
+import { easName } from '@seedprotocol/eas'
 import { metadata, type MetadataType } from '@/seedSchema'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { createMetadata } from '@/db/write/createMetadata'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import {
+  getItemStorageFilePath,
+  withItemStorageFileLock,
+  withLockedItemStorageRow,
+  writeItemStorageFile,
+} from '@/helpers/itemStorageFile'
+import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 
 /** A local edit: no attestation uid of its own and not derived from one. */
 const isLocalDraft = (row: Pick<MetadataType, 'uid' | 'derivedFromUid'>): boolean =>
@@ -92,26 +100,32 @@ export const saveItemStorage = fromCallback<
       propertyData = latest && isLocalDraft(latest) ? latest : undefined
 
       if (!propertyData && newValue) {
-        const filename = `${draftSeedUid || draftSeedLocalId}${propertyRecordSchema.filenameSuffix}`
-        const dir = propertyRecordSchema.localStorageDir?.replace(/^\//, '') || 'files'
-        await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(dir))
-        const writeToPath = BaseFileManager.getFilesPath(dir, filename)
-        await BaseFileManager.saveFile(writeToPath, newValue as string | Blob | ArrayBuffer)
+        const target = {
+          seedId: draftSeedUid || draftSeedLocalId,
+          localStorageDir: propertyRecordSchema.localStorageDir,
+          filenameSuffix: propertyRecordSchema.filenameSuffix,
+        }
+        propertyData = await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
+          const { fileName: filename } = await writeItemStorageFile(
+            target,
+            newValue as string | Blob | ArrayBuffer,
+          )
 
-        propertyData = await createMetadata(
-          {
-            propertyName,
-            propertyValue: filename,
-            modelType: (modelName ?? knownRow?.modelType ?? '').toLowerCase() || undefined,
-            seedLocalId: draftSeedLocalId,
-            seedUid: draftSeedUid,
-            versionLocalId,
-            versionUid,
-            localStorageDir: propertyRecordSchema.localStorageDir,
-            refValueType: 'file',
-          },
-          propertyRecordSchema,
-        )
+          return createMetadata(
+            {
+              propertyName,
+              propertyValue: filename,
+              modelType: (modelName ? easName(modelName) : knownRow?.modelType) || undefined,
+              seedLocalId: draftSeedLocalId,
+              seedUid: draftSeedUid,
+              versionLocalId,
+              versionUid,
+              localStorageDir: propertyRecordSchema.localStorageDir,
+              refValueType: 'file',
+            },
+            propertyRecordSchema,
+          )
+        })
       }
     } else if (propertyData && !isLocalDraft(propertyData)) {
       propertyData = undefined
@@ -121,40 +135,82 @@ export const saveItemStorage = fromCallback<
       throw new Error(`No metadata row to save ${propertyName} to`)
     }
 
-    const localStorageDir =
-      propertyRecordSchema.localStorageDir || propertyData.localStorageDir
-    const fileName =
-      propertyData.refResolvedValue ||
-      `${propertyData.seedUid || propertyData.seedLocalId}${propertyRecordSchema.filenameSuffix}`
-
-    if (!localStorageDir || !fileName) {
-      throw new Error(
-        `Missing localStorageDir: ${localStorageDir} or fileName: ${fileName}`,
-      )
+    // No storage.path: the `files` directory, as resolveItemStorageChildFile and download assume.
+    const localStorageDirOf = (row: MetadataType) =>
+      propertyRecordSchema.localStorageDir || row.localStorageDir || '/files'
+    const fileNameOf = (row: MetadataType): string | undefined => {
+      if (row.refResolvedValue) return row.refResolvedValue
+      const seedId = row.seedUid || row.seedLocalId
+      return seedId ? getItemStorageLocalFileName(seedId, propertyRecordSchema.filenameSuffix) : undefined
+    }
+    if (!fileNameOf(propertyData)) {
+      throw new Error(`Missing a seed id to name the ${propertyName} file after`)
     }
 
-    const dir = localStorageDir.replace(/^\//, '')
-    await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(dir))
-    const filePath = BaseFileManager.getFilesPath(dir, fileName)
-    try {
-      await BaseFileManager.saveFile(filePath, newValue as string | Blob | ArrayBuffer)
-    } catch (error) {
-      const fs = await BaseFileManager.getFs()
-      fs.writeFileSync(filePath, newValue)
-    }
+    // Read the row, write the file and update the row under the file's lock, so a conversion of a
+    // legacy row (migration, publish) or another save of this file, in this tab or another, can't
+    // land in between and leave the file with older content than the row says.
+    const saved = await withLockedItemStorageRow(
+      propertyData.localId!,
+      (row) => {
+        const fileName = fileNameOf(row)
+        return fileName && BaseFileManager.getFilesPath(getItemStorageSubdir(localStorageDirOf(row)), fileName)
+      },
+      async (row, filePath) => {
+        const localStorageDir = localStorageDirOf(row)
+        const fileName = fileNameOf(row)!
+        try {
+          await writeItemStorageFile(
+            { seedId: row.seedUid || row.seedLocalId || '', localStorageDir, fileName },
+            newValue as string | Blob | ArrayBuffer,
+          )
+        } catch (error) {
+          const fs = await BaseFileManager.getFs()
+          fs.writeFileSync(filePath, newValue)
+        }
 
-    await appDb
-      .update(metadata)
-      .set({
-        refResolvedValue: fileName,
-      })
-      .where(eq(metadata.localId, propertyData.localId!))
+        // A legacy row (made before Item.create saved ItemStorage values) holds the old content itself
+        // in propertyValue. The file is the content now: drop it, or a fresh load shows the old text
+        // until the file is read. A row whose propertyValue is the file name keeps it.
+        const clearsVerbatimValue =
+          !row.refResolvedValue &&
+          row.propertyValue != null &&
+          row.propertyValue !== '' &&
+          row.propertyValue !== fileName
+
+        // The row says where the file is (read back by hydration, the browser's metadata live query
+        // and publish); without localStorageDir the live query would clear it from the context.
+        await appDb
+          .update(metadata)
+          .set({
+            refResolvedValue: fileName,
+            localStorageDir,
+            // The draft is as new as its content (see updateItemPropertyValue).
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
+            ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
+          })
+          .where(eq(metadata.localId, row.localId!))
+
+        return { fileName, localStorageDir }
+      },
+    )
+    // The row went away (or lost its seed ids) before the lock was granted.
+    if (!saved) throw new Error(`No metadata row to save ${propertyName} to`)
+    const { fileName, localStorageDir } = saved
 
     sendBack({
       type: 'updateContext',
       renderValue: newValue,
-      // Point the property at the draft row when the edit moved off a published row.
-      ...(propertyData.localId !== localId && { localId: propertyData.localId }),
+      // Where the file is, right away: localStoragePath (and so publish uploads) must not wait for
+      // the browser's metadata live query, which Node does not have at all.
+      refResolvedValue: fileName,
+      localStorageDir,
+      // Point the property at the draft row when the edit moved off a published row, and drop the
+      // published row's uid with it: patch Publish skips a property that has one.
+      localId: propertyData.localId ?? localId,
+      uid: propertyData.uid ?? undefined,
     })
 
     return true

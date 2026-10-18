@@ -2,18 +2,42 @@ import type { Item } from '@seedprotocol/sdk'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
-import { getPublishWallet } from './publishWalletRegistry'
+import { defaultDataItemSigner, getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
+import { resolvePublishPayment } from '../payment'
 import type { ManagedAccountPublishError } from '../errors'
 
+/** @deprecated Already resolved: use the result's `publish`. */
+export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undefined>
+
+/**
+ * `started`: the publish was spawned; `publish` is its actor. It hasn't finished: use
+ * {@link publishItem} (or `item.publish()`) to wait for that. `already_publishing`: that seed is
+ * already publishing in this tab or another, so nothing started.
+ */
 export type EnsureWalletThenPublishResult =
-  | { outcome: 'started' }
+  | {
+      outcome: 'started'
+      publish: import('xstate').ActorRef<any, any>
+      /** @deprecated Already resolved with `publish`. */
+      started: PublishStarted
+    }
+  | { outcome: 'already_publishing' }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
+
+/** Spawns the publish and reports whether it started (waits for the spawn, not the publish). */
+export async function startPublish(
+  ...args: Parameters<typeof PublishManager.createPublish>
+): Promise<{ outcome: 'started'; publish: import('xstate').ActorRef<any, any>; started: PublishStarted } | { outcome: 'already_publishing' }> {
+  const publish = await PublishManager.createPublish(...args)
+  if (!publish) return { outcome: 'already_publishing' }
+  return { outcome: 'started', publish, started: Promise.resolve(publish) }
+}
 
 function coerceDataItemSigner(
   signer: CreatePublishOptions['dataItemSigner'] | SeedSigner | PublishWallet | undefined,
@@ -34,7 +58,8 @@ export async function ensureWalletThenPublish(
   options?: CreatePublishOptions,
 ): Promise<EnsureWalletThenPublishResult> {
   const config = getPublishConfig()
-  if (config.useModularExecutor) {
+  const payment = resolvePublishPayment(config)
+  if (payment.sender === 'modular') {
     // Modular / ManagedAccount Thirdweb bootstrap is adapter-only.
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     return ensureSmartWalletThenPublish(item, null, async () => {
@@ -49,15 +74,16 @@ export async function ensureWalletThenPublish(
   }
 
   // Upgrade EOA sender to permissionless EIP-7702 when configured.
-  if (config.accountMode === 'eip7702' && config.bundlerUrl) {
-    const sponsored = await createPermissionlessTxSender({
+  if (payment.sender === 'eip7702') {
+    const txSender = await createPermissionlessTxSender({
       signer: session.signer,
-      bundlerUrl: config.bundlerUrl,
+      bundlerUrl: config.bundlerUrl!,
       paymasterUrl: config.paymasterUrl,
+      sponsored: payment.gas.payer === 'sponsored',
     })
     session = {
       ...session,
-      txSender: sponsored,
+      txSender,
       publisherAddress: session.publisherAddress ?? session.signer.address,
     }
   }
@@ -68,9 +94,9 @@ export async function ensureWalletThenPublish(
     return { outcome: 'no_address' }
   }
 
-  PublishManager.createPublish(item, address, session, {
+  return startPublish(item, address, session, {
     ...options,
-    dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? session.signer,
+    // A smart account can't sign data items: use the session's EOA signer (defaultDataItemSigner).
+    dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? defaultDataItemSigner(session),
   })
-  return { outcome: 'started' }
 }

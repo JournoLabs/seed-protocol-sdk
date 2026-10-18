@@ -9,6 +9,7 @@ import {
 } from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
 import {
+  deploySmartWalletContract,
   getClient,
   getConnectedManagedAccountAddress,
   getManagedAccountWallet,
@@ -145,7 +146,6 @@ const ConnectButton: FC = () => {
         return
       }
       await waitUntilSeedInitialized()
-      PublishManager.stopAll()
       const owned = new Set<string>([account.address.toLowerCase()])
       let managedAddress: string | undefined
       if (config.useModularExecutor) {
@@ -176,13 +176,42 @@ const ConnectButton: FC = () => {
       if (lastSyncedOwnedKey.current === ownedKey) {
         return
       }
+      // Another wallet took over: publishes started for the previous one stop (their rows stay
+      // for it to resume). Not on the first sync, where publishes restored from the DB need this
+      // wallet, nor on a re-sync of the same wallet.
+      if (lastSyncedOwnedKey.current !== null) {
+        PublishManager.stopAll()
+      }
       lastSyncedOwnedKey.current = ownedKey
       try {
-        const publishWallet = fromThirdwebAccount(account)
+        const adminAddress = activeWallet.getAdminAccount?.()?.address
+        // A wallet with a separate admin account, or the modular executor's ManagedAccount, is a
+        // smart account; otherwise the connected account is a plain key (in-app or injected).
+        const isSmart =
+          !!managedAddress ||
+          (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
+        const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
+        // Data items need an ECDSA signer. With the modular executor the connected account is an
+        // EOA (or EIP-7702 on one) acting for the ManagedAccount; otherwise a smart wallet's admin
+        // EOA signs them.
+        const adminAccount = activeWallet.getAdminAccount?.()
+        const dataItemSigner = managedAddress
+          ? publishWallet.signer
+          : isSmart && adminAccount && adminAccount.address.toLowerCase() !== account.address.toLowerCase()
+            ? fromThirdwebAccount(adminAccount, { kind: "eoa" }).signer
+            : undefined
         await setPublishWallet({
           ...publishWallet,
           ownedAddresses: [...owned],
           publisherAddress: managedAddress ?? account.address,
+          ...(dataItemSigner ? { dataItemSigner } : {}),
+          // A new user's smart wallet has no code until its first transaction: publish deploys it.
+          ...(isSmart && !managedAddress
+            ? { deploy: async () => { await deploySmartWalletContract(account) } }
+            : {}),
+          ...(adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase()
+            ? { adminAddress }
+            : {}),
         })
       } catch (err) {
         lastSyncedOwnedKey.current = null
@@ -235,7 +264,7 @@ const ConnectButton: FC = () => {
     } catch {
       /* private mode / SSR */
     }
-    clearPublishWallet()
+    void clearPublishWallet()
     PublishManager.stopAll()
   }
 

@@ -1,20 +1,22 @@
 import { EventObject, fromCallback } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { getPublishConfig } from '~/config'
+import { resolvePublishPayment } from '~/payment'
+import { uploadToTurbo } from '../helpers/uploadToTurbo'
+import { publishAuthorizationHeaders } from '~/authorization'
 
 const BATCH_UPLOAD_TIMEOUT_MS = 120_000
 const importDynamic = new Function('s', 'return import(s)') as (specifier: string) => Promise<{
-  readFile: (path: string) => Promise<Buffer>
-  stat: (path: string) => Promise<{ size: number }>
+  readFile: (path: string) => Promise<Uint8Array>
 }>
 
 type DataItemLike = {
   raw?: Uint8Array
   filename?: string
-  getRaw?: () => Buffer | Promise<Buffer>
+  getRaw?: () => Uint8Array | Promise<Uint8Array>
 }
 
-let nodeFsPromisesCache: { readFile: (path: string) => Promise<Buffer>; stat: (path: string) => Promise<{ size: number }> } | null = null
+let nodeFsPromisesCache: { readFile: (path: string) => Promise<Uint8Array> } | null = null
 
 const getNodeFsPromises = async () => {
   if (nodeFsPromisesCache) return nodeFsPromisesCache
@@ -25,7 +27,6 @@ const getNodeFsPromises = async () => {
     const mod = await importDynamic(specifier)
     nodeFsPromisesCache = {
       readFile: mod.readFile,
-      stat: mod.stat,
     }
     return nodeFsPromisesCache
   } catch {
@@ -39,11 +40,44 @@ const getNodeFsPromises = async () => {
  * When signDataItems is used, the callback handles upload (e.g. ArConnect) so signedDataItems
  * is undefined — we skip the upload step and send uploadComplete immediately.
  */
+/** The data items to upload are gone, e.g. the publish was restored after a reload. */
+export class MissingSignedDataItemsError extends Error {
+  readonly code = 'SIGNED_DATA_ITEMS_MISSING'
+  constructor() {
+    super(
+      'The signed data items to upload are missing (they are not saved with the publish, so a publish resumed after a reload has none). Publish again.',
+    )
+    this.name = 'MissingSignedDataItemsError'
+  }
+}
+
 export const uploadViaBundler = fromCallback<EventObject, { context: PublishMachineContext }>(
   ({ sendBack, input: { context } }) => {
     const { signedDataItems } = context
 
-    const { uploadApiBaseUrl, useArweaveBundler } = getPublishConfig()
+    const config = getPublishConfig()
+    const { uploadApiBaseUrl, useArweaveBundler } = config
+    const { storage } = resolvePublishPayment(config)
+
+    // No items: either there is nothing to upload (the app's signDataItems uploaded them itself,
+    // or there were none), or they were lost (they aren't saved with the publish, so a publish
+    // restored after a reload has none). Finishing on the second would attest data items that
+    // were never uploaded.
+    if (!signedDataItems || signedDataItems.length === 0) {
+      if (context.bundlerUploadNotNeeded) {
+        sendBack({ type: 'uploadComplete', result: 'done' })
+      } else {
+        sendBack({ type: 'uploadError', error: new MissingSignedDataItemsError() })
+      }
+      return
+    }
+
+    if (storage.uploadTo === 'turbo' && storage.turbo) {
+      uploadToTurbo(signedDataItems as unknown[], storage.turbo, context)
+        .then(() => sendBack({ type: 'uploadComplete', result: 'done' }))
+        .catch((error) => sendBack({ type: 'uploadError', error }))
+      return
+    }
 
     if (!useArweaveBundler || !uploadApiBaseUrl) {
       sendBack({
@@ -57,29 +91,16 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
 
     const bundlerUrl = `${uploadApiBaseUrl.replace(/\/$/, '')}/api/upload/arweave/batch`
 
-    if (!signedDataItems || signedDataItems.length === 0) {
-      // signDataItems path: external signer (e.g. ArConnect) already uploaded; skip and proceed
-      sendBack({ type: 'uploadComplete', result: 'done' })
-      return
-    }
-
     const _uploadViaBundler = async () => {
       const items = signedDataItems as unknown[]
-      const itemCount = items.length
-      const getRawCache: (Buffer | null)[] = new Array(itemCount).fill(null)
 
-      /** Length only (pass 1). Caches buffer for getRaw() items to avoid a second read. */
-      const rawByteLength = async (item: unknown, i: number): Promise<number> => {
+      /** Raw bytes of one DataItem. Plain Uint8Array (Node Buffers are one), so no Buffer global. */
+      const rawBytes = async (item: unknown): Promise<Uint8Array> => {
         const o = item as DataItemLike
-        if (o.raw != null && (o.raw instanceof Uint8Array || Buffer.isBuffer(o.raw))) {
-          return o.raw.byteLength
-        }
+        if (o.raw instanceof Uint8Array) return o.raw
         if (typeof o.getRaw === 'function') {
-          const r = o.getRaw()
-          const resolved = r instanceof Promise ? await r : r
-          const buf = Buffer.isBuffer(resolved) ? resolved : Buffer.from(resolved)
-          getRawCache[i] = buf
-          return buf.length
+          const resolved = await o.getRaw()
+          return resolved instanceof Uint8Array ? resolved : new Uint8Array(resolved)
         }
         if (o.filename != null) {
           const nodeFsPromises = await getNodeFsPromises()
@@ -88,59 +109,24 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
               'DataItem.filename requires Node.js fs access. In browser runtime, provide DataItem.raw or DataItem.getRaw().'
             )
           }
-          const st = await nodeFsPromises.stat(o.filename)
-          return st.size
+          return nodeFsPromises.readFile(o.filename)
         }
         throw new Error('Cannot get raw bytes from DataItem')
       }
 
-      let totalSize = 4
-      const lengths: number[] = []
-      for (let i = 0; i < itemCount; i++) {
-        const len = await rawByteLength(items[i], i)
-        lengths.push(len)
-        totalSize += 4 + len
-      }
-
-      const payload = Buffer.alloc(totalSize)
-      let offset = 0
-      payload.writeUInt32BE(itemCount, offset)
-      offset += 4
-
-      for (let i = 0; i < itemCount; i++) {
-        const len = lengths[i]!
-        const cached = getRawCache[i]
-        if (cached) {
-          payload.writeUInt32BE(len, offset)
-          offset += 4
-          cached.copy(payload, offset)
-          offset += len
-          continue
-        }
-
-        const o = items[i] as DataItemLike
-        if (o.raw != null && (o.raw instanceof Uint8Array || Buffer.isBuffer(o.raw))) {
-          payload.writeUInt32BE(len, offset)
-          offset += 4
-          payload.set(o.raw, offset)
-          offset += len
-          continue
-        }
-        if (o.filename != null) {
-          const nodeFsPromises = await getNodeFsPromises()
-          if (!nodeFsPromises) {
-            throw new Error(
-              'DataItem.filename requires Node.js fs access. In browser runtime, provide DataItem.raw or DataItem.getRaw().'
-            )
-          }
-          const buf = await nodeFsPromises.readFile(o.filename)
-          payload.writeUInt32BE(buf.length, offset)
-          offset += 4
-          buf.copy(payload, offset)
-          offset += buf.length
-          continue
-        }
-        throw new Error('Cannot get raw bytes from DataItem')
+      // Batch body: item count, then each item's length and bytes (uint32 big-endian).
+      const raws: Uint8Array[] = []
+      for (const item of items) raws.push(await rawBytes(item))
+      const totalSize = raws.reduce((sum, raw) => sum + 4 + raw.byteLength, 4)
+      const payload = new Uint8Array(totalSize)
+      const view = new DataView(payload.buffer)
+      view.setUint32(0, raws.length)
+      let offset = 4
+      for (const raw of raws) {
+        view.setUint32(offset, raw.byteLength)
+        offset += 4
+        payload.set(raw, offset)
+        offset += raw.byteLength
       }
 
       const controller = new AbortController()
@@ -150,7 +136,10 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
       try {
         response = await fetch(bundlerUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            ...publishAuthorizationHeaders(context.publishAuthorization),
+          },
           body: payload,
           signal: controller.signal,
         })

@@ -1,5 +1,7 @@
 import pluralize from 'pluralize'
+import { easName } from '@seedprotocol/eas'
 import { normalizeDataType } from './property/index'
+import { INTERNAL_DATA_TYPES } from './constants'
 
 /** Minimal property def shape for List-of-relation storage name resolution */
 export type PropertySchemaEntry = {
@@ -189,4 +191,47 @@ export function resolveMetadataRecord<T extends RecordWithRef>(
   return (
     records.find((r) => r.propertyName === preferredPropertyName) ?? records[0]
   )
+}
+
+/**
+ * The EAS property name publish writes for an item property (ADR 0008 §3), already in EAS form:
+ *
+ * - List of relations: its `<name><Model>Ids` storage name (`author_identity_ids`).
+ * - Single Relation, Image, File or Html: its schema key (`author`), never the local `<name>Id`
+ *   storage name. The key is `propertyDef.name` when known, else `propertyName` without its `Id`.
+ * - Anything else: the property name.
+ */
+export function easPropertyNameForPublish(
+  propertyName: string,
+  propertyDef?: (PropertySchemaEntry & { name?: string; refValueType?: string }) | null,
+): string {
+  const listRelationName = listRelationEasPropertyName(propertyName, propertyDef ?? undefined)
+  if (listRelationName) return easName(listRelationName)
+  if (
+    propertyDef &&
+    normalizeDataType(propertyDef.dataType) !== 'List' &&
+    needsMetadataIdSuffix(propertyDef.dataType, propertyDef.refValueType) &&
+    !ID_SUFFIX_EXCLUDE.has(propertyName)
+  ) {
+    const key = propertyDef.name ?? (propertyName.endsWith('Id') ? propertyName.slice(0, -2) : propertyName)
+    return easName(key)
+  }
+  return easName(propertyName)
+}
+
+/**
+ * The EAS schema definition publish attests a property under (`string title`, `bytes32 author`),
+ * or undefined when its data type has no EAS type. Look schemas up by this, not by name: a name
+ * can have schemas of several types (Optimism Sepolia has `bytes32 storage_transaction_id` beside
+ * `string storage_transaction_id`).
+ */
+export function easSchemaDefinitionForProperty(
+  propertyName: string,
+  propertyDef?: (PropertySchemaEntry & { name?: string; refValueType?: string }) | null,
+): string | undefined {
+  if (!propertyDef?.dataType) return undefined
+  const dataType = normalizeDataType(String(propertyDef.dataType))
+  const easType = INTERNAL_DATA_TYPES[dataType as keyof typeof INTERNAL_DATA_TYPES]?.eas
+  if (!easType) return undefined
+  return `${easType} ${easPropertyNameForPublish(propertyName, propertyDef)}`
 }

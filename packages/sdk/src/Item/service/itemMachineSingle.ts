@@ -4,6 +4,8 @@ import { ItemMachineContext } from '@/types'
 import { waitForDb } from './actors/waitForDb'
 import { loadOrCreateItem } from './actors/loadOrCreateItem'
 import { runPublish } from './actors/runPublish'
+import type { ItemPublishOptions } from '@/helpers/publishConfig'
+import type { IItem } from '@/interfaces/IItem'
 import { IItemProperty } from '@/interfaces'
 
 // @ts-ignore - Complex type inference from setup().createMachine()
@@ -135,7 +137,11 @@ export const itemMachineSingle = setup({
       },
       invoke: {
         src: 'runPublish',
-        input: ({ context }) => ({ context }),
+        input: ({ context, event }) => ({
+          context,
+          item: (event as { item?: IItem<any> }).item,
+          options: (event as { options?: ItemPublishOptions }).options,
+        }),
       },
     },
     waitingForDb: {

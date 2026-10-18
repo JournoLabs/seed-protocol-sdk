@@ -1,8 +1,10 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
+import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
 import { Model } from '@/Model/Model'
+import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -18,7 +20,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '@/helpers/constants'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -29,7 +31,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
-import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
+import { currentEvictionEpoch, finishSchemaDestroy, recordSchemaDestroy } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
@@ -106,6 +108,8 @@ export class Schema {
   protected readonly _service: SchemaService
 
   $schema?: string
+  /** The schema's name (metadata.name). Assigning it renames the schema and saves a draft. */
+  name?: string
   version?: number
   metadata?: {
     name: string
@@ -162,7 +166,7 @@ export class Schema {
     // Note: Property getters/setters are now handled by the Proxy in create()
   }
 
-  static create(schemaName: string, options?: { waitForReady?: false }): Schema
+  static create(schemaName: string, options: { waitForReady: false }): Schema
   static create(
     schemaName: string,
     options?: { waitForReady?: true; readyTimeout?: number },
@@ -176,7 +180,7 @@ export class Schema {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 15000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     // First, check if we have an instance cached by name
     if (this.instanceCacheByName.has(schemaName)) {
@@ -372,10 +376,7 @@ export class Schema {
             
             // Save draft to database immediately so changes persist
             saveDraftLogger(`Name change detected, calling _saveDraftToDb (oldName: "${oldName}", newName: "${newName}")`)
-            instance._saveDraftToDb(oldName, newName).catch((error) => {
-              saveDraftLogger(`ERROR: Failed to save draft after name change: ${error instanceof Error ? error.message : String(error)}`)
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(instance._service, instance._saveDraftToDb(oldName, newName), `Schema "${newName}"`)
           } else {
             logger(`Schema name unchanged: "${oldName}"`)
           }
@@ -419,9 +420,7 @@ export class Schema {
           if (TRACKED_PROPERTIES.includes(prop as any)) {
             const trackedPropContext = newInstance._getSnapshotContext()
             const schemaName = trackedPropContext.metadata?.name || trackedPropContext.schemaName
-            newInstance._saveDraftToDb(schemaName, schemaName).catch((error) => {
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(newInstance._service, newInstance._saveDraftToDb(schemaName, schemaName), `Schema "${schemaName}"`)
           }
         }
       },
@@ -575,7 +574,7 @@ export class Schema {
   static async find({
     schemaFileId,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: {
     schemaFileId: string
     waitForReady?: boolean
@@ -617,7 +616,7 @@ export class Schema {
       includeAllVersions = false,
       includeInternal = false,
       waitForReady = false,
-      readyTimeout = 5000,
+      readyTimeout = DEFAULT_READY_TIMEOUT_MS,
     } = options
     
     try {
@@ -904,6 +903,14 @@ export class Schema {
     return this._getSnapshotContext()._validationErrors || []
   }
 
+  /**
+   * The error from the last draft save that an assignment started (e.g. `schema.name = ...`),
+   * such as a ConflictError; undefined once a later one succeeds.
+   */
+  get lastSaveError(): Error | undefined {
+    return getDraftSaveError(this._service)
+  }
+
   get isValid() {
     const errors = this.validationErrors
     return errors.length === 0
@@ -948,43 +955,79 @@ export class Schema {
   }
 
   /**
-   * Build models object from Model instances (for persistence)
-   * Model instances are the source of truth for model data
+   * Build the file-format `models` object from this schema's Model instances: every model
+   * (those created at runtime too), each property as its file definition ({ id, type, model,
+   * ref, refValueType, required, storage, validation, ... }).
    */
-  private _buildModelsFromInstances(): { [modelName: string]: any } {
+  private async _buildModelsFromInstances(): Promise<SchemaFileFormat['models']> {
     const context = this._getSnapshotContext()
-    const models: { [modelName: string]: any } = {}
-    
-    // Get model IDs from service context (reactive state)
-    const modelIds = context._liveQueryModelIds || []
-    
-    // Iterate through Model instances from static cache
-    for (const modelFileId of modelIds) {
-      const modelInstance = Model.getById(modelFileId)
-      if (!modelInstance) continue
+    const { convertPropertyToSchemaUpdate } = await import('@/helpers/updateSchema')
+    const models: SchemaFileFormat['models'] = {}
+
+    for (const modelInstance of this.models) {
       try {
         const modelName = modelInstance.modelName
-        
-        if (!modelName) {
-          logger(`Model instance with ID ${modelFileId} has no modelName, skipping`)
-          continue
+        if (!modelName) continue
+
+        const properties: SchemaFileFormat['models'][string]['properties'] = {}
+        let propertyContexts: any[] = (modelInstance.properties ?? []).map(
+          (property: any) => property.getService().getSnapshot().context,
+        )
+        // model.properties can still be empty for a model created at runtime (the browser fills
+        // it from a live query): read the rows, preferring each row's cached instance.
+        const modelDbId = (modelInstance.getService().getSnapshot().context as { _dbId?: number })._dbId
+        const db = BaseDb.getAppDb()
+        if (propertyContexts.length === 0 && modelDbId && db) {
+          const { ModelProperty } = await import('../ModelProperty/ModelProperty')
+          const rows = await db.select().from(propertiesTable).where(eq(propertiesTable.modelId, modelDbId))
+          propertyContexts = rows.map((row: typeof propertiesTable.$inferSelect) => {
+            const cached = row.schemaFileId ? ModelProperty.getById(row.schemaFileId) : undefined
+            return cached
+              ? cached.getService().getSnapshot().context
+              : {
+                  ...row,
+                  id: row.schemaFileId ?? undefined,
+                  refModelId: row.refModelId ?? undefined,
+                  refValueType: row.refValueType ?? undefined,
+                  storageType: row.storageType ?? undefined,
+                  localStorageDir: row.localStorageDir ?? undefined,
+                  filenameSuffix: row.filenameSuffix ?? undefined,
+                }
+          })
         }
-        
-        // Build model definition from Model instance context
-        // CRITICAL: Read properties from ModelProperty instances, not from Model's properties context
-        // ModelProperty instances are the source of truth for property data
-        const propertiesFromInstances = (modelInstance as any)._buildPropertiesFromInstances?.() || modelInstance.properties || {}
-        
+        const contextModel = context.models?.[modelName]
+        const fromContext = contextModel?.properties
+        // nameMatch lives only in the schema file (ADR 0009): keep each property's, found by id
+        // first so a renamed property keeps it.
+        const contextNameMatch = (ctx: { id?: string; name: string }) => {
+          const defs = Object.values(fromContext ?? {}) as { id?: string; nameMatch?: unknown }[]
+          const def = (ctx.id ? defs.find((d) => d?.id === ctx.id) : undefined) ?? fromContext?.[ctx.name]
+          return def?.nameMatch
+        }
+        for (const ctx of propertyContexts) {
+          if (!ctx.name) continue
+          const { updates } = await convertPropertyToSchemaUpdate(ctx as any, modelName, ctx.name)
+          const nameMatch = contextNameMatch(ctx)
+          properties[ctx.name] = {
+            ...(ctx.id ? { id: ctx.id } : {}),
+            ...updates,
+            ...(ctx.validation ? { validation: ctx.validation } : {}),
+            ...(ctx.htmlEmbeddedDataUriPolicy ? { htmlEmbeddedDataUriPolicy: ctx.htmlEmbeddedDataUriPolicy } : {}),
+            ...(nameMatch !== undefined ? { nameMatch } : {}),
+          }
+        }
+
+        // No property instances loaded for this model: keep the definitions the schema has.
         models[modelName] = {
-          properties: propertiesFromInstances,
+          ...(modelInstance.id ? { id: modelInstance.id } : {}),
+          ...(contextModel?.nameMatch !== undefined ? { nameMatch: contextModel.nameMatch } : {}),
+          properties: Object.keys(properties).length > 0 || !fromContext ? properties : fromContext,
         }
-        
-        logger(`Built model "${modelName}" from Model instance (ID: ${modelFileId})`)
       } catch (error) {
-        logger(`Error building model from instance (ID: ${modelFileId}): ${error instanceof Error ? error.message : String(error)}`)
+        logger(`Error building model from instance: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    
+
     logger(`Built ${Object.keys(models).length} models from Model instances`)
     return models
   }
@@ -1030,7 +1073,7 @@ export class Schema {
     // Build current schema state from context
     // CRITICAL: Read models from Model instances, not from Schema context
     // Model instances are the source of truth for model data
-    const modelsFromInstances = this._buildModelsFromInstances()
+    const modelsFromInstances = await this._buildModelsFromInstances()
     
     const currentSchema: SchemaFileFormat = {
       id: context.id,
@@ -1044,6 +1087,7 @@ export class Schema {
       models: modelsFromInstances, // Read from Model instances, not context.models
       enums: context.enums || {},
       migrations: context.migrations || [],
+      ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
     }
 
     // Update draft in database with current state
@@ -1089,6 +1133,7 @@ export class Schema {
 
     // Update database record: set isDraft = false and update schemaFileId
     if (dbSchema.length > 0) {
+      clearNameMatchLevels() // the stored schema file changes (ADR 0009)
       await db
         .update(schemasTable)
         .set({
@@ -1121,6 +1166,7 @@ export class Schema {
       type: 'clearDraft',
       _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
       _dbVersion: publishedSchema.version,
+      savedSchema: publishedSchema,
     } as any)
 
     // Clear edited flags on all ModelProperty instances and in database
@@ -1283,21 +1329,22 @@ export class Schema {
     
     // Wait for reload to complete
     return new Promise((resolve, reject) => {
+      // Cleared once the reload settles: a pending timer kept Node scripts alive for 10 s.
+      const timer = setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timeout waiting for schema reload'))
+      }, 10000)
       const subscription = this._service.subscribe((snapshot) => {
         if (snapshot.value === 'idle') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           resolve()
         } else if (snapshot.value === 'error') {
+          clearTimeout(timer)
           subscription.unsubscribe()
           reject(new Error('Failed to reload schema from database'))
         }
       })
-      
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        subscription.unsubscribe()
-        reject(new Error('Timeout waiting for schema reload'))
-      }, 10000)
     })
   }
 
@@ -1498,7 +1545,7 @@ export class Schema {
       
       // CRITICAL: Read models from Model instances, not from Schema context
       // Model instances are the source of truth for model data
-      const modelsFromInstances = this._buildModelsFromInstances()
+      const modelsFromInstances = await this._buildModelsFromInstances()
       
       const currentSchema: SchemaFileFormat = {
         $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
@@ -1508,6 +1555,7 @@ export class Schema {
         models: modelsFromInstances, // Read from Model instances, not context.models
         enums: context.enums || {},
         migrations: context.migrations || [],
+        ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
       }
       
       // Log if there was a mismatch that we're fixing
@@ -1528,6 +1576,7 @@ export class Schema {
           
           // CRITICAL: Ensure schemaFileId column matches schema.id (schema.id is now guaranteed to match finalSchemaFileId)
           // Always update schemaFileId to match the id in the schema JSON to maintain consistency
+          clearNameMatchLevels() // the stored schema file changes (ADR 0009)
           const updateData: any = {
             name: finalNewName,
             schemaData: schemaDataString,
@@ -1625,6 +1674,7 @@ export class Schema {
             
             // Update the existing record with the new name
               // CRITICAL: Ensure schemaFileId matches schema.id
+              clearNameMatchLevels() // the stored schema file changes (ADR 0009)
               await db
               .update(schemasTable)
               .set({
@@ -1817,6 +1867,22 @@ export class Schema {
       ],
     })
 
+    // Until its rows are gone, nothing may re-create this schema's models. Its own actor stays live
+    // till then, and its live query reacting to destroyStarted could read a model row the drained
+    // write had just landed and re-create (and re-write) that model after the delete below.
+    if (schemaName) recordSchemaDestroy(schemaName)
+    try {
+      await this._destroyRows(schemaFileId, schemaName, context.metadata?.name)
+    } finally {
+      if (schemaName) finishSchemaDestroy(schemaName)
+    }
+  }
+
+  private async _destroyRows(
+    schemaFileId: string | undefined,
+    schemaName: string | undefined,
+    metadataName: string | undefined,
+  ): Promise<void> {
     // The rows for this schema's models and properties are deleted below; evict their cached
     // instances too, or a re-import would get them back with dangling _dbIds.
     if (schemaName) {
@@ -1861,6 +1927,9 @@ export class Schema {
           ),
         ] as number[]
 
+        const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+        await detachModelRows(db, modelIds)
+
         await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
 
         for (const modelId of modelIds) {
@@ -1870,6 +1939,21 @@ export class Schema {
           await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
         }
         await db.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+
+        // Delete the SDK's own copies of this schema's files (all versions) in the working dir.
+        // loadAllSchemasFromDb imports any schema file without a DB row, so leaving them brought
+        // the destroyed schema back on the next Schema.all().
+        // Match on name as well as id: versions imported from complete schema files can each
+        // have their own id, and any version left behind would bring the schema back.
+        const { listCompleteSchemaFiles } = await import('@/helpers/schema')
+        const files = await listCompleteSchemaFiles().catch(() => [])
+        const fs = await BaseFileManager.getFs()
+        const names = new Set([schemaName, metadataName].filter(Boolean))
+        for (const file of files) {
+          if (file.schemaFileId === schemaFileId || names.has(file.name)) {
+            await fs.promises.unlink(file.filePath).catch(() => {})
+          }
+        }
       },
     })
   }

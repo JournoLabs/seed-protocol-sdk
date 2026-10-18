@@ -3,6 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getPublishPendingDiff } from '@/db/read/getPublishPendingDiff'
+import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getItemsData } from '@/db/read/getItems'
 import { getSeedPublishState } from '@/db/read/getSeedPublishState'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
@@ -15,6 +16,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 
 const VALID_V1 = '0x' + '1'.repeat(64)
 const VALID_V0 = '0x' + '0'.repeat(63) + '1'
+const SYNCED_TITLE_UID = '0x' + '0'.repeat(62) + 'e7'
 
 testDescribe('getPublishPendingDiff', () => {
   beforeAll(async () => {
@@ -162,5 +164,48 @@ testDescribe('getPublishPendingDiff', () => {
         `iteration ${i}`,
       ).not.toContain('title')
     }
+  })
+
+  it('an edited draft outranks a synced value older than the edit but newer than the draft', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({
+      title: 'Draft edited after sync',
+      count: 1,
+    })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const titleRow = (await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))).find(
+      (r) => r.propertyName === 'title',
+    )!
+    expect(titleRow.uid ?? null).toBeNull()
+
+    // The draft was made a while ago; it's edited now.
+    const t = Date.now()
+    await db.update(metadata).set({ createdAt: t - 3000 }).where(eq(metadata.localId, titleRow.localId!))
+    await updateItemPropertyValue({
+      seedLocalId,
+      versionLocalId: titleRow.versionLocalId!,
+      propertyName: 'title',
+      modelName: 'Post',
+      newValue: 'local edit',
+    })
+
+    // Then sync stores a value attested between the draft's creation and the edit.
+    await db.insert(metadata).values({
+      localId: `synced_title_${t}`,
+      uid: SYNCED_TITLE_UID,
+      propertyName: 'title',
+      propertyValue: 'older remote',
+      schemaUid: titleRow.schemaUid,
+      modelType: titleRow.modelType,
+      seedLocalId,
+      versionLocalId: titleRow.versionLocalId,
+      easDataType: titleRow.easDataType,
+      createdAt: t,
+      attestationCreatedAt: t - 2000,
+    })
+
+    const diff = await getPublishPendingDiff({ seedLocalId })
+    const title = diff.pendingProperties.find((p) => p.propertyName === 'title')
+    expect(title?.currentValue).toBe('local edit')
   })
 })

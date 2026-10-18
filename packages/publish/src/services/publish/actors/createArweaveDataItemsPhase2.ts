@@ -46,6 +46,7 @@ export async function executeCreateArweaveDataItemsPhase2(
       arweaveTransactions: [],
       publishUploads: [],
       signedDataItems: undefined,
+      bundlerUploadNotNeeded: true,
     }
   }
 

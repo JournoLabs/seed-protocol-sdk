@@ -8,7 +8,8 @@
  * to be run less frequently than unit tests. They run only in Node.js environment.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 
 // Import the node ArweaveClient to set up the platform class
@@ -33,9 +34,34 @@ describe.skipIf(!isNodeEnv)('ArweaveClient Integration', () => {
   // Increase timeout for network requests
   const NETWORK_TIMEOUT = 30000
 
-  beforeAll(() => {
+  // With SEED_GATEWAY_HYPER_KEY set (a CI secret), status checks ask our Hyper gateway first and
+  // the public gateways after it. Without it, or if the tunnel can't connect, they use the public
+  // gateways only. Data, tag and URL tests stay on arweave.net either way.
+  let hyperTunnel: { baseUrl: string; close: () => Promise<void> } | undefined
+
+  beforeAll(async () => {
     // Ensure we're using the default Arweave host
     BaseArweaveClient.setHost('arweave.net')
+
+    const key = process.env.SEED_GATEWAY_HYPER_KEY?.trim()
+    if (!key) return
+    try {
+      const { connectTunnel } = await import('@seedprotocol/gateway-hyper')
+      hyperTunnel = await connectTunnel({ key, host: '127.0.0.1', port: 0, connectTimeoutMs: 20000 })
+      // The tunnel dials the operator on its first request; only use it once that request works.
+      const info = await fetch(`${hyperTunnel.baseUrl}/info`, { signal: AbortSignal.timeout(25000) })
+      if (!info.ok) throw new Error(`GET /info through the tunnel returned ${info.status}`)
+      setPreferredArweaveReadBaseUrls([hyperTunnel.baseUrl])
+    } catch (error) {
+      console.warn('[ArweaveClient Integration] Hyper gateway unavailable, using public gateways:', error)
+      await hyperTunnel?.close().catch(() => {})
+      hyperTunnel = undefined
+    }
+  }, NETWORK_TIMEOUT)
+
+  afterAll(async () => {
+    setPreferredArweaveReadBaseUrls([])
+    await hyperTunnel?.close()
   })
 
   describe('getTransactionStatus()', () => {

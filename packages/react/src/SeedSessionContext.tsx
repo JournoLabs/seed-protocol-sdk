@@ -33,6 +33,8 @@ export function SeedAddressRevisionProvider({
 
   const onSessionInvalidation = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['seed', 'items'], exact: false })
+    void queryClient.invalidateQueries({ queryKey: ['seed', 'item'], exact: false })
+    void queryClient.invalidateQueries({ queryKey: ['seed', 'itemProperty'], exact: false })
     setAddressRevision((n) => n + 1)
   }, [queryClient])
 

@@ -1,6 +1,41 @@
 # Changelog
 
-## 0.8.0
+## 0.7.5 (2026-10-17)
+
+### Commits
+
+#### Fixes
+
+- packages: top-level types for legacy resolvers; query main -> Node build (12c51228)
+
+#### Other
+
+- packages: audit feed, feed-hyper, gateway-hyper, mapping, publish, query READMEs (1a5d7ee4)
+- packages: add sdk README, fix root README, add homepage/bugs metadata (3d89c932)
+
+## 0.6.10 (2026-10-04)
+
+### Commits
+
+#### Other
+
+- Fixing gas estimation. v0.6.10 (d5b161a1)
+
+## 0.6.7 (2026-10-01)
+
+_Also covers 0.6.4, 0.6.5, 0.6.6, published from commits in this range._
+
+### Commits
+
+#### Other
+
+- Final edits (687d320b)
+
+## 0.6.3 (2026-09-25)
+
+_Also covers 0.6.1, 0.6.2, published from commits in this range._
+
+_Derive and assemble. This file used to list them under `0.8.0`, a mapping version that was never published. They first shipped in 0.6.3._
 
 - `ResolveJob` adds `'derive' | 'assemble'`. `FieldMapping.sourceId` is optional so a derive-only edge is legal.
 - Persist `derive?: { from: string; fallback?: boolean }` and `assemble?: { blocks: string[] }` on the edge. Mutators pass them through, including copy + `derive` fallback. Empty `sourceId` is omitted.
@@ -11,7 +46,7 @@
 - `resolvedSourceId` only suffixes `extract` / `file`.
 - Package `autoMap` is unchanged: it does not inject derive-only slug or default html to assemble.
 
-## 0.7.0
+_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.2._
 
 - Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.
 - `applyMapping` (sync) applies lookup entries and emits refs. Unmatched values are omitted. `applyMappingAsync` reports unmatched on `errors[]` and no longer calls the host `resolve` callback for lookup.
@@ -22,12 +57,22 @@
 - `MappingDocument.lookups` / `lookups` + `onLookupsChange` are deprecated read/write fallbacks for 0.6.0 documents.
 - `_pendingResolve` is extract/file only; lookup hits appear in the preview bag.
 
-## 0.6.1
+### Commits
+
+#### Other
+
+- Fix Item proxy descriptors and FieldMapper stale mapping writes. (e26a927f)
+- Add derive and assemble as FieldMapper resolve words. (31c5753b)
+- Fixing bug so uid doesn't depend on CreatedAttestation (5e64192b)
+- Improved field mapping relation handling (76c6b18c)
+
+## 0.6.0 (2026-09-22)
+
+_Written as mapping 0.6.1._
 
 - `FieldMapper` `renderRowAccessory?: (row: FieldMapperRow) => ReactNode` — host chrome slot on each rows-layout row (`.fm-row-accessory` / `classNames.rowAccessory`), after the transform control and before remove. Package does not fetch or preview; hosts return `null` when idle (e.g. show **Preview** only for `resolve: 'extract' | 'file'`).
 - Optional `SourceNode.subtitle` for a secondary display line (inspector, wires card, source option labels). Prefer this over stuffing origin into `label`. Display-only — not part of `MappingDocument`.
-
-## 0.6.0
+_Written as mapping 0.6.0._
 
 - `FieldMapper` Phase 5: `layout` defaults to `'rows'`; `'wires'` is deprecated but still supported.
 - `FieldMapper` Phase 4: per-row lookup editors (`slots.lookups: 'row'`), row/JSON preview parity with sync `applyMapping` (+ `_pendingResolve`), JSON behind a `<details>` disclosure. Rows layout defaults `lookups` to `'row'`; wires keep `'section'`.
@@ -51,6 +96,33 @@
 - `autoMap` fans `link` / `url` sources out to matching URL-ish targets (`importUrl`, `canonicalUrl`, `url`, `link`, `permalink`).
 - `FieldMapper` supports attaching multiple properties from an active source without clearing prior edges; normalizes `@extract`/`@file` nodes to `resolve` on persist.
 
-## 0.5.1
+### Commits
+
+#### Features
+
+- add FieldMapper row layout and useFieldMapper hook (32290d70)
+- add resolve:lookup for relation value maps (c7a11b64)
+- add resolve jobs, URL classifier, and AV media roles (ac9ef29c)
+- allow one source to fan out to multiple properties (2f5b4840)
+
+#### Other
+
+- Responding to app developer requests (907b8cdf)
+- Field mapper phase 5 work (61e7a518)
+- Adding phase 4 work of mapping redesign (e3603ffa)
+- Adding cursor rule. More theme work. (9a5b31fc)
+- Additional improvements to address developer requests (1e6820ff)
+
+## 0.5.3 (2026-09-17)
+
+_Also covers 0.5.2, published from commits in this range._
+
+_Written as mapping 0.5.1._
 
 - Initial Phase 1 release: headless mapping core, markdown + RSS adapters, `FieldMapper` UI.
+
+### Commits
+
+#### Features
+
+- add @seedprotocol/mapping Phase 1 package (d97020cd)

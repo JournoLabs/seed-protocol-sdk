@@ -195,7 +195,7 @@ export class FileCache {
     try {
       const files = await fs.readdir(this.cacheDir);
       for (const file of files) {
-        // Do not delete bare {schema}.json — query collection cache files
+        // Skips bare {schema}.json: query kept collection files there before moving them to collections/
         if (file.endsWith('.json') && file.includes('-')) {
           await fs.unlink(join(this.cacheDir, file));
         }

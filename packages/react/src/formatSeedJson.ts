@@ -48,15 +48,21 @@ function limitDepth(
   if (depth >= maxDepth) {
     return '[Max depth]'
   }
+  // `seen` holds the current path only: a cycle is a value that is its own ancestor. Keeping
+  // every visited object printed a shared (non-cyclic) object as [Circular] the second time.
   seen.add(value)
-  if (Array.isArray(value)) {
-    return value.map((item) => limitDepth(item, maxDepth, maxStringLength, depth + 1, seen))
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => limitDepth(item, maxDepth, maxStringLength, depth + 1, seen))
+    }
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = limitDepth(v, maxDepth, maxStringLength, depth + 1, seen)
+    }
+    return out
+  } finally {
+    seen.delete(value)
   }
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = limitDepth(v, maxDepth, maxStringLength, depth + 1, seen)
-  }
-  return out
 }
 
 /**

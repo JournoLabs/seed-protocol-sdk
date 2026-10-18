@@ -1,5 +1,5 @@
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient";
-import { NetworkMode, QueryClient as ReactQueryClient, } from "@tanstack/react-query";
+import { NetworkMode, QueryClient as ReactQueryClient } from "@tanstack/query-core";
 import type { IQueryClient } from "@/interfaces/IQueryClient";
 import type { IQueryClientFactory } from "@seedprotocol/eas";
 
@@ -29,7 +29,7 @@ export class BrowserQueryClient implements IQueryClientFactory {
     const queryClient: IQueryClient = {
       fetchQuery: async (options) => {
         const { queryKey, queryFn, networkMode, staleTime } = options
-        return reactQueryClient.fetchQuery({
+        return reactQueryClient.query({
           queryKey,
           queryFn,
           networkMode: networkMode as NetworkMode | undefined,

@@ -44,6 +44,24 @@ describe('isSqliteUniqueConstraintError', () => {
     ).toBe(true)
   })
 
+  it('ignores stack frames (file names, positions, URL timestamps)', () => {
+    const chrome = new Error('Failed query: select 1')
+    chrome.stack =
+      'Error: Failed query: select 1\n' +
+      '    at http://localhost:63315/src/helpers/isSqliteUniqueConstraintError.test.ts?import&t=1760520672067:48:79'
+    expect(isSqliteUniqueConstraintError(chrome)).toBe(false)
+
+    const firefox = new Error('Failed query: select 1')
+    firefox.stack = 'fn@http://localhost/isSqliteUniqueConstraintError-a2067.js:10:2067\n'
+    expect(isSqliteUniqueConstraintError(firefox)).toBe(false)
+  })
+
+  it('still reads a UNIQUE message from the stack', () => {
+    const err = new Error('wrapped')
+    err.stack = 'Error: UNIQUE constraint failed: seeds.uid\n    at insert (/app/db.js:1:1)'
+    expect(isSqliteUniqueConstraintError(err)).toBe(true)
+  })
+
   it('returns false for unrelated errors', () => {
     expect(isSqliteUniqueConstraintError(new Error('Failed query: select 1'))).toBe(false)
     expect(isSqliteUniqueConstraintError(new Error('database is locked'))).toBe(false)

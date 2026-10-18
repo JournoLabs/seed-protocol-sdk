@@ -1,0 +1,36 @@
+{
+  "name": "seed-next15-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack -p 3466",
+    "dev:webpack": "next dev -p 3467",
+    "build": "next build --turbopack",
+    "build:webpack": "next build",
+    "start": "next start -p 3468"
+  },
+  "dependencies": {
+    "@seedprotocol/react": "file:../tarballs/seedprotocol-react-0.7.4.tgz",
+    "@seedprotocol/sdk": "file:../tarballs/seedprotocol-sdk-0.7.4.tgz",
+    "@tanstack/react-query": "5.104.1",
+    "@zenfs/core": "2.5.6",
+    "@zenfs/dom": "1.2.9",
+    "drizzle-orm": "0.44.7",
+    "next": "15.5.28",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "xstate": "^5.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "~5.9.3"
+  },
+  "overrides": {
+    "@seedprotocol/eas": "file:../tarballs/seedprotocol-eas-0.7.4.tgz",
+    "@seedprotocol/arweave": "file:../tarballs/seedprotocol-arweave-0.7.4.tgz",
+    "@seedprotocol/query": "file:../tarballs/seedprotocol-query-0.7.4.tgz",
+    "@seedprotocol/vite": "file:../tarballs/seedprotocol-vite-0.7.4.tgz"
+  }
+}

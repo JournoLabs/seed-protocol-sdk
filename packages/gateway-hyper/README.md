@@ -1,5 +1,7 @@
 # @seedprotocol/gateway-hyper
 
+[![npm](https://img.shields.io/npm/v/@seedprotocol/gateway-hyper.svg)](https://www.npmjs.com/package/@seedprotocol/gateway-hyper)
+
 Expose a local **seed-protocol-server + ar.io gateway** stack (via Traefik or direct upstream) to SDK users over **HyperDHT**.
 
 Two client shapes:
@@ -7,24 +9,24 @@ Two client shapes:
 - **Path A — Local sidecar:** `connectTunnel` → `http://127.0.0.1:1984` (local / Electron)
 - **Path B — App-server proxy:** `createGatewayProxy` → mount on `/api/seed-gateway` (hosted web browsers)
 
-See [docs/GATEWAY_HYPER.md](../../docs/GATEWAY_HYPER.md) for operator and developer runbooks.
+See [docs/GATEWAY_HYPER.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/GATEWAY_HYPER.md) for operator and developer runbooks. Part of [Seed Protocol](https://seedprotocol.io); the client side is configured in [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk).
 
-## Install
+## Installation
 
 ```bash
-bun add @seedprotocol/gateway-hyper
+npm install @seedprotocol/gateway-hyper
 ```
 
-Requires Node 20+ and Holepunch native addons. Prefer Node over Bun.
+Requires Node 20+ and Holepunch native addons. Prefer Node over Bun. Installs the `seed-gateway` CLI.
 
 ## CLI
 
 ```bash
 # Operator
-seed gateway tunnel serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
+seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
 
 # Client sidecar (Path A)
-seed gateway tunnel connect <z32-key> --port 1984
+seed-gateway connect <z32-key> --host 127.0.0.1 --port 1984
 ```
 
 ## Library
@@ -52,7 +54,7 @@ export const GET = (req: Request) => proxy.handleFetch(req)
 export const POST = (req: Request) => proxy.handleFetch(req)
 ```
 
-Web SDK config for Path B:
+Web SDK config for Path B (`SeedConfig.gateway` in `@seedprotocol/sdk`):
 
 ```ts
 gateway: {
@@ -66,4 +68,8 @@ Keep `SEED_GATEWAY_HYPER_KEY` on the server only. Authenticate / rate-limit the 
 ## Tests
 
 - Unit tests always run.
-- DHT integration: `GATEWAY_HYPER_TESTS=1 bun run test`
+- DHT integration: `GATEWAY_HYPER_TESTS=1 bun run test` (from a checkout of the monorepo)
+
+## License
+
+MIT

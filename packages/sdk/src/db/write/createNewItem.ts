@@ -4,8 +4,13 @@ import { ModelValues } from '@/types'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
+import {
+  getItemStorageFilePath,
+  withItemStorageFileLock,
+  writeItemStorageFile,
+} from '@/helpers/itemStorageFile'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -28,7 +33,7 @@ export const createNewItem = async ({
     throw new Error('A model name is required for createNewItem')
   }
 
-  const seedType = toSnakeCase(modelName)
+  const seedType = easName(modelName)
 
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
@@ -39,38 +44,81 @@ export const createNewItem = async ({
 
   const newSeedId = await createSeed({ type: seedType, modelFileId })
 
-  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
+  try {
+    return await writeVersionAndRows(newSeedId)
+  } catch (error) {
+    // The rows are separate inserts (no transaction): remove what was written so a failure leaves
+    // no half-made draft.
+    const { discardNewDraft } = await import('./discardNewDraft')
+    await discardNewDraft(newSeedId).catch(() => undefined)
+    throw error
+  }
 
-  // Build set of all properties to create metadata for: union of model schema + propertyData
-  // This ensures we create metadata for ALL model properties even when creating with no initial values
-  // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
-  const allPropertyNames = new Set<string>(Object.keys(propertyData))
-  if (propertySchemas) {
-    for (const name of Object.keys(propertySchemas)) {
-      allPropertyNames.add(name)
+  async function writeVersionAndRows(newSeedId: string): Promise<CreateNewItemReturnType> {
+    const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
+
+    // Build set of all properties to create metadata for: union of model schema + propertyData
+    // This ensures we create metadata for ALL model properties even when creating with no initial values
+    // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
+    const allPropertyNames = new Set<string>(Object.keys(propertyData))
+    if (propertySchemas) {
+      for (const name of Object.keys(propertySchemas)) {
+        allPropertyNames.add(name)
+      }
     }
-  }
 
-  for (const propertyName of allPropertyNames) {
-    const propertyValue = propertyData[propertyName]
-    const propertyRecordSchema = propertySchemas?.[propertyName]
+    for (const propertyName of allPropertyNames) {
+      const propertyValue = propertyData[propertyName]
+      const propertyRecordSchema = propertySchemas?.[propertyName]
 
-    await createMetadata(
-      {
-        seedLocalId: newSeedId,
-        versionLocalId: newVersionId,
-        propertyName,
-        propertyValue,
-        modelName,
-      } as Parameters<typeof createMetadata>[0],
-      propertyRecordSchema,
-      { skipValidation: true, modelFileId },
-    )
-  }
+      // ItemStorage content lives in the property's file (`<seedLocalId><extension>`), as a save puts
+      // it; the row records where. Stored verbatim in the row, publish would never upload it.
+      const isItemStorageValue =
+        propertyRecordSchema?.storageType === 'ItemStorage' &&
+        propertyValue != null &&
+        propertyValue !== ''
+      const insertRow = (
+        storageFields?: { refResolvedValue: string; localStorageDir: string; refValueType: string },
+      ) =>
+        createMetadata(
+          {
+            seedLocalId: newSeedId,
+            versionLocalId: newVersionId,
+            propertyName,
+            propertyValue: storageFields ? undefined : propertyValue,
+            ...storageFields,
+            modelName,
+          } as Parameters<typeof createMetadata>[0],
+          propertyRecordSchema,
+          { skipValidation: true, modelFileId },
+        )
 
-  return {
-    modelName,
-    seedLocalId: newSeedId,
-    versionLocalId: newVersionId,
+      if (!isItemStorageValue) {
+        await insertRow()
+        continue
+      }
+
+      // File and row under the file's lock, like every writer of a local draft's file (see
+      // withItemStorageFileLock). The seed is new, so nothing else should be writing it yet.
+      const target = {
+        seedId: newSeedId,
+        localStorageDir: propertyRecordSchema.localStorageDir,
+        filenameSuffix: propertyRecordSchema.filenameSuffix,
+      }
+      await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
+        const written = await writeItemStorageFile(target, propertyValue as string | Blob | ArrayBuffer)
+        await insertRow({
+          refResolvedValue: written.fileName,
+          localStorageDir: written.localStorageDir,
+          refValueType: 'file',
+        })
+      })
+    }
+
+    return {
+      modelName,
+      seedLocalId: newSeedId,
+      versionLocalId: newVersionId,
+    }
   }
 } 

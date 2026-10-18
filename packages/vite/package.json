@@ -1,9 +1,19 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.0",
-  "description": "Vite plugin for Seed Protocol browser/renderer apps",
+  "version": "0.7.6",
+  "description": "Vite plugin for browser apps using @seedprotocol/sdk: cross-origin isolation headers, ES module workers, linked-install support, and opt-in Node polyfills",
+  "keywords": [
+    "seed-protocol",
+    "vite",
+    "vite-plugin",
+    "zenfs",
+    "opfs",
+    "sqlite-wasm",
+    "cross-origin-isolation"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -26,7 +36,7 @@
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
-    "debug": "^4.4.1",
+    "@rollup/pluginutils": "^5.1.0",
     "vite-plugin-node-polyfills": "^0.27.0"
   },
   "peerDependencies": {
@@ -41,6 +51,7 @@
     }
   },
   "devDependencies": {
+    "@seedprotocol/bundler-core": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-react": "^6.0.0",
@@ -49,10 +60,19 @@
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/vite"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/vite#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

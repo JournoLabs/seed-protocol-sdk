@@ -6,8 +6,8 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
 /**
- * createImageItemFromDataUri reads allProperties.storageTransactionId; this must exist
- * after Item.create({ modelName: 'Image' }) (same path as embedded HTML image materialization).
+ * Publish reads allProperties.storageTransactionId of the Image items it materializes from Html
+ * embedded images (createImageItemFromBytes); this must exist after Item.create({ modelName: 'Image' }).
  */
 testDescribe('Image allProperties storageTransactionId key', () => {
   beforeAll(async () => {

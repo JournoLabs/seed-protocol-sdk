@@ -6,6 +6,35 @@ export type PublishWalletSession = PublishWallet & {
   ownedAddresses?: string[]
   /** Preferred publisher address for new seeds (defaults to signer.address). */
   publisherAddress?: string
+  /**
+   * Admin (EOA) of the smart account this session publishes from, when there is one. Lets publish
+   * tell an undeployed smart account from an EOA, which both have no bytecode.
+   */
+  adminAddress?: string
+  /**
+   * Signs Arweave data items (bundler and Turbo uploads). They need a plain ECDSA key: a smart
+   * account's signatures (EIP-1271/6492) don't verify as data items, so a smart wallet sets its
+   * admin EOA here. Without it, publish uses `signer` only when the wallet is an EOA.
+   */
+  dataItemSigner?: import('./seedSigner').SeedSigner
+  /**
+   * Deploys the publisher's smart account (kind 'smart') when it has no code yet. Publish calls it
+   * before a first publish instead of refusing it; ConnectButton sets it for its smart wallet.
+   */
+  deploy?: () => Promise<void>
+}
+
+/**
+ * The data-item signer to default to for this wallet: its own `dataItemSigner`, else its signer
+ * when that is an EOA's (`kind: 'eoa'`, or a known EOA admin). Undefined for a smart account with
+ * no EOA signer, whose signatures data items can't use.
+ */
+export function defaultDataItemSigner(
+  wallet: (Partial<PublishWalletSession> & Pick<PublishWallet, 'signer'>) | null | undefined,
+): import('./seedSigner').SeedSigner | undefined {
+  if (!wallet) return undefined
+  if (wallet.dataItemSigner) return wallet.dataItemSigner
+  return wallet.kind === 'smart' ? undefined : wallet.signer
 }
 
 let session: PublishWalletSession | null = null
@@ -35,7 +64,9 @@ export async function setPublishWallet(
   owned.add(next.txSender.address.toLowerCase())
   if (next.publisherAddress) owned.add(next.publisherAddress.toLowerCase())
   try {
-    await seedClient.setAddresses({ owned: [...owned] })
+    // Watched addresses aren't the wallet's: keep them (setAddresses replaces both lists).
+    const { watched } = await seedClient.getAddresses()
+    await seedClient.setAddresses({ owned: [...owned], watched })
     const claimAs = next.publisherAddress ?? next.signer.address
     if (claimAs) {
       await seedClient.claimUnpublishedDrafts(claimAs)
@@ -49,8 +80,22 @@ export function getPublishWallet(): PublishWalletSession | null {
   return session
 }
 
-export function clearPublishWallet(): void {
+/**
+ * Forget the publish wallet and stop treating its addresses as owned in the Seed SDK (watched
+ * addresses are kept). New drafts are then signed-out drafts, editable until a wallet connects
+ * and claims them; drafts stamped with the old wallet are read-only until it reconnects.
+ */
+export async function clearPublishWallet(): Promise<void> {
   session = null
+  if (!seedClient.isInitialized()) return
+  try {
+    const { watched } = await seedClient.getAddresses()
+    // A wallet connected while we read: its addresses win.
+    if (session) return
+    await seedClient.setAddresses({ owned: [], watched })
+  } catch (err) {
+    console.warn('[publishWalletRegistry] Failed to clear seed client owned addresses:', err)
+  }
 }
 
 /** Convenience for callers that only need signing. */

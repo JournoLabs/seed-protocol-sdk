@@ -1,12 +1,25 @@
 import type { IItem } from '@/interfaces/IItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { eq, inArray, sql, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
 import { isPlaceholderUid } from '@/helpers/easUid'
+import { ZERO_BYTES32 } from '@/helpers/constants'
 import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
 
 const READ_ONLY_ERROR = 'Item is read-only: you do not own this item'
+
+/**
+ * Thrown by write operations (save, destroy, publish, unpublish) on an item none
+ * of the client's addresses own. See isItemOwned for what counts as owned.
+ */
+export class OwnershipError extends Error {
+  constructor(message = READ_ONLY_ERROR) {
+    super(message)
+    this.name = 'OwnershipError'
+    Object.setPrototypeOf(this, OwnershipError.prototype)
+  }
+}
 
 type ItemLike = { seedLocalId?: string; seedUid?: string }
 
@@ -80,23 +93,23 @@ export function publisherIsInOwnedSet(
 
 /**
  * Shared ownership predicate.
- * - Session has owned addresses: only a publisher in that set is owned (null is never owned).
- * - Session has no owned addresses: local unsealed drafts are owned so pre-connect authoring works.
+ * - A local unsealed draft (never given a publisher) is owned whatever the owned addresses are:
+ *   it belongs to no wallet yet, and the next wallet to connect claims it (claimUnpublishedDrafts).
+ * - Any other row is owned when its publisher (or attester) is in the owned addresses.
  */
 export function isSeedRowOwned(
   row: SeedOwnershipRow,
   ownedAddresses: readonly string[],
 ): boolean {
   const publisher = resolvePublisherFromSeedRow(row)
-  if (ownedAddresses.length === 0) {
-    return isLocalUnsealedDraft({ ...row, publisher: publisher ?? row.publisher })
-  }
+  if (isLocalUnsealedDraft({ ...row, publisher: publisher ?? row.publisher })) return true
   return publisherIsInOwnedSet(publisher, ownedAddresses)
 }
 
 /**
- * SQL for `addressFilter: 'owned' | 'watched'`. Empty list → no rows (`1=0`).
- * Compares `lower(publisher)` so checksummed rows match persisted lowercase owned.
+ * SQL for an address list on `publisher`. Empty list → no rows (`1=0`).
+ * Compares `lower(publisher)` so checksummed rows match persisted lowercase addresses.
+ * Used for `addressFilter: 'watched'`; `'owned'` uses {@link ownedSeedsSql}.
  */
 export function publisherInAddressListSql(
   column: typeof seeds.publisher,
@@ -109,20 +122,61 @@ export function publisherInAddressListSql(
   return inArray(sql<string>`lower(${column})`, normalized) as SQL
 }
 
-/** Owned-list SQL on `seeds.publisher`. */
+/**
+ * @deprecated Matches `seeds.publisher` only. Use {@link ownedSeedsSql}, which agrees
+ * with {@link isSeedRowOwned} (empty owned → local unsealed drafts; attester fallback).
+ */
 export function ownedPublisherSql(ownedAddresses: readonly string[]): SQL {
   return publisherInAddressListSql(seeds.publisher, ownedAddresses)
 }
 
+/** SQL form of {@link isPlaceholderUid}: null, `''`, `'NULL'`, or zero bytes32 (trimmed, any case). */
+export function placeholderUidSql(column: typeof seeds.uid): SQL {
+  return or(
+    isNull(column),
+    eq(column, 'NULL'),
+    sql`trim(${column}) = ''`,
+    sql`lower(trim(${column})) = ${ZERO_BYTES32.toLowerCase()}`,
+  ) as SQL
+}
+
+const isBlankSql = (column: typeof seeds.publisher | typeof seeds.attestationRaw): SQL =>
+  or(isNull(column), eq(column, '')) as SQL
+
+/** SQL form of {@link isLocalUnsealedDraft} on `seeds`. */
+export function localUnsealedDraftSql(): SQL {
+  return and(
+    isBlankSql(seeds.publisher),
+    placeholderUidSql(seeds.uid),
+    isBlankSql(seeds.attestationRaw),
+  ) as SQL
+}
+
 /**
- * Checks if the current user owns the item (publisher is in persisted owned addresses).
- *
- * When the session has owned addresses, only a matching publisher is owned —
- * `publisher IS NULL` is not treated as owned. Call `claimUnpublishedDrafts`
- * after connect to stamp local drafts.
- *
- * When owned is empty, local unsealed drafts (no publisher, no real uid, no
- * attestationRaw) are still owned so create/edit works before a wallet is connected.
+ * SQL for `addressFilter: 'owned'`: a row passes exactly when {@link isSeedRowOwned} is true.
+ * - Local unsealed drafts always pass.
+ * - Otherwise `lower(trim(publisher))` is in the owned set, or, when publisher is blank, the
+ *   `attestationRaw.attester` ({@link resolvePublisherFromSeedRow}). `json_valid` guards
+ *   `json_extract`, which throws on malformed JSON.
+ */
+export function ownedSeedsSql(ownedAddresses: readonly string[]): SQL {
+  const normalized = normalizeAddressList(ownedAddresses)
+  if (normalized.length === 0) {
+    return localUnsealedDraftSql()
+  }
+  const attester = sql`CASE WHEN json_valid(${seeds.attestationRaw}) THEN lower(trim(json_extract(${seeds.attestationRaw}, '$.attester'))) END`
+  return or(
+    localUnsealedDraftSql(),
+    inArray(sql<string>`lower(trim(${seeds.publisher}))`, normalized),
+    and(isBlankSql(seeds.publisher), inArray(attester, normalized)),
+  ) as SQL
+}
+
+/**
+ * Checks if the current user owns the item: its publisher is in the persisted owned addresses,
+ * or it's a local unsealed draft (no publisher, no real uid, no attestationRaw). Such a draft
+ * was made with no wallet connected and is editable until `claimUnpublishedDrafts`, which
+ * connecting a wallet calls, gives it that wallet as publisher.
  *
  * Does not include `getAdditionalSyncAddresses` (those are extra EAS indexers,
  * not wallets the user controls).
@@ -135,11 +189,12 @@ export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean>
 }
 
 /**
- * Throws if the item is not owned. Use before write operations (publish, save, destroy).
+ * Throws OwnershipError if the item is not owned. Use before write operations
+ * (publish, save, destroy).
  */
 export async function assertItemOwned(item: ItemLike | IItem<any>): Promise<void> {
   const owned = await isItemOwned(item)
   if (!owned) {
-    throw new Error(READ_ONLY_ERROR)
+    throw new OwnershipError()
   }
 }

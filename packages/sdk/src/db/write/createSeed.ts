@@ -4,6 +4,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
 import { normalizePublisher } from '@/helpers/addresses'
+import { getOwnedAddressesFromDb } from '@/helpers/db'
 
 type CreateSeedProps = {
   type: string
@@ -21,7 +22,14 @@ export const createSeed = async ({ type, seedUid, modelFileId }: CreateSeedProps
 
   const newSeedLocalId = generateId()
 
-  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  // When nothing supplies a publisher (no getter, as in Node scripts, or no wallet connected yet)
+  // and exactly one owned address is set, the draft is that address's. With several, which one would
+  // publish isn't known: the draft gets none, stays editable, and the next wallet to connect claims it.
+  let publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  if (!publisher) {
+    const owned = await getOwnedAddressesFromDb()
+    if (owned.length === 1) publisher = normalizePublisher(owned[0])
+  }
 
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,

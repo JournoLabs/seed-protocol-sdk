@@ -23,7 +23,9 @@ import {
   NewItemProps,
   PropertyData
 } from '@/types'
-import type { CreateWaitOptions } from '@/types'
+import type { CreateWaitOptions, ItemCreateOptions } from '@/types'
+import type { ItemPublishOptions } from '@/helpers/publishConfig'
+import { normalizePublisher } from '@/helpers/addresses'
 
 import { BehaviorSubject } from 'rxjs'
 import {
@@ -39,14 +41,15 @@ import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
-import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
+import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
 import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -108,9 +111,18 @@ const getModel = (): typeof import('@/Model/Model').Model => {
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
-/** Raw File/Image/Html content (not already a storage seed reference) needs ItemProperty.save(). */
-function needsStorageSavePipeline(dataType: string | undefined, value: unknown): boolean {
+/**
+ * Initial values that need ItemProperty.save() rather than a verbatim metadata row: raw File/Image/Html
+ * content (not already a storage seed reference) becomes a storage seed, and an ItemStorage property's
+ * content goes into its file (`<seedLocalId><extension>`), where publish and reads look for it.
+ */
+function needsStorageSavePipeline(
+  dataType: string | undefined,
+  value: unknown,
+  storageType?: string | null,
+): boolean {
   if (value == null || value === '') return false
+  if (storageType === 'ItemStorage') return true
   const isStorageType =
     isDataType(dataType, ModelPropertyDataTypes.File) ||
     isDataType(dataType, ModelPropertyDataTypes.Image) ||
@@ -144,6 +156,13 @@ const itemInstanceState = new WeakMap<Item<any>, {
  * which the instance and its reactive proxy share.
  */
 const supersededSeedUids = new WeakMap<object, Set<string>>()
+
+/**
+ * Each Item's reactive proxy, keyed by the raw instance. The class's arrow-function methods see the
+ * raw instance as `this`, where tracked properties such as `seedUid` are getter-only; anything they
+ * hand the item to that assigns tracked properties (the publish executor) must get the proxy.
+ */
+const reactiveProxies = new WeakMap<object, Item<any>>()
 
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
@@ -428,16 +447,50 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
-  private static releaseItemInstanceCacheHold(instance: Item<any>): void {
+  /** Drops one holder's reference. Returns true while other holders still have the instance. */
+  private static releaseItemInstanceCacheHold(instance: Item<any>): boolean {
     const keys = this.collectInstanceCacheKeysForInstance(instance)
-    if (keys.length === 0) return
+    if (keys.length === 0) return false
     const entry = this.instanceCache.get(keys[0])!
     entry.refCount -= 1
     if (entry.refCount <= 0) {
       for (const k of keys) {
         this.instanceCache.delete(k)
       }
+      return false
     }
+    return true
+  }
+
+  /**
+   * Idle, and not the shell the item machine can be in when it reaches `idle` before
+   * `propertyInstances` is merged (an item with a version but no property instances yet).
+   */
+  private static isItemSnapshotReadyForRead(snap: any): boolean {
+    if (!snap || !('value' in snap) || snap.value !== 'idle') {
+      return false
+    }
+    const ctx = snap.context || {}
+    const versionsCount = ctx.versionsCount ?? 0
+    const hasHeadVersion = !!ctx.latestVersionLocalId
+    if (versionsCount === 0 && !hasHeadVersion) {
+      return true
+    }
+    return (ctx.propertyInstances?.size ?? 0) > 0
+  }
+
+  /**
+   * The cached Item for a seedLocalId or seedUid when it can be read right now: idle and hydrated,
+   * so at least what `Item.find()` would wait for. Otherwise undefined. Unlike `getById`, it takes
+   * no cache hold, so React hooks can call it during render.
+   */
+  static peekReady(id: string | undefined): Item<any> | undefined {
+    if (!id) return undefined
+    const instance = this.findItemInstanceCacheEntryById(id)?.instance
+    if (!instance) return undefined
+    const snap = instance.getService().getSnapshot()
+    if ((snap as { status?: string }).status !== 'active') return undefined
+    return this.isItemSnapshotReadyForRead(snap) ? instance : undefined
   }
 
   /**
@@ -457,16 +510,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           if ('value' in snap && snap.value === 'error') {
             throw new Error('Entity failed to load')
           }
-          if (!('value' in snap) || snap.value !== 'idle') {
-            return false
-          }
-          const ctx = snap.context || {}
-          const versionsCount = ctx.versionsCount ?? 0
-          const hasHeadVersion = !!ctx.latestVersionLocalId
-          if (versionsCount === 0 && !hasHeadVersion) {
-            return true
-          }
-          return (ctx.propertyInstances?.size ?? 0) > 0
+          return Item.isItemSnapshotReadyForRead(snap)
         },
         { timeout: readyTimeout },
       )
@@ -519,10 +563,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
-    options?: CreateWaitOptions,
+    options?: ItemCreateOptions,
   ): Promise<Item<any>> {
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     if (!props.modelName && props.type) {
       props.modelName = startCase(props.type)
@@ -680,6 +724,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           },
         }) as Item<any>
 
+        reactiveProxies.set(newInstance, proxiedInstance)
         this.registerItemInInstanceCache(proxiedInstance)
         if (!waitForReady) return proxiedInstance
         try {
@@ -706,6 +751,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Get property names directly from database to make Item independent from Model
     let propertyNames: string[] = []
     const dataTypeByPropertyName = new Map<string, string>()
+    const storageTypeByPropertyName = new Map<string, string>()
     const db = BaseDb.getAppDb()
     if (db && props.modelName) {
       // Model names are only unique per schema: resolve the exact models row from the most specific scope.
@@ -715,6 +761,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         schemaName: schemaName ?? modelInstance?.schemaName,
       })
       const modelRecords = modelRecord ? [modelRecord] : []
+      if (!modelRecord) {
+        const { UnknownModelError } = await import('./errors')
+        throw new UnknownModelError(props.modelName, schemaName ?? modelInstance?.schemaName)
+      }
       if (modelRecord?.schemaFileId) {
         ;(props as any).modelFileId = modelRecord.schemaFileId
       }
@@ -736,13 +786,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await db
-          .select({ name: propertiesTable.name, dataType: propertiesTable.dataType })
+          .select({
+            name: propertiesTable.name,
+            dataType: propertiesTable.dataType,
+            storageType: propertiesTable.storageType,
+          })
           .from(propertiesTable)
           .where(eq(propertiesTable.modelId, modelRecords[0].id))
         
         propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
         for (const r of propertyRecords) {
           if (r.name && r.dataType) dataTypeByPropertyName.set(r.name, r.dataType)
+          if (r.name && r.storageType) storageTypeByPropertyName.set(r.name, r.storageType)
         }
       }
     }
@@ -752,7 +807,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId: (props as any).modelFileId,
     }
     // File/Image/Html values that are raw content (html string, data URI, URL, File) must go through
-    // the property's save pipeline to become storage seeds; createNewItem would store them verbatim.
+    // the property's save pipeline to become storage seeds, and ItemStorage values to be written to
+    // their file with the property context pointing at it (as `prop.value = v; await prop.save()`).
     const pipelineValues: Array<[string, unknown]> = []
     
     // Only include properties that are in the model schema
@@ -763,7 +819,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         continue
       }
       if (propertyNames.length === 0 || propertyNames.includes(key)) {
-        if (needsStorageSavePipeline(dataTypeByPropertyName.get(key), value)) {
+        if (
+          needsStorageSavePipeline(
+            dataTypeByPropertyName.get(key),
+            value,
+            storageTypeByPropertyName.get(key),
+          )
+        ) {
           pipelineValues.push([key, value])
           continue
         }
@@ -771,6 +833,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // Type assertion: we've filtered out modelInstance above, so value should be a valid property value
         modelPropertyData[key] = value as any
       }
+    }
+    // Strict by default: unknown keys and invalid values reject before anything is written.
+    // Values that go through the property save pipeline (files, Html, ItemStorage) are
+    // validated there.
+    if (propertyNames.length > 0 && options?.validate !== false) {
+      await Item.assertValidCreateValues(props, propertyNames, dataTypeByPropertyName, new Set(pipelineValues.map(([key]) => key)))
     }
     const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
     props.seedLocalId = seedLocalId
@@ -891,26 +959,40 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       },
     }) as Item<any>
     
+    reactiveProxies.set(newInstance, proxiedInstance)
     this.registerItemInInstanceCache(proxiedInstance)
     // Storage values must be saved before returning, so wait for readiness even when not requested.
     if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
     try {
       await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
+      await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     } catch (err) {
-      try {
-        proxiedInstance.unload()
-      } catch {
-        /* best-effort cache cleanup */
-      }
+      // A rejected create leaves nothing behind, so a retry doesn't make a second draft.
+      await this.discardCreatedItem(proxiedInstance, seedLocalId)
       throw err
     }
-    await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     return proxiedInstance
   }
 
+  /** Stops a just-created item and deletes what create wrote (see discardNewDraft). */
+  private static async discardCreatedItem(item: Item<any>, seedLocalId: string): Promise<void> {
+    try {
+      this.dropCachedInstancesForSeedIds([seedLocalId])
+    } catch {
+      /* best-effort cache cleanup */
+    }
+    try {
+      const { discardNewDraft } = await import('@/db/write/discardNewDraft')
+      await discardNewDraft(seedLocalId)
+    } catch (error) {
+      itemLogger(`Item.create: could not remove the draft ${seedLocalId} after a failure:`, error)
+    }
+  }
+
   /**
-   * Run each File/Image/Html initial value through its ItemProperty save pipeline (sequentially, to
-   * avoid SQLite write contention). Rejects on the first failure; the item itself has been created.
+   * Run each File/Image/Html/ItemStorage initial value through its ItemProperty save pipeline (sequentially, to
+   * avoid SQLite write contention). Rejects on the first failure, with ItemCreateValidationError when the
+   * value breaks its property's rules; Item.create then removes the item.
    */
   private static async savePipelineValues(
     item: Item<any>,
@@ -928,6 +1010,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       try {
         await property.save()
       } catch (error) {
+        if (error instanceof ItemPropertySaveValidationError) {
+          const { ItemCreateValidationError } = await import('./errors')
+          const created = new ItemCreateValidationError(
+            item.modelName,
+            error.validationErrors.map((e) => ({ property: propertyName, code: e.code, message: e.message })),
+          )
+          ;(created as Error & { cause?: unknown }).cause = error
+          throw created
+        }
         throw new Error(
           `Item.create: failed to save ${item.modelName}.${propertyName} for item ${item.seedLocalId}: ` +
             (error instanceof Error ? error.message : String(error)),
@@ -1064,7 +1155,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     seedLocalId,
     seedUid,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: ItemFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1115,7 +1206,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   ): Promise<Item<any>[]> {
     const {
       waitForReady = false,
-      readyTimeout = 5000,
+      readyTimeout = DEFAULT_READY_TIMEOUT_MS,
       includeEas = false,
       addressFilter,
       modelFileId,
@@ -1334,8 +1425,99 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     state.definedPropertyNames.add(propertyName)
   }
 
-  static async publish(item: IItem<any>): Promise<void> {
-    await item.publish()
+  /** Same as `item.publish(options)`; requires @seedprotocol/publish. */
+  /** Keys Item.create accepts besides the model's properties. */
+  private static readonly CREATE_METADATA_KEYS = new Set([
+    'modelName', 'schemaName', 'modelInstance', 'modelFileId', 'type',
+    'seedLocalId', 'seedUid', 'schemaUid', 'attestationCreatedAt',
+    'latestVersionUid', 'latestVersionLocalId', 'publishedVersionUid', 'publishedVersionLocalId',
+    'versionsCount', 'lastVersionPublishedAt', 'lastLocalUpdateAt',
+    'createdAt', 'updatedAt', 'publisher', 'revokedAt',
+  ])
+
+  /** Throws ItemCreateValidationError for unknown keys and values that break their property's rules. */
+  private static async assertValidCreateValues(
+    props: Record<string, unknown>,
+    propertyNames: string[],
+    dataTypeByPropertyName: Map<string, string>,
+    skipKeys: Set<string>,
+  ): Promise<void> {
+    const { ItemCreateValidationError } = await import('./errors')
+    const { getPropertySchema } = await import('../helpers/property')
+    const { SchemaValidationService } = await import('../Schema/service/validation/SchemaValidationService')
+    const validationService = new SchemaValidationService()
+    const modelName = props.modelName as string
+    const known = new Set(propertyNames)
+    const problems: import('./errors').ItemCreateProblem[] = []
+
+    for (const [key, value] of Object.entries(props)) {
+      if (Item.CREATE_METADATA_KEYS.has(key) || skipKeys.has(key)) continue
+      if (!known.has(key)) {
+        problems.push({
+          property: key,
+          code: 'unknown_property',
+          message: `${modelName} has no property "${key}"`,
+        })
+        continue
+      }
+      if (value === undefined || value === null) continue
+      const propertySchema = await getPropertySchema(modelName, key, {
+        modelFileId: props.modelFileId as string | undefined,
+        schemaName: props.schemaName as string | undefined,
+      })
+      const dataType = normalizeDataType(propertySchema?.dataType ?? dataTypeByPropertyName.get(key) ?? '')
+      if (!dataType) continue
+      // Lists may be passed as the JSON array string they are stored as.
+      let checked: unknown = value
+      if (dataType === ModelPropertyDataTypes.List && typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value)
+          if (Array.isArray(parsed)) checked = parsed
+        } catch {
+          // Not JSON: validated as given, and rejected as a non-array
+        }
+      }
+      const { resolvePropertyValidationRules } = await import('../helpers/propertyValidationRules')
+      const rules =
+        propertySchema?.validation ??
+        (await resolvePropertyValidationRules(modelName, key, {
+          modelFileId: props.modelFileId as string | undefined,
+          schemaName: props.schemaName as string | undefined,
+        }))
+      const result = validationService.validatePropertyValue(
+        checked,
+        dataType as ModelPropertyDataTypes,
+        rules,
+        propertySchema?.refValueType,
+      )
+      for (const error of result.errors) {
+        problems.push({ property: key, code: error.code, message: error.message })
+      }
+    }
+
+    if (problems.length > 0) {
+      throw new ItemCreateValidationError(modelName, problems)
+    }
+  }
+
+  /**
+   * Set `publisher` on loaded Items for these seeds (after claimUnpublishedDrafts stamped
+   * their rows). Items that aren't loaded read it from the DB when they load.
+   */
+  static setPublisherForCachedSeeds(seedLocalIds: readonly string[], publisher: string): void {
+    const normalized = normalizePublisher(publisher)
+    if (!normalized) return
+    for (const seedLocalId of seedLocalIds) {
+      const item = Item.getById(seedLocalId)
+      if (!item) continue
+      const status = item.getService().getSnapshot().status
+      if (status === 'stopped' || status === 'done') continue
+      item.getService().send({ type: 'updateContext', publisher: normalized })
+    }
+  }
+
+  static async publish(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
+    await item.publish(options)
   }
 
   subscribe = (callback: (itemProps: any) => void): Subscription => {
@@ -1381,7 +1563,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const revokedAt = Math.floor(Date.now() / 1000)
     // The executor stamps the revoked version rows; the latest version is now the newest one left
     // (a local draft) or none, never a revoked one.
-    const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
     const head = await getLatestVersionRow(this.seedLocalId)
     this._service.send({
       type: 'updateContext',
@@ -1391,28 +1572,43 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     })
   }
 
-  publish = async (): Promise<void> => {
+  /**
+   * Upload this item's files to Arweave and write its attestations to EAS.
+   *
+   * Requires @seedprotocol/publish. Its `initPublish()` (or `<PublishProvider config>`)
+   * registers the PublishExecutor this delegates to; without it, publish() throws
+   * PUBLISH_NOT_CONFIGURED_MESSAGE. `options` are passed to that package unchanged (its
+   * CreatePublishOptions: signers, Arweave tags, `publishMode`, `onPublished`, ...).
+   *
+   * Resolves when the publish has finished, and rejects with the publish package's error
+   * if it failed. Throws OwnershipError if none of the client's addresses own the item.
+   */
+  publish = async (options?: ItemPublishOptions): Promise<void> => {
     const { assertItemOwned } = await import('@/helpers/ownership')
+    const { getPublishExecutor, PUBLISH_NOT_CONFIGURED_MESSAGE } = await import('@/helpers/publishConfig')
     await assertItemOwned(this)
-    this._service.send({ type: 'startPublish' })
+    if (!getPublishExecutor()) {
+      throw new Error(PUBLISH_NOT_CONFIGURED_MESSAGE)
+    }
+    const current = this._service.getSnapshot().value as string
+    if (current !== 'idle') {
+      throw new Error(
+        current === 'publishing'
+          ? 'Item is already being published.'
+          : `Item is not ready to publish (state: ${current}).`,
+      )
+    }
     return new Promise<void>((resolve, reject) => {
+      // Subscribe before sending: subscribe() does not replay the current snapshot,
+      // so a subscription made after startPublish could miss the 'publishing' state.
       let wasPublishing = false
-      const timeoutMs = 300000 // 5 minutes, match previous handler timeout
-      const timeoutId = setTimeout(() => {
-        unsub.unsubscribe()
-        if (!wasPublishing) {
-          reject(new Error('Publish did not start (timeout)'))
-        } else {
-          reject(new Error('Publish timed out'))
-        }
-      }, timeoutMs)
       const unsub = this._service.subscribe((snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
         const value = snapshot.value as string
         if (value === 'publishing') {
           wasPublishing = true
+          return
         }
         if (value === 'idle' && wasPublishing) {
-          clearTimeout(timeoutId)
           unsub.unsubscribe()
           const ctx = snapshot.context as { _publishError?: { message: string } | null }
           if (ctx._publishError) {
@@ -1422,6 +1618,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
         }
       })
+      // The executor assigns item.seedUid, which only the proxy accepts.
+      const item = reactiveProxies.get(this) ?? this
+      this._service.send({ type: 'startPublish', item, options })
     })
   }
 
@@ -1456,8 +1655,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       })
       // Publish has recorded the version it attested (updateVersionUid): reflect it here too, as
       // the versions liveQuery does in the browser. After a republish this is the new version.
-      const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
-      const head = await getLatestVersionRow(seedLocalId)
+        const head = await getLatestVersionRow(seedLocalId)
       if (head?.localId) {
         this._service.send({
           type: 'updateContext',
@@ -1914,9 +2112,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             uid: string | null
             schemaUid: string | null
             revokedAt: number | null
+            publisher: string | null
           }>(
             (sql: any) => sql`
-              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt
+              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher
               FROM seeds
               WHERE local_id = ${watchedSeedLocalId}
             `
@@ -1977,6 +2176,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 seedLocalId: seedRow.localId,
                 schemaUid: seedRow.schemaUid || undefined,
                 revokedAt: seedRow.revokedAt ?? undefined,
+                // claimUnpublishedDrafts (here or in another tab) stamps drafts' publisher.
+                ...(seedRow.publisher ? { publisher: seedRow.publisher } : {}),
               })
             },
             error: (error) => {
@@ -2136,9 +2337,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
+  /**
+   * Releases this holder's reference. Item.create, Item.find and createById return the same cached
+   * instance to every caller, so the instance is stopped only when the last holder unloads it.
+   */
   unload(): void {
     try {
-      Item.releaseItemInstanceCacheHold(this)
+      // Others (e.g. another hook showing the same item) still use it: keep it running.
+      if (Item.releaseItemInstanceCacheHold(this)) return
       unloadEntity(this, {
         getCacheKeys: () => [],
         caches: [],

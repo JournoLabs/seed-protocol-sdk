@@ -7,6 +7,7 @@ const mockGetSeedsBySchemaName = vi.fn()
 const mockGetItemVersionsFromEas = vi.fn()
 const mockGetItemPropertiesFromEas = vi.fn()
 const mockRequest = vi.fn()
+const mockGetAttestationChangesSince = vi.fn()
 
 vi.mock('@seedprotocol/eas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@seedprotocol/eas')>()
@@ -15,6 +16,10 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     getSeedsBySchemaName: (...args: unknown[]) => mockGetSeedsBySchemaName(...args),
     getItemVersionsFromEas: (...args: unknown[]) => mockGetItemVersionsFromEas(...args),
     getItemPropertiesFromEas: (...args: unknown[]) => mockGetItemPropertiesFromEas(...args),
+    // Seeds by uid answer from the same mocked request as before (fixtures carry their schema names).
+    getAttestationChangesSince: (...args: unknown[]) => mockGetAttestationChangesSince(...args),
+    getSeedsByUidsFromEas: async (...args: unknown[]) =>
+      ((await mockRequest(...args)) as { itemSeeds?: unknown[] } | undefined)?.itemSeeds ?? [],
     EasClient: {
       getEasClient: () => ({ request: mockRequest }),
     },
@@ -80,6 +85,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockRequest.mockResolvedValue({ itemSeeds: [] })
+    mockGetAttestationChangesSince.mockResolvedValue([])
     resetQueryCacheManager()
     process.env.CACHE_ENABLED = 'false'
   })
@@ -302,6 +308,7 @@ describe('queryBySchema / getSeed caching', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockRequest.mockResolvedValue({ itemSeeds: [] })
+    mockGetAttestationChangesSince.mockResolvedValue([])
     cacheDir = mkdtempSync(join(tmpdir(), 'query-api-cache-'))
     resetQueryCacheManager()
     process.env.CACHE_ENABLED = 'true'
@@ -317,69 +324,100 @@ describe('queryBySchema / getSeed caching', () => {
     rmSync(cacheDir, { recursive: true, force: true })
   })
 
+  const uncachedOpts = { limit: 10, skip: 0, expandRelations: false, hydrateStorage: false }
+  const optionsKey = buildAssembleOptionsKey(uncachedOpts)
+
   it('caches collection on skip=0 and returns etag', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'Cached', 100)
-    const first = await queryBySchema('post', {
-      limit: 10,
-      skip: 0,
-      expandRelations: false,
-      hydrateStorage: false,
-    })
+    const first = await queryBySchema('post', uncachedOpts)
     expect(first.etag).toMatch(/^"[a-f0-9]{16}"$/)
     expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
 
-    mockAssembledPost('0xseed1', '0xver1', 'Cached', 100)
-    const second = await queryBySchema('post', {
-      limit: 10,
-      skip: 0,
-      expandRelations: false,
-      hydrateStorage: false,
-    })
+    const second = await queryBySchema('post', uncachedOpts)
     expect(second.items[0]!.data.title).toBe('Cached')
     expect(second.etag).toBe(first.etag)
+    // The seed list is fetched every time; unchanged seeds are not assembled again.
     expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+    expect(mockGetAttestationChangesSince).toHaveBeenCalledTimes(1)
+    expect(mockGetAttestationChangesSince.mock.calls[0]![0]).toMatchObject({
+      refUIDs: expect.arrayContaining(['0xseed1', '0xver1']),
+      ids: ['0xseed1'],
+    })
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
+  })
+
+  it('a patch edit on the same version reaches the cached collection and item', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'Before', 100)
+    const first = await queryBySchema('post', uncachedOpts)
+
+    // New property attestation on the existing version (default 'patch' publish).
+    mockAssembledPost('0xseed1', '0xver1', 'After', 100)
+    mockGetAttestationChangesSince.mockResolvedValue([
+      { id: '0xprop2', refUID: '0xver1', timeCreated: 9_999_999_999, revocationTime: 0 },
+    ])
+    const second = await queryBySchema('post', uncachedOpts)
+    expect(second.items[0]!.data.title).toBe('After')
+    expect(second.etag).not.toBe(first.etag)
+    expect(
+      (await getQueryCacheManager().getItem('0xseed1', optionsKey))?.record.data.title,
+    ).toBe('After')
+  })
+
+  it('assembles only seeds new to the list, and drops seeds no longer listed', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+    await queryBySchema('post', uncachedOpts)
+
+    mockAssembledPost('0xseed2', '0xver2', 'Two', 200)
+    const second = await queryBySchema('post', uncachedOpts)
+    expect(second.items.map((r) => r.seedUid)).toEqual(['0xseed2'])
+    expect(mockGetItemVersionsFromEas).toHaveBeenLastCalledWith(
+      expect.objectContaining({ seedUids: ['0xseed2'] }),
+    )
+  })
+
+  it('a failed change check fails the read instead of serving unchecked data', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+    await queryBySchema('post', uncachedOpts)
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
+
+    mockGetAttestationChangesSince.mockRejectedValueOnce(new Error('indexer down'))
+    await expect(queryBySchema('post', uncachedOpts)).rejects.toThrow('indexer down')
+  })
+
+  it('keeps collections for different assemble options apart', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+    await queryBySchema('post', uncachedOpts)
+    await queryBySchema('post', { ...uncachedOpts, expandRelations: true })
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(2)
+    expect(
+      await getQueryCacheManager().getCollection(
+        'post',
+        buildAssembleOptionsKey({ expandRelations: true, hydrateStorage: false }),
+      ),
+    ).not.toBeNull()
   })
 
   it('cache:false bypasses collection cache', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'A', 100)
-    await queryBySchema('post', {
-      limit: 10,
-      skip: 0,
-      expandRelations: false,
-      hydrateStorage: false,
-      cache: false,
-    })
-    expect(await getQueryCacheManager().getCollection('post')).toBeNull()
+    await queryBySchema('post', { ...uncachedOpts, cache: false })
+    expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
   })
 
   it('skip > 0 bypasses collection cache', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'Page2', 100)
-    const result = await queryBySchema('post', {
-      limit: 10,
-      skip: 10,
-      expandRelations: false,
-      hydrateStorage: false,
-    })
+    const result = await queryBySchema('post', { ...uncachedOpts, skip: 10 })
     expect(result.etag).toBeUndefined()
-    expect(await getQueryCacheManager().getCollection('post')).toBeNull()
-    const optionsKey = buildAssembleOptionsKey({
-      expandRelations: false,
-      hydrateStorage: false,
-    })
+    expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
     expect(
       (await getQueryCacheManager().getItem('0xseed1', optionsKey))?.record.data
         .title,
     ).toBe('Page2')
   })
 
-  it('getSeed hits item cache after collection populate', async () => {
+  it('getSeed hits item cache after collection populate, after checking for changes', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'FromCollection', 100)
-    await queryBySchema('post', {
-      limit: 10,
-      skip: 0,
-      expandRelations: false,
-      hydrateStorage: false,
-    })
+    await queryBySchema('post', uncachedOpts)
 
     mockRequest.mockClear()
     const hit = await getSeed('0xseed1', {
@@ -388,6 +426,136 @@ describe('queryBySchema / getSeed caching', () => {
     })
     expect(hit?.data.title).toBe('FromCollection')
     expect(mockRequest).not.toHaveBeenCalled()
+    expect(mockGetAttestationChangesSince).toHaveBeenCalledTimes(1)
+  })
+
+  it('getSeed re-assembles a cached seed that changed', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'Before', 100)
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        {
+          id: '0xseed1',
+          decodedDataJson: '',
+          refUID: '0x0',
+          schemaId: '0xschema',
+          timeCreated: 100,
+          schema: { schemaNames: [{ name: 'post' }] },
+        },
+      ],
+    })
+    const opts = { expandRelations: false, hydrateStorage: false }
+    expect((await getSeed('0xseed1', opts))?.data.title).toBe('Before')
+
+    mockAssembledPost('0xseed1', '0xver2', 'New version', 100)
+    mockGetAttestationChangesSince.mockResolvedValue([
+      { id: '0xver2', refUID: '0xseed1', timeCreated: 9_999_999_999, revocationTime: 0 },
+    ])
+    const after = await getSeed('0xseed1', opts)
+    expect(after?.data.title).toBe('New version')
+    expect(after?.versionUid).toBe('0xver2')
+  })
+
+  it('getSeed returns null and drops the cached item when the seed was revoked', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'Live', 100)
+    await queryBySchema('post', uncachedOpts)
+
+    mockGetAttestationChangesSince.mockResolvedValue([
+      { id: '0xseed1', refUID: '0x0', timeCreated: 100, revocationTime: 9_999_999_999 },
+    ])
+    mockRequest.mockResolvedValue({ itemSeeds: [] })
+    expect(await getSeed('0xseed1', { expandRelations: false, hydrateStorage: false })).toBeNull()
+    expect(await getQueryCacheManager().getItem('0xseed1', optionsKey)).toBeNull()
+  })
+
+  describe('cached records are frozen', () => {
+    const seedRow = {
+      id: '0xseed1',
+      decodedDataJson: '',
+      refUID: '0x0',
+      schemaId: '0xschema',
+      timeCreated: 100,
+      schema: { schemaNames: [{ name: 'post' }] },
+    }
+    const writeTitle = (record: { data: object }) => () => {
+      ;(record.data as Record<string, unknown>).title = 'mutated'
+    }
+
+    it('queryBySchema results throw on mutation, fresh or cached, and the cache keeps its content', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      const first = await queryBySchema('post', uncachedOpts)
+      expect(writeTitle(first.items[0]!)).toThrow(TypeError)
+
+      const second = await queryBySchema('post', uncachedOpts)
+      expect(writeTitle(second.items[0]!)).toThrow(TypeError)
+      expect(second.items[0]!.data.title).toBe('Original')
+      expect(second.etag).toBe(first.etag)
+      // The items array is the caller's own.
+      second.items.pop()
+      expect((await queryBySchema('post', uncachedOpts)).items).toHaveLength(1)
+    })
+
+    it('getSeed results throw on mutation, fresh or cached', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
+      const opts = { expandRelations: false, hydrateStorage: false }
+
+      const fresh = await getSeed('0xseed1', opts)
+      expect(writeTitle(fresh!)).toThrow(TypeError)
+
+      mockRequest.mockClear()
+      const hit = await getSeed('0xseed1', opts)
+      expect(mockRequest).not.toHaveBeenCalled()
+      expect(writeTitle(hit!)).toThrow(TypeError)
+      expect(hit!.data.title).toBe('Original')
+    })
+
+    it('a cached changelog is frozen too', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
+      const result = await getSeed('0xseed1', {
+        include: 'data+changelog',
+        expandRelations: false,
+        hydrateStorage: false,
+      })
+      expect(() => (result!.changelog as unknown[]).push({})).toThrow(TypeError)
+    })
+  })
+
+  describe('uidPrefix', () => {
+    const SEED = '0xfd8c50ca' + '0'.repeat(56)
+
+    it('lists by normalized prefix, skips the collection cache, writes items through', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Found', 100)
+      const result = await queryBySchema('post', { ...uncachedOpts, uidPrefix: 'FD8C50CA', limit: 16 })
+
+      expect(result.items.map((r) => r.data.title)).toEqual(['Found'])
+      expect(result.etag).toBeUndefined()
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 16, 0, { uidPrefix: '0xfd8c50ca' })
+      expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
+      expect((await getQueryCacheManager().getItem(SEED, optionsKey))?.record.data.title).toBe('Found')
+    })
+
+    it('does not touch an existing collection', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Listed', 100)
+      const listed = await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', { ...uncachedOpts, uidPrefix: '0xfd8c' })
+      expect((await getQueryCacheManager().getCollection('post', optionsKey))?.etag).toBe(listed.etag)
+    })
+
+    it('returns no items, without a request, for an invalid prefix', async () => {
+      for (const uidPrefix of ['', '0x', 'fd8', 'xyz12345', '0x' + 'a'.repeat(65)]) {
+        expect((await queryBySchema('post', { ...uncachedOpts, uidPrefix })).items).toEqual([])
+      }
+      expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+    })
+
+    it('drops a matching seed whose versions were all revoked', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Gone', 100)
+      mockGetItemVersionsFromEas.mockResolvedValue([
+        { id: '0xver1', decodedDataJson: '', refUID: SEED, schemaId: '0xversion', timeCreated: 110, revoked: true },
+      ])
+      expect((await queryBySchema('post', { ...uncachedOpts, uidPrefix: '0xfd8c50ca' })).items).toEqual([])
+    })
   })
 
   it('data+changelog does not share cache with data-only', async () => {

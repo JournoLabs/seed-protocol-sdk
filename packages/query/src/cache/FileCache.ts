@@ -42,8 +42,13 @@ export class FileCache {
     }
   }
 
-  private collectionPath(schemaName: string): string {
-    return join(this.cacheDir, `${schemaName}.json`)
+  private collectionsDir(): string {
+    return join(this.cacheDir, 'collections')
+  }
+
+  /** Under `collections/`, so feed's own `{schema}-{format}.json` cleanup never matches it. */
+  private collectionPath(schemaName: string, optionsKey: string): string {
+    return join(this.collectionsDir(), `${sanitizeSeedUidForPath(schemaName)}.${optionsKey}.json`)
   }
 
   private itemPath(seedUid: string, optionsKey: string): string {
@@ -51,13 +56,17 @@ export class FileCache {
     return join(this.cacheDir, 'items', `${safe}-${optionsKey}.json`)
   }
 
-  async getCollection(schemaName: string): Promise<CachedCollectionData | null> {
+  async getCollection(
+    schemaName: string,
+    optionsKey: string,
+  ): Promise<CachedCollectionData | null> {
+    const path = this.collectionPath(schemaName, optionsKey)
     try {
-      const data = await fs.readFile(this.collectionPath(schemaName), 'utf-8')
+      const data = await fs.readFile(path, 'utf-8')
       const cached: CachedCollectionData = JSON.parse(data)
       const now = Math.floor(Date.now() / 1000)
       if (now - cached.lastUpdated > this.config.ttl) {
-        await this.clearCollection(schemaName)
+        await fs.unlink(path).catch(() => {})
         return null
       }
       return cached
@@ -75,12 +84,13 @@ export class FileCache {
 
   async setCollection(
     schemaName: string,
+    optionsKey: string,
     data: CachedCollectionData,
   ): Promise<void> {
     try {
-      await this.ensureCacheDir()
+      await fs.mkdir(this.collectionsDir(), { recursive: true })
       await fs.writeFile(
-        this.collectionPath(schemaName),
+        this.collectionPath(schemaName, optionsKey),
         JSON.stringify(data, null, 2),
         'utf-8',
       )
@@ -134,8 +144,14 @@ export class FileCache {
   }
 
   async clearCollection(schemaName: string): Promise<void> {
+    const prefix = `${sanitizeSeedUidForPath(schemaName)}.`
     try {
-      await fs.unlink(this.collectionPath(schemaName))
+      const files = await fs.readdir(this.collectionsDir())
+      for (const file of files) {
+        if (file.startsWith(prefix) && file.endsWith('.json')) {
+          await fs.unlink(join(this.collectionsDir(), file))
+        }
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.error(
@@ -167,16 +183,17 @@ export class FileCache {
           await fs.unlink(join(this.cacheDir, file))
         }
       }
-      const itemsDir = join(this.cacheDir, 'items')
-      try {
-        const itemFiles = await fs.readdir(itemsDir)
-        for (const file of itemFiles) {
-          if (file.endsWith('.json')) {
-            await fs.unlink(join(itemsDir, file))
+      for (const dir of [join(this.cacheDir, 'items'), this.collectionsDir()]) {
+        try {
+          const dirFiles = await fs.readdir(dir)
+          for (const file of dirFiles) {
+            if (file.endsWith('.json')) {
+              await fs.unlink(join(dir, file))
+            }
           }
+        } catch {
+          // dir may not exist
         }
-      } catch {
-        // items dir may not exist
       }
     } catch (error) {
       console.error('Error clearing all query caches:', error)

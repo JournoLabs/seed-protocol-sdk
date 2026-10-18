@@ -160,8 +160,11 @@ export async function validateAllFromCallbackActors(
 ): Promise<ValidationResult[]> {
   const results: ValidationResult[] = []
   
+  // Match whole path segments below `directory`, so a checkout path such as
+  // `.../sdk-untrack-dist/...` doesn't exclude every file.
   function shouldExclude(filePath: string): boolean {
-    return excludePatterns.some(pattern => filePath.includes(pattern))
+    const segments = path.relative(directory, filePath).split(path.sep)
+    return excludePatterns.some(pattern => segments.includes(pattern))
   }
 
   async function walkDir(dir: string): Promise<void> {

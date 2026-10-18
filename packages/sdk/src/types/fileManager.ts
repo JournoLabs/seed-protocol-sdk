@@ -1,18 +1,7 @@
-type DownloadAllFilesParams = {
-  transactionIds: string[], 
-  arweaveHost: string,
-  /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
-  arweaveBaseUrls?: string[],
-  excludedTransactions: Set<string>
-}
-
-type DownloadSingleFileParams = {
-  transactionId: string,
-  arweaveHost: string,
-  /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
-  arweaveBaseUrls?: string[],
-  excludedTransactions: Set<string>
-}
+// Defined in helpers/FileManager/IFileManager.ts; global aliases for code that uses them unimported.
+type DownloadAllFilesParams = import('../helpers/FileManager/IFileManager').DownloadAllFilesParams
+type DownloadAllFilesResult = import('../helpers/FileManager/IFileManager').DownloadAllFilesResult
+type DownloadSingleFileParams = import('../helpers/FileManager/IFileManager').DownloadSingleFileParams
 
 type ResizeAllImagesParams = {
   width: number,

@@ -1,7 +1,22 @@
 import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { camelCase } from 'lodash-es'
-import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
+import {
+  Attestation,
+  SchemaWhereInput,
+  easName,
+  isNameMatchLevel,
+  matchEasName,
+  partitionByRefAttester,
+} from '@seedprotocol/eas'
+import { loadNameMatchLevels, nameMatchLevels } from '@/db/read/nameMatchLevels'
+import { normalizeDataType } from '@/helpers/property'
+import { easTypeFitsProperty, syncedPropertyValue } from '@/helpers/easValueTypes'
+import {
+  easPropertyNameForPublish,
+  listRelationEasPropertyName,
+  toMetadataPropertyName,
+} from '@/helpers/metadataPropertyNames'
 import {
   parseEasPropertyMetadata,
   parseEasRelationPropertyName,
@@ -118,19 +133,145 @@ const isRelationPropertyName = (propertyNameSnake: string): boolean =>
   propertyNameSnake !== 'storage_transaction_id' &&
   propertyNameSnake !== 'storage_provider_transaction_id'
 
+type SyncedPropertyName = {
+  /** metadata.property_name for the row. */
+  propertyName: string
+  isRelation: boolean
+  isList: boolean
+  /** A list relation's ref model, until the related seeds say otherwise. */
+  refSeedType?: string
+  /** The matched local property's data type; undefined when no local property matched. */
+  dataType?: string
+}
+
+const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
+
+/**
+ * The local property an EAS property name stands for (ADR 0008): matched against the model's
+ * properties by the names publish writes for them (exact, then normalized, then fuzzy), not by
+ * reversing the EAS name. The row is stored under the name sync has always used for that property:
+ * a list relation's schema key, a single relation's `<key>Id`, anything else its key. A relation is
+ * whatever the local property is, whatever its EAS name ends in.
+ *
+ * With no model, or no matching property, the EAS name decides as before (`_id`/`_ids` are
+ * relations), so related seeds are still followed for discovery. Undefined: the name matches
+ * several local properties equally well, and the attestation is skipped.
+ */
+const resolveSyncedPropertyName = (
+  easPropertyName: string,
+  value: unknown,
+  modelSchema: Record<string, any> | undefined,
+  easType?: string,
+): SyncedPropertyName | undefined => {
+  const internal = easPropertyName === 'storage_transaction_id' || easPropertyName === 'storage_provider_transaction_id'
+  if (modelSchema && !internal) {
+    const candidates = Object.entries(modelSchema).map(([key, def]) => {
+      const dataType = normalizeDataType(def?.dataType)
+      const refValueType = normalizeDataType(def?.refValueType)
+      const isListRelation = !!listRelationEasPropertyName(key, def)
+      const isSingleRef = !isListRelation && (RELATION_DATA_TYPES.has(dataType) || RELATION_DATA_TYPES.has(refValueType))
+      return {
+        value: { key, def, isListRelation, isSingleRef },
+        name: easPropertyNameForPublish(key, { ...def, name: key }),
+        relation: isListRelation || isSingleRef,
+        // ADR 0009: set by modelSchemaForSyncedProperty from the schema file.
+        level: isNameMatchLevel(def?.nameMatch) ? def.nameMatch : undefined,
+      }
+    })
+    const match = matchEasName(easPropertyName, candidates)
+    if (match.kind === 'ambiguous') {
+      console.warn(
+        `[item/events] [syncDbWithEas] EAS property "${easPropertyName}" matches several local properties (${match.values
+          .map((v) => v.key)
+          .join(', ')}); skipping it`,
+      )
+      return undefined
+    }
+    if (match.kind === 'match') {
+      const { key, def, isListRelation, isSingleRef } = match.value
+      // ADR 0008/0010: property types must agree. A mismatch is this property's, refused.
+      if (!easTypeFitsProperty(def?.dataType, easType, value)) {
+        console.warn(
+          `[item/events] [syncDbWithEas] EAS property "${easPropertyName}" is ${easType}, which doesn't fit local property "${key}" (${def?.dataType}); skipping it`,
+        )
+        return undefined
+      }
+      if (isListRelation) {
+        return { propertyName: key, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined }
+      }
+      if (isSingleRef) {
+        return {
+          propertyName: toMetadataPropertyName(key, def?.dataType, def?.refValueType),
+          isRelation: true,
+          isList: false,
+        }
+      }
+      return { propertyName: key, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType) }
+    }
+    // A name one of the model's properties would match at a looser level than its nameMatch
+    // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
+    if (matchEasName(easPropertyName, candidates.map((c) => ({ ...c, level: 'fuzzy' as const }))).kind !== 'none') {
+      return undefined
+    }
+  }
+
+  if (!isRelationPropertyName(easPropertyName)) {
+    return { propertyName: camelCase(easPropertyName), isRelation: false, isList: false }
+  }
+  if (Array.isArray(value)) {
+    const parsed = parseEasRelationPropertyName(easPropertyName)
+    return {
+      propertyName: camelCase(parsed?.propertyName ?? easPropertyName),
+      isRelation: true,
+      isList: true,
+      refSeedType: parsed?.modelName,
+    }
+  }
+  return { propertyName: camelCase(easPropertyName), isRelation: true, isList: false }
+}
+
+/** The local model schema (properties object) of the seed a property attestation belongs to. */
+const modelSchemaForSyncedProperty = async (
+  Model: typeof import('../../Model/Model').Model,
+  property: Attestation,
+  state: SyncRunState,
+): Promise<Record<string, any> | undefined> => {
+  const seedUid = state.versionUidToSeedUid.get(property.refUID)
+  const modelType = seedUid ? state.seedUidToModelType.get(seedUid) : undefined
+  if (modelType == null) return undefined
+  const seedLocalId = state.seedUidToLocalId.get(seedUid!)
+  const model = await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
+    resolveSyncedSeedModel(Model, modelType, { seedLocalId, seedUid }),
+  )
+  if (!model?.properties) return undefined
+  // Each property's nameMatch level (ADR 0009), for resolveSyncedPropertyName.
+  const levels = await nameMatchLevels()
+  const schema = modelPropertiesToObject(model.properties)
+  for (const [key, def] of Object.entries(schema)) {
+    schema[key] = { ...def, nameMatch: levels.property(model.modelName ?? '', key, model.id) }
+  }
+  return schema
+}
+
 /**
  * Seed UIDs that relation properties point at. Collected from every property the run fetched, not
  * only newly stored ones, so related seeds are refreshed (new versions, revocations) on each sync.
  */
-const collectRelatedSeedUids = (properties: Attestation[], into: Set<string>): void => {
+const collectRelatedSeedUids = async (
+  properties: Attestation[],
+  state: SyncRunState,
+): Promise<void> => {
+  const { Model } = await import('../../Model/Model')
   for (const property of properties) {
     const parsed = parseEasPropertyMetadata(property.decodedDataJson)
     if (!parsed.ok) continue
     const { name, value } = parsed.metadata
-    if (!name || !isRelationPropertyName(name)) continue
+    if (!name) continue
+    const modelSchema = await modelSchemaForSyncedProperty(Model, property, state)
+    if (!resolveSyncedPropertyName(name, value, modelSchema)?.isRelation) continue
     const values = Array.isArray(value) ? value : [value]
     for (const v of values) {
-      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v)) into.add(v)
+      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v)) state.relatedSeedUids.add(v)
     }
   }
 }
@@ -161,6 +302,21 @@ export const isSqlEscapedAttestationRaw = (stored: string, fresh: Attestation): 
     ...('revocationTime' in stored_ && { revocationTime: stored_.revocationTime }),
   }
   return stored === JSON.stringify(withStoredRevocation).replace(/'/g, "''")
+}
+
+/**
+ * seeds.type for a seed whose EAS model name is `easModelName`: the type of the local model it
+ * matches (ADR 0008), so `htmlpage` from an older SDK is stored as `html_page`, the type local seeds
+ * of HTMLPage have. A name matching no local model, or several, is kept as it is.
+ */
+const localModelType = async (easModelName: string): Promise<string> => {
+  const { Model } = await import('../../Model/Model')
+  try {
+    const model = Model.findByModelType(easModelName)
+    return model?.modelName ? easName(model.modelName) : easModelName
+  } catch {
+    return easModelName
+  }
 }
 
 type SaveEasSeedsToDbProps = {
@@ -236,7 +392,8 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
 
   for (let i = 0; i < newSeeds.length; i++) {
     const seed = newSeeds[i]
-    seedUidToModelType.set(seed.id, seed.schema.schemaNames[0].name)
+    const modelType = await localModelType(seed.schema.schemaNames[0].name)
+    seedUidToModelType.set(seed.id, modelType)
     const seedLocalId = generateId()
     seedUidToLocalId.set(seed.id, seedLocalId)
 
@@ -248,7 +405,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
     const modelFileId = await resolveModelForSyncedSeed({
       seedUid: seed.id,
       seedLocalId,
-      modelType: seed.schema.schemaNames[0].name,
+      modelType,
       schemaUid: seed.schemaId,
     })
 
@@ -256,7 +413,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
       localId: seedLocalId,
       uid: seed.id,
       schemaUid: seed.schemaId,
-      type: seed.schema.schemaNames[0].name,
+      type: modelType,
       ...(modelFileId && { modelFileId }),
       publisher: seed.attester ? normalizeHexAddress(seed.attester) : seed.attester,
       createdAt: Date.now(),
@@ -407,6 +564,10 @@ const createMetadataRecordsForStorageTransactionId = async (
 
   const attestationData = parsed.metadata
   const propertyName = camelCase(attestationData.name)
+  // A string tx id attested under the legacy `bytes32 storage_transaction_id` schema (0xa1a5bee9…,
+  // Optimism Sepolia only) decodes as 0x…20, the ABI string offset; the id itself is only in the raw
+  // `data`. It is stored as-is and the download path skips it. Not recovered: the 8 such
+  // attestations on Optimism Sepolia date from February 2024, and publish no longer creates them.
   const propertyValue =
     typeof attestationData.value === 'string'
       ? attestationData.value
@@ -547,7 +708,7 @@ const saveEasPropertiesToDbBody = async ({
   )
   const propertyUids = itemProperties.map((property) => property.id)
 
-  collectRelatedSeedUids(itemProperties, state.relatedSeedUids)
+  await collectRelatedSeedUids(itemProperties, state)
 
   const appDb = BaseDb.getAppDb()
 
@@ -771,7 +932,7 @@ const insertSyncedProperties = async ({
 
     const propertyMetadata = parsed.metadata
 
-    let propertyNameSnake = propertyMetadata.name
+    const propertyNameSnake = propertyMetadata.name
 
     if (!propertyNameSnake) {
       console.warn(
@@ -781,11 +942,8 @@ const insertSyncedProperties = async ({
       continue
     }
 
-    let isRelation = false
-    let refValueType
-    let refSeedType
+    let refSeedType: string | undefined
     let refSchemaUid
-    let isList = false
     const schemaUid = property.schemaId
 
     setSchemaUidForSchemaDefinition({
@@ -793,34 +951,42 @@ const insertSyncedProperties = async ({
       schemaUid,
     })
 
-    if (isRelationPropertyName(propertyNameSnake)) {
-      isRelation = true
+    const easDataType = propertyMetadata.type
+    const versionUid = property.refUID
+    const versionLocalId = versionUidToLocalId.get(versionUid)
+    const attestationCreatedAt = property.timeCreated * 1000
+    const seedUid = versionUidToSeedUid.get(versionUid)
+    const seedLocalId = seedUidToLocalId.get(seedUid!)
+    const modelType = seedUidToModelType.get(seedUid!)
 
-      if (Array.isArray(propertyMetadata.value)) {
-        isList = true
-        refValueType = 'list'
+    const modelSchema = await modelSchemaForSyncedProperty(Model, property, state)
 
-        const result = parseEasRelationPropertyName(propertyNameSnake)
+    // ADR 0008: the local property this EAS name stands for, and whether it's a relation.
+    const resolvedName = resolveSyncedPropertyName(
+      propertyNameSnake,
+      propertyMetadata.value,
+      modelSchema,
+      easDataType,
+    )
+    if (!resolvedName) continue
+    const { propertyName, isRelation, isList } = resolvedName
+    const refValueType = isRelation && isList ? 'list' : undefined
+    if (isList) refSeedType = resolvedName.refSeedType
 
-        if (result) {
-          propertyNameSnake = result.propertyName
-          refSeedType = result.modelName
-        }
-
-      }
-
-      if (!isList) {
-        if (relationValuesToExclude.includes(propertyMetadata.value as string)) {
-          continue
-        }
-      }
+    if (isRelation && !isList && relationValuesToExclude.includes(propertyMetadata.value as string)) {
+      continue
     }
 
-    let propertyValue = propertyMetadata.value
-
-    if (typeof propertyValue !== 'string') {
-      propertyValue = JSON.stringify(propertyValue)
+    // ADR 0010: numeric values decoded (Number as a decimal string, Date as ISO).
+    const decodedValue = syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
+    if (decodedValue === undefined) {
+      console.warn(
+        `[item/events] [syncDbWithEas] EAS property "${propertyNameSnake}" has a value that isn't a valid ${resolvedName.dataType}; skipping it`,
+      )
+      continue
     }
+
+    const propertyValue = typeof decodedValue === 'string' ? decodedValue : JSON.stringify(decodedValue)
 
     if (isRelation && !isList) {
       const relatedSeed = itemSeeds.find(
@@ -841,23 +1007,6 @@ const insertSyncedProperties = async ({
         refSchemaUid = relatedSeeds[0].schemaId
       }
     }
-
-    const propertyName = camelCase(propertyNameSnake)
-    const easDataType = propertyMetadata.type
-    const versionUid = property.refUID
-    const versionLocalId = versionUidToLocalId.get(versionUid)
-    const attestationCreatedAt = property.timeCreated * 1000
-    const seedUid = versionUidToSeedUid.get(versionUid)
-    const seedLocalId = seedUidToLocalId.get(seedUid!)
-    const modelType = seedUidToModelType.get(seedUid!)
-
-    const model =
-      modelType != null
-        ? await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
-            resolveSyncedSeedModel(Model, modelType, { seedLocalId, seedUid }),
-          )
-        : undefined
-    const modelSchema = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
     if (propertyNameSnake === 'storage_transaction_id') {
       await createMetadataRecordsForStorageTransactionId(property, modelSchema, state)
@@ -931,28 +1080,68 @@ const syncVersionsAndPropertiesForSeeds = async ({
 }): Promise<void> => {
   if (seedUids.length === 0) return
 
-  const itemVersions = await getItemVersionsFromEas({
+  // Only the seed's attester can add versions to it, and only a version's attester can add
+  // properties to it (see partitionByRefAttester): anyone can attest with any refUID.
+  const fetchedVersions = await getItemVersionsFromEas({
     seedUids,
     excludeRevoked: false,
   })
+  const { kept: itemVersions, foreign: foreignVersions } = partitionByRefAttester(
+    fetchedVersions,
+    itemSeeds,
+  )
 
   const { versionUids } = await saveEasVersionsToDb({
     itemVersions,
     state,
   })
-  if (versionUids.length === 0) return
 
-  const fetchedProperties = await getItemPropertiesFromEas({
-    versionUids,
-    excludeRevoked: false,
-  })
+  let foreignProperties: Attestation[] = []
+  if (versionUids.length > 0) {
+    const allProperties = await getItemPropertiesFromEas({
+      versionUids,
+      excludeRevoked: false,
+    })
+    const partitioned = partitionByRefAttester(allProperties, itemVersions)
+    foreignProperties = partitioned.foreign
 
-  // The save makes the canonical pick; it also needs the other attestations to clean up after them.
-  await saveEasPropertiesToDb({
-    fetchedProperties,
-    itemSeeds,
-    state,
+    // The save makes the canonical pick; it also needs the other attestations to clean up after them.
+    await saveEasPropertiesToDb({
+      fetchedProperties: partitioned.kept,
+      itemSeeds,
+      state,
+    })
+  }
+
+  await deleteForeignAttestationRows({
+    versionUids: foreignVersions.map((version) => version.id),
+    propertyUids: foreignProperties.map((property) => property.id),
   })
+}
+
+/**
+ * Remove rows an earlier sync stored for versions and properties that another account attested:
+ * a foreign version row would count as the seed's latest version, and a foreign property row as
+ * its newest value.
+ */
+const deleteForeignAttestationRows = async ({
+  versionUids,
+  propertyUids,
+}: {
+  versionUids: string[]
+  propertyUids: string[]
+}): Promise<void> => {
+  if (versionUids.length === 0 && propertyUids.length === 0) return
+  const appDb = BaseDb.getAppDb()
+  await writeInBatches(propertyUids, (chunk) =>
+    appDb.delete(metadata).where(inArray(metadata.uid, chunk)),
+  )
+  await writeInBatches(versionUids, (chunk) =>
+    appDb.delete(metadata).where(inArray(metadata.versionUid, chunk)),
+  )
+  await writeInBatches(versionUids, (chunk) =>
+    appDb.delete(versions).where(inArray(versions.uid, chunk)),
+  )
 }
 
 /**
@@ -1022,14 +1211,18 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
 
   const appDb = BaseDb.getAppDb()
 
-  const { schemaStringToModelRecord } = await getModelSchemas()
+  // ADR 0009: this run matches names at the levels the stored schema files set now.
+  await loadNameMatchLevels(appDb)
+
+  const { matchModelRecord } = await getModelSchemas()
 
   const modelSchemas = await getModelSchemasFromEas()
 
   const schemaUids: string[] = []
 
   for (const modelSchema of modelSchemas) {
-    const foundModel = schemaStringToModelRecord.get(modelSchema.schema)
+    // ADR 0008: matched by name, so seeds published under an older SDK's name are found too.
+    const foundModel = matchModelRecord(modelSchema.schema)
 
     if (!foundModel) {
       // Skip schemas that don't have a corresponding model in the user's config

@@ -5,7 +5,16 @@ import {
   type AttestationLike,
   type QueryDataSource,
 } from '@seedprotocol/query'
-import { BaseEasClient, BaseQueryClient, GET_SEEDS, GET_VERSIONS, GET_PROPERTIES } from '@seedprotocol/eas'
+import {
+  BaseEasClient,
+  BaseQueryClient,
+  GET_PROPERTIES,
+  GET_SCHEMAS,
+  GET_SEEDS,
+  GET_SEEDS_LEAN,
+  GET_VERSIONS,
+  resetSchemaNamesCache,
+} from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions, metadata } from '@/seedSchema'
 import { createLocalQueryDataSource } from '@/query/createLocalQueryDataSource'
@@ -113,18 +122,38 @@ const matches = (att: Record<string, any>, where: Record<string, any>): boolean 
     if (key === 'id' || key === 'refUID' || key === 'revoked') {
       if ('equals' in cond) return att[key] === cond.equals
       if ('in' in cond) return cond.in.includes(att[key])
+      if ('startsWith' in cond) return String(att[key]).startsWith(cond.startsWith)
     }
     throw new Error(`fake EAS: unsupported where ${key}: ${JSON.stringify(cond)}`)
   })
 
+const SCHEMA_NAMES: Record<string, string> = {
+  [SEED_SCHEMA_UID]: SCHEMA,
+  [VERSION_SCHEMA_UID]: 'version',
+  [TITLE_SCHEMA_UID]: 'title',
+}
+
 const fakeEasClient = {
   request: async (doc: unknown, vars: { where: Record<string, any>; take?: number; skip?: number }) => {
+    if (doc === GET_SCHEMAS) {
+      const ids: string[] = vars.where.id.in
+      return { schemas: ids.map((id) => ({ id, schemaNames: [{ name: SCHEMA_NAMES[id] }] })) }
+    }
     const key =
-      doc === GET_SEEDS ? 'itemSeeds' : doc === GET_VERSIONS ? 'itemVersions' : doc === GET_PROPERTIES ? 'itemProperties' : null
+      doc === GET_SEEDS || doc === GET_SEEDS_LEAN
+        ? 'itemSeeds'
+        : doc === GET_VERSIONS
+          ? 'itemVersions'
+          : doc === GET_PROPERTIES
+            ? 'itemProperties'
+            : null
     if (!key) throw new Error('fake EAS: unexpected query')
+    // Only GET_SEEDS selects `schema { schemaNames }`.
+    const selectsSchema = doc === GET_SEEDS
     const rows = easAttestations()
       .filter((a) => matches(a, vars.where))
       .sort((a, b) => b.timeCreated - a.timeCreated)
+      .map(({ schema, ...rest }) => (selectsSchema ? { ...rest, schema } : rest))
     const skip = vars.skip ?? 0
     return { [key]: vars.take != null ? rows.slice(skip, skip + vars.take) : rows.slice(skip) }
   },
@@ -155,6 +184,7 @@ describe.sequential('local and remote query sources: seeds with revoked versions
     previousEasImpl = (BaseEasClient as any)._impl
     previousQueryImpl = (BaseQueryClient as any)._impl
     BaseEasClient.configure({ getEasClient: () => fakeEasClient as any })
+    resetSchemaNamesCache()
     BaseQueryClient.configure({
       getQueryClient: () => ({ fetchQuery: async ({ queryFn }: { queryFn: () => unknown }) => queryFn() }) as any,
     })
@@ -233,6 +263,17 @@ describe.sequential('local and remote query sources: seeds with revoked versions
       expect(await getOne(ds, allRevoked.seed.uid)).toEqual([])
       expect(await getOne(ds, revokedSeed.seed.uid)).toEqual([])
       expect(await getOne(ds, mixed.seed.uid)).toEqual([expectedPublished[1]])
+    }
+  })
+
+  it('lists by uid prefix the same way in both sources, leaving out all-revoked seeds', async () => {
+    const byPrefix = async (ds: QueryDataSource, prefix: string) =>
+      summarize(ds, await ds.listSeedsByUidPrefix(SCHEMA, prefix, { limit: 16, skip: 0 }))
+    for (const ds of [local, remote]) {
+      expect(await byPrefix(ds, '0xd5d5')).toEqual([expectedPublished[0]])
+      expect(await byPrefix(ds, '0xdada')).toEqual([expectedPublished[1]])
+      expect(await byPrefix(ds, '0xd7d7')).toEqual([])
+      expect(await byPrefix(ds, '0xd0d0')).toEqual([])
     }
   })
 

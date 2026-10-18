@@ -12,7 +12,14 @@ You can publish **incremental** property updates on the **same** Version (patch 
 
 ## Publish flow (recommended)
 
-When using the publish package (`@seedprotocol/publish`) with `ConnectButton` and its publish flow:
+Publishing needs the publish package (`@seedprotocol/publish`). The SDK prepares payloads but
+does not upload or attest on its own: `item.publish(options)` hands the item to the executor
+that `initPublish()` / `<PublishProvider config>` registers (`setPublishExecutor(publishItem)`),
+and throws if none is registered. It resolves when the publish has finished and rejects if it
+failed; attestation failures that wait for `PublishManager.retryAttestations` also reject.
+`options` are the publish package's `CreatePublishOptions`.
+
+When using the publish package with `ConnectButton` and its publish flow:
 
 1. **ensureEasSchemasForItem** runs before `getPublishPayload`. It:
    - Registers EAS schemas for each item property via the SchemaRegistry contract
@@ -32,10 +39,15 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
    back to the item still being walked is left out of this publish; it keeps no attestation uid, and
    the next publish of its item attests it with the target's uid.
 
-3. The payload is sent to the publish contract (or direct EAS, depending on config). Requests are
-   attested in order, so a link (`propertiesToUpdate`) must target its own request or a later one:
-   the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`, and the
-   direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
+3. The payload is sent to the publish contract (or direct EAS, depending on config).
+   Direct EAS is used with `useDirectEas`, or when the publisher is an EOA (no bytecode). It
+   attests one transaction per Seed and records each Seed as soon as it is attested. A smart
+   account that is not deployed yet is refused rather than sent down this path: deploy it first,
+   then publish.
+
+   Requests are attested in order, so a link (`propertiesToUpdate`) must target its own request or
+   a later one: the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`,
+   and the direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
    `PUBLISH_PREFLIGHT_FAILED`) before sending any attestation. `getPublishPayload` orders requests
    referenced-first, so its payloads never do this.
 
@@ -111,6 +123,8 @@ The publish package’s verification step checks that each **expected schema** i
 
 Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **after** `Content-SHA-256` and `Content-Type`.
 
+Both publish paths (L1 transactions via `getPublishUploads`, bundler DataItems via `getPublishUploadData`) build uploads with the SDK's `getPublishUploadData`, so they upload the same bytes with the same tags. **`Content-SHA-256`** is the lowercase hex **SHA-256** of the uploaded bytes (`getContentSha256`). SDK 0.7.2 and earlier wrote a SHA3-256 digest under that tag on the L1 transaction path; to check a tag value read from Arweave against bytes, use `contentSha256TagMatches`, which accepts both. During files download the SDK looks up these tags in one batched GraphQL request and verifies the downloaded bytes against them: a gateway serving bytes that don't match is skipped for the next one, a transaction no gateway serves matching bytes for is not saved (and is retried on a later run), and only a verified value is copied into `metadata.content_hash`. A transaction without the tag (older uploads, or one not indexed yet) is downloaded unverified.
+
 ### With `@seedprotocol/publish`
 
 - Set **`arweaveUploadTags`** on **`initPublish` / `PublishProvider` config** for app-wide defaults.
@@ -131,7 +145,8 @@ phase 1 uploads everything else, the Html files are rewritten on disk with the r
 gateway URLs, then phase 2 uploads the Html.
 
 - **`data:image/...;base64,...` in `<img src>`** (policy `materialize`, the default): each image
-  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Policy
+  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Until the
+  upload, the image's bytes are kept in the images folder as `<seed local id>.<extension>`. Policy
   `preserve` leaves data URIs in place.
 - **`seed:property/<name>`** as the whole value of a `src`, `href` or `poster` attribute: the URL of
   the same item's `<name>` property, which must be an Image, File or Json property (or a relation
