@@ -110,6 +110,36 @@ testDescribe('ItemProperty save path', () => {
     expect(property!.value).toBe('Not mine')
   }, 30000)
 
+  it('setValue saves a value that is already in context', async () => {
+    const item = await createNote('Before debounce')
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
+    const before = { propertyValue: 'Before debounce', renderValue: 'Before debounce' }
+
+    // What a debounced input does: show the typed value first, save later.
+    property!.getService().send({ type: 'updateContext', propertyValue: 'Typed', renderValue: 'Typed' })
+    property!.value = 'Typed'
+    await property!.save()
+    expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Before debounce'])
+
+    property!.setValue('Typed', { before })
+    await property!.save()
+    expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Typed'])
+  }, 30000)
+
+  it('setValue rolls a rejected value back to the given before', async () => {
+    const item = await createNote('Shown before typing')
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
+    const before = { propertyValue: 'Shown before typing', renderValue: 'Shown before typing' }
+    const tooLong = 'y'.repeat(300)
+
+    property!.getService().send({ type: 'updateContext', propertyValue: tooLong, renderValue: tooLong })
+    property!.setValue(tooLong, { before })
+
+    await expect(property!.save()).rejects.toBeInstanceOf(ItemPropertySaveValidationError)
+    expect(property!.value).toBe('Shown before typing')
+    expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Shown before typing'])
+  }, 30000)
+
   it('a Relation whose schema sets refValueType saves and survives a reload', async () => {
     // Schema files drop refValueType on a non-list Relation; a model built in code keeps it.
     const schema = Schema.create(SCHEMA_NAME, { waitForReady: false }) as Schema

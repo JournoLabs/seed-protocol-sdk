@@ -27,6 +27,8 @@ export interface IItemProperty<PropertyType = any> {
   readonly saveValidationErrors: import('@/Schema/validation').ValidationError[];
 
   subscribe(callback: Partial<BehaviorSubject<any>>): Subscription;
+  /** Shows `value` and saves it, even when it is already in context. See ItemProperty.setValue. */
+  setValue(value: any, options?: { before?: import('@/types/property').PropertyValueSnapshot }): void;
   save(): Promise<void>;
   unload(): void;
   destroy(): Promise<void>;

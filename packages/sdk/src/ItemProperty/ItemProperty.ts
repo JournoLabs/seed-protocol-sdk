@@ -3,6 +3,7 @@ import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { CreatePropertyInstanceProps, PropertyMachineContext, PropertyType as SchemaPropertyType } from '@/types'
+import type { PropertyValueSnapshot } from '@/types/property'
 import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
@@ -1488,8 +1489,21 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (currentValue === value) {
       return
     }
-    // Restored if the save is refused (item not owned) or fails.
-    const before = { propertyValue: context.propertyValue, renderValue: context.renderValue }
+    this.setValue(value)
+  }
+
+  /**
+   * Shows `value` at once and saves it; `await property.save()` to wait for the result. Unlike
+   * assigning `property.value`, it saves even when `value` is already in context.
+   *
+   * @param options.before - The values to restore if the save is refused or fails. Defaults to the
+   *   current context; pass it when you already put `value` into context (a debounced input, say),
+   *   so a refusal still rolls back to what was there before.
+   */
+  setValue(value: any, options: { before?: PropertyValueSnapshot } = {}): void {
+    const context = this._getSnapshotContext()
+    // Restored if the save is refused (item not owned), breaks a validation rule, or fails.
+    const before = options.before ?? { propertyValue: context.propertyValue, renderValue: context.renderValue }
     // Update context immediately so UI shows the value before save completes
     this._service.send({
       type: 'updateContext',

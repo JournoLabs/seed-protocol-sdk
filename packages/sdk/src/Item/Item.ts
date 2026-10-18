@@ -1006,7 +1006,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           `Item.create: property ${item.modelName}.${propertyName} did not load for item ${item.seedLocalId}; value was not saved`,
         )
       }
-      property.value = value
+      // setValue, not the setter: the setter skips the save when the value is already in context.
+      property.setValue(value)
       try {
         await property.save()
       } catch (error) {
