@@ -1432,12 +1432,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return `Item_${uid || localId}_${propertyName}`
   }
 
-  /** Clears instance cache for an item (for test isolation when run in group). */
+  /**
+   * Drops an item's properties from the instance cache, under every key they're cached by. A dropped
+   * instance someone still holds keeps running but is detached: it doesn't re-key itself into the
+   * cache when its context changes, so the next lookup creates a fresh instance.
+   */
   static clearInstanceCacheForItem(seedLocalIdOrUid: string): void {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
     const prefix = `Item_${uid || localId}_`
-    for (const key of Array.from(this.instanceCache.keys())) {
-      if (key.startsWith(prefix)) this.instanceCache.delete(key)
+    const dropped = new Set<{ instance: ItemProperty<any>; refCount: number }>()
+    for (const [key, entry] of this.instanceCache) {
+      if (key.startsWith(prefix)) dropped.add(entry)
+    }
+    for (const [key, entry] of Array.from(this.instanceCache)) {
+      if (dropped.has(entry)) this.instanceCache.delete(key)
+    }
+    for (const entry of dropped) {
+      const service = entry.instance.getService()
+      if (cacheEntries.get(service) === entry) cacheEntries.delete(service)
     }
   }
 
