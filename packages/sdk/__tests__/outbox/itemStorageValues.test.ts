@@ -148,4 +148,43 @@ testDescribe('storage values through the outbox', () => {
     expect(await BaseFileManager.pathExists(existingPath)).toBe(true)
     post.unload()
   }, 30000)
+
+  it('an older Html save that finishes writing its file last appends nothing and deletes its file', async () => {
+    const post = await createPost()
+    const html = propertyOf(post, 'html')
+    const original = BaseFileManager.saveFile.bind(BaseFileManager)
+    let olderPath: string | undefined
+    let releaseOlder!: () => void
+    const olderHeld = new Promise<void>((resolve) => (releaseOlder = resolve))
+    let olderReached!: () => void
+    const reached = new Promise<void>((resolve) => (olderReached = resolve))
+    const spy = vi.spyOn(BaseFileManager, 'saveFile').mockImplementation(async (filePath, content) => {
+      if (content === '<p>older, slow</p>') {
+        olderPath = filePath
+        olderReached()
+        await olderHeld
+      }
+      return original(filePath, content)
+    })
+    try {
+      // The newer value is assigned while the older save is still writing its file
+      html.value = '<p>older, slow</p>'
+      await reached
+      html.value = '<p>newer</p>'
+      await vi.waitFor(async () => expect((await storageOps(post.seedLocalId)).at(-1)?.status).toBe('applied'), {
+        timeout: 10000,
+      })
+      releaseOlder()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      const ops = await storageOps(post.seedLocalId)
+      expect(ops).toHaveLength(1)
+      expect(outboxOpValue<StorageValueOp>(ops[0])!.create.values.refResolvedValue).not.toContain('older')
+      expect(await BaseFileManager.pathExists(olderPath!)).toBe(false)
+      expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', outboxOpValue<StorageValueOp>(ops[0])!.create.values.refResolvedValue!))).toBe('<p>newer</p>')
+    } finally {
+      spy.mockRestore()
+    }
+    post.unload()
+  }, 30000)
 })

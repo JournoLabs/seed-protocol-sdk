@@ -15,6 +15,12 @@ export {
 } from './outbox'
 export { startItemOutbox } from './itemAppliers'
 export { getPendingSetValue } from './pendingValues'
-export { applyStorageValue } from './itemAppliers'
-export type { SetPropertyValueOp, SetPropertyValueResult, StorageValueOp } from './itemAppliers'
+export { applyItemStorageValue, applyStorageValue } from './itemAppliers'
+export type {
+  ItemStorageValueOp,
+  ItemStorageValueResult,
+  SetPropertyValueOp,
+  SetPropertyValueResult,
+  StorageValueOp,
+} from './itemAppliers'
 export type { AppendOutboxOpInput, OutboxApplier, OutboxOp, OutboxOpKind, OutboxOpStatus } from './outbox'

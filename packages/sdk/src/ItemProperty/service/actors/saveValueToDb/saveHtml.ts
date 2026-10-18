@@ -10,6 +10,7 @@ import {
 import { resolveNewSeedFields } from '@/db/write/createSeed'
 import { generateId } from '@/helpers/generateId'
 import { writeStorageValue } from './storageValue'
+import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { toMetadataPropertyName } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -42,6 +43,10 @@ export const saveHtml = fromCallback<
   // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
   // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
   // (Same rationale as analyzeInput.ts)
+
+  // Taken when the save starts: a newer save of the property makes this one drop its value
+  const writeKey = propertyWriteKey(seedLocalId ?? seedUid, propertyNameRaw)
+  const writeTicket = writeKey ? beginPropertyWrite(writeKey) : undefined
 
   const _saveHtml = async (): Promise<void> => {
     if (!propertyNameRaw) {
@@ -125,6 +130,7 @@ export const saveHtml = fromCallback<
           dataType: 'Html',
         },
       },
+      writeTicket,
     )
     // A newer value superseded this one; its save sets the context
     if (written.skipped) return
@@ -146,6 +152,7 @@ export const saveHtml = fromCallback<
   }
 
   _saveHtml()
+    .finally(() => writeTicket?.end())
     .then(() => {
       sendBack({ type: 'saveHtmlSuccess' })
     })

@@ -12,10 +12,8 @@ import { waitForIdle } from '../test-utils/waitForIdle'
 import { waitForPropertyInstances } from '../test-utils/getPublishPayloadIntegrationHelpers'
 
 /**
- * Plain value writes to one property run in order and skip superseded ones (propertyWriteQueue).
- * Html, File, Image and ItemStorage values are written by their own actors after the queue has
- * let the save go, so two quick assignments to an Html property can land in either order. The
- * newer value must win in memory and in the DB.
+ * Two quick assignments to an Html property: the newer value must win in memory and in the DB,
+ * whichever save finishes its work first (ADR 0019: assignment-order tickets, then the outbox).
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential

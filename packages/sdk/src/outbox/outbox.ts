@@ -52,6 +52,11 @@ export type OutboxApplier<Prepared = unknown> = {
    */
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
   /**
+   * Wraps the op's transaction, for locks that must be taken before it: an ItemStorage file's
+   * lock, whose other writers take it before touching the database. Calls `run` once.
+   */
+  around?: <T>(op: OutboxOp, run: () => Promise<T>) => Promise<T>
+  /**
    * Cleans up after an op that will never apply (superseded or failed): a file written for it,
    * say. Runs after the op is settled; errors are logged and ignored.
    */
@@ -280,7 +285,7 @@ async function applyUnit(unit: Unit): Promise<void> {
     const prepared: unknown[] = []
     for (const op of ops) prepared.push(await applierFor(op).prepare?.(op))
 
-    await BaseDb.transaction(async (tx) => {
+    const transaction = () => BaseDb.transaction(async (tx) => {
       // Claim: an op another drainer applied meanwhile is no longer pending
       const claimed = await tx
         .update(pendingWrites)
@@ -304,6 +309,12 @@ async function applyUnit(unit: Unit): Promise<void> {
           .where(and(inArray(pendingWrites.opId, supersededIds), eq(pendingWrites.status, 'pending')))
       }
     })
+    // Each op's `around` (a lock) wraps the transaction, the first op's outermost
+    const wrapped = ops.reduceRight<() => Promise<unknown>>((inner, op) => {
+      const around = applierFor(op).around
+      return around ? () => around(op, inner) : inner
+    }, transaction)
+    await wrapped()
     for (const id of ids) notBefore.delete(id)
     settle([...ids, ...supersededIds])
     discardAll(superseded)

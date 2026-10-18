@@ -10,6 +10,7 @@ import {
 import { resolveNewSeedFields } from '@/db/write/createSeed'
 import { generateId } from '@/helpers/generateId'
 import { writeStorageValue } from './storageValue'
+import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { getDataTypeFromString, getMimeType, toMetadataPropertyName } from '@/helpers'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
@@ -53,6 +54,10 @@ export const saveImage = fromCallback<
 
   // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
   // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
+
+  // Taken when the save starts: a newer save of the property makes this one drop its value
+  const writeKey = propertyWriteKey(seedLocalId ?? seedUid, propertyNameRaw)
+  const writeTicket = writeKey ? beginPropertyWrite(writeKey) : undefined
 
   const _saveImage = async (): Promise<void> => {
     if (!propertyNameRaw) {
@@ -209,6 +214,7 @@ export const saveImage = fromCallback<
           dataType: 'Image',
         },
       },
+      writeTicket,
     )
     // A newer value superseded this one; its save sets the context
     if (written.skipped) return
@@ -253,6 +259,7 @@ export const saveImage = fromCallback<
   }
 
   _saveImage()
+    .finally(() => writeTicket?.end())
     .then(() => sendBack({ type: 'saveImageSuccess' }))
     .catch((error) => sendBack({ type: 'saveImageError', error }))
 })

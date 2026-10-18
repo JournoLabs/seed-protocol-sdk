@@ -10,6 +10,7 @@ import {
 import { resolveNewSeedFields } from '@/db/write/createSeed'
 import { generateId } from '@/helpers/generateId'
 import { writeStorageValue } from './storageValue'
+import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { toMetadataPropertyName } from '@/helpers'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -74,6 +75,10 @@ export const saveFile = fromCallback<
 
   // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
   // so context is already updated. Skipping would prevent persisting existing file references (string filename).
+
+  // Taken when the save starts: a newer save of the property makes this one drop its value
+  const writeKey = propertyWriteKey(seedLocalId ?? seedUid, propertyNameRaw)
+  const writeTicket = writeKey ? beginPropertyWrite(writeKey) : undefined
 
   const _saveFile = async (): Promise<void> => {
     if (!propertyNameRaw) {
@@ -217,6 +222,7 @@ export const saveFile = fromCallback<
           dataType: 'File',
         },
       },
+      writeTicket,
     )
     // A newer value superseded this one; its save sets the context
     if (written.skipped) return
@@ -238,6 +244,7 @@ export const saveFile = fromCallback<
   }
 
   _saveFile()
+    .finally(() => writeTicket?.end())
     .then(() => sendBack({ type: 'saveFileSuccess' }))
     .catch((error) => sendBack({ type: 'saveFileError', error }))
 })

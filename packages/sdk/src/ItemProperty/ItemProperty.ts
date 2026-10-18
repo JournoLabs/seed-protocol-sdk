@@ -41,7 +41,7 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteQueue'
+import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import {
   ModelPropertyDataTypes,
   isDataType,

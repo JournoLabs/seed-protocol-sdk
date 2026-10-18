@@ -6,7 +6,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQueue'
+import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { rowContext } from './rowContext'
 import type { SetPropertyValueOp, SetPropertyValueResult } from '@/outbox/itemAppliers'
 
@@ -56,24 +56,26 @@ export const analyzeInput = fromCallback<
     throw new Error('Missing propertyRecordSchema')
   }
 
-  // Reserved now, before the async checks below, so a newer save always replaces this one.
+  // Taken now, before the async checks below, so a newer save always replaces this one.
   const writeKey = propertyWriteKey(seedLocalId ?? context.seedUid, propertyNameRaw)
-  const writeSlot = writeKey ? reservePropertyWrite(writeKey) : undefined
-  const writeValue = <T>(write: () => Promise<T>) =>
-    writeSlot ? writeSlot.run(write) : write().then((result) => ({ skipped: false as const, result }))
+  const writeTicket = writeKey ? beginPropertyWrite(writeKey) : undefined
 
   /**
    * Writes a plain value through the outbox (ADR 0019): appends a `set` op and waits until it
-   * applies. Skipped when a newer value of this property superseded it, as a queued write is.
-   * Rejects when the op fails. An item known only by its seed uid has no outbox key yet and
-   * writes directly.
+   * applies. Skipped when a newer save of this property started first (in this tab) or a newer
+   * value superseded it. Rejects when the op fails. An item known only by its seed uid has no
+   * outbox key yet and writes directly.
    */
   const writePlainValue = async (props: SetPropertyValueOp) => {
     if (!seedLocalId || !propertyNameRaw) {
-      return writeValue(() => updateItemPropertyValue({ ...props, seedLocalId, propertyName: propertyNameRaw } as any))
+      if (writeTicket && !writeTicket.isLatest()) return { skipped: true as const }
+      const result = await updateItemPropertyValue({ ...props, seedLocalId, propertyName: propertyNameRaw } as any)
+      return { skipped: false as const, result }
     }
     const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
     startItemOutbox()
+    // Checked right before appending (no await in between): ops apply in append order
+    if (writeTicket && !writeTicket.isLatest()) return { skipped: true as const }
     const opId = await appendOutboxOp({
       seedLocalId,
       propertyName: propertyNameRaw,
@@ -271,7 +273,7 @@ export const analyzeInput = fromCallback<
     return true
   }
 
-  _analyzeInput().finally(() => writeSlot?.release()).then(
+  _analyzeInput().finally(() => writeTicket?.end()).then(
     (isDone) => {
       if (isDone) {
         sendBack({ type: 'saveValueToDbSuccess' })

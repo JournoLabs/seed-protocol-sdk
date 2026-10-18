@@ -48,10 +48,18 @@ applied at most once. On start the leader resumes every `pending` op.
 
 **Applying an op** runs the existing writers (`updateItemPropertyValue`, `createMetadata`, the
 storage pipelines) and marks the op `applied` in one transaction. Superseded ops are coalesced:
-only the newest pending `set` for a property is applied, and older ones become `superseded`.
+of a property's run of pending value ops (`set`, `storage`) only the newest is applied, and older
+ones become `superseded`. An op that never applies has its applier's `discard` step run (a storage
+value's file is deleted).
 Transient errors (`SQLITE_BUSY`, I/O) retry with backoff; validation and ownership failures mark
 the op `failed` with its error, and the in-memory value falls back to the next value in the
 overlay (a newer pending op, else the stored row).
+
+**Assignment order.** A save does async work before it appends (the ownership check, writing a
+file), so append order alone could let an older save that finishes last win. A save takes a ticket
+when it starts (`helpers/propertyWriteTickets.ts`) and appends only if no newer save of the
+property has started in its tab; otherwise it drops its value and any file it wrote. Across tabs,
+append order is the order.
 
 **Draft history: latest value only.** Coalescing keeps one value per property in `metadata`.
 Superseded and applied ops stay as rows and are pruned on a schedule, so an edit history can be
@@ -76,9 +84,16 @@ once it is applied.
 assignment without `save()` returns at once.
 
 **`Item.create`** appends one op group (seed, version, metadata rows) applied in one transaction,
-replacing `discardNewDraft`. Storage values are written to a staging file first; the op references
-it, and applying it creates the storage seed and moves the file. ItemStorage keeps its per-file
-lock (ADR 0012).
+replacing `discardNewDraft`.
+
+**Storage values.** An Html, File or Image value is a new storage seed: its id is chosen first and
+its file written at its final path, named after it, so nothing else uses the file before the op
+applies; applying creates the seed, its version and the property row. An ItemStorage value goes in
+the item's own file, which other writers also touch, so it is written to a staging file; applying
+moves it into place and updates the draft row. That op's applier takes the file's lock (ADR 0012)
+around the transaction, the order the file's other writers use. SQLocal's transaction then takes its
+own shared Web Lock while the file lock is held, an exception to ADR 0012's rule that nothing is
+requested inside it; shared locks can't deadlock with each other.
 
 **Other writers.** Sync ingest follows the conflict rule. Publish waits for a seed's pending ops to
 apply before building its payload. `claimUnpublishedDrafts` stamps pending ops' publisher.
@@ -98,9 +113,14 @@ connection, so the database runs in WAL mode (readers don't block a commit) and 
 ## Consequences
 
 An assigned value survives a reload, two tabs editing one draft produce one row, and a refused
-save shows its error and the previous value by one path. `propertyWriteQueue`, `_valueBeforeSave`,
-the separate rollback paths, `reconcilePropertyDraftRows` and `discardNewDraft` go. React's
+save shows its error and the previous value by one path. `propertyWriteQueue` becomes the
+assignment-order tickets; `_valueBeforeSave`, the separate rollback paths,
+`reconcilePropertyDraftRows` and `discardNewDraft` go. React's
 `useDebouncedItemProperty` assigns through the setter instead of sending machine events.
+
+The drainer applies one unit at a time, so an ItemStorage op waiting for its file's lock (held by
+the legacy-row migration, say) holds up every op behind it until the lock is free or its wait
+times out.
 
 Writes reach `metadata` later than today, by the drain delay: code that reads `metadata` with raw
 SQL right after an assignment must await `save()` first. Writes made while no tab is the leader
