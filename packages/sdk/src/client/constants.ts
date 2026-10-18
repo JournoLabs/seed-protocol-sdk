@@ -18,7 +18,7 @@ export enum MachineIds {
   FILE_SYSTEM = `${MACHINE_ID_SCOPE}/fileSystem`,
 }
 
-const { INTERNAL, GLOBAL, EAS, MODEL } = MachineIds
+const { INTERNAL, GLOBAL } = MachineIds
 
 export enum ClientManagerState {
   UNINITIALIZED = 'uninitialized',
@@ -56,9 +56,7 @@ export enum GlobalState {
 }
 
 const {
-        UNINITIALIZED: GLOBAL_UNINITIALIZED,
         INITIALIZING,
-        INITIALIZED,
         PUBLISHING_ITEM,
         ADDING_MODELS_TO_DB,
       } = GlobalState

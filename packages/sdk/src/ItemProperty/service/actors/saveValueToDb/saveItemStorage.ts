@@ -37,7 +37,6 @@ export const saveItemStorage = fromCallback<
     propertyName,
     propertyRecordSchema,
     modelName,
-    propertyValue: existingValue,
   } = context
 
   if (!propertyRecordSchema) {
@@ -164,7 +163,7 @@ export const saveItemStorage = fromCallback<
             { seedId: row.seedUid || row.seedLocalId || '', localStorageDir, fileName },
             newValue as string | Blob | ArrayBuffer,
           )
-        } catch (error) {
+        } catch {
           const fs = await BaseFileManager.getFs()
           fs.writeFileSync(filePath, newValue)
         }

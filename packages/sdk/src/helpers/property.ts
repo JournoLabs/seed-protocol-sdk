@@ -78,7 +78,7 @@ export const getPropertySchema = async (
         schema = modelDef.properties || {}
       }
     }
-  } catch (error) {
+  } catch {
     // Fall through to modelPropertiesToObject
   }
   
@@ -276,7 +276,7 @@ export const getPropertySchema = async (
               if (refModelRecord?.id) {
                 propertySchema.refModelId = refModelRecord.id
               }
-            } catch (error) {
+            } catch {
               // Ignore errors - model might not exist yet
             }
           }
@@ -285,7 +285,7 @@ export const getPropertySchema = async (
         }
       }
     }
-  } catch (error) {
+  } catch {
     // Database not available or error - fall through to schema file lookup
   }
   
@@ -316,7 +316,7 @@ export const getPropertySchema = async (
             propertySchema.refModelName = schemaFromFile.ref
           }
         }
-      } catch (error) {
+      } catch {
         // Ignore errors - model might not exist yet or database not available
       }
     }

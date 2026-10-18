@@ -33,7 +33,7 @@ let bulkDownloadInFlight: Promise<void> | null = null
 const lazyDownloadInFlightByTransactionId = new Map<string, Promise<boolean>>()
 
 // syncDbFiles helper - internal service removed, functionality moved here
-const syncDbFiles = async (endpoints: any) => {
+const syncDbFiles = async (_endpoints: any) => {
   // TODO: Implement syncDbFiles functionality if needed
   // This was previously in @/services/internal/helpers
   logger('[download] syncDbFiles called but not yet implemented')

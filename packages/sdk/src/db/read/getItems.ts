@@ -101,7 +101,7 @@ export const getItemsData: GetItemsData = async ({
     ? { modelName: sql<string>`${modelName}` as any }
     : { type: seeds.type }
 
-  let query = appDb
+  const query = appDb
     .with(versionData)
     .select({
       seedLocalId: seeds.localId,

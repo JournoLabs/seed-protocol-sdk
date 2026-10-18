@@ -1,7 +1,7 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
-import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
+import { listCompleteSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
 import { Model } from '@/Model/Model'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
@@ -509,7 +509,7 @@ export class Schema {
     for (const instance of instances) {
       try {
         instance.unload()
-      } catch (error) {
+      } catch {
         // Ignore errors during cleanup (instance might already be unloaded)
       }
     }
@@ -596,7 +596,7 @@ export class Schema {
           readyTimeout,
         }
       )
-    } catch (error) {
+    } catch {
       return undefined
     }
   }
@@ -708,7 +708,7 @@ export class Schema {
           try {
             const instance = await this.createById(schemaFileId)
             schemaInstances.push(instance)
-          } catch (error) {
+          } catch {
             // Fallback to creating by name if createById fails
             schemaInstances.push(
               this.create(schemaName, { waitForReady: false }) as Schema,
@@ -1192,7 +1192,6 @@ export class Schema {
       
       if (cachedInstance) {
         const modelProperty = cachedInstance.instance
-        const propertyContext = modelProperty.getService().getSnapshot().context
         
         // Update original values to current values and clear edited flag
         modelProperty.getService().send({
@@ -1430,7 +1429,7 @@ export class Schema {
       let context: SchemaMachineContext
       try {
         context = this._getSnapshotContext()
-      } catch (error) {
+      } catch {
         // Service might be stopped, build context from what we know
         logger(`Service stopped, building context from available data`)
         context = {
@@ -1698,7 +1697,7 @@ export class Schema {
                   _dbVersion: currentSchema.version,
                 })
               }
-            } catch (error) {
+            } catch {
               // Service might be stopped, ignore
             }
             
@@ -1747,7 +1746,7 @@ export class Schema {
             _dbVersion: currentSchema.version,
           })
         }
-      } catch (error) {
+      } catch {
         // Service might be stopped, ignore
       }
       

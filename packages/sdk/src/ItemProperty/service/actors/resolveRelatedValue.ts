@@ -23,10 +23,8 @@ export const resolveRelatedValue = fromCallback<
     isRelation,
     propertyValue,
     propertyName,
-    seedUid,
     propertyRecordSchema,
     populatedFromDb,
-    schemaUid,
   } = context
 
   const _resolveRelatedValue = async () => {
@@ -55,7 +53,7 @@ export const resolveRelatedValue = fromCallback<
 
     try {
       parsedValue = JSON.parse(relationKey)
-    } catch (error) {
+    } catch {
       logger(`${propertyName} value is not a JSON string.`)
     }
 
@@ -204,7 +202,7 @@ export const resolveRelatedValue = fromCallback<
     }
   }
 
-  _resolveRelatedValue().then((success) => {
+  _resolveRelatedValue().then(() => {
     // if (success) {
     //   sendBack({
     //     type: 'resolvingRelatedValueDone',

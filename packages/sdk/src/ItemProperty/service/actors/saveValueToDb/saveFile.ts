@@ -58,7 +58,6 @@ export const saveFile = fromCallback<
   const {
     localId,
     propertyName: propertyNameRaw,
-    propertyValue: existingValue,
     propertyRecordSchema,
     modelName,
     seedLocalId,
@@ -67,7 +66,7 @@ export const saveFile = fromCallback<
     versionUid,
   } = context
 
-  let { schemaUid } = context
+  const { schemaUid } = context
 
   let newValue: ItemPropertyValueType
 
@@ -165,7 +164,7 @@ export const saveFile = fromCallback<
         try {
           await BaseFileManager.saveFile(filePath, fileData)
           notifyFileSaved(filePath)
-        } catch (e) {
+        } catch {
           const fs = await BaseFileManager.getFs()
           fs.writeFileSync(filePath, new Uint8Array(fileData))
           notifyFileSaved(filePath)
@@ -174,7 +173,7 @@ export const saveFile = fromCallback<
         try {
           await BaseFileManager.saveFile(filePath, fileData)
           notifyFileSaved(filePath)
-        } catch (e) {
+        } catch {
           const fs = await BaseFileManager.getFs()
           fs.writeFileSync(filePath, fileData)
           notifyFileSaved(filePath)

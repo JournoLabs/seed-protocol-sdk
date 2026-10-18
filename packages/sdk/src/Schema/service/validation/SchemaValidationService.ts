@@ -124,7 +124,7 @@ export class SchemaValidationService {
   /**
    * Extract literal value from a schema
    */
-  private extractLiteralValue(schema: TSchema, fieldPath: string): any {
+  private extractLiteralValue(schema: TSchema, _fieldPath: string): any {
     try {
       if (schema && typeof schema === 'object') {
         const schemaObj = schema as any
@@ -525,14 +525,12 @@ export class SchemaValidationService {
     // Check if property exists in model
     // If the property name has changed (renamed), check if the original name exists
     let propertyDefinition = model.properties?.[propertyName]
-    let actualPropertyName = propertyName
     
     if (!propertyDefinition && propertyData?._originalValues?.name) {
       const originalName = propertyData._originalValues.name
       // If the current name differs from the original, check if original exists
       if (originalName !== propertyName && model.properties?.[originalName]) {
         propertyDefinition = model.properties[originalName]
-        actualPropertyName = originalName
         // Property is being renamed, which is allowed - continue validation
       }
     }
@@ -679,7 +677,6 @@ export class SchemaValidationService {
     modelName: string,
     modelData: ModelMachineContext & { properties?: { [key: string]: any } }
   ): ValidationResult {
-    const errors: ValidationError[] = []
 
     // Create a temporary schema context that includes this model for validation purposes
     // This allows validateProperty to work without actually adding the model to the real schema
@@ -703,7 +700,7 @@ export class SchemaValidationService {
   validateModel(
     schema: SchemaMachineContext,
     modelName: string,
-    modelData?: ModelMachineContext
+    _modelData?: ModelMachineContext
   ): ValidationResult {
     const errors: ValidationError[] = []
 
@@ -721,7 +718,7 @@ export class SchemaValidationService {
 
     // Validate all properties in the model
     if (model.properties) {
-      for (const [propertyName, propertyDef] of Object.entries(model.properties)) {
+      for (const propertyName of Object.keys(model.properties)) {
         const propertyResult = this.validateProperty(schema, modelName, propertyName)
         if (!propertyResult.isValid) {
           errors.push(...propertyResult.errors.map(err => ({

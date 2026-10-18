@@ -44,7 +44,7 @@ export function setRetriesWhenOnlineEnabled(enabled: boolean | undefined): boole
 const isOffline = (): boolean =>
   typeof navigator !== 'undefined' && navigator.onLine === false
 
-const onlineTarget = (): { addEventListener: Function; removeEventListener: Function } | undefined =>
+const onlineTarget = (): Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | undefined =>
   typeof globalThis.addEventListener === 'function' ? (globalThis as any) : undefined
 
 export function createRetryWhenOnline(

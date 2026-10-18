@@ -1,8 +1,7 @@
-import { ModelSchema } from '@/types'
 import { PropertyType as PropertySchemaType } from '@/types/property'
 import type { Attestation } from '@seedprotocol/eas'
 import { PropertyType } from '@/seedSchema'
-import { IItem, IItemProperty } from '@/interfaces'
+import { IItemProperty } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import type { Model } from '@/Model/Model'
 

@@ -170,7 +170,7 @@ export const processSeedConfig = (config: SeedConfig): ModelDefinitions => {
  */
 export const saveModelsFromMarkdown = async (
   filePath: string,
-  db: BetterSQLite3Database<any> | SqliteRemoteDatabase<any>,
+  _db: BetterSQLite3Database<any> | SqliteRemoteDatabase<any>,
 ): Promise<ModelDefinitions> => {
   // Parse frontmatter
   const frontmatter = parseMarkdownFrontmatter(filePath)

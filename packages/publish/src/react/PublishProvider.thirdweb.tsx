@@ -1,6 +1,4 @@
 import React, { FC, useRef } from "react"
-import type { MutableRefObject } from "react"
-import type { QueryClient } from "@tanstack/react-query"
 import { ThirdwebProvider } from "thirdweb/react"
 import { SeedProvider } from '@seedprotocol/react'
 import { initPublish, getConfigRef, type PublishConfig } from "../config"

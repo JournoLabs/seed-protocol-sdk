@@ -1,5 +1,4 @@
-import { Type, TSchema } from '@sinclair/typebox'
-import { ModelPropertyDataTypes } from '@/helpers/property'
+import { Type } from '@sinclair/typebox'
 
 /** Default maximum length for Text properties when not explicitly set. Html holds arbitrary-length content and does not use this limit. */
 export const DEFAULT_TEXT_MAX_LENGTH = 255

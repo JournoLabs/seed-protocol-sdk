@@ -135,7 +135,7 @@ export class ArweaveImageService {
   private async getImageMetadataFromFullRequest(
     url: string,
     contentType: string,
-    contentLength: string | null
+    _contentLength: string | null
   ): Promise<ImageMetadata> {
     try {
       const response = await this.fetchWithTimeout(url)
@@ -177,7 +177,7 @@ export class ArweaveImageService {
    */
   private extractImageDimensions(
     buffer: Buffer,
-    contentType: string
+    _contentType: string
   ): { width: number; height: number } {
     try {
       const dimensions = sizeOf(buffer)

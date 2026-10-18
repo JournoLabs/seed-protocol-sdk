@@ -5,16 +5,14 @@ import { debounce } from "lodash-es"
 import { getPropertySchema, ModelProperty } from '@seedprotocol/sdk'
 import { useIsClientReady } from "./client"
 import { Subscription } from "xstate"
-import debug from "debug"
 import { useLiveQuery } from "./liveQuery"
 import { BaseDb } from '@seedprotocol/sdk'
-import { properties as propertiesTable, models as modelsTable, schemas as schemasTable } from '@seedprotocol/sdk'
+import { properties as propertiesTable, schemas as schemasTable } from '@seedprotocol/sdk'
 import { eq, or } from "drizzle-orm"
 import { Model } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getSchemaNameFromId } from '@seedprotocol/sdk'
 
-const logger = debug('seedSdk:browser:react:modelProperty')
 
 type UseModelPropertiesResult = {
   modelProperties: ModelProperty[]
@@ -59,15 +57,6 @@ export const useModelProperties = (
   // Use useModel to handle both lookup patterns (by ID or by schemaId + modelName)
   const { model } = useModel(schemaIdOrModelId, modelName)
   
-  // Determine the modelName for use in getPropertySchema
-  const modelNameForProperty = useMemo(() => {
-    if (!model) return undefined
-    try {
-      return model.modelName ?? (model as any).name
-    } catch {
-      return undefined
-    }
-  }, [model])
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
 

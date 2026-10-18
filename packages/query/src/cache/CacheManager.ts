@@ -90,7 +90,7 @@ export class CacheManager {
     if (!this.config.enabled) return null
 
     try {
-      let cached = this.memoryCache.getCollection(schemaName, optionsKey)
+      const cached = this.memoryCache.getCollection(schemaName, optionsKey)
       if (cached) {
         this.stats.hits++
         return cached
@@ -151,7 +151,7 @@ export class CacheManager {
     if (!this.config.enabled) return null
 
     try {
-      let cached = this.memoryCache.getItem(seedUid, optionsKey)
+      const cached = this.memoryCache.getItem(seedUid, optionsKey)
       if (cached) {
         this.stats.hits++
         return cached

@@ -19,7 +19,7 @@ export const createModelInstances = fromCallback<
 >(({ sendBack, input }) => {
   const evictionEpoch = currentEvictionEpoch()
   const _create = async (): Promise<void> => {
-    const { modelIds, schemaName } = input
+    const { modelIds } = input
     
     if (modelIds.length === 0) {
       logger('No model IDs provided, skipping instance creation')

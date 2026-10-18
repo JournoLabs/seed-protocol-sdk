@@ -86,7 +86,7 @@ export const identifyString = (str: string) => {
   try {
     JSON.parse(str)
     return 'json'
-  } catch (e) {
+  } catch {
     // Not JSON
   }
 

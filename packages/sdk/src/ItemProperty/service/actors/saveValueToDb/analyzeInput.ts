@@ -35,7 +35,6 @@ export const analyzeInput = fromCallback<
     seedLocalId,
     versionLocalId,
     versionUid,
-    propertyValue: existingValue,
     propertyRecordSchema,
     modelName,
   } = context
@@ -75,7 +74,7 @@ export const analyzeInput = fromCallback<
     const { ModelPropertyDataTypes } = schemaMod
     const { SchemaValidationService } = await import('../../../../Schema/service/validation/SchemaValidationService')
 
-    let propertyName = propertyNameRaw
+    const propertyName = propertyNameRaw
     if (!propertyName) {
       throw new Error('propertyName is required')
     }
@@ -233,7 +232,7 @@ export const analyzeInput = fromCallback<
 
     const stringValueForContext =
       typeof newValue === 'string' ? newValue : (newValue !== null && newValue !== undefined ? String(newValue) : undefined)
-    let updatedContext: Partial<PropertyMachineContext> = {
+    const updatedContext: Partial<PropertyMachineContext> = {
       propertyValue: stringValueForContext,
       renderValue: stringValueForContext,
     }

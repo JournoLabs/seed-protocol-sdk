@@ -16,7 +16,7 @@ import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/m
 import { and, eq, isNull, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
-import { modelSchemas, ModelSchemaType } from '@/seedSchema/ModelSchemaSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { InferInsertModel } from 'drizzle-orm'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { refreshCachedProperties } from './cachedPropertyRefresh'
@@ -318,7 +318,7 @@ export const getObjectForRow = (row: any): ResultObject => {
     // Try to parse the value as JSON
     try {
       obj[colName] = JSON.parse(value)
-    } catch (e) {
+    } catch {
       // If it fails, just set the value as a string
       obj[colName] = value
     }
@@ -571,7 +571,6 @@ export const createOrUpdate = async <T>(
   table: SQLiteTableWithColumns<any>,
   values: Partial<Record<keyof T, T[keyof T]>>,
 ) => {
-  const startTime = Date.now()
 
   const valueFilters: SQL[] = []
 
@@ -609,7 +608,6 @@ export const createOrUpdate = async <T>(
     valueFilters.push(eq(table[key], finalValue))
   }
 
-  const doneWithFilters = Date.now()
 
   // console.log('valueFilters:', valueFilters)
 
@@ -623,7 +621,6 @@ export const createOrUpdate = async <T>(
     .from(table)
     .where(and(...valueFilters))
 
-  const doneWithExistingRecords = Date.now()
 
   if (existingRecords.length > 1) {
     throw new Error('Multiple records found')
@@ -636,7 +633,6 @@ export const createOrUpdate = async <T>(
       .set(safeValues)
       .where(and(...valueFilters))
 
-    const doneWithUpdate = Date.now()
 
     return existingRecords[0] as T
   } else {
@@ -1330,7 +1326,6 @@ export const addModelsToDb = async (
       const modelProperties = modelClass.properties || []
       schema = modelPropertiesToObject(modelProperties)
     }
-    const schemaPropertyNames = new Set(Object.keys(schema))
 
     // Search for all properties and create them if they don't exist
     // Properties are unique by name + modelId, so we search using both
@@ -1381,7 +1376,6 @@ export const addModelsToDb = async (
 
       // Handle ref property - create ref model if needed
       // Check both ref and refModelName (refModelName is set by createModelFromJson)
-      let expectedRefModelId: number | null = null
       const refModelName = propertyValues.ref || propertyValues.refModelName
       if (refModelName) {
         // When ref model was already processed in this batch, use it (avoids db round-trip)
@@ -1394,7 +1388,6 @@ export const addModelsToDb = async (
           modelRecords.set(refModelName, refModel)
         }
         propertyData.refModelId = refModel.id ?? null
-        expectedRefModelId = refModel.id ?? null
       } else {
         // If it's not a Relation type, ensure refModelId is null
         propertyData.refModelId = null
@@ -2071,7 +2064,7 @@ export async function writeModelToDb(
   if (!db) throw new Error('Database not available')
   
   // Find or create model record
-  let modelRecords = await db
+  const modelRecords = await db
     .select()
     .from(modelsTable)
     .where(eq(modelsTable.schemaFileId, modelFileId))
@@ -2499,7 +2492,7 @@ export async function getModelId(
   const modelSchemaMod = await import('../seedSchema/ModelSchema')
   const { models: modelsTable } = modelSchemaMod
   const drizzleMod = await import('drizzle-orm')
-  const { eq, and, or } = drizzleMod
+  const { eq, and } = drizzleMod
 
   // Try to find by modelFileId first (more reliable)
   let records = await db
@@ -2510,7 +2503,6 @@ export async function getModelId(
 
   // If not found by modelFileId, try by name
   if (records.length === 0) {
-    const conditions = [eq(modelsTable.name, modelNameOrFileId)]
     
     // If schema is provided, narrow the search
     if (schemaNameOrId !== undefined) {

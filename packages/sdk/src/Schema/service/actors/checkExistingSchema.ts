@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { SchemaMachineContext } from '../schemaMachine'
-import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schema'
+import { listCompleteSchemaFiles } from '@/helpers/schema'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseFileManager } from '@/helpers'
 import { loadModelsFromDbForSchema, mergeDbModelsIntoSchemaModels } from '@/helpers/db'
@@ -260,7 +260,7 @@ export const checkExistingSchema = fromCallback<
                 dbSchemas = [draft]
                 break
               }
-            } catch (error) {
+            } catch {
               continue
             }
           }
@@ -397,7 +397,7 @@ export const checkExistingSchema = fromCallback<
               matchingDraft = draft
               break
             }
-          } catch (error) {
+          } catch {
             continue
           }
         }

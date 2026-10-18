@@ -16,7 +16,7 @@ const identifyString = (str: string) => {
   try {
     JSON.parse(str)
     return 'json'
-  } catch (e) {
+  } catch {
     // Not JSON
   }
 
@@ -212,7 +212,7 @@ const contentMatchesTag = async (transactionId: string, bytes: ArrayBuffer, expe
   try {
     const subtle = globalThis.crypto && globalThis.crypto.subtle
     if (subtle && toHex(await subtle.digest('SHA-256', bytes)) === want) return true
-  } catch (error) {
+  } catch {
     /* fall back to the page */
   }
   return verifyOnPage(transactionId, bytes, want)
@@ -253,7 +253,7 @@ const fetchRaw = async (
         .split(';')[0]
         .trim()
         .toLowerCase()
-    } catch (error) {
+    } catch {
       /* next gateway */
       continue
     } finally {
@@ -336,7 +336,7 @@ const decodeBase64 = (base64: string): Uint8Array | undefined => {
       binaryData[i] = binaryString.charCodeAt(i)
     }
     return binaryData
-  } catch (error) {
+  } catch {
     return undefined
   }
 }
@@ -575,7 +575,7 @@ const downloadFile = async (
 
       buffer = await response.arrayBuffer()
 
-    } catch(error) {
+    } catch {
       globalThis.postMessage({
         message: 'excludeTransaction',
         transactionId,

@@ -1,10 +1,3 @@
-import {
-  initializeFeedPlatform,
-  initializeSeedClient,
-  teardownSeedClient,
-  DEFAULT_ARWEAVE_HOST,
-} from './bootstrap';
-import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
 
 export { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';

@@ -19,7 +19,7 @@ async function resolvePropertyDef(
   propertyName: string,
   scope: ModelScope,
 ): Promise<{ dataType?: string; ref?: string; refValueType?: string; storageType?: string; localStorageDir?: string; filenameSuffix?: string; required?: boolean } | undefined> {
-  let schema = await getPropertySchema(modelName, propertyName, scope)
+  const schema = await getPropertySchema(modelName, propertyName, scope)
   if (schema) return schema
   const db = BaseDb.getAppDb()
   if (!db) return undefined

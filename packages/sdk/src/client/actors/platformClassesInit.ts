@@ -1,5 +1,5 @@
 import { ClientManagerContext, FromCallbackInput, SeedConstructorOptions } from '@/types'
-import { fromCallback, EventObject, waitFor }                      from "xstate";
+import { fromCallback, EventObject }                      from "xstate";
 import debug                                       from 'debug'
 import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";

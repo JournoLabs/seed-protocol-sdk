@@ -3,7 +3,7 @@ import {
   fetchAllBinaryData,
   fetchAllMetadataRecords,
 } from '@/helpers/file/fetchAll/actors'
-import { GET_FILES_METADATA, type Attestation } from '@seedprotocol/eas'
+import { type Attestation } from '@seedprotocol/eas'
 
 type FetchAllFilesMachineContext = {
   addresses: string[]

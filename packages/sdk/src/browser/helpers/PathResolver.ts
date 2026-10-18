@@ -35,7 +35,7 @@ export class BrowserPathResolver implements IPathResolver {
    * Gets the .seed directory path
    * Note: In browser, this returns the OPFS path where .seed data is stored
    */
-  getDotSeedDir(schemaFileDir?: string): string {
+  getDotSeedDir(_schemaFileDir?: string): string {
     // In browser, .seed directory is stored in OPFS
     // The actual path is handled by the FileManager
     return '/.seed'
@@ -45,7 +45,7 @@ export class BrowserPathResolver implements IPathResolver {
    * Finds the Seed Protocol config file
    * Note: In browser, config files are not accessible via filesystem
    */
-  findConfigFile(searchDir?: string): string | null {
+  findConfigFile(_searchDir?: string): string | null {
     // In browser, config files are typically embedded in the bundle
     // or loaded via fetch/import
     return null

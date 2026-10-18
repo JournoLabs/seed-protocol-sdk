@@ -3,7 +3,6 @@ import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/r
 import { camelCase } from 'lodash-es'
 import {
   Attestation,
-  SchemaWhereInput,
   easName,
   isNameMatchLevel,
   matchEasName,
@@ -563,7 +562,6 @@ const createMetadataRecordsForStorageTransactionId = async (
   }
 
   const attestationData = parsed.metadata
-  const propertyName = camelCase(attestationData.name)
   // A string tx id attested under the legacy `bytes32 storage_transaction_id` schema (0xa1a5bee9…,
   // Optimism Sepolia only) decodes as 0x…20, the ABI string offset; the id itself is only in the raw
   // `data`. It is stored as-is and the download path skips it. Not recovered: the 8 such

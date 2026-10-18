@@ -38,7 +38,7 @@ export const hydrateFromDb = fromCallback<
   if (!propertyNameRaw) {
     throw new Error('propertyName is required')
   }
-  let propertyName = propertyNameRaw
+  const propertyName = propertyNameRaw
 
   // Note: isRelation, isImage, isFile checks moved inside async function
   // to use dynamically imported ModelPropertyDataTypes
@@ -57,10 +57,6 @@ export const hydrateFromDb = fromCallback<
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
 
-    const isRelationDynamic =
-      propertyRecordSchema &&
-      propertyRecordSchema.ref &&
-      normalizedDataType === ModelPropertyDataTypes.Relation
 
     const isImageDynamic =
       propertyRecordSchema &&
@@ -117,7 +113,6 @@ export const hydrateFromDb = fromCallback<
     const {
       localId,
       uid,
-      propertyName: propertyNameFromDb,
       propertyValue: propertyValueFromDb,
       seedLocalId: seedLocalIdFromDb,
       seedUid: seedUidFromDb,

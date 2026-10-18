@@ -3,9 +3,7 @@ import { ClientManagerContext, FromCallbackInput } from "@/types/machines";
 import { EventObject, fromCallback } from "xstate";
 import { areFsListenersReady, setupFsListeners } from "@/events/files";
 import { eventEmitter } from "@/eventBus";
-import debug from "debug";
 
-const logger = debug('seedSdk:client:actors:fileSystemInit')
 
 export const fileSystemInit = fromCallback<
 EventObject, 

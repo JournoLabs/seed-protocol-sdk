@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Subscription, SnapshotFrom } from 'xstate'
+import { Subscription } from 'xstate'
 import debug from 'debug'
 import { ItemProperty } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
@@ -10,16 +10,13 @@ import { BaseDb } from '@seedprotocol/sdk'
 import { metadata } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, isNotNull } from 'drizzle-orm'
-import { getMetadataLatest } from '@seedprotocol/sdk'
 import { pickLatestMetadataRowPerProperty } from '@seedprotocol/sdk'
-import { propertyMachine } from '@seedprotocol/sdk'
 import { debounce, startCase } from 'lodash-es'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const logger = debug('seedSdk:react:property')
 const propertiesLogger = debug('seedSdk:react:itemProperties')
 
-type ItemPropertySnapshot = SnapshotFrom<typeof propertyMachine>
 
 type UseItemPropertyReturn = {
   property: IItemProperty | undefined

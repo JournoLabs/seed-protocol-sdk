@@ -283,7 +283,7 @@ export class BrowserFileManager implements IFileManager {
       try {
         const zenfs = await this.getFs()
         await zenfs.promises.mkdir(filePath, { recursive: true })
-      } catch (error) {
+      } catch {
         // This is a no-op. We tried to create a directory that already exists.
         logger('Attempted to create a directory that already exists')
       }

@@ -177,7 +177,6 @@ export async function deleteSchema(
 
   // Delete the file
   const fs = await BaseFileManager.getFs()
-  const path = BaseFileManager.getPathModule()
   
   try {
     await fs.promises.unlink(filePath)
@@ -224,7 +223,7 @@ export async function listSchemaFiles(): Promise<Array<{ name: string; version: 
             if (data.$schema) {
               continue
             }
-          } catch (error) {
+          } catch {
             // If we can't read/parse the file, skip it
             continue
           }
@@ -277,7 +276,7 @@ export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[
       const match = file.match(/^(.+?)_(.+)_v(\d+)\.json$/)
       
       if (match) {
-        const [, schemaFileId, schemaName, versionStr] = match
+        const [, schemaFileId, , versionStr] = match
         const version = parseInt(versionStr, 10)
         
         if (!isNaN(version)) {
@@ -300,7 +299,7 @@ export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[
                 schemaFileId: schemaFileId, // Use from filename, not data.id
               })
             }
-          } catch (error) {
+          } catch {
             // If we can't read/parse the file, skip it
             continue
           }

@@ -2,7 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { ModelMachineContext } from '../modelMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
+import { properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import debug from 'debug'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
 

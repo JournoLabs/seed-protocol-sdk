@@ -177,7 +177,7 @@ export const getItemData: GetItemData = async ({
     // Continue with default versionRow values
   }
 
-  let itemData = {
+  const itemData = {
     ...seedRow,
     ...versionRow,
     schemaName,
@@ -195,7 +195,7 @@ export const getItemData: GetItemData = async ({
   for (const propertyData of propertiesData) {
     const propertyName = propertyData.propertyName
 
-    let propertyValue = propertyData.propertyValue
+    const propertyValue = propertyData.propertyValue
 
     const schemaBaseName = toSchemaPropertyName(propertyName)
     if (schemaBaseName && propertyData.refSeedType) {

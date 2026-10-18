@@ -13,10 +13,6 @@ export type ModelStatus = (propName: string) => keyof PropertyStates
 
 export type ExcludedKeys = 'states' | 'status'
 
-type ExcludeKeys<T, K> = {
-  [P in keyof T as Exclude<P, K>]: T[P]
-}
-
 /**
  * @deprecated Use Model directly instead. This type is kept for backward compatibility during migration.
  */

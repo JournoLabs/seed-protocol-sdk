@@ -88,7 +88,7 @@ export function unloadEntity<T extends object>(instance: T, config: UnloadConfig
         try {
           sub.unsubscribe()
           ;(instanceState as Record<string, unknown>)[key] = null
-        } catch (error) {
+        } catch {
           // Ignore errors during cleanup
         }
       }
@@ -99,7 +99,7 @@ export function unloadEntity<T extends object>(instance: T, config: UnloadConfig
   if (config.onUnload) {
     try {
       config.onUnload(instance)
-    } catch (error) {
+    } catch {
       // Ignore errors during cleanup
     }
   }
@@ -108,7 +108,7 @@ export function unloadEntity<T extends object>(instance: T, config: UnloadConfig
   try {
     const service = config.getService(instance)
     service.stop()
-  } catch (error) {
+  } catch {
     // Ignore errors if service is already stopped
   }
 }

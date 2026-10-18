@@ -132,16 +132,12 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       propertyName: propertyNameFromDb,
       propertyValue: propertyValueFromDb,
       modelType,
-      seedUid,
       seedLocalId: seedLocalIdFromDb,
       versionLocalId,
-      versionUid,
       schemaUid,
       easDataType,
-      localStorageDir: localStorageDirFromDb,
       refSeedType: refSeedTypeFromDb,
       refResolvedValue: refResolvedValueFromDb,
-      refResolvedDisplayValue: refResolvedDisplayValueFromDb,
     } = rows[0]
 
     // Stored model types are the model's EAS name (ADR 0008): `blog_post` for BlogPost.

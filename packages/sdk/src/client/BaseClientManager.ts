@@ -6,12 +6,11 @@ export abstract class BaseClientManager {
   constructor() {
   }
 
-  static async init(options: SeedConstructorOptions): Promise<void> {
+  static async init(_options: SeedConstructorOptions): Promise<void> {
     if (this.isInitialized) {
       return
     }
 
-    const { config, addresses } = options
 
 
     this.isInitialized = true

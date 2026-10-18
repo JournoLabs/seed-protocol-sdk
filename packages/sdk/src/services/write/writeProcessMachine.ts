@@ -1,5 +1,4 @@
 import { assign, setup } from 'xstate'
-import { EventObject } from 'xstate'
 import { ValidationError } from '@/Schema/validation'
 import { validateEntity, type ValidateEntityInput } from './actors/validateEntity'
 import { writeToDatabase } from './actors/writeToDatabase'
