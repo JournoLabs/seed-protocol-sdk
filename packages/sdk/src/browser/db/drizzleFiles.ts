@@ -360,6 +360,30 @@ WHERE \`uid\` IS NULL
 	);
 `
 
+export const migrationSql_0020_add_pending_writes = `CREATE TABLE \`pending_writes\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`op_id\` text NOT NULL,
+	\`group_id\` text,
+	\`seed_local_id\` text NOT NULL,
+	\`property_name\` text,
+	\`kind\` text NOT NULL,
+	\`value\` text,
+	\`value_ref\` text,
+	\`base_row_id\` text,
+	\`base_uid\` text,
+	\`created_at\` integer NOT NULL,
+	\`tab_id\` text,
+	\`status\` text NOT NULL,
+	\`error\` text,
+	\`attempts\` integer DEFAULT 0 NOT NULL,
+	\`applied_at\` integer,
+	\`conflict\` text,
+	\`conflict_resolved_at\` integer
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX \`pending_writes_op_id_unique\` ON \`pending_writes\` (\`op_id\`);--> statement-breakpoint
+CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`seed_local_id\`,\`property_name\`,\`created_at\`);`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -504,6 +528,13 @@ export const journalJson = `{
       "when": 1774900000000,
       "tag": "0019_add_derived_from_uid_to_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792349085245,
+      "tag": "0020_add_pending_writes",
+      "breakpoints": true
     }
   ]
 }`
@@ -513,8 +544,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
-  "prevId": "ab739b16-741c-4ac4-b3bc-a894ef2582a1",
+  "id": "957c9caf-afbc-443d-ae58-02b3557dd44a",
+  "prevId": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1355,6 +1386,161 @@ export const snapshotJson = `{
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pending_writes": {
+      "name": "pending_writes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "op_id": {
+          "name": "op_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "property_name": {
+          "name": "property_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value_ref": {
+          "name": "value_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "base_row_id": {
+          "name": "base_row_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "base_uid": {
+          "name": "base_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tab_id": {
+          "name": "tab_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conflict": {
+          "name": "conflict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conflict_resolved_at": {
+          "name": "conflict_resolved_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "pending_writes_op_id_unique": {
+          "name": "pending_writes_op_id_unique",
+          "columns": [
+            "op_id"
+          ],
+          "isUnique": true
+        },
+        "pending_writes_drain_order": {
+          "name": "pending_writes_drain_order",
+          "columns": [
+            "status",
+            "seed_local_id",
+            "property_name",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
