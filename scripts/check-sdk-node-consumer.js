@@ -71,6 +71,13 @@ const second = ${JSON.stringify(path.join(tmp, 'second'))}
 await client.init({ config: { filesDir: first, dbConfig: { dbUrl: ${JSON.stringify(path.join(tmp, 'not-yet', 'db', 'app.db'))} } } })
 client.stop()
 if (client.isInitialized()) throw new Error('isInitialized() is true after stop()')
+if (await client.getAddresses().then(() => true, () => false)) throw new Error('getAddresses() worked after stop()')
+const warn = console.warn
+let warned = 0
+console.warn = () => { warned++ }
+client.stop()
+console.warn = warn
+if (warned !== 1) throw new Error('a second stop() did not warn once: ' + warned)
 await client.init({ config: { filesDir: second } })
 if (!client.isInitialized()) throw new Error('init after stop() did not initialise')
 const filesDir = client.getService().getSnapshot().context.filesDir

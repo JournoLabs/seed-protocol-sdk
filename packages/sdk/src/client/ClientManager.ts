@@ -77,9 +77,29 @@ export const INIT_CONFIG_CONFLICT_MESSAGE =
   'To change addresses, use client.setAddresses() (or call init again with the same config and new addresses).'
 
 const ensureInitialized = () => {
-  if (!clientManager.getSnapshot().context.isInitialized) {
+  const snapshot = clientManager.getSnapshot()
+  // After stop() the stopped actor's context still says isInitialized, so check its status too.
+  if (snapshot.status !== 'active' || !snapshot.context.isInitialized) {
     throw new Error(CLIENT_NOT_INITIALIZED);
   }
+}
+
+export const CLIENT_ALREADY_STOPPED_WARNING =
+  'client.stop() or client.unload() was called after the client had already stopped; this call does nothing. ' +
+  'Remove the extra call, or call client.init() before stopping again.'
+
+/** Shared by stop() and unload(). A repeat call after a stop warns and does nothing. */
+const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
+  if (clientManager.getSnapshot().status === 'stopped') {
+    console.warn(CLIENT_ALREADY_STOPPED_WARNING)
+    return
+  }
+  ensureInitialized()
+  activeInitConfig = undefined
+  cancelAllRetriesWhenOnline()
+  unregisterSeedQueryLocalSource()
+  clientManager.stop()
+  if (unsubscribe) subscription.unsubscribe()
 }
 
 const coalescedInit = createCoalescedAsync(async (options: any) => {
@@ -315,21 +335,8 @@ const clientInstance = {
     });
     return () => subscription.unsubscribe()
   },
-  stop: () => {
-    ensureInitialized();
-    activeInitConfig = undefined
-    cancelAllRetriesWhenOnline()
-    unregisterSeedQueryLocalSource()
-    clientManager.stop();
-  },
-  unload: () => {
-    ensureInitialized();
-    activeInitConfig = undefined
-    cancelAllRetriesWhenOnline()
-    unregisterSeedQueryLocalSource()
-    clientManager.stop();
-    subscription.unsubscribe();
-  },
+  stop: () => stopClient({ unsubscribe: false }),
+  unload: () => stopClient({ unsubscribe: true }),
 }
 
 // Export the singleton instance

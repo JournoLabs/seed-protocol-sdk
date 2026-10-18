@@ -39,7 +39,7 @@ All five entity classes (Schema, Model, ModelProperty, Item, ItemProperty) have 
 - **Schema.destroy()** – deletes the schema (and cascade: model_schemas, models, properties) from the database.
 - **Model.destroy()** – deletes the model and its properties from the database and updates the Schema context.
 - **ModelProperty.destroy()** – deletes the property row from the database and updates the Schema context.
-- **Item.destroy()** – performs a **soft delete** (sets `_markedForDeletion` on the seed row); the hook is named `useDeleteItem` because the main user-facing action is removing the item from the app.
+- **Item.destroy()** – performs a **soft delete** (sets `_markedForDeletion` on the seed row); the hook is named `useDeleteItem` because the main user-facing action is removing the item from the app. There is no restore: nothing in the SDK clears `_markedForDeletion`, so a destroyed item stays out of `Item.all` and `useItems` results. `deleted: true` lists destroyed items, for example for a trash view.
 - **ItemProperty.destroy()** – deletes the property’s metadata row(s) from the database and removes the property from the parent Item’s context.
 
 ## Usage example
