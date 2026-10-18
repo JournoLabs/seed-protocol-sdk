@@ -35,7 +35,7 @@ export const itemMachineSingle = setup({
     },
     updateProperties: {
       actions: assign({
-        propertiesUpdatedAt: Date.now(),
+        propertiesUpdatedAt: () => Date.now(),
       }),
     },
     updateValue: {
@@ -85,9 +85,11 @@ export const itemMachineSingle = setup({
     },
     updateContext: {
       actions: assign(({ context, event }) => {
+        // Every key the event carries: one sent before loading sets it (revokedAt, versionsCount,
+        // createdAt) must not be dropped because the context doesn't have it yet.
         const updates: any = {}
         for (const key in event) {
-          if (key !== 'type' && key in context) {
+          if (key !== 'type') {
             updates[key] = (event as any)[key]
           }
         }

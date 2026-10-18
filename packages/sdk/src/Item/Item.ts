@@ -1126,12 +1126,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     } = options ?? {}
     const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
+    // Built without waiting; with waitForReady the items are then awaited together, below.
     for (const itemData of itemsData) {
       itemInstances.push(
-        await Item.create({
-          ...itemData,
-          modelName,
-        }),
+        await Item.create(
+          {
+            ...itemData,
+            modelName,
+          },
+          { waitForReady: false },
+        ),
       )
     }
 
