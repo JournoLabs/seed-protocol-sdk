@@ -35,8 +35,10 @@ export function countLiveQueries() {
     })
   }) as typeof BaseDb.liveQuery)
 
-  const matching = ({ param, sql }: LiveQueryFilter) =>
-    records.filter((r) => r.params.includes(param) && (!sql || sql.test(r.sql)))
+  const matching = ({ param, sql }: LiveQueryFilter) => {
+    const params = Array.isArray(param) ? param : [param]
+    return records.filter((r) => params.every((p) => r.params.includes(p)) && (!sql || sql.test(r.sql)))
+  }
 
   return {
     /** liveQuery calls matching `filter`. */
@@ -54,8 +56,12 @@ export function countLiveQueries() {
 
 export type LiveQueryCounter = ReturnType<typeof countLiveQueries>
 
-/** Selects liveQueries by a bound parameter (e.g. a seedLocalId) and, optionally, their SQL text. */
-export type LiveQueryFilter = { param: string; sql?: RegExp }
+/**
+ * Selects liveQueries by a bound parameter (e.g. a seedLocalId or a row id) or several that must all
+ * be bound and, optionally, their SQL text.
+ */
+export type LiveQueryFilter = { param: LiveQueryParam | LiveQueryParam[]; sql?: RegExp }
+type LiveQueryParam = string | number
 
 /** SQL text and bound parameters of a liveQuery argument: an SQL tag function or a Drizzle query. */
 function describeQuery(query: unknown): { sql: string; params: unknown[] } {
