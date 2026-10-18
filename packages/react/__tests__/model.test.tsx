@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import {
   useModel,
@@ -253,6 +253,21 @@ function UseDestroyModelTest({ model }: { model: Model | null }) {
       </button>
     </div>
   )
+}
+
+/** Resolves once the model's service has gone 300ms without emitting a snapshot. */
+async function waitForModelQuiet(model: Model): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let timer = setTimeout(done, 300)
+    const sub = model.getService().subscribe(() => {
+      clearTimeout(timer)
+      timer = setTimeout(done, 300)
+    })
+    function done() {
+      sub.unsubscribe()
+      resolve()
+    }
+  })
 }
 
 describe('React Model Hooks Integration Tests', () => {
@@ -772,6 +787,40 @@ describe('React Model Hooks Integration Tests', () => {
 
       const createdName = screen.getByTestId('created-model-name')
       expect(createdName.textContent).toBe('HookTestModel')
+    })
+  })
+
+  describe('useCreateModel loading state', () => {
+    it('clears isLoading when create returns a model that is already loaded', async () => {
+      // By modelFileId: a create by name alone always makes a new model ("Post 1").
+      const modelFileId = 'post-model-models-test-id'
+      const loaded = Model.create('Post', 'Test Schema Models', { modelFileId, waitForReady: false })
+      await waitUntilOrThrow(() => loaded.getService().getSnapshot().value === 'idle', 'the model to be idle')
+      await waitForModelQuiet(loaded)
+
+      const { result } = renderHook(() => useCreateModel())
+      let created: Model | undefined
+      act(() => {
+        created = result.current.create('Test Schema Models', 'Post', { modelFileId })
+      })
+      expect(created).toBe(loaded)
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 2000 })
+      expect(result.current.error).toBeNull()
+    })
+
+    it('clears isLoading and sets error when Model.create throws', async () => {
+      const { result } = renderHook(() => useCreateModel())
+      let thrown: unknown
+      act(() => {
+        try {
+          result.current.create('Test Schema Models', '')
+        } catch (err) {
+          thrown = err
+        }
+      })
+      expect(thrown).toBeInstanceOf(Error)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.error).toBe(thrown)
     })
   })
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useSeedQueryClient } from './queryClient'
 import { BaseFileManager, eventEmitter, FILES_CHANGED_EVENT } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 
@@ -9,7 +10,7 @@ export const FILES_QUERY_KEY_PREFIX = ['seed', 'files'] as const
  * Returns an up-to-date list of filenames stored in the given directory.
  * Automatically refetches when files are saved (file-saved) or after bulk downloads (fs.downloadAll.success).
  *
- * Must be used within SeedProvider and after client.init().
+ * Use within SeedProvider, after client.init().
  *
  * @param dir - Directory name under the files root (e.g. 'files', 'images'). Default: 'files'.
  *
@@ -21,7 +22,7 @@ export const FILES_QUERY_KEY_PREFIX = ['seed', 'files'] as const
  */
 export function useFiles(dir: string = 'files') {
   const isClientReady = useIsClientReady()
-  const queryClient = useQueryClient()
+  const queryClient = useSeedQueryClient()
 
   const queryKey = useMemo(() => [...FILES_QUERY_KEY_PREFIX, dir] as const, [dir])
 
@@ -34,7 +35,7 @@ export function useFiles(dir: string = 'files') {
     queryKey,
     queryFn: () => BaseFileManager.listFiles(dir),
     enabled: isClientReady,
-  })
+  }, queryClient)
 
   useEffect(() => {
     const fileSavedHandler = (filePath: string) => {

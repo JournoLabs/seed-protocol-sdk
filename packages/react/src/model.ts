@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState, useEffect, useCallback, useRef } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { Model } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useLiveQuery } from './liveQuery'
@@ -6,7 +6,9 @@ import { BaseDb } from '@seedprotocol/sdk'
 import { models as modelsTable, modelSchemas, schemas as schemasTable } from '@seedprotocol/sdk'
 import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'xstate'
-import { QueryClient, QueryClientContext, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useSeedQueryClient } from './queryClient'
+import { useCreateState } from './useCreateState'
 
 type UseModelsResult = {
   models: Model[]
@@ -27,14 +29,9 @@ type UseModels = (schemaId: UseModelsParams) => UseModelsResult
  */
 const getModelsQueryKey = (schemaId: UseModelsParams) => ['seed', 'models', schemaId] as const
 
-// Used only outside a QueryClientProvider: useModel(modelId) calls useModels(null) (hooks must
-// run in the same order), and an id lookup never needed a provider.
-let fallbackQueryClient: QueryClient | undefined
-
 export const useModels: UseModels = (schemaId) => {
   const isClientReady = useIsClientReady()
-  const contextQueryClient = useContext(QueryClientContext)
-  const queryClient = contextQueryClient ?? (fallbackQueryClient ??= new QueryClient())
+  const queryClient = useSeedQueryClient()
   // Latest models-table rows for this schema (live query): the ground truth for what exists.
   const tableIdsRef = useRef<Set<string> | null>(null)
 
@@ -286,47 +283,19 @@ export type UseCreateModelReturn = {
 }
 
 export const useCreateModel = (): UseCreateModelReturn => {
-  const subscriptionRef = useRef<Subscription | undefined>(undefined)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-
-  const resetError = useCallback(() => setError(null), [])
+  const { run, isLoading, error, resetError } = useCreateState('Failed to create model')
 
   const create = useCallback(
-    (schemaName: string, modelName: string, options?: UseCreateModelOptions): Model => {
-      setError(null)
-      setIsLoading(true)
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-      const model = Model.create(modelName, schemaName, {
-        ...options,
-        waitForReady: false,
-      }) as Model
-      const subscription = model.getService().subscribe((snapshot) => {
-        if (snapshot.value === 'error') {
-          setError(
-            (snapshot.context as any)._loadingError?.error ??
-              new Error('Failed to create model')
-          )
-          setIsLoading(false)
-        }
-        if (snapshot.value === 'idle') {
-          setError(null)
-          setIsLoading(false)
-        }
-      })
-      subscriptionRef.current = subscription
-      return model
-    },
-    []
+    (schemaName: string, modelName: string, options?: UseCreateModelOptions): Model =>
+      run(
+        () =>
+          Model.create(modelName, schemaName, {
+            ...options,
+            waitForReady: false,
+          }) as Model,
+      ),
+    [run],
   )
-
-  useEffect(() => {
-    return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-    }
-  }, [])
 
   return {
     create,

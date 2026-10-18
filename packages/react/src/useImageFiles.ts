@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useSeedQueryClient } from './queryClient'
 import { BaseFileManager } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { eventEmitter, FILES_CHANGED_EVENT } from '@seedprotocol/sdk'
@@ -10,7 +11,7 @@ const IMAGE_FILES_QUERY_KEY = ['seed', 'imageFiles'] as const
  * Returns an up-to-date list of image filenames stored in the file system (OPFS in browser).
  * Automatically refetches when images are saved (file-saved) or after bulk downloads (fs.downloadAll.success).
  *
- * Must be used within SeedProvider and after client.init().
+ * Use within SeedProvider, after client.init().
  *
  * @example
  * ```tsx
@@ -20,7 +21,7 @@ const IMAGE_FILES_QUERY_KEY = ['seed', 'imageFiles'] as const
  */
 export function useImageFiles() {
   const isClientReady = useIsClientReady()
-  const queryClient = useQueryClient()
+  const queryClient = useSeedQueryClient()
 
   const {
     data: imageFiles = [],
@@ -31,7 +32,7 @@ export function useImageFiles() {
     queryKey: IMAGE_FILES_QUERY_KEY,
     queryFn: () => BaseFileManager.listImageFiles(),
     enabled: isClientReady,
-  })
+  }, queryClient)
 
   useEffect(() => {
     const fileSavedHandler = (filePath: string) => {

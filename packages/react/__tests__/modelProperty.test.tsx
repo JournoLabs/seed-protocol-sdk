@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import {
   useModelProperties,
@@ -139,10 +139,11 @@ function UseModelPropertyTest({
   modelName: string | null | undefined
   propertyName: string | null | undefined
 }) {
+  // null arguments type-check (they failed tsc with TS2345) and wait instead of looking anything up
   const { modelProperty, isLoading, error } = useModelProperty(
     schemaId || 'Test Schema Properties',
-    modelName || '',
-    propertyName || ''
+    modelName,
+    propertyName
   )
   const [status, setStatus] = useState<string>('loading')
 
@@ -213,9 +214,9 @@ function UseCreateModelPropertyTest() {
   const [createdPropertyName, setCreatedPropertyName] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('idle')
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     setStatus('creating')
-    const prop = create('Test Schema Properties', 'Post', { name: 'hookAddedProp', dataType: 'Text' })
+    const prop = await create('Test Schema Properties', 'Post', { name: 'hookAddedProp', dataType: 'Text' })
     setCreatedPropertyName(prop.name)
     setStatus('created')
   }
@@ -1018,6 +1019,62 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       const createdName = screen.getByTestId('created-property-name')
       expect(createdName.textContent).toBe('hookAddedProp')
+    })
+  })
+
+  describe('useCreateModelProperty loading state and schema name', () => {
+    it('clears isLoading when create returns a property that is already loaded', async () => {
+      const loaded = ModelProperty.create(
+        { name: 'title', modelName: 'Post', dataType: 'Text' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName: 'Test Schema Properties' },
+      ) as ModelProperty
+      await waitUntilOrThrow(() => loaded.getService().getSnapshot().value === 'idle', 'the property to be idle')
+
+      const { result } = renderHook(() => useCreateModelProperty())
+      let created: ModelProperty | undefined
+      await act(async () => {
+        created = await result.current.create('Test Schema Properties', 'Post', { name: 'title', dataType: 'Text' })
+      })
+      expect(created).toBe(loaded)
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 2000 })
+      expect(result.current.error).toBeNull()
+    })
+
+    it('rejects, clears isLoading and sets error for a missing name', async () => {
+      const { result } = renderHook(() => useCreateModelProperty())
+      let thrown: unknown
+      await act(async () => {
+        await result.current
+          .create('Test Schema Properties', 'Post', { name: '', dataType: 'Text' })
+          .catch((err: unknown) => {
+            thrown = err
+          })
+      })
+      expect(thrown).toBeInstanceOf(Error)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.error).toBe(thrown)
+    })
+
+    it('keeps a schema name that ends in -<number>', async () => {
+      // "props-app-2" is a stored name, not "props-app" at version 2.
+      await importJsonSchema(
+        {
+          contents: JSON.stringify({
+            ...testSchemaWithProperties,
+            id: 'props-app-2-schema',
+            metadata: { ...testSchemaWithProperties.metadata, name: 'props-app-2' },
+            models: { Note: { id: 'props-app-2-note', properties: { body: { id: 'props-app-2-body', type: 'Text' } } } },
+          }),
+        },
+        1,
+      )
+
+      const { result } = renderHook(() => useCreateModelProperty())
+      let created: ModelProperty | undefined
+      await act(async () => {
+        created = await result.current.create('props-app-2', 'Note', { name: 'tag', dataType: 'Text' })
+      })
+      expect(created!.getService().getSnapshot().context._schemaName).toBe('props-app-2')
     })
   })
 

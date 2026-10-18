@@ -10,7 +10,9 @@ import { useLiveQuery } from "./liveQuery"
 import { BaseDb, schemas as schemasTable } from '@seedprotocol/sdk'
 import { desc, eq, or } from "drizzle-orm"
 import type { SchemaType as DbSchemaType } from '@seedprotocol/sdk'
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
+import { useSeedQueryClient } from "./queryClient"
+import { useCreateState } from "./useCreateState"
 
 const logger = debug('seedSdk:react:schema')
 
@@ -27,26 +29,26 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
   const [schema, setSchema] = useState<Schema | null>(null)
   const [isLoading, setIsLoading] = useState(schemaIdentifier ? true : false)
   const [error, setError] = useState<Error | null>(null)
-  const subscriptionRef = useRef<Subscription | null>(null)
-
   const isClientReady = useIsClientReady()
 
-  const loadSchema = useCallback(async (identifier: string, isCurrent: () => boolean) => {
+  // Each load takes a hold on the cached instance (Schema.create); the load's cleanup releases it.
+  const loadSchema = useCallback(async (identifier: string, load: SchemaLoad) => {
     setIsLoading(true)
     setError(null)
     try {
       // Look the schema up only: Schema.create would add a draft schema for a name that doesn't
       // exist (e.g. a typo), so check the schemas table first.
       if (!(await schemaExists(identifier))) {
-        if (!isCurrent()) return
+        if (!load.current) return
         setSchema(null)
         setIsLoading(false)
         return
       }
-      if (!isCurrent()) return
+      if (!load.current) return
       const schemaInstance = Schema.create(identifier, {
         waitForReady: false,
       }) as Schema
+      load.instance = schemaInstance
       setSchema(schemaInstance)
 
       const service = schemaInstance.getService()
@@ -64,10 +66,10 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
         }
       }
       apply(service.getSnapshot())
-      subscriptionRef.current = service.subscribe(apply)
+      load.subscription = service.subscribe(apply)
     } catch (error) {
       logger('[useSchema] Error creating schema:', error)
-      if (!isCurrent()) return
+      if (!load.current) return
       setError(error as Error)
       setSchema(null)
       setIsLoading(false)
@@ -75,12 +77,6 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
   }, [])
 
   useEffect(() => {
-    // Clean up previous subscription before starting a new load
-    if (subscriptionRef.current) {
-      subscriptionRef.current.unsubscribe()
-      subscriptionRef.current = null
-    }
-    
     if (!isClientReady) {
       setSchema(null)
       setError(null)
@@ -94,16 +90,16 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
       return
     }
 
-    let current = true
-    void loadSchema(schemaIdentifier, () => current)
+    const load: SchemaLoad = { current: true, instance: null, subscription: null }
+    void loadSchema(schemaIdentifier, load)
 
-    // Cleanup function to unsubscribe when effect re-runs or component unmounts
+    // On unmount or identifier change: stop following the instance and release this load's hold.
     return () => {
-      current = false
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe()
-        subscriptionRef.current = null
-      }
+      load.current = false
+      load.subscription?.unsubscribe()
+      load.subscription = null
+      load.instance?.unload()
+      load.instance = null
     }
   }, [schemaIdentifier, isClientReady, loadSchema])
   
@@ -113,6 +109,12 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
     error,
   }
 
+}
+
+type SchemaLoad = {
+  current: boolean
+  instance: Schema | null
+  subscription: Subscription | null
 }
 
 /** Whether a schema with this name or schema file id is stored (or is the built-in one). */
@@ -132,7 +134,7 @@ const SEED_SCHEMAS_QUERY_KEY = ['seed', 'schemas'] as const
 
 export const useSchemas = () => {
   const isClientReady = useIsClientReady()
-  const queryClient = useQueryClient()
+  const queryClient = useSeedQueryClient()
   const previousSchemasTableDataRef = useRef<DbSchemaType[] | undefined>(undefined)
   const schemasRef = useRef<Schema[]>([])
 
@@ -144,7 +146,7 @@ export const useSchemas = () => {
     queryKey: SEED_SCHEMAS_QUERY_KEY,
     queryFn: () => Schema.all({ waitForReady: true }),
     enabled: isClientReady,
-  })
+  }, queryClient)
   schemasRef.current = schemas
 
   // Watch the schemas table for changes and invalidate so useQuery refetches
@@ -238,41 +240,13 @@ export const useSchemas = () => {
 }
 
 export const useCreateSchema = () => {
-  const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
+  const { run, isLoading, error, resetError } = useCreateState('Failed to create schema')
 
-  const resetError = useCallback(() => setError(null), [])
-
-  const createSchema = useCallback((schemaName: string) => {
-    setError(null)
-    setIsLoading(true)
-    subscriptionRef.current?.unsubscribe()
-    subscriptionRef.current = null
-    const schema = Schema.create(schemaName, {
-      waitForReady: false,
-    }) as Schema
-    const subscription = schema.getService().subscribe((snapshot: SchemaSnapshot) => {
-      if (snapshot.value === 'error') {
-        const err = snapshot.context._loadingError?.error
-        setError(err instanceof Error ? err : new Error('Failed to create schema'))
-        setIsLoading(false)
-      }
-      if (snapshot.value === 'idle') {
-        setError(null)
-        setIsLoading(false)
-      }
-    })
-    subscriptionRef.current = subscription
-    return schema
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = null
-    }
-  }, [])
+  const createSchema = useCallback(
+    (schemaName: string) =>
+      run(() => Schema.create(schemaName, { waitForReady: false }) as Schema),
+    [run],
+  )
 
   return {
     createSchema,
