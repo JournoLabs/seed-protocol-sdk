@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.7 (2026-10-18)
 
 - **Breaking: client methods throw `CLIENT_NOT_INITIALIZED` after `client.stop()` or `client.unload()`** until `client.init()` runs again. Before, `getAddresses()`, `setAddresses()`, `syncFromEas()` and the other client methods kept working against the open database after a stop. A second `stop()` or `unload()` now does nothing and logs a `console.warn` instead of stopping again, so teardown code that stops twice keeps working and shows where the extra call is.
 - **`ItemProperty.save()` and `item.publish()` reject with the error that was thrown**, so `instanceof` and fields like `code` and `cause` work: an `OwnershipError` from an assignment the item's owner check refused, or `@seedprotocol/publish`'s `ManagedAccountPublishError` with its `code`. Before, both rejected with a plain `Error` carrying only the message (and, for `save()`, the name). `save()`'s message is now the original one, without the `Failed to save property <name>:` prefix. The machine context's `_saveError` and `_publishError` hold the `Error` itself instead of `{ message, name }`. `usePublishItem`'s `error` gets the class too.
@@ -16,6 +16,34 @@ All notable changes to this package are documented in this file.
 - A schema file in the complete format (`$schema` and `metadata`) with no `metadata.name` fails init with `Could not load config.schema: Schema name is required (either at top level or in metadata.name)`. It failed with a raw SQL error (`Failed query: …`).
 - `nameMatch` levels (ADR 0009) load before `client.init` resolves. Until they loaded, a few seconds after init, model lookups by EAS type treated every model as `'fuzzy'`, so a model set to `'exact'` matched plural or misspelled types; each schema write reopened that window. After a schema write, lookups keep the previous levels until the reload finishes.
 - On Node, `BaseDb.isAppDbReady()` returns `false` until the database is open, as in the browser. It returned `true` before init.
+
+### Commits
+
+#### Breaking
+
+- client methods throw after stop(); a repeat stop() warns (dbf17511)
+
+#### Features
+
+- typed ItemCreateError for storage values that fail to save (d6a9ca17)
+- add ItemProperty.setValue(value, { before }) (f9fd4c5e)
+
+#### Fixes
+
+- save Relation values whose schema sets refValueType (b534e2d6)
+- roll back rejected values and keep thrown error classes (bf291c53)
+- load nameMatch levels before init reports ready (0434a069)
+- reject a complete-format schema file with no metadata.name (83c0a5a5)
+- claimUnpublishedDrafts no longer holds claimed loaded items (8cb73bf9)
+- Item.destroy soft-deletes only its own seed row (2e2a2ea9)
+- report Node app DB ready only once it opens; deleted filter matches = 1 (0240c523)
+- mint File display URLs from the file instead of storing them (53063d7d)
+- publish: direct-to-EAS refuses an update aimed at an earlier request (6f06bc28)
+- publish: record published list/relation values as the attested seed uids (076a6927)
+
+#### Other
+
+- move internal working docs out of the repo, record their decisions as ADRs (f770a365)
 
 ## 0.7.6 (2026-10-17)
 

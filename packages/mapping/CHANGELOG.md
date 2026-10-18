@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.7 (2026-10-18)
+
+### Commits
+
+#### Other
+
+- move internal working docs out of the repo, record their decisions as ADRs (f770a365)
+
 ## 0.7.5 (2026-10-17)
 
 ### Commits

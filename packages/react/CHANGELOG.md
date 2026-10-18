@@ -2,9 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.7 (2026-10-18)
 
 - The deleted-items query (`useItems` with `deleted: true`) matches rows with `_markedForDeletion = 1` only. It also matched rows where the column was `0`.
+
+### Commits
+
+#### Fixes
+
+- sdk: report Node app DB ready only once it opens; deleted filter matches = 1 (0240c523)
 
 ## 0.7.6 (2026-10-17)
 

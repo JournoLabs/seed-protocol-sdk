@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.7 (2026-10-18)
+
+### Commits
+
+#### Fixes
+
+- direct-to-EAS refuses an update aimed at an earlier request (6f06bc28)
+- sdk: record published list/relation values as the attested seed uids (076a6927)
+
 ## 0.7.6 (2026-10-17)
 
 - Bundler and Turbo uploads no longer use the `Buffer` global, so publishing from a browser works without Node polyfills.

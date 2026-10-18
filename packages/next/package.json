@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/next",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Next.js config helper for apps that use @seedprotocol/sdk in the browser: ZenFS fs aliases for Turbopack and webpack, and cross-origin isolation headers",
   "keywords": [
     "seed-protocol",

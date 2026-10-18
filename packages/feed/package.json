@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "RSS 2.0, Atom and JSON Feed generation for Seed Protocol items, with HTTP handlers, ETag caching and RFC 5005 archives",
   "keywords": [
     "seed-protocol",
