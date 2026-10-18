@@ -12,15 +12,19 @@ type CreateSeedProps = {
   modelFileId?: string
 }
 
-export const createSeed = async ({ type, seedUid, modelFileId }: CreateSeedProps): Promise<string> => {
+/** The fields of a new seed row that come from EAS and the app rather than the database. */
+export type NewSeedFields = {
+  schemaUid: string | null
+  publisher: string | undefined
+}
+
+/**
+ * Resolves a new seed's schema uid (optional: an item can be created before its model's EAS schema
+ * is published) and publisher. May call EAS and the app's publisher getter, so run it before a
+ * transaction, not inside one.
+ */
+export const resolveNewSeedFields = async (type: string): Promise<NewSeedFields> => {
   const schemaUid = await getEasSchemaUidForModel(type)
-
-  // schemaUid is optional - Items can be created without a schemaUid
-  // if the EAS schema hasn't been published yet
-
-  const appDb = BaseDb.getAppDb()
-
-  const newSeedLocalId = generateId()
 
   // When nothing supplies a publisher (no getter, as in Node scripts, or no wallet connected yet)
   // and exactly one owned address is set, the draft is that address's. With several, which one would
@@ -30,6 +34,26 @@ export const createSeed = async ({ type, seedUid, modelFileId }: CreateSeedProps
     const owned = await getOwnedAddressesFromDb()
     if (owned.length === 1) publisher = normalizePublisher(owned[0])
   }
+  return { schemaUid: schemaUid || null, publisher: publisher || undefined }
+}
+
+export const createSeed = async (
+  { type, seedUid, modelFileId }: CreateSeedProps,
+  options: {
+    /** The database or transaction to write; the app database by default. */
+    db?: ReturnType<typeof BaseDb.getAppDb>
+    /** From resolveNewSeedFields; required with a transaction's `db`, which mustn't wait on EAS. */
+    fields?: NewSeedFields
+  } = {},
+): Promise<string> => {
+  if (options.db && !options.fields) {
+    throw new Error('createSeed: pass fields (resolveNewSeedFields) when writing to a given db')
+  }
+  const { schemaUid, publisher } = options.fields ?? (await resolveNewSeedFields(type))
+
+  const appDb = options.db ?? BaseDb.getAppDb()
+
+  const newSeedLocalId = generateId()
 
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,

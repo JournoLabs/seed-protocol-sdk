@@ -2,19 +2,23 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { PropertyType } from '@/types'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
-import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
-import { normalizeDataType } from '@/helpers/property'
+import { resolveMetadataSchemaUid } from './createMetadata'
 import { normalizePublisher } from '@/helpers/addresses'
 
 type UpdateMetadata = (
   metadataValues: Partial<MetadataType>,
   propertyRecordSchema?: PropertyType | undefined,
+  options?: {
+    /**
+     * The database or transaction to write and read; the app database by default. With one, the
+     * EAS schema uid isn't looked up: set `schemaUid` (resolveMetadataSchemaUid) beforehand.
+     */
+    db?: ReturnType<typeof BaseDb.getAppDb>
+  },
 ) => Promise<MetadataType>
 
-export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRecordSchema) => {
-  const appDb = BaseDb.getAppDb()
+export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRecordSchema, options) => {
+  const appDb = options?.db ?? BaseDb.getAppDb()
 
   const { localId, ...rest } = metadataValues
 
@@ -44,42 +48,18 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
     }
   }
 
+  // With a given db (a transaction), the caller resolves schemaUid first: the lookup may call EAS.
+  // Without one it isn't required for a metadata update, so a failed lookup leaves it unset.
   if (
-    !isItemStorage && 
-    propertyRecordSchema &&
+    !options?.db &&
+    !isItemStorage &&
     metadataValues.propertyName &&
-    (!metadataValues.schemaUid || metadataValues.schemaUid === 'undefined' )
+    (!metadataValues.schemaUid || metadataValues.schemaUid === 'undefined')
   ) {
-    try {
-      if (propertyRecordSchema.dataType) {
-        // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
-        const dataTypeKey = normalizeDataType(
-          propertyRecordSchema.dataType,
-        ) as keyof typeof INTERNAL_DATA_TYPES
-        const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
-
-        if (easDataType) {
-          // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
-          const propertyNameSnakeCase = easPropertyNameForPublish(
-            metadataValues.propertyName,
-            propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
-          )
-          // Cached, including misses: every item of a model looks up the same property schemas.
-          const schemaUid = await getEasSchemaUidForExactDefinition(
-            `${easDataType} ${propertyNameSnakeCase}`,
-          )
-          if (schemaUid) {
-            metadataValues.schemaUid = schemaUid
-            rest.schemaUid = schemaUid
-          }
-        }
-      }
-    } catch (error) {
-      // If EAS query fails, continue without schemaUid - it's not required for metadata update
-      // Log error in development but don't throw
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Failed to fetch schemaUid for property ${metadataValues.propertyName}:`, error)
-      }
+    const schemaUid = await resolveMetadataSchemaUid(metadataValues.propertyName, propertyRecordSchema)
+    if (schemaUid) {
+      metadataValues.schemaUid = schemaUid
+      rest.schemaUid = schemaUid
     }
   }
 

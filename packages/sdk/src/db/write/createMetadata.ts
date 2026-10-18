@@ -28,6 +28,11 @@ export class MetadataValidationError extends Error {
 
 type CreateMetadataOptions = {
   skipValidation?: boolean
+  /**
+   * The database or transaction to write and read; the app database by default. With one, the EAS
+   * schema uid isn't looked up: set `schemaUid` (resolveMetadataSchemaUid) beforehand.
+   */
+  db?: ReturnType<typeof BaseDb.getAppDb>
   /** schemaFileId of the item's models row; otherwise read from the seed (seeds.model_file_id). */
   modelFileId?: string
 }
@@ -38,17 +43,47 @@ type CreateMetadata = (
   options?: CreateMetadataOptions,
 ) => Promise<MetadataType>
 
+/**
+ * The EAS schema uid a metadata row of this property takes, from the property's data type and EAS
+ * name. Undefined for a data type with no EAS type or when the lookup fails. May call EAS, so run
+ * it before a transaction, not inside one.
+ */
+export const resolveMetadataSchemaUid = async (
+  propertyName: string,
+  propertyRecordSchema: PropertyType | undefined,
+): Promise<string | undefined> => {
+  if (!propertyRecordSchema?.dataType) return undefined
+  try {
+    // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
+    const dataTypeKey = normalizeDataType(propertyRecordSchema.dataType) as keyof typeof INTERNAL_DATA_TYPES
+    const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
+    if (!easDataType) return undefined
+    // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
+    const propertyNameSnakeCase = easPropertyNameForPublish(
+      propertyName,
+      propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
+    )
+    // Cached, including misses: every item of a model looks up the same property schemas.
+    return (await getEasSchemaUidForExactDefinition(`${easDataType} ${propertyNameSnakeCase}`)) || undefined
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
+    }
+    return undefined
+  }
+}
+
 export const createMetadata: CreateMetadata = async (
   metadataValues,
   propertyRecordSchema?,
   options?,
 ) => {
-  const appDb = BaseDb.getAppDb()
+  const appDb = options?.db ?? BaseDb.getAppDb()
 
   metadataValues.localId = generateId()
 
   // A property row belongs to its seed's wallet (none yet for a draft made with no wallet connected).
-  const publisher = await getSeedPublisher(metadataValues.seedLocalId)
+  const publisher = await getSeedPublisher(metadataValues.seedLocalId, appDb)
   if (publisher) {
     metadataValues.publisher = publisher
   }
@@ -117,37 +152,11 @@ export const createMetadata: CreateMetadata = async (
     }
   }
 
-  if (!isItemStorage && !metadataValues.schemaUid && propertyRecordSchema && metadataValues.propertyName) {
-    try {
-      if (propertyRecordSchema.dataType) {
-        // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
-        const dataTypeKey = normalizeDataType(
-          propertyRecordSchema.dataType,
-        ) as keyof typeof INTERNAL_DATA_TYPES
-        const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
-
-        if (easDataType) {
-          // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
-          const propertyNameSnakeCase = easPropertyNameForPublish(
-            metadataValues.propertyName,
-            propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
-          )
-          // Cached, including misses: every item of a model looks up the same property schemas.
-          const schemaUid = await getEasSchemaUidForExactDefinition(
-            `${easDataType} ${propertyNameSnakeCase}`,
-          )
-          if (schemaUid) {
-            metadataValues.schemaUid = schemaUid
-          }
-        }
-      }
-    } catch (error) {
-      // If EAS query fails, continue without schemaUid - it's not required for metadata insertion
-      // Log error in development but don't throw
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Failed to fetch schemaUid for property ${metadataValues.propertyName}:`, error)
-      }
-    }
+  // With a given db (a transaction), the caller resolves schemaUid first: the lookup may call EAS.
+  // Without one it isn't required for metadata insertion, so a failed lookup leaves it unset.
+  if (!options?.db && !isItemStorage && !metadataValues.schemaUid && metadataValues.propertyName) {
+    const schemaUid = await resolveMetadataSchemaUid(metadataValues.propertyName, propertyRecordSchema)
+    if (schemaUid) metadataValues.schemaUid = schemaUid
   }
 
   // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup.
@@ -160,18 +169,21 @@ export const createMetadata: CreateMetadata = async (
       metadataValues.propertyId = schemaId
     } else if (modelKey) {
       // Model names are only unique per schema: resolve against the item's own model row.
-      const modelFileId = await resolveItemModelFileId({
-        modelFileId: options?.modelFileId,
-        seedLocalId: metadataValues.seedLocalId,
-        seedUid: metadataValues.seedUid,
-      })
+      const modelFileId = await resolveItemModelFileId(
+        {
+          modelFileId: options?.modelFileId,
+          seedLocalId: metadataValues.seedLocalId,
+          seedUid: metadataValues.seedUid,
+        },
+        appDb,
+      )
       if (typeof schemaId === 'string' && schemaId) {
         metadataValues.propertyId =
-          (await getPropertyIdForSchemaFileId(modelKey, schemaId, { modelFileId })) ?? undefined
+          (await getPropertyIdForSchemaFileId(modelKey, schemaId, { modelFileId }, appDb)) ?? undefined
       }
       if (metadataValues.propertyId == null && metadataValues.propertyName) {
         metadataValues.propertyId =
-          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName, { modelFileId })) ??
+          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName, { modelFileId }, appDb)) ??
           undefined
       }
     }
