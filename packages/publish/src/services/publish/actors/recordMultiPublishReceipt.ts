@@ -41,6 +41,8 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
   useModularExecutor: boolean
   contractAddressForEvents: string
   publisherAddress: string
+  /** Seed uids (by local id) created by earlier transactions of the same publish (sequential). */
+  resolvedSeedUids?: Record<string, string>
 }): Promise<{ requests: R[]; attributed: RequestAttestations[] }> {
   const { receipt, requests, rootSeedLocalId, useModularExecutor, contractAddressForEvents, publisherAddress } =
     params
@@ -66,8 +68,19 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
     })
   }
 
+  // The seed uid of every seed a relation/list slot of these requests can name by local id: those
+  // created by earlier transactions of this publish, and those of this transaction (not yet
+  // recorded on their seed rows, which happens below).
+  const resolvedSeedUids: Record<string, string> = { ...(params.resolvedSeedUids ?? {}) }
+  for (let i = 0; i < requests.length; i++) {
+    const req = requests[i]!
+    const seedUid = nonZero(req.seedUid) ?? nonZero(attributed[i]!.seedUid)
+    if (req.localId && seedUid) resolvedSeedUids[req.localId] = seedUid
+  }
+
   // Each request's property uids, against the version it attested under: its own version uid (a
-  // patch publish), or the version this transaction created for it.
+  // patch publish), or the version this transaction created for it. Relation and list values are
+  // recorded as the seed uids they attested.
   for (let i = 0; i < requests.length; i++) {
     const req = requests[i]!
     const { propertyPairs, versionUid } = attributed[i]!
@@ -77,6 +90,7 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
       attestationCreatedAtMs: attMs ?? null,
       versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
       pairs: propertyPairs,
+      resolvedSeedUids,
     })
   }
 

@@ -4,6 +4,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
+import { easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'
 
 
 export const initialize = fromCallback<
@@ -30,7 +31,10 @@ export const initialize = fromCallback<
       )
     ) {
       try {
-        schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: propertyName })
+        // A name alone matches schemas of any type (`bytes32 storage_transaction_id` beside
+        // `string storage_transaction_id`), so look up the exact definition when the type is known.
+        const schemaText = easSchemaDefinitionForProperty(propertyName, propertyRecordSchema) ?? propertyName
+        schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText })
         if (schemaUid) {
           sendBack({ type: 'updateContext', schemaUid })
         }

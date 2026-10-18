@@ -156,6 +156,13 @@ const itemInstanceState = new WeakMap<Item<any>, {
  */
 const supersededSeedUids = new WeakMap<object, Set<string>>()
 
+/**
+ * Each Item's reactive proxy, keyed by the raw instance. The class's arrow-function methods see the
+ * raw instance as `this`, where tracked properties such as `seedUid` are getter-only; anything they
+ * hand the item to that assigns tracked properties (the publish executor) must get the proxy.
+ */
+const reactiveProxies = new WeakMap<object, Item<any>>()
+
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   protected static instanceCache: Map<string, { instance: Item<any>; refCount: number }> = new Map();
@@ -716,6 +723,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           },
         }) as Item<any>
 
+        reactiveProxies.set(newInstance, proxiedInstance)
         this.registerItemInInstanceCache(proxiedInstance)
         if (!waitForReady) return proxiedInstance
         try {
@@ -948,6 +956,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       },
     }) as Item<any>
     
+    reactiveProxies.set(newInstance, proxiedInstance)
     this.registerItemInInstanceCache(proxiedInstance)
     // Storage values must be saved before returning, so wait for readiness even when not requested.
     if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
@@ -1606,7 +1615,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
         }
       })
-      this._service.send({ type: 'startPublish', item: this, options })
+      // The executor assigns item.seedUid, which only the proxy accepts.
+      const item = reactiveProxies.get(this) ?? this
+      this._service.send({ type: 'startPublish', item, options })
     })
   }
 

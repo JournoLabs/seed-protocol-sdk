@@ -12,10 +12,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-/**
- * Supported packages synced to the SDK version. Experimental packages
- * (cli, webpack, ghost) are private and intentionally excluded.
- */
+/** Packages synced to the SDK version. */
 const SYNC_PACKAGES = [
   'sdk',
   'react',
@@ -28,6 +25,9 @@ const SYNC_PACKAGES = [
   'arweave',
   'vite',
   'mapping',
+  'next',
+  // Private, but published manifests list it in devDependencies (workspace refs become this version).
+  'bundler-core',
 ]
 
 /**

@@ -1,7 +1,7 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.5",
-  "description": "Vite plugin for browser apps using @seedprotocol/sdk: Node polyfills, ZenFS aliases, CJS interop fixes and cross-origin isolation headers",
+  "version": "0.7.6",
+  "description": "Vite plugin for browser apps using @seedprotocol/sdk: cross-origin isolation headers, ES module workers, linked-install support, and opt-in Node polyfills",
   "keywords": [
     "seed-protocol",
     "vite",
@@ -9,7 +9,6 @@
     "zenfs",
     "opfs",
     "sqlite-wasm",
-    "polyfills",
     "cross-origin-isolation"
   ],
   "type": "module",
@@ -38,7 +37,6 @@
   },
   "dependencies": {
     "@rollup/pluginutils": "^5.1.0",
-    "debug": "^4.4.1",
     "vite-plugin-node-polyfills": "^0.27.0"
   },
   "peerDependencies": {
@@ -53,6 +51,7 @@
     }
   },
   "devDependencies": {
+    "@seedprotocol/bundler-core": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-react": "^6.0.0",

@@ -1,26 +1,90 @@
 import http from 'node:http'
 import { URL } from 'node:url'
-import { filterResponseHeaders } from './protocol'
+import { UpstreamTimeoutError } from './errors'
+import { filterResponseHeaders, MAX_FRAME_BYTES } from './protocol'
 import type { TunnelMeta } from '../types'
+
+/** Default idle limit on the operator's upstream socket. */
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000
+
+export type ProxyTunnelRequestOptions = {
+  /** Fail with `UpstreamTimeoutError` once the upstream socket is idle this long. 0 disables. */
+  timeoutMs?: number
+  /** Abort the upstream request, e.g. when the tunnel stream closes. */
+  signal?: AbortSignal
+}
+
+/** Headers that describe one hop and must not be forwarded (RFC 9110 section 7.6.1). */
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+])
+
+/**
+ * Drop hop-by-hop headers and the client's `host`, which names the app server rather than
+ * the upstream; it is passed on as `x-forwarded-host`. `content-length` is dropped because
+ * Node sets it from the buffered body.
+ */
+export function upstreamRequestHeaders(headers: Record<string, string>): Record<string, string> {
+  const named = new Set(
+    (Object.entries(headers).find(([key]) => key.toLowerCase() === 'connection')?.[1] ?? '')
+      .split(',')
+      .map((token) => token.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  const out: Record<string, string> = {}
+  let host: string | undefined
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase()
+    if (lower === 'host') {
+      host = value
+      continue
+    }
+    if (lower === 'content-length' || HOP_BY_HOP_HEADERS.has(lower) || named.has(lower)) continue
+    out[key] = value
+  }
+  if (host && !Object.keys(out).some((key) => key.toLowerCase() === 'x-forwarded-host')) {
+    out['x-forwarded-host'] = host
+  }
+  return out
+}
 
 export async function proxyTunnelRequest(
   upstreamBase: string,
   meta: TunnelMeta,
   body: Buffer,
+  options: ProxyTunnelRequestOptions = {},
 ): Promise<{ status: number; headers: Record<string, string>; body: Buffer }> {
   const base = upstreamBase.replace(/\/$/, '')
   const targetUrl = new URL(meta.path, `${base}/`)
+  const timeoutMs = options.timeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
 
   return new Promise((resolve, reject) => {
     const req = http.request(
       targetUrl,
       {
         method: meta.method,
-        headers: meta.headers,
+        headers: upstreamRequestHeaders(meta.headers),
+        signal: options.signal,
       },
       (res) => {
         const chunks: Buffer[] = []
-        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        let received = 0
+        res.on('data', (chunk: Buffer) => {
+          received += chunk.length
+          if (received > MAX_FRAME_BYTES) {
+            req.destroy(
+              new Error(`Upstream response exceeds ${MAX_FRAME_BYTES} bytes, the tunnel's limit`),
+            )
+            return
+          }
+          chunks.push(chunk)
+        })
         res.on('end', () => {
           resolve({
             status: res.statusCode ?? 502,
@@ -31,10 +95,14 @@ export async function proxyTunnelRequest(
         res.on('error', reject)
       },
     )
+    if (timeoutMs > 0) {
+      req.setTimeout(timeoutMs, () => req.destroy(new UpstreamTimeoutError(timeoutMs)))
+    }
     req.on('error', reject)
     if (body.length > 0) {
-      req.write(body)
+      req.end(body)
+    } else {
+      req.end()
     }
-    req.end()
   })
 }

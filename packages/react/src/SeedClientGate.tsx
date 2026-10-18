@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, type ReactNode } from 'react'
 import { client } from '@seedprotocol/sdk'
-import type { SeedConstructorOptions, SeedConfig, SchemaFileFormat } from '@seedprotocol/sdk'
+import type { SeedConstructorOptions, SeedConfig, SchemaFileInput } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 
-/** Schema input: path string or SchemaFileFormat object. Merged into config.schema at init. */
-type SchemaInput = string | SchemaFileFormat
+/** Schema input: path string or schema object. Merged into config.schema at init. */
+type SchemaInput = string | SchemaFileInput
 
 function DefaultLoading() {
   return (

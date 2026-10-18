@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
+import { easPropertyNameForPublish, easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'
 import { warnOnEasNameCollisions } from '@/imports/json'
 
 describe('easPropertyNameForPublish (ADR 0008)', () => {
@@ -16,6 +16,22 @@ describe('easPropertyNameForPublish (ADR 0008)', () => {
     ['storageTransactionId', { dataType: 'Text' }, 'storage_transaction_id'],
   ] as const)('%s %j → %s', (name, def, expected) => {
     expect(easPropertyNameForPublish(name, def)).toBe(expected)
+  })
+})
+
+describe('easSchemaDefinitionForProperty', () => {
+  it.each([
+    ['storageTransactionId', { dataType: 'Text' }, 'string storage_transaction_id'],
+    ['featureImageId', { dataType: 'Image' }, 'bytes32 feature_image'],
+    ['authors', { dataType: 'List', ref: 'Identity' }, 'bytes32[] author_identity_ids'],
+    ['publishedOn', { dataType: 'Date' }, 'uint256 published_on'],
+  ] as const)('%s %j → %s', (name, def, expected) => {
+    expect(easSchemaDefinitionForProperty(name, def)).toBe(expected)
+  })
+
+  it('is undefined without a known data type', () => {
+    expect(easSchemaDefinitionForProperty('title')).toBeUndefined()
+    expect(easSchemaDefinitionForProperty('title', { dataType: 'Nope' })).toBeUndefined()
   })
 })
 

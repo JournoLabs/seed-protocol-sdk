@@ -12,6 +12,7 @@ import {
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
+import { isDataType } from '@/helpers/property'
 import debug from 'debug'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
@@ -256,7 +257,11 @@ const createItemPropertyInstances = async (
           propertyRecordSchema: propSchema,
           refSeedType: metaRow.refSeedType ?? undefined,
           refResolvedValue: metaRow.refResolvedValue ?? undefined,
-          refResolvedDisplayValue: metaRow.refResolvedDisplayValue ?? undefined,
+          // File/Image display values are session URLs the property mints from the file; a stored one is stale.
+          refResolvedDisplayValue:
+            refSeedType === 'file' || refSeedType === 'image' || isDataType(propSchema?.dataType, 'File') || isDataType(propSchema?.dataType, 'Image')
+              ? undefined
+              : metaRow.refResolvedDisplayValue ?? undefined,
           localStorageDir: metaRow.localStorageDir ?? undefined,
         }
 

@@ -96,10 +96,14 @@ export function buildAssembleOptionsKey(options?: {
   hydrateStorage?: boolean
   include?: ChangelogInclude
   changelog?: GetSeedOptions['changelog']
+  versionUid?: string
+  asOf?: number
 }): string {
   const expand = options?.expandRelations !== false
   const hydrate = options?.hydrateStorage !== false
-  const base = `e${expand ? 1 : 0}-h${hydrate ? 1 : 0}`
+  let base = `e${expand ? 1 : 0}-h${hydrate ? 1 : 0}`
+  if (options?.versionUid !== undefined) base += `-v${options.versionUid.toLowerCase()}`
+  if (options?.asOf !== undefined) base += `-a${options.asOf}`
 
   const inc = includeCode(options?.include)
   if (!inc) return base

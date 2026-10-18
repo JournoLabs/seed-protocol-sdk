@@ -80,6 +80,32 @@ testDescribe('Item.publish delegates to the publish executor', () => {
     expect(item.getService().getSnapshot().context._publishError).toBeNull()
   }, 30000)
 
+  it('hands the executor the item it was called on, so the executor can set seedUid', async () => {
+    // The direct-EAS publish path assigns item.seedUid and then persists it. That assignment threw
+    // ("only a getter") when item.publish() passed the raw instance instead of the reactive proxy.
+    const item = await createOwnedDraft('Publish sets seedUid')
+    const seedUid = '0x' + 'e'.repeat(64)
+    let received: IItem<any> | undefined
+    setPublishExecutor(async (published: IItem<any>) => {
+      received = published
+      // A real executor uploads and attests before this; without a wait the assignment would land
+      // while the machine is still entering 'publishing', and persistSeedUid would read no uid.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      ;(published as { seedUid?: string }).seedUid = seedUid
+      await published.persistSeedUid(UNPUBLISH_TEST_PUBLISHER)
+    })
+
+    await item.publish()
+
+    expect(received).toBe(item)
+    expect(item.seedUid).toBe(seedUid)
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { seeds } = await import('@/seedSchema')
+    const { eq } = await import('drizzle-orm')
+    const [row] = await BaseDb.getAppDb().select().from(seeds).where(eq(seeds.localId, item.seedLocalId))
+    expect(row?.uid?.toLowerCase()).toBe(seedUid)
+  }, 30000)
+
   it('rejects with the executor error and records it on the machine', async () => {
     const item = await createOwnedDraft('Publish fails')
     setPublishExecutor(async () => {

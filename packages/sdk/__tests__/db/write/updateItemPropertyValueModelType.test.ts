@@ -70,9 +70,10 @@ describe.sequential('updateItemPropertyValue model types and unchanged values', 
       newValue: 'published text',
     })
 
-    expect(result).toBeUndefined()
     const rows = await rowsFor(seedLocalId, 'summary')
     expect(rows).toHaveLength(1)
     expect(rows[0]?.uid).toBe('0x' + '7'.repeat(64))
+    // The value stays in the published row, so the property keeps reading as attested.
+    expect(result).toMatchObject({ localId: rows[0]?.localId, uid: '0x' + '7'.repeat(64) })
   })
 })

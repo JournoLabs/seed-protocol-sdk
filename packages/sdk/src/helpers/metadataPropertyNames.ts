@@ -1,6 +1,7 @@
 import pluralize from 'pluralize'
 import { easName } from '@seedprotocol/eas'
 import { normalizeDataType } from './property/index'
+import { INTERNAL_DATA_TYPES } from './constants'
 
 /** Minimal property def shape for List-of-relation storage name resolution */
 export type PropertySchemaEntry = {
@@ -216,4 +217,21 @@ export function easPropertyNameForPublish(
     return easName(key)
   }
   return easName(propertyName)
+}
+
+/**
+ * The EAS schema definition publish attests a property under (`string title`, `bytes32 author`),
+ * or undefined when its data type has no EAS type. Look schemas up by this, not by name: a name
+ * can have schemas of several types (Optimism Sepolia has `bytes32 storage_transaction_id` beside
+ * `string storage_transaction_id`).
+ */
+export function easSchemaDefinitionForProperty(
+  propertyName: string,
+  propertyDef?: (PropertySchemaEntry & { name?: string; refValueType?: string }) | null,
+): string | undefined {
+  if (!propertyDef?.dataType) return undefined
+  const dataType = normalizeDataType(String(propertyDef.dataType))
+  const easType = INTERNAL_DATA_TYPES[dataType as keyof typeof INTERNAL_DATA_TYPES]?.eas
+  if (!easType) return undefined
+  return `${easType} ${easPropertyNameForPublish(propertyName, propertyDef)}`
 }

@@ -1,7 +1,12 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
 import { SchemaFileFormat, JsonImportSchema } from '@/types/import'
 import { getLatestSchemaVersion } from './schema'
-import { createModelsFromJson, jsonPropertiesToSchemaProperties, loadSchemaFromFile } from '@/imports/json'
+import {
+  createModelsFromJson,
+  createRowsWrittenSignal,
+  jsonPropertiesToSchemaProperties,
+  loadSchemaFromFile,
+} from '@/imports/json'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
 import { schemas, SchemaType } from '@/seedSchema/SchemaSchema'
@@ -621,9 +626,6 @@ async function loadSchemaWithRenames(
     }
   }
 
-  // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-  const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
-
   // Convert schema file metadata to schema input for database
   const schemaInput: Omit<SchemaType, 'id'> = {
     name: schemaName,
@@ -652,13 +654,18 @@ async function loadSchemaWithRenames(
     ]),
   )
 
+  // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+  // addModelsToDb below writes their rows; the models adopt them once it has run.
+  const rowsWritten = createRowsWrittenSignal()
+  const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds, rowsWritten.promise)
+
   // Add models to database with model renames handled and schemaFileIds
   await addModelsToDb(modelDefinitions, schemaRecord, modelRenames, {
     schemaFileId: schemaFile.id,
     modelFileIds,
     propertyFileIds,
     propertyDefinitions,
-  })
+  }).finally(rowsWritten.settle)
 
   // Models are now Model instances, no registration needed
   // They should be created via Model.create() and are accessible via Model static methods

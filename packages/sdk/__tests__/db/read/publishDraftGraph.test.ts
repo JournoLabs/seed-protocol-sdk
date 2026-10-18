@@ -121,6 +121,13 @@ const expectNoDanglingLocalRefs = (payload: any[]) => {
       }
     }
   }
+  // Requests are attested in order: a link (propertiesToUpdate) never targets an earlier request
+  // (the contract reverts with PublishTargetAlreadyAttested; the direct-to-EAS path refuses it).
+  payload.forEach((p, i) => {
+    for (const u of p.propertiesToUpdate ?? []) {
+      expect(indexOf(payload, u.publishLocalId)).toBeGreaterThanOrEqual(i)
+    }
+  })
 }
 
 const totalAttestations = (payload: any[]) =>

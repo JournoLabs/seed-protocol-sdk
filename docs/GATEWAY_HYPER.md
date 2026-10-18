@@ -198,6 +198,39 @@ initPublish({
    Or each app server (Path B) mounts `createGatewayProxy` with that key.
 5. App uses `transport: 'hyper'` or `'hybrid'` (and `proxyBaseUrl` when using Path B).
 
+## Timeouts
+
+A tunnel session opens up to `maxStreams` HyperDHT streams to the operator (default 4, on
+`createGatewayProxy`, `connectTunnel`, or `seed-gateway connect --max-streams`). Each stream
+carries one request at a time, because the framing has no request ids. A request takes an
+idle stream, or opens a new one while fewer than `maxStreams` are open; once every stream is
+busy, requests wait for the first one to come free. Streams open only when needed, so a
+session that sends one request at a time keeps one stream. Every stream to the operator is
+its own HyperDHT connection with its own handshake, and the operator serves each one
+separately, so a client sends the operator up to `maxStreams` upstream requests at once.
+
+A slow request holds up only its own stream, but a request that never finishes would keep
+that stream forever, and enough of them would fill the pool. Two limits prevent that.
+
+The operator answers 504 once its upstream socket has been idle for `upstreamTimeoutMs`
+(default 30 s, `seed-gateway serve --upstream-timeout-ms`), whether it is waiting for headers
+or partway through the body. Other upstream failures get 502. Either way the stream stays
+open for the next request.
+
+The client abandons a request once the stream has sent and received nothing for
+`requestTimeoutMs` (default 60 s, on `createGatewayProxy`, `connectTunnel`, or
+`seed-gateway connect --request-timeout-ms`). It answers its caller 504 and destroys that
+request's stream; the other streams are left alone, and the next request to take the dead
+stream opens a new one. A caller that disconnects, or a `handleFetch` request whose `signal`
+aborts, abandons the request the same way. A request still waiting for a stream is dropped
+without touching any stream. The timer starts once the request has an open stream.
+
+Keep `requestTimeoutMs` above the operator's `upstreamTimeoutMs`, so a slow upstream gets
+the operator's 504 and the stream is kept. The operator buffers the whole upstream response
+before sending it, so the client sees no bytes until the upstream finishes; a response that
+takes longer than `requestTimeoutMs` to arrive at the operator is abandoned even if the
+upstream is still sending.
+
 ## Developer key swap
 
 Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed-gateway connect` when using Path A.

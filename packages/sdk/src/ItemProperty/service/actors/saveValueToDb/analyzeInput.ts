@@ -7,6 +7,7 @@ import {
 } from '@/types/property'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQueue'
+import { rowContext } from './rowContext'
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { normalizeDataType } from '@/helpers/property'
@@ -202,7 +203,7 @@ export const analyzeInput = fromCallback<
       }
       if (localId) updatedContext.localId = localId
       if (schemaUid) updatedContext.schemaUid = schemaUid
-      if (!localId && result?.localId) updatedContext.localId = result.localId
+      Object.assign(updatedContext, rowContext(result))
       if (!schemaUid && result?.schemaUid) updatedContext.schemaUid = result.schemaUid
 
       sendBack({ type: 'updateContext', ...updatedContext })
@@ -244,9 +245,7 @@ export const analyzeInput = fromCallback<
       updatedContext.schemaUid = schemaUid
     }
 
-    if (!localId && result?.localId) {
-      updatedContext.localId = result.localId
-    }
+    Object.assign(updatedContext, rowContext(result))
 
     if (!schemaUid && result?.schemaUid) {
       updatedContext.schemaUid = result.schemaUid

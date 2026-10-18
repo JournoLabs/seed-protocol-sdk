@@ -11,6 +11,7 @@ import type {
   CreateTransactionOptions,
 } from '../types/arweave.js';
 import { GET_TRANSACTION_TAGS } from '../ArweaveClient/queries.js';
+import { fetchTransactionStatusAcrossGateways } from '../gateway/transactionStatus.js';
 import debug from 'debug';
 
 const logger = debug('seedArweave:node:ArweaveClient');
@@ -48,41 +49,9 @@ export class NodeArweaveClient implements IArweaveClient {
   }
 
   async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
-    const url = BaseArweaveClient.getStatusUrl(transactionId);
-
-    try {
-      const response = await fetch(url);
-
-      if (response.status === 404) {
-        return {
-          status: 404,
-          confirmed: null,
-        };
-      }
-
-      if (!response.ok) {
-        return {
-          status: response.status,
-          confirmed: null,
-        };
-      }
-
-      if (response.body) {
-        await response.body.cancel();
-      }
-
-      return {
-        status: 200,
-        confirmed: null,
-      };
-    } catch (error) {
-      logger('Error fetching transaction status:', error);
-      return {
-        status: 500,
-        confirmed: null,
-      };
-    }
+    return fetchTransactionStatusAcrossGateways(transactionId);
   }
+
 
   async getTransactionData(
     transactionId: string,

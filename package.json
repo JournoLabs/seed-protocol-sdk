@@ -1,6 +1,6 @@
 {
   "name": "seed-protocol-sdk-monorepo",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "author": "Keith Axline <keith@journodao.xyz>",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.0",
@@ -51,7 +51,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "node scripts/with-monorepo-build-lock.js \"node scripts/build-packages.js eas arweave query vite sdk\"",
+    "build": "node scripts/with-monorepo-build-lock.js \"node scripts/build-packages.js bundler-core eas arweave query vite sdk\"",
     "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && node scripts/build-packages.js\"",
     "test": "node scripts/test-all.js",
     "test:watch": "vitest",

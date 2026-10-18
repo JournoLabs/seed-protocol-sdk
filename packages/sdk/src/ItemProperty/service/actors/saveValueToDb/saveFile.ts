@@ -12,6 +12,7 @@ import { toMetadataPropertyName } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
+import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
@@ -180,6 +181,8 @@ export const saveFile = fromCallback<
       }
     }
 
+    // A session URL (blob: in browsers, file:// in Node): it goes in the context only. Stored, it is a
+    // dead blob: URL after reload, so readers mint their own from the path, as for Image.
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
     let newLocalId
@@ -197,7 +200,6 @@ export const saveFile = fromCallback<
           schemaUid: fileSchemaUid,
           refSeedType: 'file',
           refModelUid: fileSchemaUid,
-          refResolvedDisplayValue,
           refResolvedValue: fileName,
           localStorageDir: '/files',
           easDataType: 'bytes32',
@@ -210,8 +212,9 @@ export const saveFile = fromCallback<
       }
     }
 
+    let writtenRow: Partial<PropertyMachineContext> = {}
     if (localId) {
-      await updateItemPropertyValue({
+      writtenRow = rowContext(await updateItemPropertyValue({
         localId,
         propertyName,
         newValue: newFileSeedLocalId,
@@ -220,18 +223,18 @@ export const saveFile = fromCallback<
         modelName,
         schemaUid,
         refSeedType: 'file',
-        refResolvedDisplayValue,
         refResolvedValue: fileName,
         refModelUid: fileSchemaUid,
         localStorageDir: '/files',
         easDataType: 'bytes32',
         dataType: 'File',
-      } as any)
+      } as any))
     }
 
     sendBack({
       type: 'updateContext',
       localId: newLocalId || localId,
+      ...writtenRow,
       propertyValue: newFileSeedLocalId,
       refSeedType: 'file',
       refSchemaUid: fileSchemaUid,

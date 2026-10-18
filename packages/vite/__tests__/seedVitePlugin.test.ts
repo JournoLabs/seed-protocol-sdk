@@ -1,319 +1,159 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createLogger, resolveConfig } from 'vite'
-import { seedVitePlugin } from '../src/index.js'
+import { createLogger, resolveConfig, type Plugin } from 'vite'
+import { seedVitePlugin, type SeedVitePluginOptions } from '../src/index.js'
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
-const vitePluginSrcDir = path.resolve(testDir, '../src')
 
-function getConfigPlugin(options?: Parameters<typeof seedVitePlugin>[0]) {
-  const plugins = seedVitePlugin({ includeNodePolyfills: false, ...options })
-  const configPlugin = plugins.find((p) => p.name === 'seed-protocol:config')
-  if (!configPlugin?.config) {
-    throw new Error('seed-protocol:config plugin not found')
-  }
-  return configPlugin
+const tempDirs: string[] = []
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+/** A temp dir with real path (macOS temp dirs are symlinks). */
+function tempDir(): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-')))
+  tempDirs.push(dir)
+  return dir
 }
 
-function callConfig(
-  plugin: { config?: unknown },
+function writePackage(dir: string, name: string, extra: Record<string, unknown> = {}): void {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, ...extra }))
+}
+
+function configPlugin(options?: SeedVitePluginOptions): Plugin {
+  const plugin = seedVitePlugin(options).find((p) => p.name === 'seed-protocol:config')
+  if (!plugin) throw new Error('seed-protocol:config plugin not found')
+  return plugin
+}
+
+function hookFn(plugin: Plugin, name: keyof Plugin): (...args: any[]) => any {
+  const hook = (plugin as Record<string, any>)[name]
+  const fn = typeof hook === 'function' ? hook : hook?.handler
+  if (!fn) throw new Error(`missing ${String(name)} hook`)
+  return fn
+}
+
+function callConfig(plugin: Plugin, userConfig: Record<string, any> = {}, mode = 'development') {
+  return hookFn(plugin, 'config')(userConfig, { command: 'serve', mode }) as Record<string, any>
+}
+
+async function resolveWith(
+  command: 'serve' | 'build',
+  options: SeedVitePluginOptions,
   userConfig: Record<string, unknown> = {},
-  env: { command: 'serve' | 'build'; mode: string } = {
-    command: 'serve',
-    mode: 'development',
-  },
 ) {
-  const hook = plugin.config as
-    | ((config: unknown, env: unknown) => unknown)
-    | { handler: (config: unknown, env: unknown) => unknown }
-    | undefined
-  if (!hook) throw new Error('missing config hook')
-  const fn = typeof hook === 'function' ? hook : hook.handler
-  return fn(userConfig, env) as Record<string, any>
+  const warnings: string[] = []
+  const logger = createLogger('silent')
+  logger.warn = (msg) => {
+    warnings.push(msg)
+  }
+  logger.warnOnce = logger.warn
+  const config = await resolveConfig(
+    { root: testDir, configFile: false, customLogger: logger, plugins: seedVitePlugin(options), ...userConfig },
+    command,
+  )
+  return { config, warnings }
 }
 
-function getMainPlugin(options?: Parameters<typeof seedVitePlugin>[0]) {
-  const plugins = seedVitePlugin({ includeNodePolyfills: false, ...options })
-  const main = plugins.find((p) => p.name === 'seed-protocol:main')
-  if (!main) throw new Error('seed-protocol:main plugin not found')
-  return main
+/** Run a configure(Preview)Server hook and return the headers its middleware sets. */
+function middlewareHeaders(
+  plugin: Plugin,
+  hookName: 'configureServer' | 'configurePreviewServer',
+): Record<string, string> | undefined {
+  let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
+  hookFn(plugin, hookName)({ middlewares: { use: (m: typeof middleware) => { middleware = m } } })
+  if (!middleware) return undefined
+  const applied: Record<string, string> = {}
+  const res = {
+    getHeader: (key: string) => applied[key],
+    setHeader: (key: string, value: string) => {
+      applied[key] = value
+    },
+    writeHead: () => {},
+  }
+  middleware({}, res, () => {})
+  // writeHead re-applies headers a handler cleared (React Router Framework Mode).
+  delete applied['Cross-Origin-Opener-Policy']
+  res.writeHead()
+  return applied
 }
 
-function aliasFindToString(find: string | RegExp): string {
-  return typeof find === 'string' ? find : find.source
-}
+describe('seedVitePlugin defaults', () => {
+  it('is one plugin that adds no aliases, pre-bundling lists, defines or HTML', () => {
+    const plugins = seedVitePlugin()
+    expect(plugins.map((p) => p.name)).toEqual(['seed-protocol:config'])
 
-describe('seedVitePlugin renderer hardening', () => {
-  it('exposes debug interop shim next to plugin sources', () => {
-    const shimPath = path.join(vitePluginSrcDir, 'debug-default-shim.js')
-    expect(fs.existsSync(shimPath)).toBe(true)
+    const userConfig: Record<string, any> = {}
+    const result = callConfig(plugins[0]!, userConfig)
+    expect(userConfig.resolve).toBeUndefined()
+    expect(result.optimizeDeps).toEqual({ rolldownOptions: { output: { strictExecutionOrder: true } } })
+    expect(result.define).toBeUndefined()
+    expect(result.build).toBeUndefined()
+    expect(plugins[0]!.transformIndexHtml).toBeUndefined()
   })
 
-  it('exposes stream stub shim next to plugin sources', () => {
-    const shimPath = path.join(vitePluginSrcDir, 'stream-default-shim.js')
-    expect(fs.existsSync(shimPath)).toBe(true)
-  })
-
-  it('merges renderer compatibility aliases and optimizeDeps includes', () => {
-    const configPlugin = getConfigPlugin()
-    const userConfig: Record<string, any> = { resolve: { alias: [] }, optimizeDeps: {} }
-    const result = callConfig(configPlugin, userConfig)
-
-    // Aliases are appended to the config in place (see the config hook), not returned.
-    expect(result?.resolve?.alias).toBeUndefined()
-    const aliases = userConfig.resolve.alias
-    expect(Array.isArray(aliases)).toBe(true)
-
-    const aliasKeys = (aliases as Array<{ find: string | RegExp; replacement: string }>).map(
-      (a) => aliasFindToString(a.find),
-    )
-
-    expect(aliasKeys.some((k) => k.includes('nanoid-dictionary'))).toBe(true)
-    expect(aliasKeys.some((k) => k === '^debug$')).toBe(true)
-    expect(aliasKeys.some((k) => k === '^stream$')).toBe(true)
-    expect(aliasKeys.some((k) => k === '^node:stream$')).toBe(true)
-
-    const zenfsCoreIndex = path.join(
-      process.cwd(),
-      'node_modules/@zenfs/core/dist/index.js',
-    )
-    if (fs.existsSync(zenfsCoreIndex)) {
-      expect(aliasKeys.some((k) => k.includes('@zenfs\\/core'))).toBe(true)
+  it('runs dev pre-bundle chunks in order unless the user decides', async () => {
+    for (const includeNodePolyfills of [false, true]) {
+      const { config } = await resolveWith('serve', { includeNodePolyfills })
+      expect(config.optimizeDeps.rolldownOptions?.output).toMatchObject({ strictExecutionOrder: true })
     }
-
-    const includes = result?.optimizeDeps?.include ?? []
-    expect(includes).toContain('debug')
-    expect(includes).toContain('nanoid-dictionary')
-    expect(includes).toContain('pluralize')
-    expect(includes).toContain(
-      '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk',
-    )
-    expect(includes).toContain(
-      '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
-    )
-  })
-
-  it('uses optimizeDeps.rolldownOptions instead of deprecated esbuildOptions', () => {
-    const configPlugin = getConfigPlugin()
-    const result = configPlugin.config!({ resolve: { alias: [] }, optimizeDeps: {} })
-
-    expect(result?.optimizeDeps?.esbuildOptions).toBeUndefined()
-    expect(result?.optimizeDeps?.rollupOptions).toBeUndefined()
-    expect(result?.optimizeDeps?.rolldownOptions?.transform?.define?.global).toBe('globalThis')
-    expect(result?.optimizeDeps?.rolldownOptions?.resolve?.alias?.stream).toMatch(
-      /stream-default-shim\.js$/,
-    )
-    expect(result?.optimizeDeps?.rolldownOptions?.resolve?.alias?.['node:stream']).toMatch(
-      /stream-default-shim\.js$/,
-    )
-  })
-
-  it('merges legacy optimizeDeps.esbuildOptions.define into rolldownOptions', () => {
-    const configPlugin = getConfigPlugin()
-    const result = callConfig(configPlugin, {
-      resolve: { alias: [] },
-      optimizeDeps: {
-        esbuildOptions: { define: { 'process.env.FOO': '"bar"' } },
-      },
+    const { config: user } = await resolveWith('serve', {}, {
+      optimizeDeps: { rolldownOptions: { output: { strictExecutionOrder: false } } },
     })
-
-    expect(result?.optimizeDeps?.esbuildOptions).toBeUndefined()
-    expect(result?.optimizeDeps?.rolldownOptions?.transform?.define).toMatchObject({
-      'process.env.FOO': '"bar"',
-      global: 'globalThis',
-    })
+    expect(user.optimizeDeps.rolldownOptions?.output).toMatchObject({ strictExecutionOrder: false })
   })
 
-  it('prebundles app-optional deps only when the app root can resolve them', () => {
-    const appOptional = ['kerium', 'utilium', 'memium', 'readable-stream', 'viem', 'isows']
-    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
-    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
-    try {
-      for (const dep of appOptional) {
-        const pkgDir = path.join(appRoot, 'node_modules', dep)
-        fs.mkdirSync(pkgDir, { recursive: true })
-        fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: dep }))
-      }
-      const configPlugin = getConfigPlugin()
-
-      const bare = callConfig(configPlugin, { root: bareRoot })
-      for (const dep of appOptional) expect(bare.optimizeDeps.include).not.toContain(dep)
-
-      const withDeps = callConfig(configPlugin, { root: appRoot })
-      for (const dep of appOptional) expect(withDeps.optimizeDeps.include).toContain(dep)
-    } finally {
-      fs.rmSync(bareRoot, { recursive: true, force: true })
-      fs.rmSync(appRoot, { recursive: true, force: true })
-    }
+  it('defaults worker.format to es without overriding a user format', async () => {
+    const { config: defaults } = await resolveWith('build', {})
+    expect(defaults.worker.format).toBe('es')
+    const { config: user } = await resolveWith('build', {}, { worker: { format: 'iife' } })
+    expect(user.worker.format).toBe('iife')
   })
 
-  it('prebundles eas / arweave / query together and dedupes the ones the app resolves', () => {
-    const shared = ['@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/query']
-    const writePkg = (dir: string, name: string) => {
-      fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }))
-    }
-    const roots: string[] = []
-    const mkRoot = () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
-      roots.push(root)
-      return root
-    }
-    try {
-      const configPlugin = getConfigPlugin()
-
-      // Hoisted (npm): the app resolves each package.
-      const hoisted = mkRoot()
-      writePkg(path.join(hoisted, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
-      for (const pkg of shared) writePkg(path.join(hoisted, 'node_modules', pkg), pkg)
-      const h = callConfig(configPlugin, { root: hoisted })
-      for (const pkg of shared) {
-        expect(h.optimizeDeps.include).toContain(pkg)
-        expect(h.resolve.dedupe).toContain(pkg)
-      }
-
-      // Nested under the SDK only (bun): prebundle through the SDK, never dedupe from the root.
-      const nested = mkRoot()
-      writePkg(path.join(nested, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
-      const n = callConfig(configPlugin, { root: nested })
-      for (const pkg of shared) {
-        expect(n.optimizeDeps.include).toContain(`@seedprotocol/sdk > ${pkg}`)
-        expect(n.resolve.dedupe).not.toContain(pkg)
-      }
-
-      // No SDK and no packages: nothing added.
-      const bare = callConfig(configPlugin, { root: mkRoot() })
-      for (const pkg of shared) {
-        expect(bare.optimizeDeps.include.some((dep: string) => dep.endsWith(pkg))).toBe(false)
-      }
-    } finally {
-      for (const root of roots) fs.rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('returns only its own optimizeDeps additions (Vite concatenates arrays)', () => {
-    const configPlugin = getConfigPlugin()
-    const result = callConfig(configPlugin, {
-      optimizeDeps: {
-        include: ['user-include'],
-        exclude: ['user-exclude'],
-        rolldownOptions: { plugins: [{ name: 'user-optimizer-plugin' }] },
-      },
-    })
-    expect(result.optimizeDeps.include).not.toContain('user-include')
-    expect(result.optimizeDeps.exclude).not.toContain('user-exclude')
-    expect(result.optimizeDeps.rolldownOptions.plugins).toBeUndefined()
-  })
-
-  it('includes sdk-import-fix post plugin', () => {
-    const plugins = seedVitePlugin({ includeNodePolyfills: false })
-    const fix = plugins.find((p) => p.name === 'seed-protocol:sdk-import-fix')
-    expect(fix).toBeDefined()
-    expect(fix?.enforce).toBe('post')
-  })
-
-  it('rewrites path-browserify default import in SDK FileManager chunks', () => {
-    const plugins = seedVitePlugin({ includeNodePolyfills: false })
-    const fix = plugins.find((p) => p.name === 'seed-protocol:sdk-import-fix')
-    const code = "import path from 'path-browserify';\nexport { path }"
-    const id = '/node_modules/@seedprotocol/sdk/dist/FileManager-abc.js'
-    const out = fix?.transform?.(code, id)
-    expect(out).not.toBeNull()
-    expect(out?.code).toContain("import * as path from 'path'")
-    expect(out?.code).not.toContain("from 'path-browserify'")
-  })
-
-  it('does not force NODE_ENV=production during vite serve', () => {
-    const configPlugin = getConfigPlugin()
-    const result = callConfig(
-      configPlugin,
-      { resolve: { alias: [] }, optimizeDeps: {} },
-      { command: 'serve', mode: 'development' },
-    )
-    expect(result.define['process.env.NODE_ENV']).toBeUndefined()
-  })
-
-  it('does not overwrite a user NODE_ENV define', () => {
-    const configPlugin = getConfigPlugin()
-    const result = callConfig(
-      configPlugin,
-      {
-        resolve: { alias: [] },
-        optimizeDeps: {},
-        define: { 'process.env.NODE_ENV': JSON.stringify('test') },
-      },
-      { command: 'serve', mode: 'development' },
-    )
-    expect(result.define['process.env.NODE_ENV']).toBe('"test"')
-  })
-
-  it('HTML process shim uses Vite mode instead of hardcoded production', () => {
-    const plugins = seedVitePlugin({ includeNodePolyfills: false })
-    const configPlugin = plugins.find((p) => p.name === 'seed-protocol:config')
-    const main = plugins.find((p) => p.name === 'seed-protocol:main')
-    callConfig(configPlugin!, {}, { command: 'serve', mode: 'development' })
-    const hook = main?.transformIndexHtml
-    const fn = typeof hook === 'function' ? hook : hook && 'handler' in hook ? hook.handler : null
-    if (!fn) throw new Error('missing transformIndexHtml')
-    const html = fn('<html><head></head></html>') as string
-    expect(html).toContain("NODE_ENV:\"development\"")
-    expect(html).not.toContain("NODE_ENV:'production'")
-  })
-
-  it('sets isolation headers on server config and writeHead', () => {
-    const configPlugin = getConfigPlugin()
-    const result = callConfig(configPlugin, { resolve: { alias: [] }, optimizeDeps: {} })
-    expect(result.server?.headers?.['Cross-Origin-Opener-Policy']).toBe('same-origin')
-    expect(result.server?.headers?.['Cross-Origin-Embedder-Policy']).toBe('credentialless')
-    expect(result.server?.headers?.['Cross-Origin-Resource-Policy']).toBe('same-origin')
-
-    const main = getMainPlugin()
-    const applied: Record<string, string> = {}
-    const res = {
-      getHeader: (key: string) => applied[key],
-      setHeader: (key: string, value: string) => {
-        applied[key] = value
-      },
-      writeHead: (...args: unknown[]) => args,
-    }
-    let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
-    const server = {
-      middlewares: {
-        use: (fn: typeof middleware) => {
-          middleware = fn
+  for (const command of ['serve', 'build'] as const) {
+    it(`leaves the user's build options alone and doesn't warn (${command})`, async () => {
+      const userPlugin = { name: 'user-build-plugin' }
+      const { config, warnings } = await resolveWith(command, { includeNodePolyfills: true }, {
+        build: {
+          rollupOptions: {
+            output: { entryFileNames: 'app-[name].js' },
+            external: ['user-ext'],
+            plugins: [userPlugin],
+          },
         },
-      },
-    }
-    const hook = main.configureServer
-    const fn = typeof hook === 'function' ? hook : hook && 'handler' in hook ? hook.handler : null
-    if (!fn) throw new Error('missing configureServer')
-    fn(server as any)
-    expect(middleware).toBeDefined()
-    middleware!({}, res, () => {})
-    expect(applied['Cross-Origin-Opener-Policy']).toBe('same-origin')
-    applied['Cross-Origin-Opener-Policy'] = ''
-    res.writeHead(200, 'OK')
-    expect(applied['Cross-Origin-Opener-Policy']).toBe('same-origin')
+      })
+      expect(warnings.filter((w) => /rollupOptions.*rolldownOptions/.test(w))).toEqual([])
+      const options = config.build.rolldownOptions
+      expect(options.output).toMatchObject({ entryFileNames: 'app-[name].js' })
+      expect(options.external).toEqual(['user-ext'])
+      expect((options.plugins as unknown[]).filter((p) => p === userPlugin)).toHaveLength(1)
+    })
+  }
+})
+
+describe('seedVitePlugin isolation headers', () => {
+  it('sets them on the server config and in writeHead', () => {
+    const plugin = configPlugin()
+    const result = callConfig(plugin)
+    expect(result.server.headers).toEqual({
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    })
+    expect(middlewareHeaders(plugin, 'configureServer')).toEqual(result.server.headers)
   })
 
-  it('lets user server/preview isolation headers win over the plugin values', async () => {
-    const plugins = seedVitePlugin({ includeNodePolyfills: false })
-    const config = await resolveConfig(
-      {
-        root: testDir,
-        configFile: false,
-        logLevel: 'silent',
-        plugins,
-        server: {
-          headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' },
-        },
-        preview: { headers: { 'cross-origin-opener-policy': 'same-origin-allow-popups' } },
-      },
-      'serve',
-    )
+  it('lets user server/preview headers win over the plugin values', async () => {
+    const options = {}
+    const { config } = await resolveWith('serve', options, {
+      server: { headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' } },
+      preview: { headers: { 'cross-origin-opener-policy': 'same-origin-allow-popups' } },
+    })
     expect(config.server.headers).toEqual({
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'X-App': 'dev',
@@ -328,158 +168,142 @@ describe('seedVitePlugin renderer hardening', () => {
     })
 
     // The writeHead middleware sends the user's values too, not ours.
-    const main = plugins.find((p) => p.name === 'seed-protocol:main')!
-    for (const [hookName, expected] of [
-      ['configureServer', { coep: 'require-corp', coop: 'same-origin' }],
-      ['configurePreviewServer', { coep: 'credentialless', coop: 'same-origin-allow-popups' }],
-    ] as const) {
-      const applied: Record<string, string> = {}
-      let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
-      const hook = (main as Record<string, any>)[hookName]
-      const fn = typeof hook === 'function' ? hook : hook.handler
-      fn({ middlewares: { use: (m: typeof middleware) => { middleware = m } } })
-      middleware!(
-        {},
-        {
-          getHeader: (key: string) => applied[key],
-          setHeader: (key: string, value: string) => { applied[key] = value },
-          writeHead: () => {},
-        },
-        () => {},
-      )
-      expect(applied['Cross-Origin-Embedder-Policy']).toBe(expected.coep)
-      expect(applied['Cross-Origin-Opener-Policy']).toBe(expected.coop)
-    }
+    const plugin = config.plugins.find((p) => p.name === 'seed-protocol:config')!
+    expect(middlewareHeaders(plugin, 'configureServer')).toMatchObject({
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    })
+    expect(middlewareHeaders(plugin, 'configurePreviewServer')).toMatchObject({
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+    })
   })
 
   it('leaves preview inheriting server.headers when the user sets no preview headers', async () => {
-    const config = await resolveConfig(
-      {
-        root: testDir,
-        configFile: false,
-        logLevel: 'silent',
-        plugins: seedVitePlugin({ includeNodePolyfills: false }),
-        server: { headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' } },
-      },
-      'serve',
-    )
+    const { config } = await resolveWith('serve', {}, {
+      server: { headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' } },
+    })
     expect(config.preview.headers).toEqual(config.server.headers)
-    expect(config.preview.headers?.['X-App']).toBe('dev')
     expect(config.preview.headers?.['Cross-Origin-Embedder-Policy']).toBe('require-corp')
   })
 
-  it('skips isolation headers when isolationHeaders is false', () => {
-    const configPlugin = getConfigPlugin({ isolationHeaders: false })
-    const result = callConfig(configPlugin, { resolve: { alias: [] }, optimizeDeps: {} })
-    expect(result.server?.headers?.['Cross-Origin-Opener-Policy']).toBeUndefined()
-
-    const main = getMainPlugin({ isolationHeaders: false })
-    expect(main.configureServer).toBeDefined()
-    let used = false
-    fnSafeConfigure(main, {
-      middlewares: { use: () => { used = true } },
+  it('takes overrides, and sets nothing when isolationHeaders is false', () => {
+    expect(callConfig(configPlugin({ isolationHeaders: { coep: 'require-corp' } })).server.headers).toMatchObject({
+      'Cross-Origin-Embedder-Policy': 'require-corp',
     })
-    expect(used).toBe(false)
+
+    const off = configPlugin({ isolationHeaders: false })
+    expect(callConfig(off).server).toBeUndefined()
+    expect(middlewareHeaders(off, 'configureServer')).toBeUndefined()
   })
 })
 
-describe('seedVitePlugin resolved resolve.alias / dedupe', () => {
-  type ResolvedAlias = { find: string | RegExp; replacement: string }
-  const findKey = (find: string | RegExp) => (typeof find === 'string' ? find : find.toString())
-
-  async function resolveResolve(
-    resolve: Record<string, unknown>,
-    includeNodePolyfills: boolean,
-  ) {
-    const config = await resolveConfig(
-      {
-        root: testDir,
-        configFile: false,
-        logLevel: 'silent',
-        plugins: seedVitePlugin({ includeNodePolyfills }),
-        resolve,
-      },
-      'serve',
-    )
-    return config.resolve as unknown as { alias: ResolvedAlias[]; dedupe: string[] }
-  }
-
-  const userAliasArray = () => [
-    { find: 'arweave', replacement: '/user/arweave.js' },
-    { find: /^debug$/, replacement: '/user/debug.js' },
-    { find: 'user-lib', replacement: '/user/lib.js' },
-  ]
-  const userAliasObject = () => ({
-    arweave: '/user/arweave.js',
-    'user-lib': '/user/lib.js',
-  })
-
-  for (const includeNodePolyfills of [false, true]) {
-    for (const [form, makeAlias] of [
-      ['array', userAliasArray],
-      ['object', userAliasObject],
-    ] as const) {
-      it(`keeps ${form}-form user aliases once and ahead of the plugin's (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
-        const { alias } = await resolveResolve({ alias: makeAlias() }, includeNodePolyfills)
-
-        const keys = alias.map((entry) => findKey(entry.find))
-        const duplicates = keys.filter((key, i) => keys.indexOf(key) !== i)
-        expect(duplicates).toEqual([])
-
-        const userIndex = (replacement: string) =>
-          alias.findIndex((entry) => entry.replacement === replacement)
-        const pluginArweave = keys.indexOf('/^arweave$/')
-        expect(pluginArweave).toBeGreaterThan(-1)
-        expect(userIndex('/user/arweave.js')).toBeGreaterThan(-1)
-        expect(userIndex('/user/arweave.js')).toBeLessThan(pluginArweave)
-        expect(userIndex('/user/lib.js')).toBeGreaterThan(-1)
-
-        // Node polyfill shims match first, and the polyfills plugin's bare string
-        // aliases (which would also catch subpaths such as `buffer/`) are dropped.
-        const shimBuffer = keys.indexOf('/^buffer$/')
-        expect(shimBuffer).toBeGreaterThan(-1)
-        expect(shimBuffer).toBeLessThan(userIndex('/user/arweave.js'))
-        for (const bare of ['buffer', 'node:buffer', 'process', 'node:process', 'global']) {
-          expect(keys).not.toContain(bare)
-        }
-
-        if (form === 'array') {
-          // Same find as the plugin's debug shim: the user's entry replaces it.
-          const debugEntries = alias.filter((entry) => findKey(entry.find) === '/^debug$/')
-          expect(debugEntries.map((entry) => entry.replacement)).toEqual(['/user/debug.js'])
-        }
-      })
+describe('seedVitePlugin installs outside the app root', () => {
+  it('dedupes the packages the app root resolves, and only those', () => {
+    const hoisted = tempDir()
+    for (const pkg of ['react', 'react-dom', '@seedprotocol/sdk', '@seedprotocol/eas']) {
+      writePackage(path.join(hoisted, 'node_modules', pkg), pkg)
     }
+    expect(callConfig(configPlugin(), { root: hoisted }).resolve.dedupe).toEqual([
+      'react',
+      'react-dom',
+      '@seedprotocol/sdk',
+      '@seedprotocol/eas',
+    ])
 
-    it(`keeps user dedupe entries once (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
-      const { dedupe } = await resolveResolve(
-        { dedupe: ['user-dep', 'react'] },
-        includeNodePolyfills,
-      )
-      expect(dedupe.filter((dep) => dep === 'user-dep')).toHaveLength(1)
-      expect(dedupe.filter((dep) => dep === 'react')).toHaveLength(1)
-      expect(dedupe).toContain('@seedprotocol/sdk')
-      expect(new Set(dedupe).size).toBe(dedupe.length)
+    // Nested under the SDK only (pnpm, bun): Vite would fail to resolve it from the root.
+    const nested = tempDir()
+    writePackage(path.join(nested, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+    writePackage(path.join(nested, 'node_modules/@seedprotocol/sdk/node_modules/@seedprotocol/eas'), '@seedprotocol/eas')
+    expect(callConfig(configPlugin(), { root: nested }).resolve.dedupe).toEqual(['@seedprotocol/sdk'])
+  })
+
+  it('keeps user dedupe entries once', async () => {
+    const root = tempDir()
+    writePackage(path.join(root, 'node_modules/react'), 'react')
+    const { config } = await resolveWith('serve', {}, { root, resolve: { dedupe: ['user-dep', 'react'] } })
+    expect(config.resolve.dedupe.filter((dep) => dep === 'react')).toHaveLength(1)
+    expect(config.resolve.dedupe).toContain('user-dep')
+  })
+
+  it('lets the dev server read a linked SDK and its SQLite worker', async () => {
+    // The SDK and its dependencies live outside the app, as with `file:` or `link:` installs.
+    const checkout = tempDir()
+    const sdkDir = path.join(checkout, 'packages/sdk')
+    writePackage(sdkDir, '@seedprotocol/sdk')
+    // Like sqlocal: ESM-only, no package.json export, so require.resolve can't find it.
+    writePackage(path.join(checkout, 'node_modules/sqlocal'), 'sqlocal', {
+      exports: { '.': { import: './dist/index.js' } },
     })
-  }
+    writePackage(path.join(checkout, 'node_modules/@sqlite.org/sqlite-wasm'), '@sqlite.org/sqlite-wasm')
+
+    const app = tempDir()
+    writePackage(app, 'app')
+    fs.mkdirSync(path.join(app, 'node_modules/@seedprotocol'), { recursive: true })
+    fs.symlinkSync(sdkDir, path.join(app, 'node_modules/@seedprotocol/sdk'))
+
+    const { config } = await resolveWith('serve', {}, { root: app })
+    expect(config.server.fs.allow).toEqual(
+      expect.arrayContaining([
+        sdkDir,
+        path.join(checkout, 'node_modules/sqlocal'),
+        path.join(checkout, 'node_modules/@sqlite.org/sqlite-wasm'),
+      ]),
+    )
+
+    // An SDK installed inside the app is already allowed.
+    const local = tempDir()
+    writePackage(path.join(local, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+    const { config: localConfig } = await resolveWith('serve', {}, { root: local })
+    expect(localConfig.server.fs.allow.filter((dir) => dir.includes('@seedprotocol'))).toEqual([])
+  })
 })
 
-describe('seedVitePlugin resolved optimizer config (node polyfills on)', () => {
-  async function resolveServeConfig(userConfig: Record<string, unknown> = {}) {
-    return resolveConfig(
-      {
-        root: testDir,
-        configFile: false,
-        logLevel: 'silent',
-        plugins: seedVitePlugin({ includeNodePolyfills: true }),
-        ...userConfig,
-      },
-      'serve',
-    )
-  }
+describe('seedVitePlugin fsModules', () => {
+  it('aliases the listed modules to ZenFS after the user aliases', async () => {
+    for (const alias of [
+      [{ find: 'fs', replacement: '/user/fs.js' }, { find: 'user-lib', replacement: '/user/lib.js' }],
+      { fs: '/user/fs.js', 'user-lib': '/user/lib.js' },
+    ]) {
+      const { config } = await resolveWith(
+        'serve',
+        { fsModules: ['fs', 'node:fs/promises'] },
+        { resolve: { alias } },
+      )
+      const entries = config.resolve.alias.map((entry) => [String(entry.find), entry.replacement])
+      expect(entries.filter(([find]) => find === 'fs')).toEqual([['fs', '/user/fs.js']])
+      expect(entries).toContainEqual(['node:fs/promises', '@zenfs/core/promises'])
+      expect(entries.findIndex(([find]) => find === 'user-lib')).toBeLessThan(
+        entries.findIndex(([find]) => find === 'node:fs/promises'),
+      )
+    }
+  })
+})
+
+describe('seedVitePlugin includeNodePolyfills', () => {
+  const resolvePolyfilled = (userConfig: Record<string, unknown> = {}) =>
+    resolveWith('serve', { includeNodePolyfills: true }, userConfig).then((r) => r.config)
+
+  it('adds the polyfills and resolves their shims to this package', async () => {
+    const config = await resolvePolyfilled({
+      resolve: { alias: [{ find: 'user-lib', replacement: '/user/lib.js' }] },
+    })
+    const names = config.plugins.map((p) => p.name)
+    expect(names).toContain('seed-protocol:node-globals')
+    expect(names).toContain('seed-protocol:polyfill-resolve')
+
+    const keys = config.resolve.alias.map((entry) => String(entry.find))
+    // Absolute shim aliases first; the polyfills plugin's bare aliases are dropped.
+    expect(keys[0]).toBe('vite-plugin-node-polyfills/shims/buffer')
+    for (const bare of ['buffer', 'node:buffer', 'process', 'node:process', 'global']) {
+      expect(keys).not.toContain(bare)
+    }
+    expect(keys).toContain('/^stream$/')
+    expect(keys.indexOf('user-lib')).toBeLessThan(keys.indexOf('/^stream$/'))
+  })
 
   it('registers the polyfills optimizer banner plugin exactly once', async () => {
-    const config = await resolveServeConfig()
+    const config = await resolvePolyfilled()
     const names = ((config.optimizeDeps.rolldownOptions?.plugins ?? []) as Array<{ name?: string }>)
       .flat()
       .map((p) => p?.name)
@@ -488,135 +312,58 @@ describe('seedVitePlugin resolved optimizer config (node polyfills on)', () => {
   })
 
   it('keeps user optimizer plugins and defines without duplicating them', async () => {
-    const userPlugin = { name: 'user-optimizer-plugin' }
-    const config = await resolveServeConfig({
+    const config = await resolvePolyfilled({
       optimizeDeps: {
         rolldownOptions: {
-          plugins: [userPlugin],
+          plugins: [{ name: 'user-optimizer-plugin' }],
           transform: { define: { __USER_FLAG__: 'true' } },
         },
+        esbuildOptions: { define: { 'process.env.FOO': '"bar"' } },
       },
     })
     const rolldownOptions = config.optimizeDeps.rolldownOptions!
-    const names = ((rolldownOptions.plugins ?? []) as Array<{ name?: string }>)
-      .flat()
-      .map((p) => p?.name)
+    const names = ((rolldownOptions.plugins ?? []) as Array<{ name?: string }>).flat().map((p) => p?.name)
     expect(names.filter((n) => n === 'user-optimizer-plugin')).toHaveLength(1)
-    expect(rolldownOptions.transform?.define).toMatchObject({ __USER_FLAG__: 'true' })
+    expect(rolldownOptions.transform?.define).toMatchObject({
+      __USER_FLAG__: 'true',
+      'process.env.FOO': '"bar"',
+      global: 'globalThis',
+    })
   })
 
-  it('maps global to globalThis in the resolved optimizer define', async () => {
-    const config = await resolveServeConfig()
-    expect(config.optimizeDeps.rolldownOptions?.transform?.define?.global).toBe('globalThis')
+  it('defines global without forcing NODE_ENV or replacing user defines', async () => {
+    const config = await resolvePolyfilled({ define: { 'process.platform': '"user"' } })
+    expect(config.define.global).toBe('globalThis')
+    expect(config.define['process.platform']).toBe('"user"')
+    expect(config.define['process.env.NODE_ENV']).not.toBe('"production"')
+  })
+
+  it('injects global / process shims into index.html with the Vite mode', () => {
+    const globals = seedVitePlugin({ includeNodePolyfills: true }).find(
+      (p) => p.name === 'seed-protocol:node-globals',
+    )!
+    callConfig(globals, {}, 'development')
+    const html = hookFn(globals, 'transformIndexHtml')('<html><head></head></html>') as string
+    expect(html).toContain('NODE_ENV:"development"')
+    expect(html.indexOf('globalThis.global=globalThis')).toBeGreaterThan(html.indexOf('<head>'))
   })
 })
 
-function fnSafeConfigure(plugin: { configureServer?: unknown }, server: unknown) {
-  const hook = plugin.configureServer
-  const fn = typeof hook === 'function' ? hook : hook && typeof hook === 'object' && 'handler' in hook ? (hook as { handler: Function }).handler : null
-  fn?.(server)
-}
-
-describe('seedVitePlugin build options', () => {
-  function captureWarnings() {
-    const warnings: string[] = []
-    const logger = createLogger('silent')
-    logger.warn = (msg) => {
-      warnings.push(msg)
-    }
-    logger.warnOnce = logger.warn
-    return { logger, warnings }
-  }
-
-  async function resolveWith(command: 'serve' | 'build', userConfig: Record<string, unknown>) {
-    const { logger, warnings } = captureWarnings()
-    const config = await resolveConfig(
-      {
-        root: testDir,
-        configFile: false,
-        customLogger: logger,
-        plugins: seedVitePlugin({ includeNodePolyfills: true }),
-        ...userConfig,
-      },
-      command,
-    )
-    return { config, warnings }
-  }
-
-  for (const command of ['serve', 'build'] as const) {
-    it(`keeps the user's build.rollupOptions without warning (${command})`, async () => {
-      const userPlugin = { name: 'user-build-plugin' }
-      const { config, warnings } = await resolveWith(command, {
-        build: {
-          rollupOptions: {
-            output: { entryFileNames: 'app-[name].js' },
-            external: ['user-ext'],
-            plugins: [userPlugin],
-          },
-          commonjsOptions: { include: [/user-cjs/] },
-        },
-      })
-      expect(warnings.filter((w) => /rollupOptions.*rolldownOptions/.test(w))).toEqual([])
-
-      const options = config.build.rolldownOptions
-      expect(config.build.rollupOptions).toBe(options)
-      expect(options.output).toMatchObject({ entryFileNames: 'app-[name].js' })
-      expect((options.plugins as unknown[]).filter((p) => p === userPlugin)).toHaveLength(1)
-
-      const external = options.external as Array<string | RegExp>
-      expect(external.filter((e) => e === 'user-ext')).toHaveLength(1)
-      const isExternal = (id: string) =>
-        external.some((e) => (typeof e === 'string' ? e === id : e.test(id)))
-      expect(isExternal('better-sqlite3')).toBe(true)
-      expect(isExternal('better-sqlite3/lib/index.js')).toBe(true)
-      expect(isExternal('/app/node_modules/better-sqlite3/lib/index.js')).toBe(true)
-      expect(isExternal('better-sqlite3-helper')).toBe(false)
-
-      const cjsInclude = config.build.commonjsOptions.include as RegExp[]
-      expect(cjsInclude.map(String)).toEqual([
-        '/user-cjs/',
-        '/node_modules/',
-        String(/seed-protocol-sdk[\\/]+dist[\\/]/),
-      ])
-    })
-  }
-
-  it('wraps a user external function instead of replacing it', async () => {
-    const { config } = await resolveWith('build', {
-      build: { rolldownOptions: { external: (id: string) => id === 'user-ext' } },
-    })
-    const external = config.build.rolldownOptions.external as (
-      id: string,
-      importer: string | undefined,
-      isResolved: boolean,
-    ) => boolean
-    expect(typeof external).toBe('function')
-    expect(external('user-ext', undefined, false)).toBe(true)
-    expect(external('better-sqlite3', undefined, false)).toBe(true)
-    expect(external('react', undefined, false)).toBe(false)
-  })
-
-  it('defaults worker.format to es without overriding a user format', async () => {
-    const { config: defaults } = await resolveWith('build', {})
-    expect(defaults.worker.format).toBe('es')
-    const { config: user } = await resolveWith('build', { worker: { format: 'iife' } })
-    expect(user.worker.format).toBe('iife')
-  })
-})
-
-describe('seedVitePlugin bare-globals scan', () => {
-  function scan(code: string): string[] {
-    const main = getMainPlugin()
-    const hook = main.generateBundle as unknown as (o: unknown, b: unknown) => void
+describe('seedVitePlugin debug: bare-globals scan', () => {
+  function scan(code: string, debug = true): string[] {
+    const hook = hookFn(configPlugin({ debug }), 'generateBundle')
     const lines: string[] = []
     const warn = console.warn
+    const log = console.log
     console.warn = (...args: unknown[]) => {
       lines.push(args.map(String).join(' '))
     }
+    console.log = () => {}
     try {
       hook.call({}, {}, { 'chunk.js': { type: 'chunk', code } })
     } finally {
       console.warn = warn
+      console.log = log
     }
     return lines
       .map((l) => /line (\d+): `(\w+)`/.exec(l))
@@ -640,6 +387,10 @@ describe('seedVitePlugin bare-globals scan', () => {
       'global@4',
       'process@5',
     ])
+  })
+
+  it('stays quiet without debug', () => {
+    expect(scan('export const buf = Buffer.from("x")', false)).toEqual([])
   })
 
   it.each([

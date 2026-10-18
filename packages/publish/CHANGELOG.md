@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.6 (2026-10-17)
+
+- Bundler and Turbo uploads no longer use the `Buffer` global, so publishing from a browser works without Node polyfills.
+
+### Commits
+
+#### Fixes
+
+- retry attestation verification while the indexer lags (e6f641f3)
+- upload data items without the Buffer global (ca361c32)
+
 ## 0.7.5 (2026-10-17)
 
 ### Breaking

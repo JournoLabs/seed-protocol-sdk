@@ -2,8 +2,64 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.6 (2026-10-17)
+
+- **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.
+
+- The SDK has no peer dependencies. `@zenfs/core` (2.5.6), `@zenfs/dom` (1.2.9), `xstate` and `drizzle-orm` are regular dependencies, so installing `@seedprotocol/sdk` installs them; apps don't need to add them or match the ZenFS versions. The SDK no longer depends on `@tanstack/react-query` (its browser query cache uses `@tanstack/query-core`); `@seedprotocol/react` still declares React Query as a peer. `fsevents` is gone from the optional dependencies; nothing used it.
+
+- New `@seedprotocol/sdk/drizzle` entry re-exports `drizzle-orm` (`eq`, `and`, `like`, `sql`, ...) from the copy the SDK uses. Import query operators from there to query the SDK's tables without installing `drizzle-orm` or keeping it on the SDK's 0.44 range.
+
+- `client.init({ config: { schema } })` is enough. `filesDir` defaults to `endpoints.files`, then `'.seed'`, and `endpoints` defaults to `filesDir`, in the browser too. Before, browser init failed with `Config must include endpoints with filePaths and files`, and Node init did unless `filesDir` was set.
+- `SeedConfig.schema` takes a `SchemaFileInput`: a schema file whose `$schema`, `version`, `metadata.createdAt`, `metadata.updatedAt`, `enums` and `migrations` may be left out. `version` defaults to 1. A schema object without `$schema` used to fail with `Schema name is required` although `metadata.name` was set.
+
+- **A changed schema with a pinned `id` loads at init even when its `version` didn't change.** Before, `config.schema` whose content changed but whose `id` and `version` matched a schema file the device had stored loaded that old file and dropped the new content without an error: new models were missing (`Failed to save property …: no schema found for …`) and removed ones stayed. Now the stored file is overwritten with a console warning to bump `version`. `importJsonSchema` with a complete schema throws `Schema … already exists with different content` in that case instead of loading the old file.
+- Models a schema drops are unlinked from it when the schema loads, whether the change came with a new `version` or not. Before, a new version kept every model the previous one had linked. The models' rows and items stay. Schemas with draft edits are left as they are.
+- Client init's "continue in a test environment" checks read `IS_SEED_DEV` only where a `process` global exists. In a browser without Node polyfills, a missing app DB or a failed config save threw `process is not defined` instead of its own error.
+- The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
+- `item.publish()` works on the direct-EAS (EOA) path. It failed every time with `Creating attestations for … failed: Cannot set property seedUid of #<Item> which has only a getter`, because it handed `@seedprotocol/publish` the item's raw instance, where `seedUid` can't be assigned, instead of the item it was called on. `publishItem(item)` was not affected.
+- **A property edited after its seed is published attests on the next patch `publish()`.** The edit went into a new draft row, but the property kept the published row's `localId` and `uid`, so patch Publish skipped it as already attested and the edit never reached EAS. Basic, Relation, List, Image, File, Html and ItemStorage properties were affected. Each later edit also added another draft row, and setting the published value back left the draft in place. Publish now also points a property at its newest draft row when its context still names a published one (another tab's edit, or a metadata update the browser's live query dropped while the property was saving).
+
+### Commits
+
+#### Breaking
+
+- fail browser init when the database can't persist to OPFS (30bb7697)
+- make @seedprotocol/vite an optional peer (cc594f7e)
+
+#### Features
+
+- default filesDir and endpoints, accept a minimal schema (4f6e8a8d)
+- re-export drizzle-orm as @seedprotocol/sdk/drizzle (887d8a90)
+- next: add @seedprotocol/next with withSeed (bc640fa8)
+
+#### Fixes
+
+- arweave: time out status checks and fall back to other gateways (b6c851f5)
+- point an edited published property at its draft row (8fe23390)
+- a Model only takes the row with its own id (f178b936)
+- catch child-instance load failures in entity live queries (c1691717)
+- resolve property schema UIDs by exact definition everywhere (c0dffe4d)
+- don't read a tx id out of a bytes32 value (22b14058)
+- publish properties under the schema for their exact definition (0de66bb5)
+- pass the reactive proxy to the publish executor (4ff701d8)
+- read IS_SEED_DEV only where process exists (3c8f7752)
+- load a changed schema whose pinned id and version match the stored file (cd7153a8)
+- schema import writes each model and property row once (48fad4fb)
+- model and property inserts no longer fail when the row exists (f77a1e01)
+- keep the Node platform out of browser bundles (7d2e8dab)
+- keep schema-file model fields when merging model rows on load (264d2764)
+
+#### Other
+
+- note why legacy bytes32 storage_transaction_id attestations aren't recovered (ee460f98)
+- resolve the Node filesDir in the Node platform (ecd8cff7)
+
 ## 0.7.5 (2026-10-17)
 
+- Browser bundles no longer include the Node platform. It shipped as an unused lazy chunk of about 150 KB gzipped (libsql and its migrator), and broke webpack and Next.js server builds. The Node platform now loads through `#seed-node-platform`, a `package.json` `imports` entry that maps to the browser platform under the `browser` condition. Platform selection at runtime is unchanged, so jsdom still gets the browser platform.
+- **Breaking: `@seedprotocol/vite` is an optional peer dependency** instead of a dependency, so installing the SDK no longer installs Vite, Rolldown and `vite-plugin-node-polyfills`. Apps that import `@seedprotocol/sdk/vite` must install `@seedprotocol/vite` themselves.
+- `withSeed` from `@seedprotocol/sdk/node` is deprecated in favor of `@seedprotocol/next`, which covers Turbopack and sets the cross-origin isolation headers.
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
 - **Breaking: Number properties publish as `string <name>` instead of `uint8 <name>`** (ADR 0010), so values above 255, negatives and decimals publish; before, they failed with `Failed to encode property`. A stored value that isn't a finite number fails publish validation with `publish_invalid_number`. Published Number values are under a new EAS schema UID. Items published before keep their `uint8` attestations until the property changes, and sync still reads `uint8`, other integer and numeric string attestations into Number properties.
 - **Breaking: sync skips a property attestation whose EAS type doesn't fit the local property's type** (ADR 0008, ADR 0010), with a warning. A Number takes integer types and numeric strings; other types take the type publish writes for them. Before, any attestation with a matching name was stored.

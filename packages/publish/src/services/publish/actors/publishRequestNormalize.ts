@@ -49,6 +49,50 @@ export function hasCrossPayloadUnresolved(reqs: unknown[]): boolean {
   )
 }
 
+export type PropertiesToUpdateOrderViolation = {
+  /** Index of the request whose propertiesToUpdate entry points backwards. */
+  requestIndex: number
+  /** Index of the request it updates, attested before `requestIndex`. */
+  targetIndex: number
+  requestLocalId: string | undefined
+  targetLocalId: string
+  propertySchemaUid: string | undefined
+}
+
+/**
+ * The first propertiesToUpdate entry that targets an earlier request of `requests` (sent in this
+ * order). Its seed uid can never be written into that request, whose attestations are already
+ * made; the publish contract reverts with PublishTargetAlreadyAttested(requestIndex, targetIndex)
+ * (SeedPublishLib.setSeedReference). Targeting the request itself or a later one is fine; a
+ * target outside the batch is not this check's concern.
+ */
+export function findPropertiesToUpdateTargetingEarlierRequest(
+  requests: Array<{
+    localId?: string
+    propertiesToUpdate?: Array<{ publishLocalId?: string; propertySchemaUid?: string }>
+  }>,
+): PropertiesToUpdateOrderViolation | undefined {
+  const indexOf = new Map<string, number>()
+  requests.forEach((r, i) => {
+    if (r?.localId && !indexOf.has(r.localId)) indexOf.set(r.localId, i)
+  })
+  for (let requestIndex = 0; requestIndex < requests.length; requestIndex++) {
+    const req = requests[requestIndex]
+    for (const pu of req?.propertiesToUpdate ?? []) {
+      const targetIndex = pu?.publishLocalId ? indexOf.get(pu.publishLocalId) : undefined
+      if (targetIndex === undefined || targetIndex >= requestIndex) continue
+      return {
+        requestIndex,
+        targetIndex,
+        requestLocalId: req?.localId,
+        targetLocalId: pu.publishLocalId!,
+        propertySchemaUid: pu.propertySchemaUid,
+      }
+    }
+  }
+  return undefined
+}
+
 /** Keep only propertiesToUpdate whose target is in the same multiPublish batch (same tx). */
 export function filterPropertiesToUpdateForBatch<T extends { publishLocalId?: string }>(
   propertiesToUpdate: T[] | undefined,

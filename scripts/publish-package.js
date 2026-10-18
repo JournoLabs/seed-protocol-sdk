@@ -31,8 +31,6 @@
  * - `--provenance` — publish with npm provenance (CI only; see docs/RELEASING.md)
  *
  * Without a terminal (CI), any prompt fails instead of waiting for input.
- *
- * Experimental packages (cli, webpack, ghost) are private and not publishable via this script.
  */
 
 import { readFileSync } from 'fs'
@@ -41,14 +39,15 @@ import { fileURLToPath } from 'url'
 import { spawn, execSync } from 'child_process'
 import * as readline from 'readline'
 import { withPublishableWorkspaceManifest } from './workspace-publish-manifest.js'
-import { PUBLISH_ORDER } from './release-channel.js'
+import { AWAITING_FIRST_PUBLISH, PUBLISH_ORDER } from './release-channel.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = [...PUBLISH_ORDER]
-const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
+// AWAITING_FIRST_PUBLISH packages can only be published one at a time, by hand.
+const VALID_PACKAGES = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
+const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'next']
 
 /** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
 const npmPublishOptions = { tag: null, provenance: false }

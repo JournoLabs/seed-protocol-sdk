@@ -562,6 +562,10 @@ const createMetadataRecordsForStorageTransactionId = async (
   }
 
   const attestationData = parsed.metadata
+  // A string tx id attested under the legacy `bytes32 storage_transaction_id` schema (0xa1a5bee9…,
+  // Optimism Sepolia only) decodes as 0x…20, the ABI string offset; the id itself is only in the raw
+  // `data`. It is stored as-is and the download path skips it. Not recovered: the 8 such
+  // attestations on Optimism Sepolia date from February 2024, and publish no longer creates them.
   const propertyValue =
     typeof attestationData.value === 'string'
       ? attestationData.value

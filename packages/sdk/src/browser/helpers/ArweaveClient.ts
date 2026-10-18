@@ -13,6 +13,7 @@ import type {
 import {
   GET_TRANSACTION_TAGS,
   fetchArweaveRawFromBaseUrl,
+  fetchTransactionStatusAcrossGateways,
   getPreferredArweaveReadBaseUrls,
 } from '@seedprotocol/arweave'
 import debug from "debug";
@@ -52,41 +53,9 @@ export class BrowserArweaveClient implements IArweaveClient {
   }
 
   async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
-    const url = BaseArweaveClient.getStatusUrl(transactionId);
-
-    try {
-      const response = await fetch(url);
-
-      if (response.status === 404) {
-        return {
-          status: 404,
-          confirmed: null,
-        };
-      }
-
-      if (!response.ok) {
-        return {
-          status: response.status,
-          confirmed: null,
-        };
-      }
-
-      if (response.body) {
-        await response.body.cancel();
-      }
-
-      return {
-        status: 200,
-        confirmed: null,
-      };
-    } catch (error) {
-      logger("Error fetching transaction status:", error);
-      return {
-        status: 500,
-        confirmed: null,
-      };
-    }
+    return fetchTransactionStatusAcrossGateways(transactionId);
   }
+
 
   async getTransactionData(
     transactionId: string,

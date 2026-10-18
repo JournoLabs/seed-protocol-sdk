@@ -200,7 +200,7 @@ Done by a maintainer with publish rights and 2FA.
    Node line use `npm install -g npm@11`:
 
    ```bash
-   for p in eas arweave vite query sdk feed feed-hyper gateway-hyper react publish mapping; do
+   for p in eas arweave vite next query sdk feed feed-hyper gateway-hyper react publish mapping; do
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env release --allow-publish -y
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env preview --allow-publish -y
      npm trust github "@seedprotocol/$p" --file cleanup-dist-tags.yml --repo JournoLabs/seed-protocol-sdk --env cleanup --allow-stage-publish -y
@@ -218,6 +218,18 @@ Done by a maintainer with publish rights and 2FA.
 3. **After the first CI publish succeeds:**
    - Revoke the old npm token and delete the `NPM_TOKEN` repository secret.
    - Set each package to "Require two-factor authentication and disallow tokens".
+
+### Adding a package
+
+Trusted publishing can't create a package on npm, so CI can't publish a package's first
+version (npm answers the PUT with a 404). A new package goes in `AWAITING_FIRST_PUBLISH` in
+`scripts/release-channel.js`, which keeps it out of CI publishes, dist-tag moves and changelog
+sections. To bring it in, a maintainer with publish rights and 2FA:
+
+1. Publishes it once by hand: `node scripts/publish-package.js [--tag <tag>] <name>`.
+2. Runs the three `npm trust github` commands above for it and turns on "Allow npm dist-tag"
+   for each configuration.
+3. Moves it from `AWAITING_FIRST_PUBLISH` into `PUBLISH_ORDER` and adds it to the loop above.
 
 ## Troubleshooting
 

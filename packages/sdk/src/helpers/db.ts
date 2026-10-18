@@ -486,6 +486,9 @@ const findOrCreateModelRecord = async (
   }
 
   try {
+    // A Model instance's own write can insert this file id between the lookups above and here
+    // (schema import writes each model twice at once). DO NOTHING instead of a failed statement,
+    // which sqlite-wasm logs as a warning even though the error is caught.
     const inserted = await db
       .insert(modelsTable)
       .values({
@@ -493,8 +496,22 @@ const findOrCreateModelRecord = async (
         schemaFileId: modelFileId || null,
         isEdited: false,
       })
+      .onConflictDoNothing()
       .returning()
-    return inserted[0] as NewModelRecord
+    if (inserted.length > 0) {
+      return inserted[0] as NewModelRecord
+    }
+    if (modelFileId) {
+      const existing = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.schemaFileId, modelFileId))
+        .limit(1)
+      if (existing.length > 0) {
+        return existing[0] as NewModelRecord
+      }
+    }
+    throw new Error(`Model "${modelName}" was not inserted and no row has schemaFileId "${modelFileId}"`)
   } catch (error: any) {
     if (isSqliteUniqueConstraintError(error) && modelFileId) {
       const existing = await db
@@ -1488,15 +1505,15 @@ export const addModelsToDb = async (
         }
 
         logger(`Creating new property ${modelName}:${propertyName} with schemaFileId: ${propertyData.schemaFileId}`)
-        try {
-          await db.insert(properties).values(propertyDataWithIsEdited)
-        } catch (insertError: any) {
-          // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb call)
-          if (isSqliteUniqueConstraintError(insertError)) {
-            logger(`Property ${modelName}:${propertyName} already exists (UNIQUE constraint), treating as success`)
-          } else {
-            throw insertError
-          }
+        // A conflict means the row already exists: the schema import's Model instances write their
+        // properties at the same time as this. DO NOTHING keeps sqlite-wasm from logging a failed insert.
+        const inserted = await db
+          .insert(properties)
+          .values(propertyDataWithIsEdited)
+          .onConflictDoNothing()
+          .returning({ id: properties.id })
+        if (inserted.length === 0) {
+          logger(`Property ${modelName}:${propertyName} already exists (UNIQUE constraint), treating as success`)
         }
       }
     }
@@ -1641,6 +1658,57 @@ export const loadModelsFromDbForSchema = async (
     logger(`Error loading models from database for schema ${schemaId}:`, error)
     return {}
   }
+}
+
+/**
+ * Merges the models {@link loadModelsFromDbForSchema} read from the database into a schema's
+ * models. The database decides which models and properties exist and their stored fields; the
+ * schema keeps what only it holds (nameMatch, description, validation, ...), found by id first so
+ * a property renamed in the database keeps them. A schema property whose id a database property
+ * has is dropped under its old name.
+ */
+export const mergeDbModelsIntoSchemaModels = (
+  schemaModels: { [modelName: string]: any } | undefined,
+  dbModels: { [modelName: string]: any },
+): { [modelName: string]: any } => {
+  const merged: { [modelName: string]: any } = { ...(schemaModels ?? {}) }
+  for (const [modelName, dbModel] of Object.entries(dbModels)) {
+    const schemaModel = schemaModels?.[modelName]
+    if (!schemaModel) {
+      merged[modelName] = dbModel
+      continue
+    }
+    const schemaProps: { [name: string]: any } = schemaModel.properties ?? {}
+    const dbProps: { [name: string]: any } = dbModel.properties ?? {}
+    const schemaNameById = new Map<string, string>()
+    for (const [name, prop] of Object.entries(schemaProps)) {
+      const id = prop?.id ?? prop?.schemaFileId
+      if (id) schemaNameById.set(id, name)
+    }
+    const properties: { [name: string]: any } = {}
+    const matched = new Set<string>()
+    for (const [name, dbProp] of Object.entries(dbProps)) {
+      const byId = dbProp?.schemaFileId ? schemaNameById.get(dbProp.schemaFileId) : undefined
+      const byName = schemaProps[name]
+      const byNameId = byName?.id ?? byName?.schemaFileId
+      // By name only when the ids don't say it's another property.
+      const schemaName =
+        byId ?? (byName && !(byNameId && dbProp?.schemaFileId && byNameId !== dbProp.schemaFileId) ? name : undefined)
+      const schemaProp = schemaName ? schemaProps[schemaName] : undefined
+      if (schemaName && schemaProp) matched.add(schemaName)
+      // The database's dataType and ref replace the file's type and model.
+      const { type, model, ...fromSchema } = schemaProp ?? {}
+      properties[name] = {
+        ...fromSchema,
+        ...(dbProp?.dataType === undefined && type !== undefined ? { type } : {}),
+        ...(dbProp?.ref === undefined && model !== undefined ? { model } : {}),
+        ...dbProp,
+      }
+    }
+    const unmatched = Object.fromEntries(Object.entries(schemaProps).filter(([name]) => !matched.has(name)))
+    merged[modelName] = { ...schemaModel, ...dbModel, properties: { ...unmatched, ...properties } }
+  }
+  return merged
 }
 
 /**
@@ -1869,19 +1937,19 @@ export const savePropertyToDb = async (
   } else {
     // Property doesn't exist, create it
     // Set isEdited = true for runtime-created properties
-    try {
-      await db.insert(properties).values({
+    // A conflict means the row already exists (concurrent addModelsToDb or another write): treat as success
+    const inserted = await db
+      .insert(properties)
+      .values({
         ...propertyData,
         isEdited: true, // Runtime-created properties are edited
       })
+      .onConflictDoNothing()
+      .returning({ id: properties.id })
+    if (inserted.length > 0) {
       logger(`Created property ${property.modelName}:${property.name} in database`)
-    } catch (insertError: any) {
-      // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb or race)
-      if (isSqliteUniqueConstraintError(insertError)) {
-        logger(`Property ${property.modelName}:${property.name} already exists (UNIQUE constraint), treating as success`)
-      } else {
-        throw insertError
-      }
+    } else {
+      logger(`Property ${property.modelName}:${property.name} already exists (UNIQUE constraint), treating as success`)
     }
   }
 }
@@ -2018,31 +2086,30 @@ export async function writeModelToDb(
       modelId = doubleCheck[0].id!
       logger(`Model with schemaFileId "${modelFileId}" was created by another process, using existing record (id: ${modelId})`)
     } else {
-      try {
-        const newModel = await db.insert(modelsTable).values({
+      // DO NOTHING on conflict: addModelsToDb writes the same row during schema import, and a failed
+      // insert is logged by sqlite-wasm even when caught.
+      const newModel = await db
+        .insert(modelsTable)
+        .values({
           name: data.modelName,
           schemaFileId: modelFileId,
           isEdited: true, // Runtime-created models are edited
-        }).returning()
+        })
+        .onConflictDoNothing()
+        .returning()
+      if (newModel.length > 0) {
         modelId = newModel[0].id!
-      } catch (error: any) {
-        // Handle unique constraint violation
-        if (isSqliteUniqueConstraintError(error)) {
-          logger(`Unique constraint violation for schemaFileId "${modelFileId}", attempting to find existing model`)
-          const existing = await db
-            .select()
-            .from(modelsTable)
-            .where(eq(modelsTable.schemaFileId, modelFileId))
-            .limit(1)
-          if (existing.length > 0) {
-            modelId = existing[0].id!
-            logger(`Found existing model with schemaFileId "${modelFileId}" (id: ${modelId}) after constraint violation`)
-          } else {
-            throw error
-          }
-        } else {
-          throw error
+      } else {
+        const existing = await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.schemaFileId, modelFileId))
+          .limit(1)
+        if (existing.length === 0) {
+          throw new Error(`Failed to create or find model "${data.modelName}" with schemaFileId "${modelFileId}"`)
         }
+        modelId = existing[0].id!
+        logger(`Found existing model with schemaFileId "${modelFileId}" (id: ${modelId}) after insert conflict`)
       }
     }
   } else {
@@ -2303,30 +2370,29 @@ export async function writePropertyToDb(
         .where(eq(properties.id, doubleCheck[0].id!))
       logger(`Property with schemaFileId "${propertyFileId}" was created by another process, updated existing record`)
     } else {
-      try {
-        await db.insert(properties).values({ required: false, ...propertyData })
+      // DO NOTHING on conflict: addModelsToDb writes the same row during schema import, and a failed
+      // insert is logged by sqlite-wasm even when caught.
+      const inserted = await db
+        .insert(properties)
+        .values({ required: false, ...propertyData })
+        .onConflictDoNothing()
+        .returning({ id: properties.id })
+      if (inserted.length > 0) {
         logger(`Created property ${data.name} (${propertyFileId}) in database`)
-      } catch (error: any) {
-        // Handle unique constraint violation
-        if (isSqliteUniqueConstraintError(error)) {
-          logger(`Unique constraint violation for property schemaFileId "${propertyFileId}", attempting to find existing property`)
-          const existing = await db
-            .select()
-            .from(properties)
-            .where(eq(properties.schemaFileId, propertyFileId))
-            .limit(1)
-          if (existing.length > 0) {
-            await db
-              .update(properties)
-              .set(propertyData)
-              .where(eq(properties.id, existing[0].id!))
-            logger(`Found existing property with schemaFileId "${propertyFileId}" (id: ${existing[0].id}) after constraint violation, updated it`)
-          } else {
-            throw new Error(`Failed to create or find property "${data.name}" with schemaFileId "${propertyFileId}": ${error.message}`)
-          }
-        } else {
-          throw error
+      } else {
+        const existing = await db
+          .select()
+          .from(properties)
+          .where(eq(properties.schemaFileId, propertyFileId))
+          .limit(1)
+        if (existing.length === 0) {
+          throw new Error(`Failed to create or find property "${data.name}" with schemaFileId "${propertyFileId}"`)
         }
+        await db
+          .update(properties)
+          .set(propertyData)
+          .where(eq(properties.id, existing[0].id!))
+        logger(`Found existing property with schemaFileId "${propertyFileId}" (id: ${existing[0].id}) after insert conflict, updated it`)
       }
     }
   }

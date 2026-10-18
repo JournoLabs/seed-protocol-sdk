@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.6 (2026-10-17)
+
+### Commits
+
+#### Breaking
+
+- vite: cut seedVitePlugin defaults to what the SDK needs (5312b28d)
+
+#### Fixes
+
+- time out status checks and fall back to other gateways (b6c851f5)
+
 ## 0.7.5 (2026-10-17)
 
 ### Commits

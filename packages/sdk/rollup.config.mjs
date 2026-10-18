@@ -5,6 +5,7 @@ import commonjs from '@rollup/plugin-commonjs'
 import alias from '@rollup/plugin-alias'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { isBuiltin } from 'node:module'
 import json from '@rollup/plugin-json'
 import MagicString from 'magic-string'
 
@@ -141,6 +142,7 @@ const config = [
       main: 'src/index.ts',
       node: 'src/node/index.ts',
       vite: 'src/vite/index.ts', // Separate entry for vite plugin (Node.js only)
+      drizzle: 'src/drizzle/index.ts',
       'platform.node': 'src/platform/index.node.ts',
       'platform.browser': 'src/platform/index.browser.ts',
     },
@@ -155,7 +157,19 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
-    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/query', '@seedprotocol/vite'],
+    // A Node built-in whose bindings are all tree-shaken away (markdown.ts's readFileSync) would
+    // otherwise stay as a bare `import 'fs'` in main.js, which webpack and Turbopack can't
+    // resolve for the browser and Vite warns about.
+    treeshake: { moduleSideEffects: (id, external) => !(external && isBuiltin(id)) },
+    external: [
+      '@seedprotocol/feed',
+      '@seedprotocol/eas',
+      '@seedprotocol/arweave',
+      '@seedprotocol/query',
+      '@seedprotocol/vite',
+      // Resolved by the consumer through package.json `imports` (browser vs Node platform).
+      '#seed-node-platform',
+    ],
     plugins: [
       alias({
         entries: [

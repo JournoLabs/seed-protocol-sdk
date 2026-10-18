@@ -15,13 +15,14 @@ const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Packages whose own `test` script runs here, in this order. */
 export const PACKAGE_TESTS = [
+  '@seedprotocol/bundler-core',
   '@seedprotocol/vite',
   '@seedprotocol/query',
   '@seedprotocol/eas',
   '@seedprotocol/arweave',
   '@seedprotocol/feed-hyper',
   '@seedprotocol/gateway-hyper',
-  '@seedprotocol/webpack',
+  '@seedprotocol/next',
   '@seedprotocol/publish',
 ]
 

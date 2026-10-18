@@ -123,6 +123,10 @@ export const hydrateFromDb = fromCallback<
     } = firstRow
 
     let { refResolvedDisplayValue, refResolvedValue, localStorageDir } = firstRow
+    // File/Image display values are minted below from the file; a stored one is a stale session URL.
+    if (isImageDynamic || isFileDynamic) {
+      refResolvedDisplayValue = null
+    }
 
     let propertyValueProcessed: string | string[] | undefined | null =
       propertyValueFromDb

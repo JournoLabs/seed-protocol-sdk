@@ -284,13 +284,26 @@ async function main() {
 
 ## Browser: OPFS and hosting
 
-The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Two integration notes:
+The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Three integration notes:
 
 1. **Cross-origin isolation** — SQLite WASM / `SharedArrayBuffer` need the document to be cross-origin isolated. `seedVitePlugin()` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (plus `Cross-Origin-Resource-Policy: same-origin`) on the Vite **dev and preview** servers, including `writeHead` so React Router Framework Mode HTML still gets them. Production hosts must set the same headers themselves (nginx, Netlify `_headers`, etc.). Use `COEP: require-corp` if your WASM stack requires it. Opt out in Vite with `isolationHeaders: false`.
 
 2. **Concurrent access** — Avoid reading the same OPFS path while another context still has it open for writing, or before a writer has finished closing/flushing. The SDK retries a narrow class of transient read errors (`NotReadableError` / Chromium’s “permission problems … reference” wording) and `waitForFileWithContent` keeps polling until timeout, but coordinating writers and readers in your app still reduces flakes.
 
-3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`. Pin the same versions the SDK declares (`2.5.6` / `1.2.9`) and let the Vite plugin alias/dedupe them. Pinning an older pair beside the SDK nests a second copy; `configureSingle` then runs against a different module instance than the one the SDK imported.
+3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.5.6` / `1.2.9`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
+
+## Next.js
+
+Use the SDK only in the browser: in client components, initialized through `SeedClientGate`. Wrap your config with `withSeed` from [`@seedprotocol/next`](../packages/next/README.md), which aliases `fs` to ZenFS in browser builds, keeps the SDK's Node code out of server builds, and sends the cross-origin isolation headers under `next dev` and `next start`:
+
+```js
+// next.config.mjs
+import { withSeed } from '@seedprotocol/next'
+
+export default withSeed({})
+```
+
+`app/layout.tsx` can render `SeedProvider` from `@seedprotocol/react` directly. Next.js 16 works with Turbopack and webpack. Next.js 15 works with webpack only, so drop `--turbopack` from `next dev`.
 
 ---
 

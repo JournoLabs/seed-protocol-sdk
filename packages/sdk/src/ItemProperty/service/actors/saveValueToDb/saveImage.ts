@@ -12,6 +12,7 @@ import { getDataTypeFromString, getMimeType, toMetadataPropertyName } from '@/he
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
+import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -224,8 +225,9 @@ export const saveImage = fromCallback<
       }
     }
 
+    let writtenRow: Partial<PropertyMachineContext> = {}
     if (localId) {
-      await updateItemPropertyValue({
+      writtenRow = rowContext(await updateItemPropertyValue({
         localId: localId,
         propertyName,
         newValue: newImageSeedLocalId,
@@ -239,12 +241,13 @@ export const saveImage = fromCallback<
         localStorageDir: '/images',
         easDataType: 'bytes32',
         dataType: 'Image',
-      } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
+      } as any)) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
     }
 
     sendBack({
       type: 'updateContext',
       localId: newLocalId || localId,
+      ...writtenRow,
       propertyValue: newImageSeedLocalId,
       refSeedType: 'image',
       refSchemaUid: imageSchemaUid,

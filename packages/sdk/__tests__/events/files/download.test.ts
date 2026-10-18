@@ -239,6 +239,35 @@ describe('events/files/download dedupe', () => {
     )
   })
 
+  // A storage_transaction_id attested under the legacy `bytes32` schema decodes as 0x…20.
+  it('skips bytes32 values instead of downloading a 43-character slice of them', async () => {
+    const bytes32 = '0x' + '0'.repeat(62) + '20'
+    mocks.fetchQuery.mockImplementation(async ({ queryKey }: { queryKey: unknown[] }) => {
+      if (queryKey[0] === 'getFilesMetadata') {
+        return {
+          filesMetadata: [
+            { id: 'meta-bytes32', decodedDataJson: JSON.stringify([{ value: { value: bytes32 } }]) },
+            { id: 'meta-1', decodedDataJson: JSON.stringify([{ value: { value: VALID_ARWEAVE_TX } }]) },
+          ],
+        }
+      }
+      return []
+    })
+
+    const mod = await import('@/events/files/download')
+    await mod.downloadAllFilesBinaryRequestHandler()
+    expect(mocks.downloadFileByTransactionId).toHaveBeenCalledTimes(1)
+    expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
+      expect.objectContaining({ transactionId: VALID_ARWEAVE_TX }),
+    )
+
+    vi.clearAllMocks()
+    expect(await mod.downloadTransactionIdWithDedupe(bytes32)).toBe(false)
+    expect(await mod.downloadTransactionIdWithDedupe(`https://arweave.net/${bytes32}`)).toBe(false)
+    expect(mocks.downloadFileByTransactionId).not.toHaveBeenCalled()
+    expect(mocks.downloadAllFiles).not.toHaveBeenCalled()
+  })
+
   describe('Content-SHA-256', () => {
     const TX_B = 'B'.repeat(43)
     const TX_C = 'C'.repeat(43)

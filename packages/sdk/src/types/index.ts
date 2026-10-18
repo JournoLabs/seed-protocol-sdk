@@ -49,8 +49,8 @@ export interface DbConfig {
 
 export interface SeedConfig {
   /**
-   * Persisted file path labels. On Node, both fields default to `filesDir` when omitted.
-   * Browser init still requires them.
+   * Persisted file path labels, saved in `app_state`. Both fields default to `filesDir`, and
+   * `files` is the fallback for `filesDir`. Nothing else reads them, so most apps leave them out.
    */
   readonly endpoints?: Endpoints
   models?: Record<string, Model>
@@ -69,6 +69,10 @@ export interface SeedConfig {
     /** EAS indexer GraphQL endpoint. Overrides the chain default and the `EAS_ENDPOINT` env var. */
     indexerUrl?: string
   }
+  /**
+   * Directory for the database and files: in OPFS in the browser, under `<cwd>/.seed` on Node when
+   * relative. Default: `endpoints.files`, then `'.seed'`.
+   */
   filesDir?: string
   dbConfig?: DbConfig
   /**
@@ -83,9 +87,9 @@ export interface SeedConfig {
    * - No "already exists with different content" errors
    * - `client.init` rejects if it cannot be read or applied
    * - string: path to schema file (Node: relative to process.cwd(); Browser: relative to working dir)
-   * - object: complete SchemaFileFormat inlined
+   * - object: the schema itself; only `metadata.name` and `models` are required
    */
-  schema?: string | import('./import').SchemaFileFormat
+  schema?: string | import('./import').SchemaFileInput
 }
 
 /**

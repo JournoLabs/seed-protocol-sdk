@@ -7,6 +7,7 @@ import { withSqliteBusyRetry } from "./sqliteBusyRetry"
 import { withSeedDbLock } from "@/helpers/tabLocks"
 import { sql } from "drizzle-orm"
 import { BaseFileManager } from "@/helpers";
+import { DatabaseNotPersistentError } from "@/helpers/FileManager/errors";
 import * as schema from '@/seedSchema'
 import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
@@ -72,6 +73,16 @@ export class BrowserDb implements IDb {
       await BaseFileManager.waitForFileWithContent(journalFilePath, 100, 5000)
       logger('[Db.prepareDb] journal file is ready')
 
+      // SQLite's OPFS VFS needs SharedArrayBuffer and Atomics. Without them SQLocal quietly
+      // opens an in-memory database, so fail before starting the worker.
+      if (typeof SharedArrayBuffer === 'undefined' || typeof Atomics === 'undefined') {
+        throw new DatabaseNotPersistentError(
+          globalThis.crossOriginIsolated === false
+            ? 'the page is not cross-origin isolated, so SharedArrayBuffer is unavailable'
+            : 'SharedArrayBuffer is unavailable',
+        )
+      }
+
       // Initialize SQLocalDrizzle with reactive: true to enable reactive queries.
       // Blob-wrap sqlocal's HTTPS module worker so Chrome profiles that kill
       // `new Worker(https://…/worker-HASH.js, { type: 'module' })` as an entry
@@ -103,6 +114,12 @@ export class BrowserDb implements IDb {
       logger('[Db.prepareDb] database prepared')
 
       await raceSqlocalStartup((async () => {
+        // OPFS can still fail inside the worker (e.g. storage blocked); SQLocal then reports memory.
+        const { storageType } = await sqlocalDrizzle.getDatabaseInfo()
+        if (storageType !== 'opfs') {
+          throw new DatabaseNotPersistentError(`SQLocal opened a "${storageType}" database instead of OPFS`)
+        }
+
         await this.runMigrations(db)
 
         this.appDb = db

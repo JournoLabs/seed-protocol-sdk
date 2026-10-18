@@ -2,6 +2,29 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.6 (2026-10-17)
+
+- `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.
+- `getSeed(seedUid, { versionUid, asOf })` reads a seed at one of its versions, with relations expanded and storage hydrated as for the latest, and returns null when the seed has no such version. `asOf` leaves out attestations made after it; a `patch` publish adds property attestations to the current version, so a version uid alone shows later patches (ADR 0011).
+- `queryBySchema`, `queryBySchemaForMonth` and `getSeed` return only the seeds asked for. Before, a seed related to one of them that had the same schema (a post linking to another post) came back as an extra record, past `limit`, with its own relations unexpanded, and that record went into the item cache.
+
+### Commits
+
+#### Features
+
+- getSeed versionUid/asOf, and getSeeds for many seeds at once (cf8c9f71)
+- assemble a seed at a pinned version, optionally as of a time (21b3f94e)
+
+#### Fixes
+
+- return only requested seeds, not same-schema related ones (3244561e)
+
+#### Other
+
+- reword getUnchangedCachedItems comment (3bacd9ff)
+- getSeeds, version reads, ADR 0011 (a058aef3)
+- assemble seeds of mixed schemas in one pass (38dba73b)
+
 ## 0.7.5 (2026-10-17)
 
 - Values from `uint*` and `int*` property attestations come back as decimal strings. Before, `uint256` and other wide integers came back as the indexer's `{"type":"BigNumber","hex":…}` JSON (ADR 0010).

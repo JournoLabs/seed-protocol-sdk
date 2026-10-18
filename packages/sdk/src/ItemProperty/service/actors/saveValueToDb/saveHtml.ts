@@ -11,6 +11,7 @@ import { createSeed } from '@/db/write/createSeed'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
+import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { toMetadataPropertyName } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -119,8 +120,9 @@ export const saveHtml = fromCallback<
       }
     }
 
+    let writtenRow: Partial<PropertyMachineContext> = {}
     if (localId) {
-      await updateItemPropertyValue({
+      writtenRow = rowContext(await updateItemPropertyValue({
         localId,
         propertyName,
         newValue: newHtmlSeedLocalId,
@@ -135,12 +137,13 @@ export const saveHtml = fromCallback<
         localStorageDir: '/html',
         easDataType: 'bytes32',
         dataType: 'Html',
-      } as any)
+      } as any))
     }
 
     sendBack({
       type: 'updateContext',
       localId: newLocalId || localId,
+      ...writtenRow,
       propertyValue: newHtmlSeedLocalId,
       refSeedType: 'html',
       refSchemaUid: htmlSchemaUid,
