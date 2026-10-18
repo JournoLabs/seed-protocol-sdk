@@ -52,26 +52,29 @@ export function unloadEntity<T extends object>(instance: T, config: UnloadConfig
   // Get cache keys for this instance
   const cacheKeys = config.getCacheKeys(instance)
 
-  // Remove from all caches (decrement refCount, delete if 0)
-  let stillReferenced = false
+  // Release one hold per entry. An entry stored under several keys (a name and an id) is one
+  // instance's count: decrement it once, and when it reaches 0 delete every key that holds it.
+  const found: Array<{ cache: Map<string, CacheEntry<T>>; key: string; entry: CacheEntry<T> }> = []
   for (const cache of config.caches) {
     for (const key of cacheKeys) {
       const entry = cache.get(key)
-      if (entry) {
-        entry.refCount -= 1
-        if (entry.refCount <= 0) {
-          cache.delete(key)
+      if (entry) found.push({ cache, key, entry })
+    }
+  }
+  const entries = new Set(found.map(({ entry }) => entry))
+  for (const entry of entries) entry.refCount -= 1
 
-          // Also remove from secondary caches if provided
-          if (config.secondaryCaches) {
-            for (const secondaryCache of config.secondaryCaches) {
-              secondaryCache.delete(key)
-            }
-          }
-        } else {
-          cache.set(key, entry)
-          stillReferenced = true
-        }
+  let stillReferenced = false
+  for (const { cache, key, entry } of found) {
+    if (entry.refCount > 0) {
+      stillReferenced = true
+      continue
+    }
+    cache.delete(key)
+    // Also remove from secondary caches if provided
+    if (config.secondaryCaches) {
+      for (const secondaryCache of config.secondaryCaches) {
+        secondaryCache.delete(key)
       }
     }
   }

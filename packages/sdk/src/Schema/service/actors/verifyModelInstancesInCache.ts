@@ -62,7 +62,7 @@ export const verifyModelInstancesInCache = fromCallback<
 
         for (const modelFileId of modelIds) {
           // Try to get instance from cache
-          const instance = Model.getById(modelFileId)
+          const instance = Model.peek(modelFileId)
           if (instance) {
             verifiedInstances.push(modelFileId)
           } else {

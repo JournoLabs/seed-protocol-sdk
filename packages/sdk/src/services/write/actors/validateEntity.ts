@@ -35,7 +35,7 @@ export const validateEntity = fromPromise<
     if (schemaEvictedSince(schemaName, evictionEpoch)) {
       throw new Error(`Schema "${schemaName}" was evicted during validation`)
     }
-    return Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+    return Schema.create(schemaName, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
   }
   
   const _validate = async (): Promise<ValidateEntityOutput> => {

@@ -188,7 +188,7 @@ const getPropertySchemaByModelFileId = async (
   propertyName: string
 ): Promise<ReturnType<typeof getPropertySchema>> => {
   // Get model by modelFileId
-  const model = await Model.createById(modelFileId)
+  const model = await Model.createById(modelFileId, { hold: false })
   if (!model) {
     return undefined
   }
@@ -350,7 +350,7 @@ export function useModelProperty(
         propertyData = await getPropertySchemaByModelFileId(lookupMode.modelFileId, lookupMode.propertyName)
         
         // Get modelName from model (needed for ModelProperty.create)
-        const model = await Model.createById(lookupMode.modelFileId)
+        const model = await Model.createById(lookupMode.modelFileId, { hold: false })
         resolvedModelName = model?.modelName ?? (model as any)?.name
       } else {
         // lookupMode.type === 'schemaId'

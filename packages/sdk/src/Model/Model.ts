@@ -359,6 +359,8 @@ export class Model {
       waitForReady: false
       /** @internal Schema import: see the implementation signature */
       persistedBy?: Promise<unknown>
+      /** @internal SDK lookups pass false: see the implementation signature */
+      hold?: false
     },
   ): Model
   static create(
@@ -371,6 +373,8 @@ export class Model {
       registerWithSchema?: boolean
       waitForReady?: true
       readyTimeout?: number
+      /** @internal SDK lookups pass false: see the implementation signature */
+      hold?: false
     },
   ): Promise<Model>
   static create(
@@ -387,6 +391,11 @@ export class Model {
        * row for its id by then, it writes as usual.
        */
       persistedBy?: Promise<unknown>
+      /**
+       * @internal false for SDK code that only looks the model up: no hold is taken, and a model
+       * loaded here is cached with none, so its users' last unload still stops it.
+       */
+      hold?: false
     } & CreateWaitOptions,
   ): Model | Promise<Model> {
     if (!modelName) {
@@ -395,6 +404,7 @@ export class Model {
 
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
+    const holds = options?.hold === false ? 0 : 1
 
     // Extract schema name and instance
     let schemaName: string
@@ -415,12 +425,10 @@ export class Model {
     const registerWithSchema = options?.registerWithSchema !== false && schemaInstance !== undefined
 
     // Step 1: Check ID-based cache first (if ID provided)
-    if (id && this.instanceCacheById.has(id)) {
-      const { instance, refCount } = this.instanceCacheById.get(id)!
-      this.instanceCacheById.set(id, {
-        instance,
-        refCount: refCount + 1,
-      })
+    const cachedById = id ? this.instanceCacheById.get(id) : undefined
+    if (cachedById) {
+      cachedById.refCount += holds
+      const { instance } = cachedById
       logger(`Model.create: Found instance in ID cache for "${modelName}" (ID: ${id})`)
       if (!waitForReady) return instance
       return this.waitUntilReady(instance, readyTimeout)
@@ -455,18 +463,16 @@ export class Model {
     // create('My Model') calls get new instances with incremented names.
     if (id && uniqueModelName === modelName) {
       const legacyKey = `${schemaName}:${modelName}`
-      if (this.instanceCache.has(legacyKey)) {
-        const { instance, refCount } = this.instanceCache.get(legacyKey)!
+      const legacyEntry = this.instanceCache.get(legacyKey)
+      if (legacyEntry) {
+        const { instance } = legacyEntry
         const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean; id?: string }
         if (!ctx._idFromSchema && !this.isOtherModelId(ctx.id, id)) {
-          this.instanceCache.set(legacyKey, {
-            instance,
-            refCount: refCount + 1,
-          })
+          legacyEntry.refCount += holds
           logger(`Model.create: Found instance in legacy cache for "${modelName}"`)
           const existingId = (instance._getSnapshotContext() as { id?: string }).id
           if (existingId) {
-            this.instanceCacheById.set(existingId, { instance, refCount: refCount + 1 })
+            this.instanceCacheById.set(existingId, legacyEntry)
             this.instanceCacheByName.set(legacyKey, existingId)
           }
           if (!waitForReady) return instance
@@ -501,18 +507,16 @@ export class Model {
       this.instanceCache.has(nameKey) &&
       !this.isOtherModelId((this.instanceCache.get(nameKey)!.instance._getSnapshotContext() as { id?: string }).id, id)
     ) {
-      const { instance, refCount } = this.instanceCache.get(nameKey)!
-      this.instanceCache.set(nameKey, {
-        instance,
-        refCount: refCount + 1,
-      })
+      const legacyEntry = this.instanceCache.get(nameKey)!
+      legacyEntry.refCount += holds
+      const { instance } = legacyEntry
       logger(`Model.create: Found instance in legacy cache for "${modelName}"`)
       
       // Migrate to new cache structure
       const context = instance._getSnapshotContext()
       const existingId = context.id // id is now the schemaFileId (string)
       if (existingId) {
-        this.instanceCacheById.set(existingId, { instance, refCount: refCount + 1 })
+        this.instanceCacheById.set(existingId, legacyEntry)
         this.instanceCacheByName.set(nameKey, existingId)
       }
       
@@ -759,11 +763,10 @@ export class Model {
     }) as Model
     
     // Step 8: Store in new ID-based cache
-    // resolvedId is guaranteed to be defined at this point (generated if not provided)
-    this.instanceCacheById.set(resolvedId!, {
-      instance: proxiedInstance,
-      refCount: 1,
-    })
+    // resolvedId is guaranteed to be defined at this point (generated if not provided).
+    // The ID and legacy caches share one entry: one hold count for the instance.
+    const entry = { instance: proxiedInstance, refCount: holds }
+    this.instanceCacheById.set(resolvedId!, entry)
     
     // Step 9: Store in name-based index (placeholder key when !id; loadOrCreateModel will replace with final name)
     this.instanceCacheByName.set(nameKey, resolvedId!)
@@ -773,10 +776,7 @@ export class Model {
     }
 
     // Step 10: Also store in legacy cache (for backward compatibility during migration)
-    this.instanceCache.set(nameKey, {
-      instance: proxiedInstance,
-      refCount: 1,
-    })
+    this.instanceCache.set(nameKey, entry)
     
     logger(`Model.create: Created new instance for "${uniqueModelName}" (ID: ${id})`)
     
@@ -1064,44 +1064,54 @@ export class Model {
   }
 
   /**
-   * Get Model instance by modelFileId (O(1) lookup)
+   * Get Model instance by modelFileId (O(1) lookup). Takes a hold on the instance; release it with
+   * `unload()`.
    */
   static getById(modelFileId: string): Model | undefined {
     const entry = this.instanceCacheById.get(modelFileId)
-    if (entry) {
-      // Increment ref count
-      this.instanceCacheById.set(modelFileId, {
-        instance: entry.instance,
-        refCount: entry.refCount + 1,
-      })
-      return entry.instance
-    }
-    return undefined
+    if (!entry) return undefined
+    entry.refCount += 1
+    return entry.instance
   }
 
   /**
-   * Get Model instance by name (O(1) lookup via name→ID mapping)
-   * 
+   * The cached Model with this modelFileId, without taking a hold. For SDK code that reads the
+   * model and doesn't hand it to a caller; callers that keep it use `getById`, `find` or `create`.
+   */
+  static peek(modelFileId: string): Model | undefined {
+    return this.instanceCacheById.get(modelFileId)?.instance
+  }
+
+  /**
+   * Get Model instance by name (O(1) lookup via name→ID mapping). Takes a hold on the instance;
+   * release it with `unload()`.
+   *
    * @param modelName - The name of the model
    * @param schemaName - The schema name (optional, will query DB if not provided)
    * @returns The Model instance if found, undefined otherwise
    */
   static getByName(modelName: string, schemaName?: string): Model | undefined {
+    const model = this.peekByName(modelName, schemaName)
+    return model?.id ? this.getById(model.id) : undefined
+  }
+
+  /**
+   * `getByName` without taking a hold. Without `schemaName` it searches every cached schema and
+   * throws AmbiguousModelError when models from several schemas share the name; callers that know
+   * the schema or model id should use Model.resolve() instead.
+   */
+  static peekByName(modelName: string, schemaName?: string): Model | undefined {
     if (schemaName) {
-      const nameKey = `${schemaName}:${modelName}`
-      const id = this.instanceCacheByName.get(nameKey)
-      if (!id) {
-        return undefined
-      }
-      return this.getById(id)
+      const id = this.instanceCacheByName.get(`${schemaName}:${modelName}`)
+      return id ? this.peek(id) : undefined
     }
-    // If schemaName not provided, search all name keys. Model names are only unique per schema, so
-    // this throws AmbiguousModelError when cached models from several schemas share the name.
-    // Callers that know the schema or model id should use Model.resolve() instead.
     return this._getUniqueCachedModel(modelName, (cachedModelName) => cachedModelName === modelName)
   }
 
-  /** The one cached Model whose name matches, or AmbiguousModelError if models from several schemas do. */
+  /**
+   * The one cached Model whose name matches (no hold taken), or AmbiguousModelError if models from
+   * several schemas do.
+   */
   private static _getUniqueCachedModel(
     label: string,
     matches: (cachedModelName: string) => boolean,
@@ -1118,34 +1128,34 @@ export class Model {
       throw new AmbiguousModelError(label, [...matchesById.values()])
     }
     const [matchId] = matchesById.keys()
-    return matchId ? this.getById(matchId) : undefined
+    return matchId ? this.peek(matchId) : undefined
   }
 
   /**
    * Resolve a cached Model from the most specific scope available: modelFileId (Model.id), then
-   * schemaName + modelName, then modelName alone.
+   * schemaName + modelName, then modelName alone. Takes no hold.
    */
   static resolve(
     modelName: string | undefined,
     scope: { modelFileId?: string | null; schemaName?: string | null } = {},
   ): Model | undefined {
     if (scope.modelFileId) {
-      const byId = this.getById(scope.modelFileId)
+      const byId = this.peek(scope.modelFileId)
       if (byId) return byId
     }
     if (!modelName) return undefined
     if (scope.schemaName) {
-      const bySchema = this.getByName(modelName, scope.schemaName)
+      const bySchema = this.peekByName(modelName, scope.schemaName)
       if (bySchema) return bySchema
     }
-    return this.getByName(modelName)
+    return this.peekByName(modelName)
   }
 
   /**
    * Find Model by modelType (an EAS model name, as seeds.type stores it). Matched as ADR 0008
    * matches EAS names: `new_model` finds "New model", and `htmlpage` (an older SDK's name) finds
    * "HTMLPage", unless HTMLPage's nameMatch (ADR 0009) is `exact`. Only the tightest matching tier
-   * counts; matches in several schemas are ambiguous.
+   * counts; matches in several schemas are ambiguous. Takes no hold.
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
@@ -1157,7 +1167,7 @@ export class Model {
   }
 
   /**
-   * Get all Model instances for a schema from cache only (synchronous).
+   * Get all Model instances for a schema from cache only (synchronous). Takes no holds.
    * Includes models created at runtime via Model.create() that may not yet be in schema context.
    */
   static getCachedInstancesForSchema(schemaName: string): Model[] {
@@ -1166,7 +1176,7 @@ export class Model {
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
       const [cachedSchemaName] = nameKey.split(':')
       if (cachedSchemaName === schemaName && id && !seen.has(id)) {
-        const instance = this.getById(id)
+        const instance = this.peek(id)
         if (instance) {
           instances.push(instance)
           seen.add(id)
@@ -1189,18 +1199,18 @@ export class Model {
 
   /**
    * Async Model.resolve(): exact cache hit by modelFileId or schemaName+modelName, else the DB row for
-   * that scope (instantiating the Model), and only then the name-only fallback.
+   * that scope (instantiating the Model), and only then the name-only fallback. Takes no hold.
    */
   static async resolveAsync(
     modelName: string | undefined,
     scope: { modelFileId?: string | null; schemaName?: string | null } = {},
   ): Promise<Model | undefined> {
     if (scope.modelFileId) {
-      const byId = this.getById(scope.modelFileId)
+      const byId = this.peek(scope.modelFileId)
       if (byId) return byId
     }
     if (modelName && scope.schemaName) {
-      const bySchema = this.getByName(modelName, scope.schemaName)
+      const bySchema = this.peekByName(modelName, scope.schemaName)
       if (bySchema) return bySchema
     }
     if (scope.modelFileId || scope.schemaName) {
@@ -1228,14 +1238,14 @@ export class Model {
             // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
             if (schemaEvictedSince(record.schemaName, evictionEpoch)) return undefined
             if (modelDestroyedSince(record.modelFileId, evictionEpoch)) return undefined
-            return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
+            return this.create(record.modelName, record.schemaName, { id: record.modelFileId, hold: false })
           }
         } catch (error) {
           logger(`Model.resolveAsync: scoped lookup failed for "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
-    return modelName ? this.getByNameAsync(modelName) : undefined
+    return modelName ? this.getByNameAsync(modelName, undefined, { hold: false }) : undefined
   }
 
   /**
@@ -1244,7 +1254,7 @@ export class Model {
    * 
    * @param modelName - The name of the model
    * @param schemaName - Optional schema name (will query DB if not provided)
-   * @returns The Model instance if found, undefined otherwise
+   * @returns The Model instance if found, undefined otherwise. Takes a hold unless `hold: false`.
    */
   static async getByNameAsync(
     modelName: string,
@@ -1255,10 +1265,13 @@ export class Model {
        * schema since then makes this return undefined instead of re-creating the model. Defaults to now.
        */
       evictionEpoch?: number
+      /** @internal `hold: false` as for `create` */
+      hold?: false
     },
   ): Promise<Model | undefined> {
     // First try cache
-    const cached = this.getByName(modelName, schemaName)
+    const cached =
+      options?.hold === false ? this.peekByName(modelName, schemaName) : this.getByName(modelName, schemaName)
     if (cached) {
       return cached
     }
@@ -1310,6 +1323,7 @@ export class Model {
         // Create model instance (will be cached)
         return this.create(record.modelName, record.schemaName, {
           id: record.modelFileId, // id is now the schemaFileId (string)
+          ...(options?.hold === false && { hold: false as const }),
         })
       } catch (error) {
         if (error instanceof AmbiguousModelError) throw error
@@ -1337,6 +1351,8 @@ export class Model {
        * of re-creating the model. Defaults to now.
        */
       evictionEpoch?: number
+      /** @internal `hold: false` as for `create` */
+      hold?: false
     },
   ): Promise<Model | undefined> {
     if (!modelFileId) {
@@ -1344,7 +1360,7 @@ export class Model {
     }
 
     // Step 1: Check cache first (fast path)
-    const cached = this.getById(modelFileId)
+    const cached = options?.hold === false ? this.peek(modelFileId) : this.getById(modelFileId)
     if (cached) {
       logger(`Model.createById: Found instance in cache for ID "${modelFileId}"`)
       return cached
@@ -1399,6 +1415,7 @@ export class Model {
       logger(`Model.createById: Creating model "${modelName}" in schema "${schemaName}" from ID "${modelFileId}"`)
       return this.create(modelName, schemaName, {
         id: modelFileId, // id is now the schemaFileId (string)
+        ...(options?.hold === false && { hold: false as const }),
       })
     } catch (error) {
       logger(`Model.createById: Error looking up model by ID "${modelFileId}": ${error instanceof Error ? error.message : String(error)}`)
@@ -1533,7 +1550,8 @@ export class Model {
    * Get all Model instances, optionally filtered by schema.
    * When DB is available, loads from DB via getModelsData; otherwise returns from cache.
    * With waitForReady, waits for each model to be ready (idle, with any properties from Model.create
-   * created) and leaves out models that error or time out.
+   * created) and leaves out models that error or time out. Takes no holds: a caller that keeps a
+   * model uses `Model.find` or `Model.create`.
    */
   static async all(
     schemaName?: string,
@@ -1549,7 +1567,7 @@ export class Model {
         for (const [nameKey, id] of this.instanceCacheByName.entries()) {
           const [cachedSchemaName] = nameKey.split(':')
           if (cachedSchemaName === schemaName) {
-            const instance = this.getById(id)
+            const instance = this.peek(id)
             if (instance && !seen.has(id)) {
               instances.push(instance)
               seen.add(id)
@@ -1593,7 +1611,7 @@ export class Model {
     for (const row of rows) {
       // A model can appear more than once (e.g. duplicate model_schemas links); return it once.
       if (row.schemaFileId && !seen.has(row.schemaFileId)) {
-        const instance = await this.createById(row.schemaFileId)
+        const instance = await this.createById(row.schemaFileId, { hold: false })
         if (instance && !seen.has(instance.id ?? row.schemaFileId)) {
           instances.push(instance)
           seen.add(instance.id ?? row.schemaFileId)
@@ -1606,7 +1624,7 @@ export class Model {
       for (const [nameKey, id] of this.instanceCacheByName.entries()) {
         const [cachedSchemaName] = nameKey.split(':')
         if (cachedSchemaName === schemaName && id && !seen.has(id)) {
-          const instance = this.getById(id)
+          const instance = this.peek(id)
           if (instance) {
             instances.push(instance)
             seen.add(id)
@@ -2147,7 +2165,7 @@ export class Model {
         if (schemaName && modelName) {
           // Imported here, not at module load: Model and Schema import each other.
           const { Schema } = await import('@/Schema/Schema')
-          const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
+          const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
           const schemaContext = schema.getService().getSnapshot().context
           if (schemaContext.models?.[modelName]) {
             const updatedModels = { ...schemaContext.models }

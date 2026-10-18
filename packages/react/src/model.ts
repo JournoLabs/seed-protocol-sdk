@@ -206,7 +206,7 @@ export const useModel = (
         setIsLoading(true)
         setError(null)
         // Use Model.createById which handles cache + DB lookup
-        const foundModel = await Model.createById(schemaIdOrModelId)
+        const foundModel = await Model.createById(schemaIdOrModelId, { hold: false })
         setModel(foundModel || undefined)
         setIsLoading(false)
         setError(null)

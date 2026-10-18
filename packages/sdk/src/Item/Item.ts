@@ -480,6 +480,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
+   * The cached Item for a seedLocalId or seedUid, in any state, without taking a hold. For SDK code
+   * that reads or messages the item and doesn't hand it to a caller.
+   */
+  static peek(id: string | null | undefined): Item<any> | undefined {
+    return id ? this.findItemInstanceCacheEntryById(id)?.instance : undefined
+  }
+
+  /**
    * The cached Item for a seedLocalId or seedUid when it can be read right now: idle and hydrated,
    * so at least what `Item.find()` would wait for. Otherwise undefined. Unlike `getById`, it takes
    * no cache hold, so React hooks can call it during render.

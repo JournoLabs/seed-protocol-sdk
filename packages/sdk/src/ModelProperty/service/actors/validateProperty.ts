@@ -96,9 +96,7 @@ export const validateProperty = fromCallback<
     if (isActorStopped(self)) return
     if (fullContext._schemaName && fullContext.modelName) {
       try {
-        const schema = Schema.create(fullContext._schemaName, {
-          waitForReady: false,
-        }) as import('@/Schema/Schema').Schema
+        const schema = Schema.create(fullContext._schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
         const schemaSnapshot = schema.getService().getSnapshot()
         const schemaStatus = schemaSnapshot.value
         

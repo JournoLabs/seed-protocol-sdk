@@ -64,9 +64,7 @@ export const validateModel = fromCallback<
       if (isActorStopped(self)) return
       if (context.schemaName) {
         try {
-          const schema = Schema.create(context.schemaName, {
-            waitForReady: false,
-          }) as import('@/Schema/Schema').Schema
+          const schema = Schema.create(context.schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
           const schemaSnapshot = schema.getService().getSnapshot()
           const schemaStatus = schemaSnapshot.value
           

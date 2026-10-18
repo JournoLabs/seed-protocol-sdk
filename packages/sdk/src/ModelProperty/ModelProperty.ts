@@ -365,10 +365,10 @@ export class ModelProperty {
       // Synchronous cache hits first: callers compare against these values right after construction,
       // so an extra await here lets every property look "edited" (a draft save each). Only then the
       // DB (by modelId), and never instantiate a Model while its own properties are initializing.
-      let model = schemaName ? Model.getByName(property.modelName, schemaName) : undefined
+      let model = schemaName ? Model.peekByName(property.modelName, schemaName) : undefined
       if (!model) {
         try {
-          model = Model.getByName(property.modelName)
+          model = Model.peekByName(property.modelName)
         } catch {
           model = undefined // ambiguous name; resolve by modelId below
         }
@@ -376,7 +376,7 @@ export class ModelProperty {
       if (!model && modelId) {
         const { resolveModelRecord } = await import('@/db/read/resolveModelRecord')
         const modelFileId = (await resolveModelRecord(property.modelName, { modelId }))?.schemaFileId
-        model = modelFileId ? Model.getById(modelFileId) : undefined
+        model = modelFileId ? Model.peek(modelFileId) : undefined
       }
       // Evicted (with its schema) or unloaded while the lookups above ran: don't instantiate its model
       // again from rows that are being deleted.
@@ -387,6 +387,7 @@ export class ModelProperty {
           // then (this instance may already be stopped) must not re-create the model.
           model = await Model.getByNameAsync(property.modelName, undefined, {
             evictionEpoch: this._evictionEpoch,
+            hold: false,
           })
         } catch {
           model = undefined
@@ -1518,7 +1519,7 @@ export class ModelProperty {
         }
 
         if (schemaName) {
-          const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
+          const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
           const snapshot = schema.getService().getSnapshot()
           const schemaContext = snapshot.context
           if (schemaContext.models?.[modelName]?.properties?.[propertyName]) {
