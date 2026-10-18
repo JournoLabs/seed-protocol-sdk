@@ -13,7 +13,7 @@ import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
-import type { IItem, IItemProperty, ItemPublishOptions } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty, ItemCreateOptions, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
@@ -437,7 +437,15 @@ export const useItems: UseItems = ({
 }
 
 export type UseCreateItemReturn = {
-  createItem: (modelName: string, itemData?: Record<string, any>) => Promise<Item<any> | undefined>
+  /**
+   * Calls `Item.create({ modelName, ...itemData }, options)`. A call made while another is in
+   * flight returns that call's promise (and its item) instead of creating a second one.
+   */
+  createItem: (
+    modelName: string,
+    itemData?: Record<string, any>,
+    options?: ItemCreateOptions,
+  ) => Promise<Item<any> | undefined>
   isLoading: boolean
   error: Error | null
   resetError: () => void
@@ -447,37 +455,45 @@ export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
-  const inFlightRef = useRef(false)
+  const inFlightRef = useRef<Promise<Item<any> | undefined> | null>(null)
 
   const resetError = useCallback(() => setError(null), [])
 
   const createItem = useCallback(
-    async (modelName: string, itemData?: Record<string, any>): Promise<Item<any> | undefined> => {
+    (
+      modelName: string,
+      itemData?: Record<string, any>,
+      options?: ItemCreateOptions,
+    ): Promise<Item<any> | undefined> => {
       if (inFlightRef.current) {
-        logger('[useCreateItem] [createItem] already creating item, skipping')
-        return undefined
+        logger('[useCreateItem] [createItem] already creating item, returning the in-flight create')
+        return inFlightRef.current
       }
-      inFlightRef.current = true
 
       setError(null)
       // Flush loading=true synchronously so the UI (and tests) can observe it before async work runs.
       flushSync(() => setIsLoading(true))
 
-      try {
-        const data = itemData ?? {}
-        // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
-        const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0])
-        return (newItem ?? undefined) as Item<any> | undefined
-      } catch (err) {
-        logger('[useCreateItem] Error creating item:', err)
-        setError(err instanceof Error ? err : new Error(String(err)))
-        return undefined
-      } finally {
-        inFlightRef.current = false
-        // Defer clearing loading so React can commit the loading=true render first.
-        // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
-        queueMicrotask(() => setIsLoading(false))
+      const run = async (): Promise<Item<any> | undefined> => {
+        try {
+          const data = itemData ?? {}
+          // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
+          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], options)
+          return (newItem ?? undefined) as Item<any> | undefined
+        } catch (err) {
+          logger('[useCreateItem] Error creating item:', err)
+          setError(err instanceof Error ? err : new Error(String(err)))
+          return undefined
+        } finally {
+          inFlightRef.current = null
+          // Defer clearing loading so React can commit the loading=true render first.
+          // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
+          queueMicrotask(() => setIsLoading(false))
+        }
       }
+      const promise = run()
+      inFlightRef.current = promise
+      return promise
     },
     [],
   )

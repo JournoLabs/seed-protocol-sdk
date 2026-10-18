@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Subscription } from 'xstate'
 import debug from 'debug'
-import { ItemProperty } from '@seedprotocol/sdk'
+import { ItemProperty, ItemPropertySaveValidationError } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
-import type { IItemProperty } from '@seedprotocol/sdk'
+import type { IItemProperty, PropertyValueSnapshot } from '@seedprotocol/sdk'
 import { useLiveQuery } from './liveQuery'
 import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
@@ -161,35 +161,59 @@ export function useItemProperty(
   useEffect(() => {
     if (!property) return
 
-    let lastVersionAt = 0
+    const bump = () => setVersion((prev) => prev + 1)
+    const initialContext = (property.getService().getSnapshot() as any)?.context
+    let lastRenderValue: unknown = initialContext?.renderValue
+    let lastPropertyValue: unknown = initialContext?.propertyValue
     let wasIdle = false
-    /** Idle snapshots repeat often; only re-render when context values actually change (e.g. liveQuery/updateContext after idle). */
-    let lastIdleValueSig: string | undefined
+    let lastVersionAt = 0
+    let trailing: ReturnType<typeof setTimeout> | undefined
     const THROTTLE_MS = 50
     const subscription: Subscription = property.getService().subscribe((snapshot: any) => {
-      const isIdle = snapshot && typeof snapshot === 'object' && 'value' in snapshot && snapshot.value === 'idle'
+      const ctx = snapshot?.context ?? {}
+      // A value change re-renders at once: a controlled input bound to property.value that
+      // skipped a render was reset to the old value, and the next keystroke built on it.
+      if (!Object.is(ctx.renderValue, lastRenderValue) || !Object.is(ctx.propertyValue, lastPropertyValue)) {
+        lastRenderValue = ctx.renderValue
+        lastPropertyValue = ctx.propertyValue
+        wasIdle = snapshot.value === 'idle'
+        lastVersionAt = Date.now()
+        clearTimeout(trailing)
+        trailing = undefined
+        bump()
+        return
+      }
+      const isIdle = snapshot.value === 'idle'
       if (isIdle) {
-        const ctx = snapshot.context
-        const sig = JSON.stringify([ctx.renderValue, ctx.propertyValue])
-        const shouldBump = !wasIdle || sig !== lastIdleValueSig
-        if (shouldBump) {
+        // Idle snapshots repeat often; re-render only on arriving there.
+        if (!wasIdle) {
           wasIdle = true
-          lastIdleValueSig = sig
-          setVersion((prev) => prev + 1)
+          clearTimeout(trailing)
+          trailing = undefined
+          bump()
         }
         return
       }
       wasIdle = false
-      lastIdleValueSig = undefined
-      // Throttle re-renders during transitions: property machine emits many snapshots
+      // Other fields (saving flags, errors) change on many snapshots in a row: throttle those, with a
+      // trailing render so the last one is never dropped.
       const now = Date.now()
       if (now - lastVersionAt >= THROTTLE_MS) {
         lastVersionAt = now
-        setVersion(prev => prev + 1)
+        bump()
+      } else if (!trailing) {
+        trailing = setTimeout(() => {
+          trailing = undefined
+          lastVersionAt = Date.now()
+          bump()
+        }, THROTTLE_MS - (now - lastVersionAt))
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      clearTimeout(trailing)
+      subscription.unsubscribe()
+    }
   }, [property])
 
   return {
@@ -236,16 +260,20 @@ export function useDebouncedItemProperty(
     return { seedLocalId, seedUid, propertyName }
   }, [itemId, seedLocalId, seedUid, propertyName])
 
-  const { property, isLoading, error } = useItemProperty(normalizedParams)
+  const { property, isLoading, error: queryError } = useItemProperty(normalizedParams)
   const latestValueRef = useRef<string>('')
+  /** What the property showed before the first keystroke of the current debounce window. */
+  const beforeRef = useRef<PropertyValueSnapshot | null>(null)
+  const saveError = usePropertySaveError(property)
 
   const debouncedPersist = useMemo(
     () =>
       debounce((prop: IItemProperty) => {
-        prop.getService().send({
-          type: 'save',
-          newValue: latestValueRef.current,
-        })
+        const before = beforeRef.current ?? undefined
+        beforeRef.current = null
+        // setValue looks up a missing propertyRecordSchema and rolls back to `before` when the save
+        // is refused (item not owned) or breaks a rule.
+        prop.setValue(latestValueRef.current, { before })
       }, debounceMs),
     [debounceMs]
   )
@@ -261,6 +289,10 @@ export function useDebouncedItemProperty(
   const setValue = useCallback(
     (value: string) => {
       if (!property) return
+      if (!beforeRef.current) {
+        const ctx = (property.getService().getSnapshot() as any).context
+        beforeRef.current = { propertyValue: ctx.propertyValue, renderValue: ctx.renderValue }
+      }
       latestValueRef.current = value
       property.getService().send({
         type: 'updateContext',
@@ -277,8 +309,45 @@ export function useDebouncedItemProperty(
     setValue,
     flush,
     isLoading,
-    error,
+    error: queryError ?? saveError,
   }
+}
+
+/**
+ * The property's last save failure: `_saveError` (an OwnershipError for an item you don't own,
+ * say), or an ItemPropertySaveValidationError when the value broke a rule. Cleared by the next save.
+ */
+function usePropertySaveError(property: IItemProperty | undefined): Error | null {
+  const [error, setError] = useState<Error | null>(null)
+  useEffect(() => {
+    if (!property) {
+      setError(null)
+      return
+    }
+    const read = (ctx: any): Error | null => {
+      if (ctx?._saveError) return ctx._saveError as Error
+      const validationErrors = ctx?._saveValidationErrors
+      if (validationErrors?.length) {
+        return new ItemPropertySaveValidationError(
+          `Invalid value for property ${ctx.propertyName}: ${validationErrors.map((e: { message: string }) => e.message).join('; ')}`,
+          validationErrors,
+        )
+      }
+      return null
+    }
+    let lastSource: unknown
+    const update = (ctx: any) => {
+      // Compare the context fields, not the built error, so an unchanged failure keeps its identity.
+      const source = ctx?._saveError || (ctx?._saveValidationErrors?.length ? ctx._saveValidationErrors : null)
+      if (source === lastSource) return
+      lastSource = source
+      setError(read(ctx))
+    }
+    update((property.getService().getSnapshot() as any)?.context)
+    const subscription: Subscription = property.getService().subscribe((snapshot: any) => update(snapshot?.context))
+    return () => subscription.unsubscribe()
+  }, [property])
+  return error
 }
 
 type UseItemPropertiesReturn = {

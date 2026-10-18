@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import {
   useResolvedMediaRef,
@@ -29,11 +29,35 @@ function NormalizedProbe() {
   )
 }
 
+function LoggingProbe({ value, log }: { value: string; log: { value: string; href?: string; status: string }[] }) {
+  const { href, status } = useResolvedMediaRef({ value })
+  log.push({ value, href, status })
+  return <span data-testid="href">{href ?? ''}</span>
+}
+
 describe('useResolvedMediaRef', () => {
   it('resolves https URL to href (direct)', async () => {
     render(<HookProbe value="https://example.com/img.png" />)
     expect(await screen.findByTestId('status')).toHaveTextContent('ready')
     expect(screen.getByTestId('href')).toHaveTextContent('https://example.com/img.png')
+  })
+
+  it('never returns the previous value\'s href after the value changes', async () => {
+    const first = 'https://example.com/first.png'
+    const second = 'https://example.com/second.png'
+    const log: { value: string; href?: string; status: string }[] = []
+    const { rerender } = render(<LoggingProbe value={first} log={log} />)
+    await waitFor(() => expect(screen.getByTestId('href')).toHaveTextContent(first))
+
+    rerender(<LoggingProbe value={second} log={log} />)
+    await waitFor(() => expect(screen.getByTestId('href')).toHaveTextContent(second))
+
+    const afterChange = log.filter((r) => r.value === second)
+    expect(afterChange.length).toBeGreaterThan(0)
+    for (const r of afterChange) {
+      expect(r.href === undefined || r.href === second).toBe(true)
+      if (r.href === undefined) expect(r.status).toBe('loading')
+    }
   })
 })
 

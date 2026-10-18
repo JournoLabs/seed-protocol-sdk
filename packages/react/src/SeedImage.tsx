@@ -66,7 +66,7 @@ const SeedImageInner = ({
   filename: filenameOverride,
   ensure = true,
   ...props
-}: SeedImageProps): React.ReactNode => {
+}: SeedImageProps, ref: React.ForwardedRef<HTMLImageElement>): React.ReactNode => {
   const [sizedContentUrl, setSizedContentUrl] = useState<string | undefined>()
   const [originalContentUrl, setOriginalContentUrl] = useState<string | undefined>()
 
@@ -238,6 +238,7 @@ const SeedImageInner = ({
       alt={props.alt || imageProperty.propertyName || 'Image'}
       width={width}
       {...imgProps}
+      ref={ref}
       onError={handleError}
     />
   )
@@ -245,4 +246,5 @@ const SeedImageInner = ({
 
 // Shallow comparison of all props: the old comparator ignored className, style, alt and handlers,
 // so changing them never re-rendered.
-export const SeedImage = React.memo(SeedImageInner)
+// forwardRef: React 18 doesn't pass `ref` to a plain function component.
+export const SeedImage = React.memo(React.forwardRef(SeedImageInner))
