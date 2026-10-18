@@ -110,6 +110,11 @@ export class NodeDb implements IDb {
     return !!this.db
   }
 
+  async transaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    if (!this.db) throw new Error('Database not prepared')
+    return this.db.transaction(fn)
+  }
+
   /**
    * Copy prebuilt SQL migrations into the app db directory (overwrite to stay current).
    */
