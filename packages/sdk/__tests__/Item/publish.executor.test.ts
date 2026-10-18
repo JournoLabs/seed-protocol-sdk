@@ -115,7 +115,30 @@ testDescribe('Item.publish delegates to the publish executor', () => {
     await expect(item.publish()).rejects.toThrow('bundler rejected the upload')
     const snapshot = item.getService().getSnapshot()
     expect(snapshot.value).toBe('idle')
-    expect(snapshot.context._publishError).toEqual({ message: 'bundler rejected the upload' })
+    expect(snapshot.context._publishError?.message).toBe('bundler rejected the upload')
+  }, 30000)
+
+  it('rejects with the executor error itself, keeping its class, code and cause', async () => {
+    // Stands in for @seedprotocol/publish's ManagedAccountPublishError, which apps branch on by code.
+    class ExecutorError extends Error {
+      constructor(message: string, readonly code: string, options?: { cause?: unknown }) {
+        super(message, options)
+        this.name = 'ExecutorError'
+      }
+    }
+    const item = await createOwnedDraft('Publish fails with a code')
+    const cause = new Error('rpc timeout')
+    const thrown = new ExecutorError('managed account unavailable', 'MANAGED_ACCOUNT_UNAVAILABLE', { cause })
+    setPublishExecutor(async () => {
+      throw thrown
+    })
+
+    const error = await item.publish().catch((e: unknown) => e)
+    expect(error).toBe(thrown)
+    expect(error).toBeInstanceOf(ExecutorError)
+    expect((error as ExecutorError).code).toBe('MANAGED_ACCOUNT_UNAVAILABLE')
+    expect((error as Error).cause).toBe(cause)
+    expect(item.getService().getSnapshot().context._publishError).toBe(thrown)
   }, 30000)
 
   it('rejects a second publish while one is in flight', async () => {

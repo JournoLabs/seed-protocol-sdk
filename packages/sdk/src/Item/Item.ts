@@ -1610,9 +1610,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
         if (value === 'idle' && wasPublishing) {
           unsub.unsubscribe()
-          const ctx = snapshot.context as { _publishError?: { message: string } | null }
-          if (ctx._publishError) {
-            reject(new Error(ctx._publishError.message))
+          const { _publishError: publishError } = snapshot.context
+          if (publishError) {
+            reject(publishError)
           } else {
             resolve()
           }

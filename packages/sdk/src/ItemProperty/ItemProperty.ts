@@ -1564,11 +1564,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
       settled.context
-    if (saveError) {
-      const error = new Error(`Failed to save property ${propertyName}: ${saveError.message}`)
-      if (saveError.name) error.name = saveError.name
-      throw error
-    }
+    if (saveError) throw saveError
     if (validationErrors?.length) {
       throw new ItemPropertySaveValidationError(
         `Invalid value for property ${propertyName}: ${validationErrors.map((e) => e.message).join('; ')}`,

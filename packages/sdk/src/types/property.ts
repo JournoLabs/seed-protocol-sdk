@@ -77,8 +77,11 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   _destroyError?: { message: string; name?: string } | null
   /** Validation errors from last failed save (enum, pattern, etc.). Cleared on successful save. */
   _saveValidationErrors?: import('@/Schema/validation').ValidationError[]
-  /** Error from last failed save (e.g. file save, metadata creation). Cleared on successful save. */
-  _saveError?: { message: string; name?: string } | null
+  /**
+   * Error from the last failed save (ownership refusal, file save, metadata creation), as thrown, so
+   * its class and fields (`code`, `cause`) survive. Cleared when the next save starts.
+   */
+  _saveError?: Error | null
   /** Set by an assignment's save: the values to restore if that save fails. */
   _valueBeforeSave?: PropertyValueSnapshot
 }

@@ -58,6 +58,9 @@ const withListValueParsed = <T extends { propertyValue?: unknown; renderValue?: 
   return { ...context, propertyValue, renderValue }
 }
 
+/** Keeps the thrown Error itself, so `save()` rethrows it with its class, `code` and `cause`. */
+const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)))
+
 export const propertyMachine = setup({
   types: {
     context: {} as PropertyMachineContext,
@@ -109,8 +112,7 @@ export const propertyMachine = setup({
         const error = (event as { type: 'saveFailed'; error: unknown }).error
         return {
           isSaving: false,
-          _saveError:
-            error instanceof Error ? { message: error.message, name: error.name } : { message: String(error) },
+          _saveError: toError(error),
           ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
           _valueBeforeSave: undefined,
         }
@@ -146,12 +148,15 @@ export const propertyMachine = setup({
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
       })),
     },
+    /** The value broke its property's rules: nothing was written, so restore the shown value. */
     saveValueValidationError: {
       target: '.idle',
-      actions: assign({
+      actions: assign(({ context, event }) => ({
         isSaving: false,
-        _saveValidationErrors: ({ event }) => (event as { type: 'saveValueValidationError'; errors: any[] }).errors,
-      }),
+        _saveValidationErrors: (event as { type: 'saveValueValidationError'; errors: any[] }).errors,
+        ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
+        _valueBeforeSave: undefined,
+      })),
     },
     clearSaveError: {
       actions: assign({ _saveError: null }),
@@ -281,13 +286,7 @@ export const propertyMachine = setup({
             saveImageError: {
               target: 'doneSaving',
               actions: assign({
-                _saveError: ({ event }) =>
-                  (event as { type: 'saveImageError'; error: unknown }).error instanceof Error
-                    ? {
-                        message: (event as { type: 'saveImageError'; error: Error }).error.message,
-                        name: (event as { type: 'saveImageError'; error: Error }).error.name,
-                      }
-                    : { message: String((event as { type: 'saveImageError'; error: unknown }).error) },
+                _saveError: ({ event }) => toError((event as { type: 'saveImageError'; error: unknown }).error),
               }),
             },
           },
@@ -305,13 +304,7 @@ export const propertyMachine = setup({
             saveFileError: {
               target: 'doneSaving',
               actions: assign({
-                _saveError: ({ event }) =>
-                  (event as { type: 'saveFileError'; error: unknown }).error instanceof Error
-                    ? {
-                        message: (event as { type: 'saveFileError'; error: Error }).error.message,
-                        name: (event as { type: 'saveFileError'; error: Error }).error.name,
-                      }
-                    : { message: String((event as { type: 'saveFileError'; error: unknown }).error) },
+                _saveError: ({ event }) => toError((event as { type: 'saveFileError'; error: unknown }).error),
               }),
             },
           },
@@ -328,13 +321,7 @@ export const propertyMachine = setup({
             saveHtmlError: {
               target: 'doneSaving',
               actions: assign({
-                _saveError: ({ event }) =>
-                  (event as { type: 'saveHtmlError'; error: unknown }).error instanceof Error
-                    ? {
-                        message: (event as { type: 'saveHtmlError'; error: Error }).error.message,
-                        name: (event as { type: 'saveHtmlError'; error: Error }).error.name,
-                      }
-                    : { message: String((event as { type: 'saveHtmlError'; error: unknown }).error) },
+                _saveError: ({ event }) => toError((event as { type: 'saveHtmlError'; error: unknown }).error),
               }),
             },
           },
@@ -351,13 +338,7 @@ export const propertyMachine = setup({
             saveRelationError: {
               target: 'doneSaving',
               actions: assign({
-                _saveError: ({ event }) =>
-                  (event as { type: 'saveRelationError'; error: unknown }).error instanceof Error
-                    ? {
-                        message: (event as { type: 'saveRelationError'; error: Error }).error.message,
-                        name: (event as { type: 'saveRelationError'; error: Error }).error.name,
-                      }
-                    : { message: String((event as { type: 'saveRelationError'; error: unknown }).error) },
+                _saveError: ({ event }) => toError((event as { type: 'saveRelationError'; error: unknown }).error),
               }),
             },
           },
@@ -375,13 +356,7 @@ export const propertyMachine = setup({
             saveItemStorageError: {
               target: 'doneSaving',
               actions: assign({
-                _saveError: ({ event }) =>
-                  (event as { type: 'saveItemStorageError'; error: unknown }).error instanceof Error
-                    ? {
-                        message: (event as { type: 'saveItemStorageError'; error: Error }).error.message,
-                        name: (event as { type: 'saveItemStorageError'; error: Error }).error.name,
-                      }
-                    : { message: String((event as { type: 'saveItemStorageError'; error: unknown }).error) },
+                _saveError: ({ event }) => toError((event as { type: 'saveItemStorageError'; error: unknown }).error),
               }),
             },
           },
