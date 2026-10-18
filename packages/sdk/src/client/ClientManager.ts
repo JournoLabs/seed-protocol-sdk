@@ -68,6 +68,20 @@ const createClientManager = () => {
 let { actor: clientManager, actorSubscription: subscription } = createClientManager()
 export { clientManager }
 
+type ClientService = typeof clientManager
+const serviceListeners = new Set<(service: ClientService) => void>()
+
+/** Tells subscribeService listeners that the clientManager actor was replaced or stopped. */
+const notifyServiceListeners = () => {
+  for (const listener of [...serviceListeners]) {
+    try {
+      listener(clientManager)
+    } catch (error) {
+      logger('subscribeService listener threw:', error)
+    }
+  }
+}
+
 /** Config of the init that is running or has succeeded; cleared when init fails or the client stops. */
 let activeInitConfig: SeedConstructorOptions['config'] | undefined
 
@@ -100,6 +114,7 @@ const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
   unregisterSeedQueryLocalSource()
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
+  notifyServiceListeners()
 }
 
 const coalescedInit = createCoalescedAsync(async (options: any) => {
@@ -112,6 +127,7 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
     // stop() (or a failed test) stopped it: start over with a new actor and a clean context.
     logger('Client manager was stopped, creating a new one')
     ;({ actor: clientManager, actorSubscription: subscription } = createClientManager())
+    notifyServiceListeners()
   }
 
   // Clear any stale context from previous failed initializations
@@ -194,6 +210,17 @@ const clientInstance = {
   getService: () => {
     // ensureInitialized();
     return clientManager;
+  },
+  /**
+   * Calls `listener` with the clientManager actor when it changes: `init()` after `stop()`
+   * replaces the actor, and `stop()` ends the current one. Subscribe to the actor itself for its
+   * state changes. Returns a function that removes the listener.
+   */
+  subscribeService: (listener: (service: ClientService) => void): (() => void) => {
+    serviceListeners.add(listener)
+    return () => {
+      serviceListeners.delete(listener)
+    }
   },
   /**
    * Initialise the SDK. Calls made while an init is running share it. Once initialised, a

@@ -373,17 +373,24 @@ export class BrowserDb implements IDb {
     }
 
     const baseObservable = new Observable<T[]>((subscriber) => {
-      const reactiveQueryResult = this.sqlocalInstance!.reactiveQuery(query)
-
-      const subscription = reactiveQueryResult.subscribe(
-        (data: Record<string, any>[]) => {
-          subscriber.next(data as T[])
-        },
-        (err: Error) => {
-          console.error('[BaseDb.liveQuery] SQLocal reactiveQuery error:', err)
-          subscriber.error(err)
-        }
-      )
+      // Setup errors (bad SQL, a closed database) go to the subscriber like query errors, so
+      // callers see them as an error notification rather than only in the console.
+      let subscription: { unsubscribe: () => void }
+      try {
+        subscription = this.sqlocalInstance!.reactiveQuery(query).subscribe(
+          (data: Record<string, any>[]) => {
+            subscriber.next(data as T[])
+          },
+          (err: Error) => {
+            logger('[BaseDb.liveQuery] SQLocal reactiveQuery error:', err)
+            subscriber.error(err)
+          }
+        )
+      } catch (error) {
+        logger('[BaseDb.liveQuery] SQLocal reactiveQuery setup failed:', error)
+        subscriber.error(error)
+        return
+      }
 
       return () => {
         subscription.unsubscribe()

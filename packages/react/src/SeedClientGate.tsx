@@ -45,10 +45,24 @@ export type SeedClientGateProps = {
 }
 
 /**
+ * A dependency that changes only when `value` holds different data, so an inline object doesn't
+ * re-run an effect on every render. Falls back to identity for values JSON can't encode.
+ */
+function valueKey(value: unknown): unknown {
+  try {
+    return JSON.stringify(value ?? null)
+  } catch {
+    return value
+  }
+}
+
+/**
  * Gates children until the Seed client is initialized and optionally imports a schema.
  * Mounted inside RouterProvider so we never swap the router—only the route content.
  * This avoids removeChild DOM errors and ensures QueryClientProvider stays stable.
  * Both overlay and content stay in DOM; we only toggle visibility via classes.
+ * After `client.stop()` it shows the loading state again until the next init finishes, without
+ * a remount.
  */
 export function SeedClientGate({
   initConfig,
@@ -63,8 +77,17 @@ export function SeedClientGate({
   // Kept in a ref so an inline callback doesn't re-run init on every render.
   const onInitErrorRef = useRef(onInitError)
   onInitErrorRef.current = onInitError
+  // Compared by value, so an inline initConfig or schema doesn't re-run init on every render.
+  const initConfigRef = useRef(initConfig)
+  initConfigRef.current = initConfig
+  const schemaRef = useRef(schema)
+  schemaRef.current = schema
+  const initConfigKey = valueKey(initConfig)
+  const schemaKey = valueKey(schema)
 
   useEffect(() => {
+    const initConfig = initConfigRef.current
+    const schema = schemaRef.current
     const effectiveConfig: SeedConstructorOptions = schema
       ? {
           ...initConfig,
@@ -81,7 +104,7 @@ export function SeedClientGate({
         console.error('[SeedClientGate] client init failed', err)
       }
     })
-  }, [initConfig, schema])
+  }, [initConfigKey, schemaKey])
 
   const loadingContent = loadingComponent ?? <DefaultLoading />
 

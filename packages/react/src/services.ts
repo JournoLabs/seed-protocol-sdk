@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ActorRef } from 'xstate'
 import pluralize from 'pluralize'
-import { useSelector } from '@xstate/react'
 import debug from 'debug'
-import { ClientManagerState, getClient } from '@seedprotocol/sdk'
+import { ClientManagerState, MachineIds } from '@seedprotocol/sdk'
 import { isDbReadyState } from './db'
+import { useClientSelector, useClientService } from './client'
 
 const logger = debug('seedSdk:react:services')
 
@@ -80,36 +80,50 @@ export const getServiceUniqueKey = (service: ActorRef<any, any>) => {
   return uniqueKey
 }
 
+const isClientManagerService = (service: ActorRef<any, any>): boolean =>
+  (service as any)?.logic?.config?.id === MachineIds.CLIENT_MANAGER
+
+/**
+ * 100 once the service reaches a final state ('idle', 'ready', ...). During startup, the client
+ * manager's progress through init, or the current state's position among the `loading`-tagged
+ * states for other services. 0 when there's nothing to measure.
+ */
+export const getPercentComplete = (service: ActorRef<any, any>): number => {
+  const snapshot = service?.getSnapshot()
+  if (isClientManagerService(service)) {
+    return snapshot?.status === 'active' ? percentForClientState(snapshot.value) : 0
+  }
+  const value = getServiceValue(service)
+  if (value && finalStrings.includes(value)) {
+    return 100
+  }
+  const states = (service as any)?.logic?.states
+  if (!value || !states) {
+    return 0
+  }
+  const loadingStateNames = Object.entries(states)
+    .filter(([, state]) => (state as { tags?: string[] }).tags?.includes('loading'))
+    .map(([stateName]) => stateName)
+  const stateIndex = loadingStateNames.indexOf(value)
+  if (stateIndex < 0) {
+    return 0
+  }
+  return (stateIndex / loadingStateNames.length) * 100
+}
+
 export const useService = (service: ActorRef<any, any>) => {
   const [timeElapsed, setTimeElapsed] = useState(0)
 
-  const getPercentComplete = (service: ActorRef<any, any>) => {
-    let percentComplete = 0
-    const serviceAny = service as any
-    if (serviceAny.logic?.states) {
-      const stateNames: string[] = []
-      const startupStates: any[] = []
-
-      for (const [stateName, state] of Object.entries(serviceAny.logic.states)) {
-        const stateTyped = state as { tags?: string[] }
-        if (stateTyped.tags?.includes('loading')) {
-          stateNames.push(stateName)
-          startupStates.push(state)
-        }
-      }
-
-      const totalStates = startupStates.length
-      const value = getServiceValue(service)
-      if (value && finalStrings.includes(value)) {
-        return 0
-      }
-      if (value) {
-        const stateIndex = stateNames.indexOf(value)
-        percentComplete = (stateIndex / totalStates) * 100
-      }
-    }
-    return percentComplete
-  }
+  // Re-render on state changes, not only on the timer below.
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const subscription = service.subscribe({ next: onChange, error: onChange, complete: onChange })
+      return () => subscription.unsubscribe()
+    },
+    [service],
+  )
+  const getValue = () => getServiceValue(service)
+  const value = useSyncExternalStore(subscribe, getValue, getValue)
 
   const updateTime = useCallback(
     (interval: ReturnType<typeof setInterval>) => {
@@ -143,7 +157,7 @@ export const useService = (service: ActorRef<any, any>) => {
   return {
     name: getServiceName(service),
     timeElapsed,
-    value: getServiceValue(service),
+    value,
     percentComplete: getPercentComplete(service),
     uniqueKey: getServiceUniqueKey(service),
   }
@@ -190,50 +204,27 @@ const percentForClientState = (state: unknown): number => {
 }
 
 export const useServices = () => {
-  const [actors, setActors] = useState<ActorRef<any, any>[]>([])
-  // From the current state: subscribe() doesn't replay it, so an already-idle client stayed at 5.
-  const [percentComplete, setPercentComplete] = useState(() =>
-    percentForClientState(getClient().getService().getSnapshot().value),
+  const clientService = useClientService()
+  const percentComplete = useClientSelector((snapshot) =>
+    snapshot.status === 'active' ? percentForClientState(snapshot.value) : 0,
   )
-
-  // Global service removed - now track ClientManager directly
-  useEffect(() => {
-    const clientManager = getClient()
-    const clientService = clientManager.getService()
-    
-    // Add ClientManager to actors list
-    const clientActor = clientService as any
-    clientActor.uniqueKey = 'clientManager'
-    
-    setActors([clientActor])
-    
-    setPercentComplete(percentForClientState(clientService.getSnapshot().value))
-    const subscription = clientService.subscribe((snapshot) => {
-      setPercentComplete(percentForClientState(snapshot.value))
-    })
-    
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
+  const services = useMemo(() => {
+    ;(clientService as any).uniqueKey = 'clientManager'
+    return [clientService as ActorRef<any, any>]
+  }, [clientService])
 
   return {
-    services: actors,
+    services,
     percentComplete,
   }
 }
 
 export const useGlobalServiceStatus = () => {
-  const clientManager = getClient()
-  const clientService = clientManager.getService()
-
-  const status = useSelector(clientService, (snapshot) => {
-    return snapshot.value
-  })
+  const status = useClientSelector((snapshot) => snapshot.value)
 
   // 'ready' while the app database is open (see isDbReadyState), otherwise the client state.
-  const internalStatus = useSelector(clientService, (snapshot) =>
-    isDbReadyState(snapshot.value) ? 'ready' : snapshot.value,
+  const internalStatus = useClientSelector((snapshot) =>
+    snapshot.status === 'active' && isDbReadyState(snapshot.value) ? 'ready' : snapshot.value,
   )
 
   return {
