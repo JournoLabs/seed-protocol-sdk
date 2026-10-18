@@ -377,6 +377,7 @@ export const migrationSql_0020_add_pending_writes = `CREATE TABLE \`pending_writ
 	\`error\` text,
 	\`attempts\` integer DEFAULT 0 NOT NULL,
 	\`applied_at\` integer,
+	\`result\` text,
 	\`conflict\` text,
 	\`conflict_resolved_at\` integer
 );
@@ -532,7 +533,7 @@ export const journalJson = `{
     {
       "idx": 20,
       "version": "6",
-      "when": 1792349085245,
+      "when": 1792354539632,
       "tag": "0020_add_pending_writes",
       "breakpoints": true
     }
@@ -544,7 +545,7 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "957c9caf-afbc-443d-ae58-02b3557dd44a",
+  "id": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
   "prevId": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
   "tables": {
     "appState": {
@@ -1502,6 +1503,13 @@ export const snapshotJson = `{
         "applied_at": {
           "name": "applied_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result": {
+          "name": "result",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

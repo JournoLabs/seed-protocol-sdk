@@ -8,6 +8,7 @@ import {
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQueue'
 import { rowContext } from './rowContext'
+import type { SetPropertyValueOp, SetPropertyValueResult } from '@/outbox/itemAppliers'
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { normalizeDataType } from '@/helpers/property'
@@ -60,6 +61,31 @@ export const analyzeInput = fromCallback<
   const writeSlot = writeKey ? reservePropertyWrite(writeKey) : undefined
   const writeValue = <T>(write: () => Promise<T>) =>
     writeSlot ? writeSlot.run(write) : write().then((result) => ({ skipped: false as const, result }))
+
+  /**
+   * Writes a plain value through the outbox (ADR 0019): appends a `set` op and waits until it
+   * applies. Skipped when a newer value of this property superseded it, as a queued write is.
+   * Rejects when the op fails. An item known only by its seed uid has no outbox key yet and
+   * writes directly.
+   */
+  const writePlainValue = async (props: SetPropertyValueOp) => {
+    if (!seedLocalId || !propertyNameRaw) {
+      return writeValue(() => updateItemPropertyValue({ ...props, seedLocalId, propertyName: propertyNameRaw } as any))
+    }
+    const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
+    startItemOutbox()
+    const opId = await appendOutboxOp({
+      seedLocalId,
+      propertyName: propertyNameRaw,
+      kind: 'set',
+      value: props,
+      baseRowId: localId ?? null,
+    })
+    await waitForOutboxOp(opId)
+    const [op] = await getOutboxOps([opId])
+    if (op?.status !== 'applied') return { skipped: true as const }
+    return { skipped: false as const, result: outboxOpResult<SetPropertyValueResult>(op) ?? undefined }
+  }
 
   const _analyzeInput = async (): Promise<boolean> => {
     // Assignment writes straight to the DB, so check ownership here as save()/destroy()/publish() do.
@@ -171,18 +197,16 @@ export const analyzeInput = fromCallback<
     // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])
     if (normalizedDataType === ModelPropertyDataTypes.List && Array.isArray(newValue)) {
       const stringValue = JSON.stringify(newValue)
-      const written = await writeValue(() => updateItemPropertyValue({
+      const written = await writePlainValue({
         localId,
-        propertyName: propertyName!,
         newValue: stringValue,
-        seedLocalId,
         versionLocalId,
         versionUid,
         modelName,
         schemaUid,
         dataType: propertyRecordSchema.dataType,
         refValueType: propertyRecordSchema.refValueType,
-      } as any))
+      })
       // A newer save replaced this one: it writes, and sets the context, instead.
       if (written.skipped) return true
       const result = written.result
@@ -205,18 +229,16 @@ export const analyzeInput = fromCallback<
       ? (typeof newValue === 'string' ? newValue : String(newValue))
       : null
 
-    const written = await writeValue(() => updateItemPropertyValue({
+    const written = await writePlainValue({
       localId,
-      propertyName: propertyName!,
       newValue: stringValue,
-      seedLocalId,
       versionLocalId,
       versionUid,
       modelName,
       schemaUid,
       dataType: propertyRecordSchema.dataType,
       refValueType: propertyRecordSchema.refValueType,
-    } as any)) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
+    })
     if (written.skipped) return true
     const result = written.result
 

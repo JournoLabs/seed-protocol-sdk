@@ -48,9 +48,9 @@ export type OutboxApplier<Prepared = unknown> = {
   /**
    * Writes the op on `tx`, inside the transaction that marks it applied. Must read and write only
    * through `tx` (see BaseDb.transaction). Throw OutboxOpRejectedError to fail the op for good;
-   * any other error is retried.
+   * any other error is retried. What it returns is stored as the op's `result` (JSON).
    */
-  apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<void>
+  apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
 }
 
 /** An op that can never apply (a broken rule, an item the client doesn't own). Not retried. */
@@ -131,6 +131,11 @@ export async function appendOutboxOp(input: AppendOutboxOpInput): Promise<string
 /** An op's stored value, decoded. */
 export function outboxOpValue<T = unknown>(op: Pick<OutboxOp, 'value'>): T | undefined {
   return op.value == null ? undefined : (JSON.parse(op.value) as T)
+}
+
+/** What an applied op's applier returned, decoded. */
+export function outboxOpResult<T = unknown>(op: Pick<OutboxOp, 'result'>): T | undefined {
+  return op.result == null ? undefined : (JSON.parse(op.result) as T)
 }
 
 // --- Draining ---------------------------------------------------------------------------------
@@ -276,7 +281,13 @@ async function applyUnit(unit: Unit): Promise<void> {
         .returning({ opId: pendingWrites.opId })
       if (claimed.length !== ids.length) throw new ClaimLostError()
       for (const [index, op] of ops.entries()) {
-        await applierFor(op).apply(op, tx, prepared[index])
+        const result = await applierFor(op).apply(op, tx, prepared[index])
+        if (result !== undefined) {
+          await tx
+            .update(pendingWrites)
+            .set({ result: JSON.stringify(result) })
+            .where(eq(pendingWrites.opId, op.opId))
+        }
       }
       if (supersededIds.length > 0) {
         await tx

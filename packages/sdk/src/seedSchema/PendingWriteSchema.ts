@@ -33,6 +33,8 @@ export const pendingWrites = sqliteTable(
     error: text('error'),
     attempts: int('attempts').notNull().default(0),
     appliedAt: int('applied_at'),
+    /** JSON the applier recorded when the op applied (for a `set`: the metadata row written). */
+    result: text('result'),
     /** JSON: the synced value this op was applied over, when there was one (ADR 0019). */
     conflict: text('conflict'),
     conflictResolvedAt: int('conflict_resolved_at'),

@@ -128,6 +128,10 @@ export const loadOrCreateProperty = fromCallback<
       metadataRecords as (MetadataType & { refResolvedValue?: string | null; refSeedType?: string })[],
       propertyName
     )
+    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
+    const { getPendingSetValue } = await import('@/outbox/pendingValues')
+    const pendingValue = await getPendingSetValue(metadataRecord.seedLocalId ?? seedLocalId, propertyName)
+    if (pendingValue !== undefined) metadataRecord.propertyValue = pendingValue
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined

@@ -15,6 +15,7 @@ CREATE TABLE `pending_writes` (
 	`error` text,
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`applied_at` integer,
+	`result` text,
 	`conflict` text,
 	`conflict_resolved_at` integer
 );
