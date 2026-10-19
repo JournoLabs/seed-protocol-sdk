@@ -1,4 +1,5 @@
 import { IItem, IItemProperty } from '@/interfaces'
+import { timed, timingLogger } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import {
   INTERNAL_PROPERTY_NAMES,
@@ -629,6 +630,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (!isWaitForTimeout) {
         throw e
       }
+      timingLogger(
+        `item ${item.seedLocalId ?? item.seedUid} not ready for read after ${readyTimeout}ms (no property instances); continuing`,
+      )
     }
     const snap = svc.getSnapshot() as any
     const pis = snap.context?.propertyInstances as
@@ -645,6 +649,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }),
       ),
     )
+    if (timingLogger.enabled) {
+      const notIdle = [...pis.entries()]
+        .filter(([, prop]) => {
+          const propSnap = prop.getService().getSnapshot()
+          return propSnap.value !== 'idle' || propSnap.context?.isSaving
+        })
+        .map(([name]) => name)
+      if (notIdle.length > 0) {
+        timingLogger(
+          `item ${item.seedLocalId ?? item.seedUid}: properties still not idle after waiting up to ${readyTimeout}ms, continuing: ${notIdle.join(', ')}`,
+        )
+      }
+    }
   }
 
   private static itemCacheEntryLooksUnhydratedAfterIdle(
@@ -1099,22 +1116,33 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
+    let cached = false
     try {
-      return await findEntity<Item<any>>(
-        {
-          getById: (id) => Item.getById(id) || undefined,
-          createById: async (id) => {
-            // Pass modelName to createById if available
-            return await Item.createById(id, modelName)
-          },
-        },
-        { id },
-        {
-          waitForReady,
-          readyTimeout,
-        }
+      return await timed(
+        `find ${modelName ?? '?'} ${id}`,
+        () =>
+          findEntity<Item<any>>(
+            {
+              getById: (id) => {
+                const instance = Item.getById(id) || undefined
+                cached = instance !== undefined
+                return instance
+              },
+              createById: async (id) => {
+                // Pass modelName to createById if available
+                return await Item.createById(id, modelName)
+              },
+            },
+            { id },
+            {
+              waitForReady,
+              readyTimeout,
+            }
+          ),
+        () => (cached ? '(cached)' : '(loaded)'),
       )
-    } catch {
+    } catch (error) {
+      timingLogger(`find ${modelName ?? '?'} ${id} returned undefined: ${error}`)
       return undefined
     }
   }
@@ -1131,6 +1159,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId?: string
       /** ... or the schema that defines it. */
       schemaName?: string
+      /**
+       * Stops building items once aborted and rejects with the signal's reason. Items already
+       * built stay loaded.
+       */
+      signal?: AbortSignal
     },
   ): Promise<Item<any>[]> {
     const {
@@ -1140,11 +1173,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       addressFilter,
       modelFileId,
       schemaName,
+      signal,
     } = options ?? {}
+    signal?.throwIfAborted()
     const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     // Built without waiting; with waitForReady the items are then awaited together, below.
     for (const itemData of itemsData) {
+      signal?.throwIfAborted()
       itemInstances.push(
         await Item.create(
           {
@@ -1163,6 +1199,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         ),
       )
     }
+    signal?.throwIfAborted()
 
     return orderBy(itemInstances, ['createdAt'], ['desc'])
   }

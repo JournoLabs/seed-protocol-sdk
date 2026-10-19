@@ -66,4 +66,20 @@ describe.sequential('ADDRESSES_PERSISTED_EVENT', () => {
       { timeout: WAIT_TIMEOUT_MS },
     )
   })
+
+  it('does not emit again when the same addresses are saved', async () => {
+    const { client } = await import('@/client')
+    await client.setAddresses({ owned: [ownedAddr], watched: [watchedAddr] })
+    await vi.waitFor(() => expect(emitSpy).toHaveBeenCalledWith(ADDRESSES_PERSISTED_EVENT, expect.anything()), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+    emitSpy.mockClear()
+
+    // e.g. a wallet reconnecting saves the addresses it already saved
+    await client.setAddresses({ owned: [ownedAddr.toUpperCase().replace('0X', '0x')], watched: [watchedAddr] })
+    await vi.waitFor(() => expect(client.getService().getSnapshot().context.isSaving).toBe(false), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+    expect(emitSpy).not.toHaveBeenCalledWith(ADDRESSES_PERSISTED_EVENT, expect.anything())
+  })
 })

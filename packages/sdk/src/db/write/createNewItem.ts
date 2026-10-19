@@ -10,6 +10,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import type { CreateItemOp, CreateItemResult } from '@/outbox/itemAppliers'
+import { timed } from '@/helpers/timing'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -42,7 +43,8 @@ export const createNewItem = async ({
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const model = await Model.resolveAsync(modelName, { modelFileId })
+  const label = `createNewItem ${modelName}`
+  const model = await timed(`${label} model`, () => Model.resolveAsync(modelName, { modelFileId }))
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
   modelFileId ??= model?.id
 
@@ -58,6 +60,25 @@ export const createNewItem = async ({
       allPropertyNames.add(name)
     }
   }
+
+  // Resolved now: applying runs in a transaction and doesn't wait on EAS. One parallel round,
+  // not one indexer request per property in turn.
+  const schemaUids = new Map<string, string | undefined>()
+  await timed(`${label} schema lookups`, () =>
+    Promise.all(
+      [...allPropertyNames].map(async (propertyName) => {
+        const propertyRecordSchema = propertySchemas?.[propertyName]
+        if (!propertyRecordSchema || propertyRecordSchema.storageType === 'ItemStorage') return
+        schemaUids.set(
+          propertyName,
+          await resolveMetadataSchemaUid(
+            listRelationEasPropertyName(propertyName, propertyRecordSchema) ?? propertyName,
+            propertyRecordSchema,
+          ),
+        )
+      }),
+    ),
+  )
 
   const rows: CreateItemOp['rows'] = []
   const stagedPaths: string[] = []
@@ -87,28 +108,26 @@ export const createNewItem = async ({
         continue
       }
 
-      // Resolved now: applying runs in a transaction and doesn't wait on EAS
-      const schemaUid =
-        propertyRecordSchema && !isItemStorage
-          ? await resolveMetadataSchemaUid(
-              listRelationEasPropertyName(propertyName, propertyRecordSchema) ?? propertyName,
-              propertyRecordSchema,
-            )
-          : undefined
-      rows.push({ propertyName, propertyValue, propertyRecordSchema, schemaUid })
+      rows.push({ propertyName, propertyValue, propertyRecordSchema, schemaUid: schemaUids.get(propertyName) })
     }
 
     const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
     startItemOutbox()
-    const applied = await appendOutboxOpAndWait<CreateItemResult>({
-      seedLocalId,
-      kind: 'create',
-      value: {
-        modelName,
-        seed: { type: seedType, modelFileId, fields: await resolveNewSeedFields(seedType) },
-        rows,
-      } satisfies CreateItemOp,
-    })
+    const fields = await timed(`${label} seed fields`, () => resolveNewSeedFields(seedType))
+    const applied = await timed(
+      `${label} outbox apply`,
+      () =>
+        appendOutboxOpAndWait<CreateItemResult>({
+          seedLocalId,
+          kind: 'create',
+          value: {
+            modelName,
+            seed: { type: seedType, modelFileId, fields },
+            rows,
+          } satisfies CreateItemOp,
+        }),
+      () => `(${rows.length} rows)`,
+    )
     if (applied.superseded || !applied.result) {
       throw new Error(`The new ${modelName} item was not written`)
     }

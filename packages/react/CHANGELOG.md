@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `useItems` lists an item created while its first load is still running. The live query saw the new item and asked for a refetch, but TanStack Query joins a fetch already running when the query has no data yet, so the list came back without the item and stayed that way until another seed changed. The hook now refetches once that fetch settles. A superseded load (new query key, unmount) stops building items through `Item.all`'s new `signal`.
 - `useItemProperty` and `useItemProperties` hold the properties they return while mounted and release them on unmount, so a property stops once no component, item or `find` holds it. Before, each lookup took a hold that was never released. `useItemProperties` no longer keeps its list for five minutes after unmount (`gcTime: 0`, as `useItemProperty` already had).
 - The status hooks (`useIsClientReady`, `useDbsAreReady`, `useIsDbReady`, `useGlobalServiceStatus`, `useServices`) and `SeedClientGate` follow the client after `client.stop()` and a new `client.init()`. Before, they kept reading the stopped client: they reported ready while the new init ran and didn't re-render when it finished. They now report not ready from `stop()` until the next init finishes, and the gate shows its loading state again without a remount.
 - New `useClientService()` returns the current clientManager actor, and `useClientSelector(selector)` derives a value from its snapshot; both follow `stop()` and init.

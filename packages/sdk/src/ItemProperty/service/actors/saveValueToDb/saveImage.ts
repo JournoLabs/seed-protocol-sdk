@@ -13,7 +13,7 @@ import { writeStorageValue } from './storageValue'
 import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { getDataTypeFromString, getMimeType, toMetadataPropertyName } from '@/helpers'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
-import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { ImageSize } from '@/helpers/constants'
 import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
@@ -168,10 +168,10 @@ export const saveImage = fromCallback<
     const resolvedPropertySchemaUid =
       schemaUid && schemaUid !== imageSchemaUid
         ? schemaUid
-        : (await getEasSchemaForItemProperty({
+        : await lookupPropertySchemaUid(
             propertyName,
-            easDataType: 'bytes32',
-          }))?.id
+            propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+          )
 
     const written = await writeStorageValue(
       { seedLocalId, seedUid, propertyName },

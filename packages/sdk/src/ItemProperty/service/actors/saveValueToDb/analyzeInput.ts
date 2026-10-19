@@ -10,21 +10,11 @@ import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTic
 import { rowContext } from './rowContext'
 import type { SetPropertyValueOp, SetPropertyValueResult } from '@/outbox/itemAppliers'
 
-import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
+import { timed } from '@/helpers/timing'
 import { normalizeDataType } from '@/helpers/property'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
-import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
-
-// Extract TypedData type from EIP712MessageTypes
-// EIP712MessageTypes is defined as { [key: string]: TypedData[] }
-type ExtractTypedData<T> = T extends { [key: string]: infer U }
-  ? U extends Array<infer V>
-    ? V
-    : never
-  : never
-type TypedData = ExtractTypedData<EIP712MessageTypes>
 
 export const analyzeInput = fromCallback<
   EventObject,
@@ -91,8 +81,12 @@ export const analyzeInput = fromCallback<
 
   const _analyzeInput = async (): Promise<boolean> => {
     // Assignment writes straight to the DB, so check ownership here as save()/destroy()/publish() do.
+    const label = `save ${modelName ?? '?'}.${propertyNameRaw ?? '?'}`
     const { isItemOwned, OwnershipError } = await import('@/helpers/ownership')
-    if (!(await isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }))) {
+    const owned = await timed(`${label} write ownership`, () =>
+      isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }),
+    )
+    if (!owned) {
       sendBack({ type: 'saveFailed', error: new OwnershipError() })
       return false
     }
@@ -172,34 +166,17 @@ export const analyzeInput = fromCallback<
     }
 
     if (!schemaUid) {
-      try {
-        let easDataType
-
-        if (propertyRecordSchema.dataType) {
-          const normalizedType = normalizeDataType(propertyRecordSchema.dataType)
-          easDataType = INTERNAL_DATA_TYPES[normalizedType as keyof typeof INTERNAL_DATA_TYPES]?.eas as TypedData['type']
-        }
-
-        const schemaFromEas = await getEasSchemaForItemProperty({
-          propertyName: propertyName!,
-          easDataType,
-        })
-        if (schemaFromEas) {
-          schemaUid = schemaFromEas.id
-        }
-      } catch (error) {
-        // If schema fetch fails, continue without schemaUid - it's not required for local metadata
-        // Log error in development but don't throw
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
-        }
-      }
+      // Cached lookup, shared with item creation, so a save doesn't wait on the EAS indexer each
+      // time. Not required for the row; publish resolves the schema again.
+      schemaUid = await timed(`${label} schema lookup`, () =>
+        lookupPropertySchemaUid(propertyName, propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1]),
+      )
     }
 
     // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])
     if (normalizedDataType === ModelPropertyDataTypes.List && Array.isArray(newValue)) {
       const stringValue = JSON.stringify(newValue)
-      const written = await writePlainValue({
+      const written = await timed(`${label} write`, () => writePlainValue({
         localId,
         newValue: stringValue,
         versionLocalId,
@@ -208,7 +185,7 @@ export const analyzeInput = fromCallback<
         schemaUid,
         dataType: propertyRecordSchema.dataType,
         refValueType: propertyRecordSchema.refValueType,
-      })
+      }))
       // A newer save replaced this one: it writes, and sets the context, instead.
       if (written.skipped) return true
       const result = written.result
@@ -231,7 +208,7 @@ export const analyzeInput = fromCallback<
       ? (typeof newValue === 'string' ? newValue : String(newValue))
       : null
 
-    const written = await writePlainValue({
+    const written = await timed(`${label} write`, () => writePlainValue({
       localId,
       newValue: stringValue,
       versionLocalId,
@@ -240,7 +217,7 @@ export const analyzeInput = fromCallback<
       schemaUid,
       dataType: propertyRecordSchema.dataType,
       refValueType: propertyRecordSchema.refValueType,
-    })
+    }))
     if (written.skipped) return true
     const result = written.result
 
@@ -273,14 +250,14 @@ export const analyzeInput = fromCallback<
     return true
   }
 
-  _analyzeInput().finally(() => writeTicket?.end()).then(
-    (isDone) => {
+  _analyzeInput()
+    .finally(() => writeTicket?.end())
+    .then((isDone) => {
       if (isDone) {
         sendBack({ type: 'saveValueToDbSuccess' })
       }
-    },
-    (error: unknown) => {
+    })
+    .catch((error: unknown) => {
       sendBack({ type: 'saveFailed', error })
-    },
-  )
+    })
 })
