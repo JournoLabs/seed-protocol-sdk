@@ -1,6 +1,6 @@
 # 0020. Loaded entities learn about row changes from one trigger-fed change log
 
-- **Status:** Proposed
+- **Status:** Accepted (being implemented)
 - **Date:** 2026-10-19
 - **Scope:** `@seedprotocol/sdk` (`browser/db`, migrations, Item, ItemProperty), `@seedprotocol/react`
   (indirectly); amends ADR 0015 for Item and ItemProperty
