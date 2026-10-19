@@ -9,7 +9,8 @@ import { generateId } from '@/helpers'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { getItemData } from '@/db/read/getItemData'
 import { startItemOutbox } from '@/outbox'
-import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
+import { drainOutbox, outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
+import { beforePendingReadForTests } from '@/outbox/pendingValues'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForIdle } from '../test-utils/waitForIdle'
@@ -56,6 +57,7 @@ testDescribe('read overlay for pending values', () => {
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
+    beforePendingReadForTests(undefined)
     pauseOutboxDrainForTests(false)
     await outboxIdleForTests()
   })
@@ -143,6 +145,44 @@ testDescribe('read overlay for pending values', () => {
     pauseOutboxDrainForTests(false)
     await outboxIdleForTests()
     await vi.waitFor(() => expect(propertyOf(reloaded, 'notes').value).toBe('pending notes'))
+    reloaded.unload()
+  }, 30000)
+
+  // A reader takes the stored row and the pending ops in two reads. The op applying between them
+  // must leave the value in one of the two, so these apply it just before the pending read: the
+  // first one, or the first one for `propertyName`.
+  const applyBeforePendingRead = (propertyName?: string) =>
+    beforePendingReadForTests(async (names) => {
+      if (propertyName && !names?.includes(propertyName)) return false
+      await drainOutbox()
+      return true
+    })
+
+  it('item property lists keep a value whose op applies while they read', async () => {
+    const post = await createPost()
+    pauseOutboxDrainForTests(true)
+    propertyOf(post, 'title').value = 'applied mid-read'
+    await pendingOp(post.seedLocalId, 'set')
+
+    applyBeforePendingRead()
+    const values = Object.fromEntries(
+      (await getItemProperties({ seedLocalId: post.seedLocalId })).map((p) => [p.propertyName, p.propertyValue]),
+    )
+    expect(values.title).toBe('applied mid-read')
+    post.unload()
+  }, 30000)
+
+  it('an Html value whose op applies during a reload shows after it', async () => {
+    const post = await createPost()
+    pauseOutboxDrainForTests(true)
+    propertyOf(post, 'html').value = '<p>applied mid-reload</p>'
+    await pendingOp(post.seedLocalId, 'storage')
+
+    applyBeforePendingRead('html')
+    const reloaded = await reload(post.seedLocalId)
+    await vi.waitFor(() => expect(propertyOf(reloaded, 'html').value).toBe('<p>applied mid-reload</p>'), {
+      timeout: 10000,
+    })
     reloaded.unload()
   }, 30000)
 })

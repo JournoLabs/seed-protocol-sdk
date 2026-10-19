@@ -99,15 +99,20 @@ export const hydrateFromDb = fromCallback<
       whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
     }
 
+    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019). Its
+    // op is read first: one that applies between the two reads is then in one of them.
+    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
+    const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
+
     const rows = await appDb
       .select()
       .from(metadata)
       .where(and(...whereClauses))
       .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
 
-    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
-    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
-    const pending = await getPendingPropertyRow(rows?.[0]?.seedLocalId ?? seedLocalId, propertyName)
+    const pending = seedLocalId
+      ? pendingFirst
+      : await getPendingPropertyRow(rows?.[0]?.seedLocalId, propertyName)
 
     if ((!rows || !rows.length) && !pending) {
       return
