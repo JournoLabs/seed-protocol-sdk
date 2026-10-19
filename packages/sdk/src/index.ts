@@ -32,6 +32,7 @@ export {
   METADATA_LATEST_FIRST_ORDER_SQL,
 } from './helpers/compareMetadataRowsLatestFirst'
 export type { MetadataRecencyRow } from './helpers/compareMetadataRowsLatestFirst'
+export type { PropertyConflict } from './outbox/conflicts'
 export { loadAllSchemasFromDb } from './helpers/schema'
 export { schemaMachine } from './Schema/service/schemaMachine'
 export { propertyMachine } from './ItemProperty/service/propertyMachine'

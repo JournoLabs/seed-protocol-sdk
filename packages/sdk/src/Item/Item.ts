@@ -1469,6 +1469,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return this._service
   }
 
+  /**
+   * The item's unresolved conflicts, one per property: local edits that were kept over a value
+   * sync wrote while they were pending (ADR 0019). Each property's is also on `property.conflict`.
+   */
+  conflicts = async (): Promise<import('@/outbox/conflicts').PropertyConflict[]> => {
+    const { getItemConflicts } = await import('@/outbox/conflicts')
+    return getItemConflicts(this.seedLocalId)
+  }
+
   getEditedProperties = async (): Promise<PropertyData[]> => {
     return await getItemProperties({
       seedLocalId: this.seedLocalId,

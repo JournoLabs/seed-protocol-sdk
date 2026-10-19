@@ -82,6 +82,11 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
    * its class and fields (`code`, `cause`) survive. Cleared when the next save starts.
    */
   _saveError?: Error | null
+  /**
+   * The unresolved conflict between this property's last local edit and a value sync wrote while
+   * it was pending (ADR 0019); null when there is none.
+   */
+  conflict?: import('@/outbox/conflicts').PropertyConflict | null
   /** Set by an assignment's save: the values to restore if that save fails. */
   _valueBeforeSave?: PropertyValueSnapshot
 }

@@ -18,6 +18,8 @@ export {
 } from './outbox'
 export { startItemOutbox } from './itemAppliers'
 export { getPendingSetValue } from './pendingValues'
+export { getItemConflicts, getPropertyConflict, markPropertyConflictsResolved } from './conflicts'
+export type { PropertyConflict } from './conflicts'
 export {
   applyCreateItem,
   applyDelete,

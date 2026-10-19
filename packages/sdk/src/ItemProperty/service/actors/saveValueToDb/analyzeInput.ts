@@ -9,6 +9,8 @@ import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { rowContext } from './rowContext'
 import type { SetPropertyValueOp, SetPropertyValueResult } from '@/outbox/itemAppliers'
+import type { PropertyConflict } from '@/outbox/conflicts'
+import { eventEmitter } from '@/eventBus'
 
 import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { timed } from '@/helpers/timing'
@@ -60,7 +62,7 @@ export const analyzeInput = fromCallback<
     if (!seedLocalId || !propertyNameRaw) {
       if (writeTicket && !writeTicket.isLatest()) return { skipped: true as const }
       const result = await updateItemPropertyValue({ ...props, seedLocalId, propertyName: propertyNameRaw } as any)
-      return { skipped: false as const, result }
+      return { skipped: false as const, result, conflict: null }
     }
     const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, throwItemWriteError, waitForOutboxOp } =
       await import('@/outbox')
@@ -77,7 +79,9 @@ export const analyzeInput = fromCallback<
     await waitForOutboxOp(opId).catch(throwItemWriteError)
     const [op] = await getOutboxOps([opId])
     if (op?.status !== 'applied') return { skipped: true as const }
-    return { skipped: false as const, result: outboxOpResult<SetPropertyValueResult>(op) ?? undefined }
+    const conflict = op.conflict ? (JSON.parse(op.conflict) as PropertyConflict) : null
+    if (conflict) eventEmitter.emit('itemProperty.conflict', conflict)
+    return { skipped: false as const, result: outboxOpResult<SetPropertyValueResult>(op) ?? undefined, conflict }
   }
 
   const _analyzeInput = async (): Promise<boolean> => {
@@ -194,6 +198,7 @@ export const analyzeInput = fromCallback<
       const updatedContext: Partial<PropertyMachineContext> = {
         propertyValue: newValue,
         renderValue: newValue,
+        conflict: written.conflict ?? null,
       }
       if (localId) updatedContext.localId = localId
       if (schemaUid) updatedContext.schemaUid = schemaUid
@@ -227,6 +232,7 @@ export const analyzeInput = fromCallback<
     const updatedContext: Partial<PropertyMachineContext> = {
       propertyValue: stringValueForContext,
       renderValue: stringValueForContext,
+      conflict: written.conflict ?? null,
     }
 
     if (localId) {

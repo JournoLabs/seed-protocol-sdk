@@ -114,6 +114,8 @@ export const hydrateFromDb = fromCallback<
     const { getPendingSetValue } = await import('@/outbox/pendingValues')
     const pendingValue = await getPendingSetValue(firstRow.seedLocalId ?? seedLocalId, propertyName)
     if (pendingValue !== undefined) firstRow.propertyValue = pendingValue
+    const { getPropertyConflict } = await import('@/outbox/conflicts')
+    const conflict = await getPropertyConflict(firstRow.seedLocalId ?? seedLocalId, propertyName)
 
     const {
       localId,
@@ -270,6 +272,7 @@ export const hydrateFromDb = fromCallback<
       refResolvedValue,
       refResolvedDisplayValue,
       renderValue,
+      conflict,
       populatedFromDb: true,
     })
 

@@ -8,6 +8,7 @@ export interface IItem<_T extends ModelValues<ModelSchema>> {
   subscribe(callback: (itemProps: any) => void): Subscription
   getService(): ActorRefFrom<any>
   getEditedProperties(): Promise<PropertyData[]>
+  conflicts(): Promise<import('@/outbox/conflicts').PropertyConflict[]>
   /**
    * Upload and attest this item. Requires @seedprotocol/publish: `initPublish()` (or
    * `<PublishProvider config>`) registers the executor this delegates to; without it

@@ -1579,6 +1579,38 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return this._alias
   }
 
+  /**
+   * The unresolved conflict between this property's last local edit and a value sync wrote while
+   * the edit was pending (ADR 0019): the local edit was kept, and `remoteValue` is what sync wrote.
+   * Null when there is none. Cleared by the next edit or `resolveConflict`.
+   */
+  get conflict(): import('@/outbox/conflicts').PropertyConflict | null {
+    return this._getSnapshotContext().conflict ?? null
+  }
+
+  /**
+   * Settles `conflict`. `'local'` keeps the local edit. `'remote'` drops the local draft, so the
+   * synced value shows again (and publish has nothing to send for this property).
+   */
+  async resolveConflict(choice: 'local' | 'remote'): Promise<void> {
+    const { seedLocalId, propertyName } = this._getSnapshotContext()
+    if (!seedLocalId || !propertyName) return
+    const { appendOutboxOpAndWait, markPropertyConflictsResolved, startItemOutbox, throwItemWriteError } =
+      await import('@/outbox')
+    if (choice === 'remote') {
+      startItemOutbox()
+      await appendOutboxOpAndWait({
+        seedLocalId,
+        propertyName,
+        kind: 'delete',
+        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+      }).catch(throwItemWriteError)
+    }
+    await markPropertyConflictsResolved(seedLocalId, propertyName)
+    this._service.send({ type: 'updateContext', conflict: null })
+    if (choice === 'remote') this._service.send({ type: 'rehydrateFromDb' })
+  }
+
   get value() {
     // Use string literal to avoid circular dependency
     const context = this._getSnapshotContext()
@@ -1617,11 +1649,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const context = this._getSnapshotContext()
     // Restored if the save is refused (item not owned), breaks a validation rule, or fails.
     const before = options.before ?? { propertyValue: context.propertyValue, renderValue: context.renderValue }
-    // Update context immediately so UI shows the value before save completes
+    // Update context immediately so UI shows the value before save completes. A new edit settles
+    // the property's conflict (ADR 0019).
     this._service.send({
       type: 'updateContext',
       propertyValue: value,
       renderValue: value,
+      conflict: null,
     })
 
     // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)

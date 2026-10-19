@@ -2,7 +2,7 @@
  * The appliers for item ops (ADR 0019). Every tab registers them at init: the leader applies ops
  * that other tabs appended.
  */
-import { and, eq, inArray, or } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { createSeed, type NewSeedFields } from '@/db/write/createSeed'
@@ -24,6 +24,7 @@ import {
   startOutbox,
   type OutboxOp,
 } from './outbox'
+import { findSetConflict, recordPropertyEdit } from './conflicts'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -299,6 +300,8 @@ export type DeleteOp =
   | { mode: 'discard' }
   | { mode: 'item' }
   | { mode: 'property'; propertyNames: string[] }
+  /** The properties' local draft rows only, so their newest attested rows show again. */
+  | { mode: 'drafts'; propertyNames: string[] }
 
 /** Files a discarded draft's rows named, deleted once the op applied. */
 export type DeleteResult = { filePaths: string[] }
@@ -319,6 +322,18 @@ export async function applyDelete(
     await db
       .delete(metadata)
       .where(and(eq(metadata.seedLocalId, op.seedLocalId), inArray(metadata.propertyName, value.propertyNames)))
+    return { filePaths: [] }
+  }
+  if (value.mode === 'drafts') {
+    await db
+      .delete(metadata)
+      .where(
+        and(
+          eq(metadata.seedLocalId, op.seedLocalId),
+          inArray(metadata.propertyName, value.propertyNames),
+          isNull(metadata.uid),
+        ),
+      )
     return { filePaths: [] }
   }
   const rows = await db
@@ -403,20 +418,26 @@ export function startItemOutbox(): void {
       prepare: requireOwned,
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
+        // Before the write, which makes the edit the newest row
+        const conflict = await findSetConflict(op, value, tx)
         const result = await updateItemPropertyValue(
           { ...value, seedLocalId: op.seedLocalId, propertyName: op.propertyName ?? undefined } as never,
           { db: tx },
         )
+        await recordPropertyEdit(op, conflict, tx)
         return result ?? null
       },
     })
     registerOutboxApplier('storage', {
       prepare: requireOwned,
+      // Storage values record no conflicts: their ops carry no base row (ADR 0019)
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)!
-        return isItemStorageOp(value)
-          ? applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx)
-          : applyStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+        const result = isItemStorageOp(value)
+          ? await applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+          : await applyStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+        await recordPropertyEdit(op, null, tx)
+        return result
       },
       // ItemStorage: the file's lock before the transaction, the order its other writers use
       around: (op, run) => {
