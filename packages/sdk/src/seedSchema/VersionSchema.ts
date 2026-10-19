@@ -9,7 +9,9 @@ export const versions = sqliteTable('versions', {
   seedType: text('seed_type'),
   note: text('note'),
   createdAt: int('created_at'),
-  updatedAt: int('updated_at'),
+  updatedAt: int('updated_at')
+    .$defaultFn(() => Date.now())
+    .$onUpdate(() => Date.now()),
   attestationCreatedAt: int('attestation_created_at'),
   attestationRaw: text('attestation_raw'),
   publisher: text('publisher'),

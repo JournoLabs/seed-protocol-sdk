@@ -25,7 +25,9 @@ export const metadata = sqliteTable('metadata', {
   attestationCreatedAt: int('attestation_created_at'),
   contentHash: text('content_hash'),
   createdAt: int('created_at'),
-  updatedAt: int('updated_at'),
+  updatedAt: int('updated_at')
+    .$defaultFn(() => Date.now())
+    .$onUpdate(() => Date.now()),
   publisher: text('publisher'),
   // Unix seconds when this row's attestation was revoked on EAS; null while it's live (or for a
   // local, unpublished row). EAS sync keeps only the canonical attestation per (version, property

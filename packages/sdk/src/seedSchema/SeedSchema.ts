@@ -15,7 +15,9 @@ export const seeds = sqliteTable(
     attestationRaw: text('attestation_raw'),
     attestationCreatedAt: int('attestation_created_at'),
     createdAt: int('created_at'),
-    updatedAt: int('updated_at'),
+    updatedAt: int('updated_at')
+      .$defaultFn(() => Date.now())
+      .$onUpdate(() => Date.now()),
     _markedForDeletion: int('_marked_for_deletion'),
     revokedAt: int('revoked_at'),
   },
