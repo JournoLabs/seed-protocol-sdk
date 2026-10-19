@@ -5,10 +5,8 @@ import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/he
 import { PropertyType } from '@/types'
 import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { BaseDb } from '../Db/BaseDb'
-import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 
@@ -118,37 +116,17 @@ export const createMetadata: CreateMetadata = async (
   }
 
   if (!isItemStorage && !metadataValues.schemaUid && propertyRecordSchema && metadataValues.propertyName) {
-    try {
-      if (propertyRecordSchema.dataType) {
-        // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
-        const dataTypeKey = normalizeDataType(
-          propertyRecordSchema.dataType,
-        ) as keyof typeof INTERNAL_DATA_TYPES
-        const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
-
-        if (easDataType) {
-          // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
-          const propertyNameSnakeCase = easPropertyNameForPublish(
-            metadataValues.propertyName,
-            propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
-          )
-          // Cached, including misses: every item of a model looks up the same property schemas.
-          const schemaUid = await getEasSchemaUidForExactDefinition(
-            `${easDataType} ${propertyNameSnakeCase}`,
-          )
-          if (schemaUid) {
-            metadataValues.schemaUid = schemaUid
-          }
-        }
-      }
-    } catch (error) {
-      // If EAS query fails, continue without schemaUid - it's not required for metadata insertion
-      // Log error in development but don't throw
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Failed to fetch schemaUid for property ${metadataValues.propertyName}:`, error)
-      }
+    // Cached, including misses: every item of a model looks up the same property schemas. Not
+    // required for the row; publish resolves the schema again.
+    const schemaUid = await lookupPropertySchemaUid(
+      metadataValues.propertyName,
+      propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+    )
+    if (schemaUid) {
+      metadataValues.schemaUid = schemaUid
     }
   }
+
 
   // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup.
   // propertyRecordSchema.id is the integer properties.id only when built from a DB row; from schema

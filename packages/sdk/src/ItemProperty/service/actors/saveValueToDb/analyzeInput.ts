@@ -9,21 +9,10 @@ import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQueue'
 import { rowContext } from './rowContext'
 
-import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { normalizeDataType } from '@/helpers/property'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
-import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
-
-// Extract TypedData type from EIP712MessageTypes
-// EIP712MessageTypes is defined as { [key: string]: TypedData[] }
-type ExtractTypedData<T> = T extends { [key: string]: infer U }
-  ? U extends Array<infer V>
-    ? V
-    : never
-  : never
-type TypedData = ExtractTypedData<EIP712MessageTypes>
 
 export const analyzeInput = fromCallback<
   EventObject,
@@ -144,28 +133,12 @@ export const analyzeInput = fromCallback<
     }
 
     if (!schemaUid) {
-      try {
-        let easDataType
-
-        if (propertyRecordSchema.dataType) {
-          const normalizedType = normalizeDataType(propertyRecordSchema.dataType)
-          easDataType = INTERNAL_DATA_TYPES[normalizedType as keyof typeof INTERNAL_DATA_TYPES]?.eas as TypedData['type']
-        }
-
-        const schemaFromEas = await getEasSchemaForItemProperty({
-          propertyName: propertyName!,
-          easDataType,
-        })
-        if (schemaFromEas) {
-          schemaUid = schemaFromEas.id
-        }
-      } catch (error) {
-        // If schema fetch fails, continue without schemaUid - it's not required for local metadata
-        // Log error in development but don't throw
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
-        }
-      }
+      // Cached lookup, shared with createMetadata, so a save doesn't wait on the EAS indexer each
+      // time. Not required for the row; publish resolves the schema again.
+      schemaUid = await lookupPropertySchemaUid(
+        propertyName,
+        propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+      )
     }
 
     // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])

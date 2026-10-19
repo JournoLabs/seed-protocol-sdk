@@ -4,6 +4,7 @@ import { ModelValues } from '@/types'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
 import {
@@ -42,6 +43,11 @@ export const createNewItem = async ({
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
   modelFileId ??= model?.id
 
+  // createMetadata looks up each property's EAS schema. Start every lookup now, in parallel and
+  // while the seed and version rows are written, so the per-property inserts read the cache
+  // instead of waiting on the indexer one property at a time.
+  const schemaLookups = prefetchPropertySchemaUids(propertySchemas)
+
   const newSeedId = await createSeed({ type: seedType, modelFileId })
 
   try {
@@ -66,6 +72,8 @@ export const createNewItem = async ({
         allPropertyNames.add(name)
       }
     }
+
+    await schemaLookups
 
     for (const propertyName of allPropertyNames) {
       const propertyValue = propertyData[propertyName]
@@ -122,3 +130,16 @@ export const createNewItem = async ({
     }
   }
 } 
+
+function prefetchPropertySchemaUids(
+  propertySchemas: ReturnType<typeof modelPropertiesToObject> | undefined,
+): Promise<unknown> {
+  if (!propertySchemas) return Promise.resolve()
+  return Promise.all(
+    Object.entries(propertySchemas).map(([propertyName, propertyDef]) =>
+      propertyDef?.storageType === 'ItemStorage'
+        ? undefined
+        : lookupPropertySchemaUid(propertyName, propertyDef as Parameters<typeof lookupPropertySchemaUid>[1]),
+    ),
+  )
+}

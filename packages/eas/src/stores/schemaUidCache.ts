@@ -4,6 +4,7 @@ import { getEasEndpoint } from '../easEndpoint.js'
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 import { GET_SCHEMA_BY_NAME } from '../queries.js'
 import { toSnakeCase } from '../utils.js'
+import { easName } from '../easNames.js'
 
 const schemaUidForSchemaDefinition = new Map<string, string>()
 const schemaUidForModel = new Map<string, string>()
@@ -12,7 +13,7 @@ const schemaUidForModel = new Map<string, string>()
  * How long a schema lookup that found nothing is remembered. Item creation looks up the same
  * property and model schemas for every item, and most local models have none on EAS, so misses are
  * cached too. After this, the next lookup asks EAS again, so a schema registered by another client
- * is eventually found. Registering a schema in this client clears cached misses immediately.
+ * is eventually found. Registering a schema in this client forgets the misses it answers at once.
  */
 export const SCHEMA_LOOKUP_MISS_TTL_MS = 5 * 60 * 1000
 
@@ -25,15 +26,16 @@ const lookupsInFlight = new Map<string, Promise<string | undefined>>()
 let missGeneration = 0
 
 /** UIDs differ per chain, so lookups are scoped to the EAS endpoint they were made against. */
-const scopeToEndpoint = (key: string): string => {
-  let endpoint = ''
+const currentEndpoint = (): string => {
   try {
-    endpoint = getEasEndpoint()
+    return getEasEndpoint()
   } catch {
     // Misconfigured chain: the lookup itself will fail and isn't cached.
+    return ''
   }
-  return `${endpoint}\n${key}`
 }
+
+const scopeToEndpoint = (key: string): string => `${currentEndpoint()}\n${key}`
 
 /**
  * Runs an EAS schema lookup unless the same lookup found nothing within the last
@@ -69,11 +71,42 @@ export const cachedSchemaLookup = async (
   return request
 }
 
-/** Forgets every cached miss, so the next lookups ask EAS again. Called when a schema is registered. */
+/** Forgets every cached miss, so the next lookups ask EAS again. */
 export const clearSchemaLookupMisses = (): void => {
   missGeneration++
   lookupMissExpiresAt.clear()
   lookupsInFlight.clear()
+}
+
+/**
+ * Forgets the cached misses (and lookups in flight) on the current endpoint whose key `answers`
+ * matches. Called when a schema becomes known, with a test for the lookups it would now satisfy.
+ * Forgetting every miss here instead made each save that read a stored model UID send all
+ * property lookups to EAS again.
+ */
+const forgetMisses = (answers: (key: string) => boolean): void => {
+  const prefix = `${currentEndpoint()}\n`
+  const matches = (scopedKey: string) => scopedKey.startsWith(prefix) && answers(scopedKey.slice(prefix.length))
+  let forgotInFlight = false
+  for (const scopedKey of [...lookupMissExpiresAt.keys()]) {
+    if (matches(scopedKey)) lookupMissExpiresAt.delete(scopedKey)
+  }
+  for (const scopedKey of [...lookupsInFlight.keys()]) {
+    if (matches(scopedKey)) {
+      lookupsInFlight.delete(scopedKey)
+      forgotInFlight = true
+    }
+  }
+  // A lookup in flight for a matching key would otherwise cache its stale miss when it settles.
+  if (forgotInFlight) missGeneration++
+}
+
+/** Lookups a schema with this definition answers: by exact definition, or by a name it ends with. */
+const definitionAnswers = (definition: string) => {
+  const snake = toSnakeCase(definition)
+  return (key: string) =>
+    key === `definition:${definition}` ||
+    (key.startsWith('schemaName:') && snake.endsWith(key.slice('schemaName:'.length)))
 }
 
 /** Clears every schema UID cache in this module (found UIDs and misses). For tests. */
@@ -92,8 +125,8 @@ export const setSchemaUidForSchemaDefinition = ({
   schemaUid: string
 }): void => {
   schemaUidForSchemaDefinition.set(toSnakeCase(text), schemaUid)
-  // A miss for this or a related lookup (e.g. by property name) may now be found.
-  clearSchemaLookupMisses()
+  // A miss for this definition, or for a name it ends with, may now be found.
+  forgetMisses(definitionAnswers(text))
 }
 
 export const setSchemaUidForModel = ({
@@ -104,7 +137,9 @@ export const setSchemaUidForModel = ({
   schemaUid: string
 }): void => {
   schemaUidForModel.set(modelName.toLowerCase(), schemaUid)
-  clearSchemaLookupMisses()
+  // getEasSchemaUidForModel looks models up by EAS name.
+  const modelKey = `model:${easName(modelName)}`
+  forgetMisses((key) => key === modelKey)
 }
 
 export const getSchemaUidForModelFromCache = (modelName: string): string | undefined =>
