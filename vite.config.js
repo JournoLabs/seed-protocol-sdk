@@ -276,6 +276,8 @@ export default defineConfig({
           name: 'NodeJS',
           environment: 'node',
           dir: '.',
+          // Creates the run dir that holds each file's temp project dir and removes it after the run.
+          globalSetup: ['./packages/sdk/__tests__/globalSetup.node.ts'],
           env: {
             DEBUG: debugNamespaces,
           },
