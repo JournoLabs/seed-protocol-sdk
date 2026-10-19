@@ -1971,7 +1971,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           return
         }
 
-        if (currentVersionLocalId) {
+        // In the browser the versions liveQuery below emits at once and its handler runs this same
+        // metadata read and property setup, so only Node (no liveQuery) does it here.
+        if (currentVersionLocalId && !isBrowser) {
           // Query initial metadata records for the latest version
           const initialMetadata = await db
             .select()

@@ -670,12 +670,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           propertyNames.length > 1
             ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
             : eq(metadataLatest.propertyName, propertyNames[0])
-        const initialMetadata = await db
-          .with(metadataLatest)
-          .select()
-          .from(metadataLatest)
-          .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
-          .limit(15)
+        // In the browser the metadata liveQuery below emits the same row at once, so only Node (no
+        // liveQuery) reads it here.
+        const initialMetadata = isBrowser
+          ? []
+          : await db
+              .with(metadataLatest)
+              .select()
+              .from(metadataLatest)
+              .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
+              .limit(15)
 
         if (initialMetadata.length > 0) {
           const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
