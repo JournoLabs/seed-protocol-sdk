@@ -7,7 +7,9 @@ import { GraphQLClient } from 'graphql-request'
  */
 export const EAS_REQUEST_TIMEOUT_MS = 30_000
 
-function withTimeout(init: RequestInit | undefined, timeoutMs: number): RequestInit | undefined {
+type FetchInit = Parameters<typeof fetch>[1]
+
+function withTimeout(init: FetchInit, timeoutMs: number): FetchInit {
   if (typeof AbortSignal === 'undefined' || typeof AbortSignal.timeout !== 'function') return init
   const timeout = AbortSignal.timeout(timeoutMs)
   const callerSignal = init?.signal
@@ -20,6 +22,6 @@ function withTimeout(init: RequestInit | undefined, timeoutMs: number): RequestI
 export function createEasGraphQLClient(url: string, timeoutMs = EAS_REQUEST_TIMEOUT_MS): GraphQLClient {
   return new GraphQLClient(url, {
     // Resolved per call, so a fetch replaced after construction (tests, polyfills) is used.
-    fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, withTimeout(init, timeoutMs)),
+    fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) => fetch(input, withTimeout(init, timeoutMs)),
   })
 }
