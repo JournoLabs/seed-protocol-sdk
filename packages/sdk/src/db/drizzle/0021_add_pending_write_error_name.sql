@@ -1,0 +1,1 @@
+ALTER TABLE `pending_writes` ADD `error_name` text;

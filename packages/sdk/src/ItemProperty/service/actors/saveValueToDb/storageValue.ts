@@ -33,7 +33,8 @@ export async function writeStorageValue<Result extends SetPropertyValueResult = 
   if (!seedLocalId) {
     throw new Error(`No local seed for the item to save ${item.propertyName} to`)
   }
-  const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
+  const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, throwItemWriteError, waitForOutboxOp } =
+    await import('@/outbox')
   startItemOutbox()
   // Checked right before appending (no await in between): ops apply in append order
   if (ticket && !ticket.isLatest()) {
@@ -47,7 +48,7 @@ export async function writeStorageValue<Result extends SetPropertyValueResult = 
     kind: 'storage',
     value,
   })
-  await waitForOutboxOp(opId)
+  await waitForOutboxOp(opId).catch(throwItemWriteError)
   const [op] = await getOutboxOps([opId])
   if (op?.status !== 'applied') return { skipped: true }
   const result = outboxOpResult<Result>(op) ?? undefined

@@ -3,7 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
-import { withTabLock } from '@/helpers/tabLocks'
+import { tryWithTabLock, withTabLock } from '@/helpers/tabLocks'
 
 export type ItemStorageFileTarget = {
   /** The item's seedUid, else its seedLocalId: the file is `<seedId><extension>`. */
@@ -65,6 +65,14 @@ export const itemStorageFileLockName = (filePath: string): string => `seed:item-
  */
 export function withItemStorageFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
   return withTabLock(itemStorageFileLockName(filePath), fn)
+}
+
+/** {@link withItemStorageFileLock} only if the lock is free now (see `tryWithTabLock`). */
+export function tryWithItemStorageFileLock<T>(
+  filePath: string,
+  fn: () => Promise<T>,
+): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  return tryWithTabLock(itemStorageFileLockName(filePath), fn)
 }
 
 /** Lock attempts before giving up when the row's target file keeps changing under us. */

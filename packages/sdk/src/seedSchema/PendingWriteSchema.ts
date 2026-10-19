@@ -31,6 +31,8 @@ export const pendingWrites = sqliteTable(
     /** `pending` | `applied` | `superseded` | `failed`. An op is claimed and applied in one transaction. */
     status: text('status').notNull(),
     error: text('error'),
+    /** The name of the error that failed the op (`OwnershipError`, say), so a waiter can tell why. */
+    errorName: text('error_name'),
     attempts: int('attempts').notNull().default(0),
     appliedAt: int('applied_at'),
     /** JSON the applier recorded when the op applied (for a `set`: the metadata row written). */

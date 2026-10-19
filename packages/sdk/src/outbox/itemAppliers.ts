@@ -2,7 +2,7 @@
  * The appliers for item ops (ADR 0019). Every tab registers them at init: the leader applies ops
  * that other tabs appended.
  */
-import { and, eq, inArray, or } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { createSeed, type NewSeedFields } from '@/db/write/createSeed'
@@ -13,10 +13,23 @@ import { metadata, seeds, type MetadataType } from '@/seedSchema'
 import type { PropertyType } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
-import { getItemStorageFilePath, withItemStorageFileLock } from '@/helpers/itemStorageFile'
+import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
-import { outboxOpValue, registerOutboxApplier, startOutbox, type OutboxOp } from './outbox'
+import { isItemOwned, OwnershipError } from '@/helpers/ownership'
+import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
+import { normalizeDataType } from '@/helpers/property'
+import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
+import {
+  OutboxOpDeferredError,
+  OutboxOpFailedError,
+  outboxOpValue,
+  registerOutboxApplier,
+  startOutbox,
+  type OutboxOp,
+} from './outbox'
+import { findSetConflict, recordPropertyEdit } from './conflicts'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -292,6 +305,8 @@ export type DeleteOp =
   | { mode: 'discard' }
   | { mode: 'item' }
   | { mode: 'property'; propertyNames: string[] }
+  /** The properties' local draft rows only, so their newest attested rows show again. */
+  | { mode: 'drafts'; propertyNames: string[] }
 
 /** Files a discarded draft's rows named, deleted once the op applied. */
 export type DeleteResult = { filePaths: string[] }
@@ -312,6 +327,18 @@ export async function applyDelete(
     await db
       .delete(metadata)
       .where(and(eq(metadata.seedLocalId, op.seedLocalId), inArray(metadata.propertyName, value.propertyNames)))
+    return { filePaths: [] }
+  }
+  if (value.mode === 'drafts') {
+    await db
+      .delete(metadata)
+      .where(
+        and(
+          eq(metadata.seedLocalId, op.seedLocalId),
+          inArray(metadata.propertyName, value.propertyNames),
+          isNull(metadata.uid),
+        ),
+      )
     return { filePaths: [] }
   }
   const rows = await db
@@ -366,6 +393,72 @@ async function discardStorageValue(op: OutboxOp): Promise<void> {
   else fs?.unlinkSync?.(path)
 }
 
+/**
+ * The ownership rule, checked before an op applies (ADR 0019's async rules): the op may come from
+ * another tab, or from before a reload, and the client may have lost the item's wallet since it
+ * was appended. OwnershipError fails the op without a retry.
+ */
+async function requireOwned(op: OutboxOp): Promise<void> {
+  if (!(await isItemOwned({ seedLocalId: op.seedLocalId }))) throw new OwnershipError()
+}
+
+/** A Relation value names a local seed that doesn't exist. */
+export class RelationTargetError extends Error {
+  constructor(readonly targets: string[]) {
+    super(`Relation target not found: ${targets.join(', ')}`)
+    this.name = 'RelationTargetError'
+  }
+}
+
+/** The seed ids a Relation or List-of-Relation value names; none for other values. */
+function relationTargets(value: SetPropertyValueOp): string[] {
+  const dataType = normalizeDataType(value.dataType)
+  const refValueType = normalizeDataType(value.refValueType)
+  if (!value.newValue) return []
+  if (dataType === 'Relation' && refValueType !== 'Image') return [value.newValue]
+  if (dataType === 'List' && refValueType === 'Relation') return parseListPropertyValueFromStorage(value.newValue)
+  return []
+}
+
+/**
+ * The relation-target rule, checked before a `set` applies: each seed a Relation value names by
+ * local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
+ * target whose create op is still pending defers the op (OutboxOpDeferredError) until it applies;
+ * any other missing target fails it with RelationTargetError.
+ */
+async function requireRelationTargets(op: OutboxOp): Promise<void> {
+  const value = outboxOpValue<SetPropertyValueOp>(op)
+  const localIds = [...new Set(value ? relationTargets(value) : [])].filter((id) => !isValidEasAttestationUid(id))
+  if (localIds.length === 0) return
+  const db = BaseDb.getAppDb()
+  const found = await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.localId, localIds))
+  const missing = localIds.filter((id) => !found.some((row: { localId: string | null }) => row.localId === id))
+  if (missing.length === 0) return
+  const creating = await db
+    .select({ seedLocalId: pendingWrites.seedLocalId })
+    .from(pendingWrites)
+    .where(
+      and(
+        inArray(pendingWrites.seedLocalId, missing),
+        eq(pendingWrites.kind, 'create'),
+        eq(pendingWrites.status, 'pending'),
+      ),
+    )
+  if (creating.length > 0) throw new OutboxOpDeferredError(`Relation target ${creating[0].seedLocalId} is being created`)
+  throw new RelationTargetError(missing)
+}
+
+/**
+ * Rethrows a failed item op's error as its caller expects it: OwnershipError when the drainer
+ * refused the op for ownership, else the OutboxOpFailedError as is.
+ */
+export function throwItemWriteError(error: unknown): never {
+  if (error instanceof OutboxOpFailedError && error.errorName === 'OwnershipError') {
+    throw new OwnershipError(error.message)
+  }
+  throw error
+}
+
 let registered = false
 
 /** Registers the item appliers and starts draining. Safe to call more than once. */
@@ -373,28 +466,42 @@ export function startItemOutbox(): void {
   if (!registered) {
     registered = true
     registerOutboxApplier('set', {
+      prepare: async (op) => {
+        await requireOwned(op)
+        await requireRelationTargets(op)
+      },
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
+        // Before the write, which makes the edit the newest row
+        const conflict = await findSetConflict(op, value, tx)
         const result = await updateItemPropertyValue(
           { ...value, seedLocalId: op.seedLocalId, propertyName: op.propertyName ?? undefined } as never,
           { db: tx },
         )
+        await recordPropertyEdit(op, conflict, tx)
         return result ?? null
       },
     })
     registerOutboxApplier('storage', {
+      prepare: requireOwned,
+      // Storage values record no conflicts: their ops carry no base row (ADR 0019)
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)!
-        return isItemStorageOp(value)
-          ? applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx)
-          : applyStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+        const result = isItemStorageOp(value)
+          ? await applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+          : await applyStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+        await recordPropertyEdit(op, null, tx)
+        return result
       },
-      // ItemStorage: the file's lock before the transaction, the order its other writers use
-      around: (op, run) => {
+      // ItemStorage: the file's lock before the transaction, the order its other writers use. Taken
+      // only when free: another writer holding it would otherwise hold up every other op.
+      around: async (op, run) => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
-        return value && isItemStorageOp(value)
-          ? withItemStorageFileLock(itemStorageTargetPath(op.seedLocalId, value.itemStorage), run)
-          : run()
+        if (!value || !isItemStorageOp(value)) return run()
+        const path = itemStorageTargetPath(op.seedLocalId, value.itemStorage)
+        const outcome = await tryWithItemStorageFileLock(path, run)
+        if (!outcome.acquired) throw new OutboxOpDeferredError(`ItemStorage file ${path} is locked`)
+        return outcome.value
       },
       discard: discardStorageValue,
     })
@@ -410,6 +517,10 @@ export function startItemOutbox(): void {
       },
     })
     registerOutboxApplier('delete', {
+      // A discarded draft is the client's own create rolled back
+      prepare: async (op) => {
+        if (outboxOpValue<DeleteOp>(op)?.mode !== 'discard') await requireOwned(op)
+      },
       apply: async (op, tx): Promise<DeleteResult> => applyDelete(op, outboxOpValue<DeleteOp>(op)!, tx),
     })
   }

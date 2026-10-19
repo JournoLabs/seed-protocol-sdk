@@ -102,12 +102,15 @@ export const loadOrCreateProperty = fromCallback<
         }
       }
       logger(`Metadata not found in database for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
+      // No row yet, but maybe a value waiting in the outbox (ADR 0019)
+      const { getPendingSetValue } = await import('@/outbox/pendingValues')
+      const pendingValue = (await getPendingSetValue(seedLocalId, propertyName)) ?? undefined
       sendBack({
         type: 'loadOrCreatePropertySuccess',
         property: {
           propertyName,
-          propertyValue: context.propertyValue || undefined,
-          renderValue: context.renderValue || context.propertyValue || undefined,
+          propertyValue: context.propertyValue || pendingValue,
+          renderValue: context.renderValue || context.propertyValue || pendingValue,
           seedLocalId,
           seedUid,
           versionLocalId: versionLocalId || context.versionLocalId,
@@ -129,9 +132,9 @@ export const loadOrCreateProperty = fromCallback<
       propertyName
     )
     // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
-    const { getPendingSetValue } = await import('@/outbox/pendingValues')
-    const pendingValue = await getPendingSetValue(metadataRecord.seedLocalId ?? seedLocalId, propertyName)
-    if (pendingValue !== undefined) metadataRecord.propertyValue = pendingValue
+    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
+    const pending = await getPendingPropertyRow(metadataRecord.seedLocalId ?? seedLocalId, propertyName)
+    if (pending) Object.assign(metadataRecord, applyPendingRow({}, pending))
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
