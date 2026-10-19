@@ -387,6 +387,55 @@ CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`
 
 export const migrationSql_0021_add_pending_write_error_name = `ALTER TABLE \`pending_writes\` ADD \`error_name\` text;`
 
+export const migrationSql_0022_add_entity_changes = `CREATE TABLE \`entity_changes\` (
+	\`seq\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`tbl\` text NOT NULL,
+	\`seed_local_id\` text,
+	\`seed_uid\` text,
+	\`property_name\` text,
+	\`at\` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX \`entity_changes_at\` ON \`entity_changes\` (\`at\`);--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_seeds_insert\` AFTER INSERT ON \`seeds\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('seeds', NEW.\`local_id\`, NEW.\`uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_seeds_update\` AFTER UPDATE ON \`seeds\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('seeds', NEW.\`local_id\`, NEW.\`uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) SELECT 'seeds', OLD.\`local_id\`, OLD.\`uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE OLD.\`local_id\` IS NOT NEW.\`local_id\` OR OLD.\`uid\` IS NOT NEW.\`uid\`;
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_seeds_delete\` AFTER DELETE ON \`seeds\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('seeds', OLD.\`local_id\`, OLD.\`uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_versions_insert\` AFTER INSERT ON \`versions\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('versions', NEW.\`seed_local_id\`, NEW.\`seed_uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_versions_update\` AFTER UPDATE ON \`versions\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('versions', NEW.\`seed_local_id\`, NEW.\`seed_uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) SELECT 'versions', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE OLD.\`seed_local_id\` IS NOT NEW.\`seed_local_id\` OR OLD.\`seed_uid\` IS NOT NEW.\`seed_uid\`;
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_versions_delete\` AFTER DELETE ON \`versions\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`at\`) VALUES ('versions', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_metadata_insert\` AFTER INSERT ON \`metadata\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) VALUES ('metadata', NEW.\`seed_local_id\`, NEW.\`seed_uid\`, NEW.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_metadata_update\` AFTER UPDATE ON \`metadata\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) VALUES ('metadata', NEW.\`seed_local_id\`, NEW.\`seed_uid\`, NEW.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) SELECT 'metadata', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, OLD.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE OLD.\`seed_local_id\` IS NOT NEW.\`seed_local_id\` OR OLD.\`seed_uid\` IS NOT NEW.\`seed_uid\` OR OLD.\`property_name\` IS NOT NEW.\`property_name\`;
+END;
+--> statement-breakpoint
+CREATE TRIGGER \`entity_changes_metadata_delete\` AFTER DELETE ON \`metadata\` BEGIN
+	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) VALUES ('metadata', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, OLD.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
+END;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -545,6 +594,13 @@ export const journalJson = `{
       "when": 1792414753260,
       "tag": "0021_add_pending_write_error_name",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792453539761,
+      "tag": "0022_add_entity_changes",
+      "breakpoints": true
     }
   ]
 }`
@@ -554,8 +610,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
-  "prevId": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
+  "id": "66e8dfbd-9c3d-44fe-94ef-ec8aaa3377f6",
+  "prevId": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
   "tables": {
     "appState": {
       "name": "appState",
@@ -825,6 +881,66 @@ export const snapshotJson = `{
         }
       },
       "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "entity_changes": {
+      "name": "entity_changes",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "tbl": {
+          "name": "tbl",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seed_uid": {
+          "name": "seed_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "property_name": {
+          "name": "property_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entity_changes_at": {
+          "name": "entity_changes_at",
+          "columns": [
+            "at"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
