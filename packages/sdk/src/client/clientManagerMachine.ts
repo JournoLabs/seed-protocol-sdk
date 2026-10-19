@@ -12,7 +12,7 @@ import { addModelsToStore } from "./actors/addModelsToStore"
 import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
-import { emitAcrossTabs } from "@/helpers/tabEvents"
+import { announceAddressesPersisted } from "@/client/addressesPersisted"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
 import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
 import { startAlignRowPublishers } from "@/db/alignRowPublishers"
@@ -20,7 +20,6 @@ import { startClearStoredDisplayUrls } from "@/db/clearStoredDisplayUrls"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import { startItemOutbox } from "@/outbox"
 import {
-  ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
 } from "@/client/events"
 
@@ -105,7 +104,7 @@ function emitAddressesPersistedIfAddressesKey(event: {
 }) {
   if (event.key !== "addresses") return
   const payload = parseAddressesPersistedPayload(event.value)
-  emitAcrossTabs(ADDRESSES_PERSISTED_EVENT, payload)
+  announceAddressesPersisted(payload)
 }
 
 function errorFromEvent(event: unknown, fallbackMessage: string): Error {

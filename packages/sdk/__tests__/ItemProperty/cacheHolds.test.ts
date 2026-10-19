@@ -77,4 +77,25 @@ testDescribe('ItemProperty cache holds', () => {
     expect(byLocalId!.getService().getSnapshot().status).not.toBe('stopped')
     item.unload()
   }, 30000)
+
+  it('a held property dropped with its item stays out of the cache when its context changes', async () => {
+    const item = await createPost('dropped')
+    const seedLocalId = item.seedLocalId
+    const held = await ItemProperty.find({ propertyName: 'title', seedLocalId })
+    expect(held).toBeDefined()
+
+    Item.dropCachedInstancesForSeedIds([seedLocalId])
+    expect(ItemProperty.instanceCache.has(ItemProperty.cacheKey(seedLocalId, 'title'))).toBe(false)
+
+    // Its live query or a save can still update the held instance after the drop
+    held!.getService().send({ type: 'updateContext', renderValue: 'changed after drop' })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(ItemProperty.instanceCache.has(ItemProperty.cacheKey(seedLocalId, 'title'))).toBe(false)
+
+    const reloaded = await ItemProperty.find({ propertyName: 'title', seedLocalId })
+    expect(reloaded).toBeDefined()
+    expect(reloaded!.getService()).not.toBe(held!.getService())
+    held!.unload()
+    reloaded!.unload()
+  }, 30000)
 })

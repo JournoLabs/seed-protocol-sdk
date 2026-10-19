@@ -11,7 +11,7 @@
  * (registerOutboxApplier).
  */
 import debug from 'debug'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { pendingWrites, type PendingWriteType } from '@/seedSchema/PendingWriteSchema'
 import { generateId } from '@/helpers/generateId'
@@ -55,7 +55,9 @@ export type OutboxApplier<Prepared = unknown> = {
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
   /**
    * Wraps the op's transaction, for locks that must be taken before it: an ItemStorage file's
-   * lock, whose other writers take it before touching the database. Calls `run` once.
+   * lock, whose other writers take it before touching the database. Calls `run` once, or throws
+   * OutboxOpDeferredError without calling it when the lock is held, so the drainer isn't kept
+   * waiting while other ops could apply.
    */
   around?: <T>(op: OutboxOp, run: () => Promise<T>) => Promise<T>
   /**
@@ -86,6 +88,21 @@ const isRetryable = (error: unknown): boolean =>
   isSqliteBusyError(error) ||
   (error instanceof Error && RETRYABLE_ERROR_NAMES.has(error.name))
 
+/**
+ * An op that can't apply yet for a reason that will pass without counting as a failure: an applier's
+ * `around` found a lock held. The drainer sets the op (and its property's queue) aside for
+ * OUTBOX_DEFER_MS and goes on with other ops; its attempts aren't counted.
+ */
+export class OutboxOpDeferredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OutboxOpDeferredError'
+  }
+}
+
+/** How long a deferred op waits before the drainer tries it again. */
+export const OUTBOX_DEFER_MS = 50
+
 /** An op that can never apply (a broken rule, an item the client doesn't own). Not retried. */
 export class OutboxOpRejectedError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -100,6 +117,8 @@ export class OutboxOpFailedError extends Error {
   constructor(
     readonly opId: string,
     message: string,
+    /** The name of the error that failed the op, when it was recorded. */
+    readonly errorName: string | null = null,
   ) {
     super(message)
     this.name = 'OutboxOpFailedError'
@@ -114,6 +133,12 @@ export const OUTBOX_MAX_ATTEMPTS = 8
 const WAIT_POLL_MS = 1_000
 /** Ops read per drain pass. */
 const DRAIN_BATCH = 200
+/** Applied and superseded ops are kept this long, then pruned. */
+export const OUTBOX_PRUNE_AFTER_MS = 24 * 60 * 60 * 1000
+/** Failed ops are kept longer, so a refused write can still be looked into. */
+export const OUTBOX_PRUNE_FAILED_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/** How often the leader prunes, at most. */
+const PRUNE_EVERY_MS = 60 * 60 * 1000
 
 const appliers = new Map<string, OutboxApplier<any>>()
 
@@ -227,7 +252,41 @@ function scheduleDrain(): void {
     } finally {
       draining = undefined
     }
+    if (Date.now() - lastPrunedAt >= PRUNE_EVERY_MS) {
+      lastPrunedAt = Date.now()
+      pruneOutbox().catch((error) => logger('prune failed', error))
+    }
   })()
+}
+
+let lastPrunedAt = 0
+
+/**
+ * Deletes settled ops older than their retention: applied and superseded ops after
+ * OUTBOX_PRUNE_AFTER_MS, failed ones after OUTBOX_PRUNE_FAILED_AFTER_MS. An applied op with an
+ * unresolved conflict stays until the conflict is resolved. Pending ops are never pruned. The
+ * leader runs it after a drain, at most hourly. Returns how many ops it deleted.
+ */
+export async function pruneOutbox(now = Date.now()): Promise<number> {
+  const db = BaseDb.getAppDb()
+  if (!db) return 0
+  const settledBefore = now - OUTBOX_PRUNE_AFTER_MS
+  const deleted = await db
+    .delete(pendingWrites)
+    .where(
+      or(
+        and(
+          eq(pendingWrites.status, 'applied'),
+          lt(sql`coalesce(${pendingWrites.appliedAt}, ${pendingWrites.createdAt})`, settledBefore),
+          or(isNull(pendingWrites.conflict), isNotNull(pendingWrites.conflictResolvedAt)),
+        ),
+        and(eq(pendingWrites.status, 'superseded'), lt(pendingWrites.createdAt, settledBefore)),
+        and(eq(pendingWrites.status, 'failed'), lt(pendingWrites.createdAt, now - OUTBOX_PRUNE_FAILED_AFTER_MS)),
+      ),
+    )
+    .returning({ opId: pendingWrites.opId })
+  if (deleted.length > 0) logger(`pruned ${deleted.length} settled ops`)
+  return deleted.length
 }
 
 /**
@@ -344,14 +403,18 @@ async function applyUnit(unit: Unit): Promise<void> {
     for (const op of ops) prepared.push(await applierFor(op).prepare?.(op))
 
     const transaction = () => BaseDb.transaction(async (tx) => {
-      // Claim: an op another drainer applied meanwhile is no longer pending
-      const claimed = await tx
+      // Claim: an op another drainer applied meanwhile is no longer pending. The claimed rows are
+      // what is applied: a writer may have changed an op's value since it was read
+      // (claimUnpublishedDrafts stamps pending creates in its own transaction).
+      const claimed: OutboxOp[] = await tx
         .update(pendingWrites)
         .set({ status: 'applied', appliedAt: Date.now() })
         .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
-        .returning({ opId: pendingWrites.opId })
+        .returning()
       if (claimed.length !== ids.length) throw new ClaimLostError()
-      for (const [index, op] of ops.entries()) {
+      const current = new Map(claimed.map((row) => [row.opId, row]))
+      for (const [index, read] of ops.entries()) {
+        const op = current.get(read.opId) ?? read
         const result = await applierFor(op).apply(op, tx, prepared[index])
         if (result !== undefined) {
           await tx
@@ -378,6 +441,12 @@ async function applyUnit(unit: Unit): Promise<void> {
     discardAll(superseded)
   } catch (error) {
     if (error instanceof ClaimLostError) return
+    if (error instanceof OutboxOpDeferredError) {
+      logger(`op ${ids.join(', ')} deferred: ${error.message}`)
+      for (const id of ids) notBefore.set(id, Date.now() + OUTBOX_DEFER_MS)
+      scheduleRetry()
+      return
+    }
     await recordFailure(ops, superseded, error)
   }
 }
@@ -390,6 +459,7 @@ function applierFor(op: OutboxOp): OutboxApplier<unknown> {
 
 async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
+  const errorName = error instanceof Error ? error.name : null
   const attempts = Math.max(...ops.map((op) => op.attempts)) + 1
   const permanent = !isRetryable(error) || attempts >= OUTBOX_MAX_ATTEMPTS
   const ids = ops.map((op) => op.opId)
@@ -398,7 +468,7 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
     logger(`op ${ids.join(', ')} failed (attempt ${attempts}), retrying: ${message}`)
     await db
       .update(pendingWrites)
-      .set({ attempts, error: message })
+      .set({ attempts, error: message, errorName })
       .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
     const delay = OUTBOX_RETRY_DELAYS_MS[Math.min(attempts - 1, OUTBOX_RETRY_DELAYS_MS.length - 1)]
     for (const id of ids) notBefore.set(id, Date.now() + delay)
@@ -408,14 +478,14 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
   logger(`op ${ids.join(', ')} failed: ${message}`)
   await db
     .update(pendingWrites)
-    .set({ status: 'failed', attempts, error: message })
+    .set({ status: 'failed', attempts, error: message, errorName })
     .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
   // The values they superseded were replaced by the user; they don't come back.
   const supersededIds = superseded.map((op) => op.opId)
   if (supersededIds.length > 0) {
     await db
       .update(pendingWrites)
-      .set({ status: 'superseded', error: message })
+      .set({ status: 'superseded', error: message, errorName })
       .where(and(inArray(pendingWrites.opId, supersededIds), eq(pendingWrites.status, 'pending')))
   }
   for (const id of ids) notBefore.delete(id)
@@ -471,7 +541,7 @@ function settleWaiters(row: OutboxOp): void {
   waiters.delete(row.opId)
   for (const waiter of set) {
     if (outcome === 'ok') waiter.resolve()
-    else waiter.reject(new OutboxOpFailedError(row.opId, row.error ?? 'The write failed'))
+    else waiter.reject(new OutboxOpFailedError(row.opId, row.error ?? 'The write failed', row.errorName))
   }
 }
 

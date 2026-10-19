@@ -99,21 +99,29 @@ export const hydrateFromDb = fromCallback<
       whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
     }
 
+    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019). Its
+    // op is read first: one that applies between the two reads is then in one of them.
+    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
+    const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
+
     const rows = await appDb
       .select()
       .from(metadata)
       .where(and(...whereClauses))
       .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
 
-    if (!rows || !rows.length) {
+    const pending = seedLocalId
+      ? pendingFirst
+      : await getPendingPropertyRow(rows?.[0]?.seedLocalId, propertyName)
+
+    if ((!rows || !rows.length) && !pending) {
       return
     }
 
-    const firstRow = { ...rows[0] }
-    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
-    const { getPendingSetValue } = await import('@/outbox/pendingValues')
-    const pendingValue = await getPendingSetValue(firstRow.seedLocalId ?? seedLocalId, propertyName)
-    if (pendingValue !== undefined) firstRow.propertyValue = pendingValue
+    const stored = rows?.[0] ?? ({ seedLocalId, seedUid, propertyName } as (typeof rows)[number])
+    const firstRow = pending ? applyPendingRow({ ...stored }, pending) : { ...stored }
+    const { getPropertyConflict } = await import('@/outbox/conflicts')
+    const conflict = await getPropertyConflict(firstRow.seedLocalId ?? seedLocalId, propertyName)
 
     const {
       localId,
@@ -270,6 +278,7 @@ export const hydrateFromDb = fromCallback<
       refResolvedValue,
       refResolvedDisplayValue,
       renderValue,
+      conflict,
       populatedFromDb: true,
     })
 
@@ -286,7 +295,12 @@ export const hydrateFromDb = fromCallback<
       })
       if (item) {
         const dir = localStorageDir?.replace(/^\//, '') || 'files'
-        const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
+        // A pending value's content is in its staged file until the op moves it into place
+        const staged = pending?.stagedPath
+        const filePath =
+          staged && (await BaseFileManager.pathExists(staged))
+            ? staged
+            : BaseFileManager.getFilesPath(dir, refResolvedValue)
         const exists = await BaseFileManager.pathExists(filePath)
 
         if (!exists) {

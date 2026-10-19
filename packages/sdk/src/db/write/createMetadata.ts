@@ -5,10 +5,8 @@ import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/he
 import { PropertyType } from '@/types'
 import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { BaseDb } from '../Db/BaseDb'
-import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 
@@ -48,30 +46,12 @@ type CreateMetadata = (
  * name. Undefined for a data type with no EAS type or when the lookup fails. May call EAS, so run
  * it before a transaction, not inside one.
  */
+/** The property's EAS schema UID from the shared lookup cache (lookupPropertySchemaUid). */
 export const resolveMetadataSchemaUid = async (
   propertyName: string,
   propertyRecordSchema: PropertyType | undefined,
-): Promise<string | undefined> => {
-  if (!propertyRecordSchema?.dataType) return undefined
-  try {
-    // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
-    const dataTypeKey = normalizeDataType(propertyRecordSchema.dataType) as keyof typeof INTERNAL_DATA_TYPES
-    const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
-    if (!easDataType) return undefined
-    // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
-    const propertyNameSnakeCase = easPropertyNameForPublish(
-      propertyName,
-      propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
-    )
-    // Cached, including misses: every item of a model looks up the same property schemas.
-    return (await getEasSchemaUidForExactDefinition(`${easDataType} ${propertyNameSnakeCase}`)) || undefined
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
-    }
-    return undefined
-  }
-}
+): Promise<string | undefined> =>
+  lookupPropertySchemaUid(propertyName, propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1])
 
 export const createMetadata: CreateMetadata = async (
   metadataValues,

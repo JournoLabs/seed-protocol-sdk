@@ -2,6 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
+import { and, eq, inArray } from 'drizzle-orm'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { metadata } from '@/seedSchema'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -125,10 +128,12 @@ describe('getPublishPayload integration (browser)', () => {
       (p) => p.propertyName === 'author' || p.propertyName === 'authorId' || p.alias === 'author'
     )
     expect(authorProp).toBeDefined()
-    if (authorProp) {
-      authorProp.value = '0000000000'
-      await authorProp.save()
-    }
+    // The related item is gone after the edit (an assignment naming a missing seed is refused)
+    await BaseDb.getAppDb()
+      .update(metadata)
+      .set({ propertyValue: '0000000000' })
+      .where(and(eq(metadata.seedLocalId, postItem.seedLocalId), inArray(metadata.propertyName, ['author', 'authorId'])))
+    authorProp!.showValue('0000000000')
     await expect(getPublishPayload(postItem, [])).rejects.toThrow('No related item found for required relation')
   }, 30000)
 

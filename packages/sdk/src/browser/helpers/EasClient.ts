@@ -1,6 +1,6 @@
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
-import { getEasEndpoint, type IEasClient } from '@seedprotocol/eas'
-import { GraphQLClient } from 'graphql-request'
+import { createEasGraphQLClient, getEasEndpoint, type IEasClient } from '@seedprotocol/eas'
+import type { GraphQLClient } from 'graphql-request'
 
 export class BrowserEasClient implements IEasClient {
   private easClient: { url: string; client: GraphQLClient } | undefined
@@ -9,7 +9,7 @@ export class BrowserEasClient implements IEasClient {
   getEasClient(): GraphQLClient {
     const url = getEasEndpoint()
     if (this.easClient?.url !== url) {
-      this.easClient = { url, client: new GraphQLClient(url) }
+      this.easClient = { url, client: createEasGraphQLClient(url) }
     }
     return this.easClient.client
   }

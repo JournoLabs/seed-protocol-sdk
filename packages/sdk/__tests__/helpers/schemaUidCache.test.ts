@@ -115,6 +115,22 @@ describe('getEasSchemaUidForExactDefinition', () => {
   })
 })
 
+describe('forgetting misses when a schema becomes known', () => {
+  it("keeps other definitions' misses", async () => {
+    await getEasSchemaUidForExactDefinition('string body')
+    setSchemaUidForSchemaDefinition({ text: 'string title', schemaUid: UID_A })
+    await getEasSchemaUidForExactDefinition('string body')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps definition misses when a model UID is learned (e.g. read from model_uids)', async () => {
+    await getEasSchemaUidForExactDefinition('string title')
+    setSchemaUidForModel({ modelName: 'Image', schemaUid: UID_B })
+    await getEasSchemaUidForExactDefinition('string title')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('getEasSchemaUidForSchemaDefinition', () => {
   it('caches misses and forgets them when a schema is registered', async () => {
     expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBeUndefined()
@@ -142,18 +158,22 @@ describe('getEasSchemaUidForModel', () => {
     vi.spyOn(BaseDb, 'getAppDb').mockReturnValue(undefined as never)
   })
 
-  it('caches a miss and forgets it when a model schema is registered', async () => {
-    expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
-    expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
+  it('caches a miss and forgets it when that model schema is registered', async () => {
+    expect(await getEasSchemaUidForModel('BlogPost')).toBeUndefined()
+    expect(await getEasSchemaUidForModel('BlogPost')).toBeUndefined()
     expect(request).toHaveBeenCalledTimes(1)
 
-    // Registering another model's schema clears cached misses; Article is then found on EAS.
+    // Another model's schema answers nothing BlogPost asked: its miss stays cached.
     setSchemaUidForModel({ modelName: 'Post', schemaUid: UID_B })
-    schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
-    expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(await getEasSchemaUidForModel('BlogPost')).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+
+    // Registered elsewhere, then learned here: the cached UID answers without a request.
+    setSchemaUidForModel({ modelName: 'BlogPost', schemaUid: UID_A })
+    expect(await getEasSchemaUidForModel('BlogPost')).toBe(UID_A)
+    expect(request).toHaveBeenCalledTimes(1)
   })
+
 
   it("asks EAS for the model's EAS name, as publish registers it", async () => {
     schemas = [{ id: UID_A }]

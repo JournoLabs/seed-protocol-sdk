@@ -3,6 +3,7 @@ export {
   appendOutboxOpAndWait,
   appendOutboxOps,
   drainOutbox,
+  pruneOutbox,
   getOutboxOps,
   outboxOpResult,
   outboxOpValue,
@@ -10,15 +11,29 @@ export {
   startOutbox,
   waitForOutboxOp,
   waitForPendingOutboxOps,
+  OutboxOpDeferredError,
   OutboxOpFailedError,
   OutboxOpRejectedError,
   OutboxOpRetryableError,
+  OUTBOX_DEFER_MS,
   OUTBOX_MAX_ATTEMPTS,
+  OUTBOX_PRUNE_AFTER_MS,
+  OUTBOX_PRUNE_FAILED_AFTER_MS,
   OUTBOX_RETRY_DELAYS_MS,
 } from './outbox'
 export { startItemOutbox } from './itemAppliers'
 export { getPendingSetValue } from './pendingValues'
-export { applyCreateItem, applyDelete, applyItemStorageValue, applyStorageValue, deleteFiles } from './itemAppliers'
+export { getItemConflicts, getPropertyConflict, markPropertyConflictsResolved } from './conflicts'
+export type { PropertyConflict } from './conflicts'
+export {
+  applyCreateItem,
+  applyDelete,
+  applyItemStorageValue,
+  applyStorageValue,
+  deleteFiles,
+  throwItemWriteError,
+  RelationTargetError,
+} from './itemAppliers'
 export type {
   CreateItemOp,
   CreateItemResult,
