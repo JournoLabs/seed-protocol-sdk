@@ -17,6 +17,10 @@ import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/it
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
+import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
+import { normalizeDataType } from '@/helpers/property'
+import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
 import {
   OutboxOpDeferredError,
   OutboxOpFailedError,
@@ -398,6 +402,52 @@ async function requireOwned(op: OutboxOp): Promise<void> {
   if (!(await isItemOwned({ seedLocalId: op.seedLocalId }))) throw new OwnershipError()
 }
 
+/** A Relation value names a local seed that doesn't exist. */
+export class RelationTargetError extends Error {
+  constructor(readonly targets: string[]) {
+    super(`Relation target not found: ${targets.join(', ')}`)
+    this.name = 'RelationTargetError'
+  }
+}
+
+/** The seed ids a Relation or List-of-Relation value names; none for other values. */
+function relationTargets(value: SetPropertyValueOp): string[] {
+  const dataType = normalizeDataType(value.dataType)
+  const refValueType = normalizeDataType(value.refValueType)
+  if (!value.newValue) return []
+  if (dataType === 'Relation' && refValueType !== 'Image') return [value.newValue]
+  if (dataType === 'List' && refValueType === 'Relation') return parseListPropertyValueFromStorage(value.newValue)
+  return []
+}
+
+/**
+ * The relation-target rule, checked before a `set` applies: each seed a Relation value names by
+ * local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
+ * target whose create op is still pending defers the op (OutboxOpDeferredError) until it applies;
+ * any other missing target fails it with RelationTargetError.
+ */
+async function requireRelationTargets(op: OutboxOp): Promise<void> {
+  const value = outboxOpValue<SetPropertyValueOp>(op)
+  const localIds = [...new Set(value ? relationTargets(value) : [])].filter((id) => !isValidEasAttestationUid(id))
+  if (localIds.length === 0) return
+  const db = BaseDb.getAppDb()
+  const found = await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.localId, localIds))
+  const missing = localIds.filter((id) => !found.some((row: { localId: string | null }) => row.localId === id))
+  if (missing.length === 0) return
+  const creating = await db
+    .select({ seedLocalId: pendingWrites.seedLocalId })
+    .from(pendingWrites)
+    .where(
+      and(
+        inArray(pendingWrites.seedLocalId, missing),
+        eq(pendingWrites.kind, 'create'),
+        eq(pendingWrites.status, 'pending'),
+      ),
+    )
+  if (creating.length > 0) throw new OutboxOpDeferredError(`Relation target ${creating[0].seedLocalId} is being created`)
+  throw new RelationTargetError(missing)
+}
+
 /**
  * Rethrows a failed item op's error as its caller expects it: OwnershipError when the drainer
  * refused the op for ownership, else the OutboxOpFailedError as is.
@@ -416,7 +466,10 @@ export function startItemOutbox(): void {
   if (!registered) {
     registered = true
     registerOutboxApplier('set', {
-      prepare: requireOwned,
+      prepare: async (op) => {
+        await requireOwned(op)
+        await requireRelationTargets(op)
+      },
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         // Before the write, which makes the edit the newest row

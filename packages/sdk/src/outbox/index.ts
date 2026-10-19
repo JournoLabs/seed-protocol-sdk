@@ -32,6 +32,7 @@ export {
   applyStorageValue,
   deleteFiles,
   throwItemWriteError,
+  RelationTargetError,
 } from './itemAppliers'
 export type {
   CreateItemOp,

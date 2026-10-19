@@ -6,7 +6,7 @@ import { Item } from '@/Item/Item'
 import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { appendOutboxOp, drainOutbox, startItemOutbox, waitForOutboxOp } from '@/outbox'
+import { appendOutboxOp, drainOutbox, getOutboxOps, OutboxOpFailedError, startItemOutbox, waitForOutboxOp } from '@/outbox'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -172,4 +172,62 @@ testDescribe('item values through the outbox', () => {
     expect(rows.map((row: { propertyValue: string | null }) => row.propertyValue)).toEqual(['from tab two'])
     post.unload()
   }, 30000)
+
+  describe('relation targets', () => {
+    const setRelation = (seedLocalId: string, newValue: string, list = false) =>
+      appendOutboxOp({
+        seedLocalId,
+        propertyName: list ? 'relatedIds' : 'author',
+        kind: 'set',
+        value: list
+          ? { newValue, dataType: 'List', refValueType: 'Relation' }
+          : { newValue, dataType: 'Relation' },
+      })
+    const failureOf = async (opId: string) => (await waitForOutboxOp(opId).catch((error: unknown) => error)) as OutboxOpFailedError
+
+    it('a relation to a local seed, or to an attestation uid with no local copy, applies', async () => {
+      const post = await createPost('relating')
+      const target = await createPost('target')
+      await waitForOutboxOp(await setRelation(post.seedLocalId, target.seedLocalId))
+      expect((await rowsFor(post.seedLocalId, 'author'))[0].propertyValue).toBe(target.seedLocalId)
+
+      const remoteUid = '0x' + 'ab'.repeat(32)
+      await waitForOutboxOp(await setRelation(post.seedLocalId, JSON.stringify([target.seedLocalId, remoteUid]), true))
+      expect((await rowsFor(post.seedLocalId, 'relatedIds'))[0].propertyValue).toBe(
+        JSON.stringify([target.seedLocalId, remoteUid]),
+      )
+    }, 30000)
+
+    it('a relation to a local seed id that does not exist fails with RelationTargetError', async () => {
+      const post = await createPost('dangling')
+      const single = await failureOf(await setRelation(post.seedLocalId, 'noSuchSeed1'))
+      expect(single).toBeInstanceOf(OutboxOpFailedError)
+      expect(single.errorName).toBe('RelationTargetError')
+
+      const listed = await failureOf(await setRelation(post.seedLocalId, JSON.stringify([post.seedLocalId, 'noSuchSeed2']), true))
+      expect(listed.errorName).toBe('RelationTargetError')
+      expect(await rowsFor(post.seedLocalId, 'author')).toEqual([])
+      expect(await rowsFor(post.seedLocalId, 'relatedIds')).toEqual([])
+    }, 30000)
+
+    it('a relation to a seed whose create op is pending waits for it, without counting an attempt', async () => {
+      const post = await createPost('waiting')
+      pauseOutboxDrainForTests(true)
+      const targetId = generateId()
+      const relate = await setRelation(post.seedLocalId, targetId)
+      const create = await appendOutboxOp({
+        seedLocalId: targetId,
+        kind: 'create',
+        value: { modelName: 'OutboxPost', seed: { type: 'outbox_post', fields: {} }, rows: [] },
+      })
+      pauseOutboxDrainForTests(false)
+
+      await waitForOutboxOp(create)
+      await waitForOutboxOp(relate)
+      const [op] = await getOutboxOps([relate])
+      expect(op.status).toBe('applied')
+      expect(op.attempts).toBe(0)
+      expect((await rowsFor(post.seedLocalId, 'author'))[0].propertyValue).toBe(targetId)
+    }, 30000)
+  })
 })
