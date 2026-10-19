@@ -8,6 +8,8 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { eventEmitter } from '@/eventBus'
 import { startItemOutbox, type PropertyConflict } from '@/outbox'
+import { keepLocalDraftsOverSyncedRows } from '@/outbox/conflicts'
+import { getItemProperties } from '@/db/read/getItemProperties'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -215,5 +217,54 @@ testDescribe('conflicts between a pending edit and sync', () => {
     property.getService().send({ type: 'rehydrateFromDb' })
 
     await vi.waitFor(() => expect(property.conflict).toMatchObject({ remoteValue: 'remote', localValue: 'local' }))
+  }, 30000)
+
+  /** What sync's property insert does: an attested row, then the conflict rule over local drafts. */
+  const syncAfterDraft = async (baseRow: typeof metadata.$inferSelect, value: string, attestedAt: number) => {
+    const row = {
+      ...baseRow,
+      id: undefined,
+      localId: generateId(),
+      uid: fakeUid(),
+      propertyValue: value,
+      createdAt: Date.now(),
+      attestationCreatedAt: attestedAt,
+    }
+    await db().insert(metadata).values(row as never)
+    await keepLocalDraftsOverSyncedRows([row])
+    return row
+  }
+  const shownTitle = async (seedLocalId: string) =>
+    (await getItemProperties({ seedLocalId })).find((p) => p.propertyName === 'title')?.propertyValue
+
+  it('a draft written before sync brings a newer attestation stays the value, and the conflict is recorded', async () => {
+    const { item, property, baseRow } = await publishedPost('base')
+    property.value = 'local'
+    await property.save()
+
+    const remote = await syncAfterDraft(baseRow, 'remote', Date.now() + 5_000)
+
+    expect(await shownTitle(item.seedLocalId)).toBe('local')
+    expect(await item.conflicts()).toEqual([
+      expect.objectContaining({ baseValue: 'base', remoteValue: 'remote', localValue: 'local', remoteUid: remote.uid }),
+    ])
+    property.getService().send({ type: 'rehydrateFromDb' })
+    await vi.waitFor(() => expect(property.conflict).toMatchObject({ remoteValue: 'remote' }))
+    expect(property.value).toBe('local')
+
+    await property.resolveConflict('remote')
+    await vi.waitFor(() => expect(property.value).toBe('remote'))
+    expect(await shownTitle(item.seedLocalId)).toBe('remote')
+  }, 30000)
+
+  it('sync over a draft records no conflict when it brings the base value again, and the draft still wins', async () => {
+    const { item, property, baseRow } = await publishedPost('base')
+    property.value = 'local'
+    await property.save()
+
+    await syncAfterDraft(baseRow, 'base', Date.now() + 5_000)
+
+    expect(await shownTitle(item.seedLocalId)).toBe('local')
+    expect(await item.conflicts()).toEqual([])
   }, 30000)
 })

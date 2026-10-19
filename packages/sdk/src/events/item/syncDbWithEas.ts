@@ -1049,6 +1049,9 @@ const insertSyncedProperties = async ({
   for (let i = 0; i < rows.length; i += batchSize) {
     await appDb.insert(metadata).values(rows.slice(i, i + batchSize))
   }
+  // A local draft of a synced property stays its value, and the conflict is recorded (ADR 0019)
+  const { keepLocalDraftsOverSyncedRows } = await import('@/outbox/conflicts')
+  await keepLocalDraftsOverSyncedRows(rows)
 }
 
 const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {
