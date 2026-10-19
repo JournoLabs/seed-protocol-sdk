@@ -3,7 +3,7 @@ import { Subscription } from 'xstate'
 import debug from 'debug'
 import { ItemProperty, ItemPropertySaveValidationError } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
-import type { IItemProperty, PropertyValueSnapshot } from '@seedprotocol/sdk'
+import type { IItemProperty } from '@seedprotocol/sdk'
 import { useLiveQuery } from './liveQuery'
 import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
@@ -265,18 +265,14 @@ export function useDebouncedItemProperty(
 
   const { property, isLoading, error: queryError } = useItemProperty(normalizedParams)
   const latestValueRef = useRef<string>('')
-  /** What the property showed before the first keystroke of the current debounce window. */
-  const beforeRef = useRef<PropertyValueSnapshot | null>(null)
   const saveError = usePropertySaveError(property)
 
   const debouncedPersist = useMemo(
     () =>
       debounce((prop: IItemProperty) => {
-        const before = beforeRef.current ?? undefined
-        beforeRef.current = null
-        // setValue looks up a missing propertyRecordSchema and rolls back to `before` when the save
-        // is refused (item not owned) or breaks a rule.
-        prop.setValue(latestValueRef.current, { before })
+        // setValue looks up a missing propertyRecordSchema and, when the save is refused (item not
+        // owned) or breaks a rule, rolls back to what showed before the first keystroke.
+        prop.setValue(latestValueRef.current)
       }, debounceMs),
     [debounceMs]
   )
@@ -292,16 +288,8 @@ export function useDebouncedItemProperty(
   const setValue = useCallback(
     (value: string) => {
       if (!property) return
-      if (!beforeRef.current) {
-        const ctx = (property.getService().getSnapshot() as any).context
-        beforeRef.current = { propertyValue: ctx.propertyValue, renderValue: ctx.renderValue }
-      }
       latestValueRef.current = value
-      property.getService().send({
-        type: 'updateContext',
-        propertyValue: value,
-        renderValue: value,
-      })
+      property.showValue(value)
       debouncedPersist(property)
     },
     [property, debouncedPersist]

@@ -79,6 +79,23 @@ testDescribe('writes check ownership', () => {
     expect(await storedTitles(item.seedLocalId)).not.toContain('Overwritten')
   }, 30000)
 
+  it('a refused save after showValue rolls back to what showed before the first showValue', async () => {
+    const item = await createDraftStampedBy(OTHER_PUBLISHER, 'Shown before')
+    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
+
+    property!.showValue('S')
+    property!.showValue('Sh')
+    expect(property!.value).toBe('Sh')
+    property!.setValue('Sh')
+
+    await vi.waitFor(() => {
+      const context = property!.getService().getSnapshot().context
+      expect(context._saveError?.name).toBe('OwnershipError')
+      expect(context.isSaving).toBe(false)
+    })
+    expect(property!.value).toBe('Shown before')
+  }, 30000)
+
   it('assigning a property on an item you own still saves', async () => {
     const item = await createDraftStampedBy(UNPUBLISH_TEST_PUBLISHER, 'Mine')
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
