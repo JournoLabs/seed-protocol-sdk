@@ -10,6 +10,7 @@ import { propertyWriteKey, reservePropertyWrite } from '@/helpers/propertyWriteQ
 import { rowContext } from './rowContext'
 
 import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
+import { timed } from '@/helpers/timing'
 import { normalizeDataType } from '@/helpers/property'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
@@ -52,8 +53,12 @@ export const analyzeInput = fromCallback<
 
   const _analyzeInput = async (): Promise<boolean> => {
     // Assignment writes straight to the DB, so check ownership here as save()/destroy()/publish() do.
+    const label = `save ${modelName ?? '?'}.${propertyNameRaw ?? '?'}`
     const { isItemOwned, OwnershipError } = await import('@/helpers/ownership')
-    if (!(await isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }))) {
+    const owned = await timed(`${label} write ownership`, () =>
+      isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }),
+    )
+    if (!owned) {
       sendBack({ type: 'saveFailed', error: new OwnershipError() })
       return false
     }
@@ -135,16 +140,15 @@ export const analyzeInput = fromCallback<
     if (!schemaUid) {
       // Cached lookup, shared with createMetadata, so a save doesn't wait on the EAS indexer each
       // time. Not required for the row; publish resolves the schema again.
-      schemaUid = await lookupPropertySchemaUid(
-        propertyName,
-        propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+      schemaUid = await timed(`${label} schema lookup`, () =>
+        lookupPropertySchemaUid(propertyName, propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1]),
       )
     }
 
     // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])
     if (normalizedDataType === ModelPropertyDataTypes.List && Array.isArray(newValue)) {
       const stringValue = JSON.stringify(newValue)
-      const written = await writeValue(() => updateItemPropertyValue({
+      const written = await timed(`${label} write`, () => writeValue(() => updateItemPropertyValue({
         localId,
         propertyName: propertyName!,
         newValue: stringValue,
@@ -155,7 +159,7 @@ export const analyzeInput = fromCallback<
         schemaUid,
         dataType: propertyRecordSchema.dataType,
         refValueType: propertyRecordSchema.refValueType,
-      } as any))
+      } as any)))
       // A newer save replaced this one: it writes, and sets the context, instead.
       if (written.skipped) return true
       const result = written.result
@@ -178,7 +182,7 @@ export const analyzeInput = fromCallback<
       ? (typeof newValue === 'string' ? newValue : String(newValue))
       : null
 
-    const written = await writeValue(() => updateItemPropertyValue({
+    const written = await timed(`${label} write`, () => writeValue(() => updateItemPropertyValue({
       localId,
       propertyName: propertyName!,
       newValue: stringValue,
@@ -189,7 +193,7 @@ export const analyzeInput = fromCallback<
       schemaUid,
       dataType: propertyRecordSchema.dataType,
       refValueType: propertyRecordSchema.refValueType,
-    } as any)) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
+    } as any))) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
     if (written.skipped) return true
     const result = written.result
 

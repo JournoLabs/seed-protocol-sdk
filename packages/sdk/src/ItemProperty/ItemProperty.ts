@@ -36,6 +36,7 @@ import {
   forceRemoveFromCaches,
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
+import { timed } from '@/helpers/timing'
 import { eventEmitter } from '@/eventBus'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
@@ -1647,23 +1648,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   async save(): Promise<void> {
     const ctx = this._getSnapshotContext()
+    const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
     const { assertItemOwned } = await import('@/helpers/ownership')
-    await assertItemOwned({
-      seedLocalId: ctx?.seedLocalId ?? undefined,
-      seedUid: ctx?.seedUid ?? undefined,
-    })
+    await timed(`${label} ownership`, () =>
+      assertItemOwned({
+        seedLocalId: ctx?.seedLocalId ?? undefined,
+        seedUid: ctx?.seedUid ?? undefined,
+      }),
+    )
     // Without this, save() would see `idle` before the deferred `save` event and resolve unsaved.
     if (this._pendingSchemaSave && !(await this._pendingSchemaSave)) {
       throw new Error(
         `Failed to save property ${ctx?.propertyName}: no schema found for ${ctx?.modelName}.${ctx?.propertyName}`,
       )
     }
-    const settled = await waitFor(
-      this._service,
-      (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-      {
+    const settled = await timed(`${label} until idle`, () =>
+      waitFor(this._service, (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle', {
         timeout: 10_000,
-      },
+      }),
     )
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
       settled.context

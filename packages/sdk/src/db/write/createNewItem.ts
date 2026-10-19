@@ -5,6 +5,7 @@ import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
 import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
+import { timed, timingLogger } from '@/helpers/timing'
 import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
 import {
@@ -39,7 +40,8 @@ export const createNewItem = async ({
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const model = await Model.resolveAsync(modelName, { modelFileId })
+  const label = `createNewItem ${modelName}`
+  const model = await timed(`${label} model`, () => Model.resolveAsync(modelName, { modelFileId }))
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
   modelFileId ??= model?.id
 
@@ -48,7 +50,7 @@ export const createNewItem = async ({
   // instead of waiting on the indexer one property at a time.
   const schemaLookups = prefetchPropertySchemaUids(propertySchemas)
 
-  const newSeedId = await createSeed({ type: seedType, modelFileId })
+  const newSeedId = await timed(`${label} seed`, () => createSeed({ type: seedType, modelFileId }))
 
   try {
     return await writeVersionAndRows(newSeedId)
@@ -61,7 +63,9 @@ export const createNewItem = async ({
   }
 
   async function writeVersionAndRows(newSeedId: string): Promise<CreateNewItemReturnType> {
-    const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
+    const newVersionId = await timed(`${label} version`, () =>
+      createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) }),
+    )
 
     // Build set of all properties to create metadata for: union of model schema + propertyData
     // This ensures we create metadata for ALL model properties even when creating with no initial values
@@ -73,7 +77,8 @@ export const createNewItem = async ({
       }
     }
 
-    await schemaLookups
+    await timed(`${label} schema lookups (after seed and version)`, () => schemaLookups)
+    const rowsStarted = timingLogger.enabled ? performance.now() : 0
 
     for (const propertyName of allPropertyNames) {
       const propertyValue = propertyData[propertyName]
@@ -121,6 +126,9 @@ export const createNewItem = async ({
           refValueType: 'file',
         })
       })
+    }
+    if (timingLogger.enabled) {
+      timingLogger(`${label} metadata rows ${Math.round(performance.now() - rowsStarted)}ms (${allPropertyNames.size} rows)`)
     }
 
     return {
