@@ -14,6 +14,7 @@ import type { Sqlite3Method } from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
+import { startChangeFeed } from './changeFeed'
 import { Observable, distinctUntilChanged } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -130,6 +131,10 @@ export class BrowserDb implements IDb {
         // One-time: clear item data whose model can't be determined (seeds.model_file_id, migration 0015)
         const { resetAmbiguousLegacyItemData } = await import('@/db/resetAmbiguousLegacyItemData')
         await resetAmbiguousLegacyItemData()
+
+        // Loaded Items and ItemProperties hear about row changes through it (ADR 0020). Started
+        // after the fixups above, so their log rows aren't dispatched.
+        await startChangeFeed(db, (query) => this.liveQuery(query))
       })(), workerFailed)
 
       return this.appDb

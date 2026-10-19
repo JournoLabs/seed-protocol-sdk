@@ -113,4 +113,24 @@ describe('two tabs of one app', () => {
 
     expect(await tabs.callSeedTab(a, 'counterValue', key)).toBe(2 * times)
   }, 60000)
+
+  it("a write in one tab reaches the other tab's change feed", async () => {
+    const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
+    open.push(a, b)
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+
+    const localId: string = await tabs.callSeedTab(a, 'insertSeed')
+    await tabs.callSeedTab(b, 'watchSeed', localId)
+    await tabs.callSeedTab(a, 'touchSeed', localId)
+    await vi.waitFor(async () => expect(await tabs.callSeedTab(b, 'changeCalls', localId)).toBe(1), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+
+    // And the other way.
+    await tabs.callSeedTab(a, 'watchSeed', localId)
+    await tabs.callSeedTab(b, 'touchSeed', localId)
+    await vi.waitFor(async () => expect(await tabs.callSeedTab(a, 'changeCalls', localId)).toBe(1), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+  }, 60000)
 })
