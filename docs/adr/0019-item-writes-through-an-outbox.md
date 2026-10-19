@@ -38,7 +38,10 @@ Number, an ISO string for Date, a JSON array string for List) don't throw. A val
 type that breaks a rule (length, range, enum, pattern, required) is kept in memory with its errors
 on `property.validation` and is not appended; `save()` rejects with
 `ItemPropertySaveValidationError`, and the value is lost on reload. A valid value updates memory
-and appends one op. Async rules (ownership, relation targets) run when the op is applied.
+and appends one op. The setter checks ownership before it appends, so a refusal in the usual case
+appends nothing; the drainer checks it again in the applier's `prepare` step, because the op may
+come from another tab or from before a reload, and the client may have lost the item's wallet since.
+Creates and discards are not checked. Relation targets are not checked yet.
 
 **Draining.** The leader tab (ADR 0012) drains the outbox. Other tabs append and post a nudge on
 the existing BroadcastChannel. This is an exception to ADR 0012's rule that receivers never write:
@@ -54,7 +57,7 @@ ones become `superseded`. An op that never applies has its applier's `discard` s
 value's file is deleted).
 Transient errors (`SQLITE_BUSY`, a busy file, or `OutboxOpRetryableError` from an applier) retry
 with backoff; anything else (a broken rule, ownership, a constraint) marks the op `failed` with
-its error at once, and the in-memory value falls back to the next value in the
+its error and the error's name (`error_name`) at once, so a waiter can rethrow `OwnershipError`, and the in-memory value falls back to the next value in the
 overlay (a newer pending op, else the stored row).
 
 **Assignment order.** A save does async work before it appends (the ownership check, writing a
@@ -65,7 +68,8 @@ append order is the order.
 
 **Draft history: latest value only.** Coalescing keeps one value per property in `metadata`.
 Superseded and applied ops stay as rows and are pruned on a schedule, so an edit history can be
-added later by keeping them.
+added later by keeping them. The leader prunes after a drain, at most hourly: applied and
+superseded ops after a day, failed ops after a week.
 
 **A pending local edit wins over a synced value, and the conflict is recorded.** When an op is
 applied and sync has written a newer attested row since `base_row_id`, the op is applied on top
@@ -73,7 +77,13 @@ of it (a new draft over the synced version, as `updateItemPropertyValue` already
 attested row), and the op records `{ seedLocalId, propertyName, baseValue, remoteValue,
 localValue, remoteUid }` in `conflict`. It is exposed as `property.conflict`, as an event, and
 through `item.conflicts()`, and cleared by the next local edit or `resolveConflict('local' |
-'remote')`. Rows with an unresolved conflict are not pruned. For whole-value sets this replay is
+'remote')`. Rows with an unresolved conflict are not pruned. A row with the base row's uid (the same
+attestation synced again) is not a conflict, nor is a synced value equal to the base value or to
+the edit's. When the edit had no base row, only an attested row written after the edit counts.
+`resolveConflict('remote')` deletes the property's local draft rows through a `delete` op, so the
+synced row is the newest again. The `itemProperty.conflict` event fires in the tab that made the
+edit; other tabs see the conflict when they load the property. Storage ops carry no base row and
+record no conflicts. For whole-value sets this replay is
 the same as "local wins"; a field-level merge (lists, rich text) needs finer ops and is not part
 of this decision.
 
@@ -100,7 +110,10 @@ around the transaction, the order the file's other writers use. SQLocal's transa
 own shared Web Lock while the file lock is held, an exception to ADR 0012's rule that nothing is
 requested inside it; shared locks can't deadlock with each other.
 
-**Other writers.** Sync ingest follows the conflict rule. Publish waits for a seed's pending ops to
+**Other writers.** Sync ingest only adds attested rows and never touches drafts, so a pending op
+that meets one applies the conflict rule. An edit that applied before sync lands is not covered:
+readers take the newest row by attestation time, so a newer attestation hides the draft without a
+recorded conflict. Publish waits for a seed's pending ops to
 apply before building its payload. `claimUnpublishedDrafts` stamps pending ops' publisher.
 `removeLocalCopiesForAddresses` and purges delete the seed's ops. A property rename rewrites
 pending ops that use the old name.
