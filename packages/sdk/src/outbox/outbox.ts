@@ -386,14 +386,18 @@ async function applyUnit(unit: Unit): Promise<void> {
     for (const op of ops) prepared.push(await applierFor(op).prepare?.(op))
 
     const transaction = () => BaseDb.transaction(async (tx) => {
-      // Claim: an op another drainer applied meanwhile is no longer pending
-      const claimed = await tx
+      // Claim: an op another drainer applied meanwhile is no longer pending. The claimed rows are
+      // what is applied: a writer may have changed an op's value since it was read
+      // (claimUnpublishedDrafts stamps pending creates in its own transaction).
+      const claimed: OutboxOp[] = await tx
         .update(pendingWrites)
         .set({ status: 'applied', appliedAt: Date.now() })
         .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
-        .returning({ opId: pendingWrites.opId })
+        .returning()
       if (claimed.length !== ids.length) throw new ClaimLostError()
-      for (const [index, op] of ops.entries()) {
+      const current = new Map(claimed.map((row) => [row.opId, row]))
+      for (const [index, read] of ops.entries()) {
+        const op = current.get(read.opId) ?? read
         const result = await applierFor(op).apply(op, tx, prepared[index])
         if (result !== undefined) {
           await tx

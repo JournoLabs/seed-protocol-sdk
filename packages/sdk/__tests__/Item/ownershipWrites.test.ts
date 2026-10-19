@@ -6,6 +6,7 @@ import { client } from '@/client'
 import { setGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 import { OwnershipError } from '@/helpers/ownership'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { Item } from '@/Item/Item'
 import { appendOutboxOp, getOutboxOps, OutboxOpFailedError, startItemOutbox, waitForOutboxOp } from '@/outbox'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -108,6 +109,50 @@ testDescribe('writes check ownership', () => {
 
       expect(item.publisher).toBe(UNPUBLISH_TEST_PUBLISHER.toLowerCase())
     } finally {
+      await client.setAddresses({ owned: [UNPUBLISH_TEST_PUBLISHER], watched: [] })
+    }
+  }, 30000)
+
+  it('claimUnpublishedDrafts claims a draft whose create op is still pending', async () => {
+    await client.setAddresses({ owned: [UNPUBLISH_TEST_PUBLISHER, OTHER_PUBLISHER], watched: [] })
+    try {
+      startItemOutbox()
+      pauseOutboxDrainForTests(true)
+      // Item.create itself: the helper creates an author item first
+      const creating = Item.create({
+        modelName: 'Post',
+        schemaName: 'Test Schema getPublishPayload',
+        title: 'Claimed while pending',
+      } as never) as Promise<Item<any>>
+      let createOp: { seedLocalId: string } | undefined
+      await vi.waitFor(async () => {
+        ;[createOp] = await BaseDb.getAppDb()!
+          .select()
+          .from(pendingWrites)
+          .where(and(eq(pendingWrites.kind, 'create'), eq(pendingWrites.status, 'pending')))
+        expect(createOp).toBeDefined()
+      })
+
+      const result = await client.claimUnpublishedDrafts(UNPUBLISH_TEST_PUBLISHER)
+      expect(result.pendingCreates).toBe(1)
+      pauseOutboxDrainForTests(false)
+      const item = await creating
+
+      expect(item.seedLocalId).toBe(createOp!.seedLocalId)
+      const [seed] = await BaseDb.getAppDb()!
+        .select({ publisher: seeds.publisher })
+        .from(seeds)
+        .where(eq(seeds.localId, item.seedLocalId))
+      expect(seed.publisher).toBe(UNPUBLISH_TEST_PUBLISHER.toLowerCase())
+      const titleRows = await BaseDb.getAppDb()!
+        .select({ publisher: metadata.publisher })
+        .from(metadata)
+        .where(and(eq(metadata.seedLocalId, item.seedLocalId), eq(metadata.propertyName, 'title')))
+      expect(titleRows.map((row: { publisher: string | null }) => row.publisher)).toEqual([
+        UNPUBLISH_TEST_PUBLISHER.toLowerCase(),
+      ])
+    } finally {
+      pauseOutboxDrainForTests(false)
       await client.setAddresses({ owned: [UNPUBLISH_TEST_PUBLISHER], watched: [] })
     }
   }, 30000)
