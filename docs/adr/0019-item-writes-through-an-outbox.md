@@ -29,7 +29,8 @@ conflicts; this decision doesn't cover them.
 (the stored row the edit was made against), `created_at`, `tab_id`, `status` (`pending`,
 `applied`, `superseded`, `failed`), `error`, `attempts`, `applied_at`, and `conflict` (JSON, see
 below). Ops for one `(seed_local_id, property_name)` apply in append order (the row id), and a
-property waits behind its oldest pending op, including one waiting for a retry.
+property waits behind its oldest pending op, including one waiting for a retry. An op on the seed
+itself (no property: create, delete) is ordered against all of its seed's ops.
 
 **Assignment.** The setter checks the value's type and shape synchronously and throws a
 `TypeError` on a mismatch, before anything changes; documented coercions (a numeric string for
@@ -51,8 +52,9 @@ storage pipelines) and marks the op `applied` in one transaction. Superseded ops
 of a property's run of pending value ops (`set`, `storage`) only the newest is applied, and older
 ones become `superseded`. An op that never applies has its applier's `discard` step run (a storage
 value's file is deleted).
-Transient errors (`SQLITE_BUSY`, I/O) retry with backoff; validation and ownership failures mark
-the op `failed` with its error, and the in-memory value falls back to the next value in the
+Transient errors (`SQLITE_BUSY`, a busy file, or `OutboxOpRetryableError` from an applier) retry
+with backoff; anything else (a broken rule, ownership, a constraint) marks the op `failed` with
+its error at once, and the in-memory value falls back to the next value in the
 overlay (a newer pending op, else the stored row).
 
 **Assignment order.** A save does async work before it appends (the ownership check, writing a
@@ -83,8 +85,11 @@ once it is applied.
 **`await property.save()`** resolves when its op is applied and rejects when it fails. An
 assignment without `save()` returns at once.
 
-**`Item.create`** appends one op group (seed, version, metadata rows) applied in one transaction,
-replacing `discardNewDraft`.
+**`Item.create`** appends one `create` op (seed, version, a row per property, ItemStorage initial
+values staged) applied in one transaction, so a failure leaves nothing. When a later step of
+`Item.create` fails (an initial storage value is refused), a `delete` op in `discard` mode removes
+the draft, in order after its pending ops; it replaces `discardNewDraft`. `Item.destroy` and
+`ItemProperty.destroy` are `delete` ops too.
 
 **Storage values.** An Html, File or Image value is a new storage seed: its id is chosen first and
 its file written at its final path, named after it, so nothing else uses the file before the op
@@ -106,9 +111,11 @@ over the SQLocal driver), in Node through the libsql driver's `db.transaction()`
 that fails with `SQLITE_BUSY` is retried as a whole; the per-statement busy retry never runs
 inside one. SQLocal is upgraded from 0.16 to 0.18 for `tx.batch` inside transactions and the
 faster reactive bulk writes. From 0.17 SQLocal leaves cross-connection locking to SQLite, so
-cross-tab contention surfaces as `SQLITE_BUSY`. In Node, libsql gives each transaction its own
-connection, so the database runs in WAL mode (readers don't block a commit) and libsql's
-`execute` and `batch` get the same per-statement busy retry as the browser driver.
+cross-tab contention surfaces as `SQLITE_BUSY`. In Node, libsql's own `transaction()` gives each
+transaction a connection and opens another for what follows; several connections in one process
+locked each other out and lost an op's insert in tests. So Node uses one connection with the
+browser's semantics: one transaction at a time, and other statements wait for it
+(`node/db/singleConnectionTransactions.ts`). The database runs in WAL mode for other processes.
 
 ## Consequences
 

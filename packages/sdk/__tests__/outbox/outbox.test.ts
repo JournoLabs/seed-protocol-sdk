@@ -13,6 +13,7 @@ import {
   waitForOutboxOp,
   OutboxOpFailedError,
   OutboxOpRejectedError,
+  OutboxOpRetryableError,
   type OutboxOp,
 } from '@/outbox'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
@@ -49,7 +50,7 @@ testDescribe('outbox', () => {
       throw new OutboxOpRejectedError('rejected after writing')
     }
     if (b.reject) throw new OutboxOpRejectedError('not allowed')
-    if (b.failTimes && b.attempts <= b.failTimes) throw new Error('transient')
+    if (b.failTimes && b.attempts <= b.failTimes) throw new OutboxOpRetryableError('transient')
   }
 
   beforeAll(async () => {

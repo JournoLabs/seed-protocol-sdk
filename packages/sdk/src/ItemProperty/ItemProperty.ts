@@ -1427,6 +1427,29 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return true
   }
 
+  /**
+   * Stops an item's cached properties that nobody holds. Internal lookups cache a property without
+   * a hold for the item to take; one that finished after the item stopped (a liveQuery handler's
+   * find, say) never got that hold and would otherwise keep running. Called when the item stops.
+   */
+  static unloadUnheldForItem(seedIds: Array<string | null | undefined>): void {
+    const prefixes = seedIds
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => this.cacheKey(id, ''))
+    if (prefixes.length === 0) return
+    const unheld = new Set<ItemProperty<any>>()
+    for (const [key, entry] of this.instanceCache) {
+      if (entry.refCount <= 0 && prefixes.some((prefix) => key.startsWith(prefix))) unheld.add(entry.instance)
+    }
+    for (const instance of unheld) {
+      try {
+        instance.unload()
+      } catch {
+        // Already stopped
+      }
+    }
+  }
+
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
     return `Item_${uid || localId}_${propertyName}`
@@ -1750,11 +1773,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       onUnload: (instance) => (instance as ItemProperty<any>)._subscription?.unsubscribe(),
     })
 
-    forceRemoveFromCaches(this, {
-      getCacheKeys: () => cacheKeys,
-      caches: [ItemProperty.instanceCache as Map<string, unknown>],
-    })
+    // Out of the cache once its rows are gone (below): removed earlier, a lookup that read a row
+    // before the delete applied would build a new instance for it
+    const removeFromCaches = () =>
+      forceRemoveFromCaches(this, {
+        getCacheKeys: () => cacheKeys,
+        caches: [ItemProperty.instanceCache as Map<string, unknown>],
+      })
 
+    try {
+      await this._destroyRows(context)
+    } finally {
+      removeFromCaches()
+    }
+  }
+
+  private async _destroyRows(context: PropertyMachineContext): Promise<void> {
     await runDestroyLifecycle(this, {
       getService: (instance) =>
         instance._service as { send: (ev: unknown) => void; stop: () => void },
@@ -1765,7 +1799,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const propertyName = context.propertyName
         if (!propertyName || (!seedLocalId && !seedUid)) return
 
-        if (db) {
+        if (db && seedLocalId) {
+          // Through the outbox (ADR 0019): after the property's pending edits, which would
+          // otherwise write its rows back
+          const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+          startItemOutbox()
+          await appendOutboxOpAndWait({
+            seedLocalId,
+            propertyName,
+            kind: 'delete',
+            value: { mode: 'property', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+          })
+        } else if (db) {
           const seedSchemaMod = await import('../seedSchema')
           const { metadata } = seedSchemaMod
           const drizzleMod = await import('drizzle-orm')

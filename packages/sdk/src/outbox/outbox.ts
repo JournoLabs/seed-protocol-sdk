@@ -16,6 +16,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { pendingWrites, type PendingWriteType } from '@/seedSchema/PendingWriteSchema'
 import { generateId } from '@/helpers/generateId'
 import { TAB_ID, isLeaderTab, onTabMessage, postTabMessage, whenLeaderTab } from '@/helpers/tabCoordinator'
+import { isSqliteBusyError } from '@/browser/db/sqliteBusyRetry'
 
 const logger = debug('seedSdk:outbox')
 
@@ -47,8 +48,9 @@ export type OutboxApplier<Prepared = unknown> = {
   prepare?: (op: OutboxOp) => Promise<Prepared>
   /**
    * Writes the op on `tx`, inside the transaction that marks it applied. Must read and write only
-   * through `tx` (see BaseDb.transaction). Throw OutboxOpRejectedError to fail the op for good;
-   * any other error is retried. What it returns is stored as the op's `result` (JSON).
+   * through `tx` (see BaseDb.transaction). Errors fail the op, except busy database or file errors
+   * and OutboxOpRetryableError, which are retried. What it returns is stored as the op's `result`
+   * (JSON).
    */
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
   /**
@@ -62,6 +64,27 @@ export type OutboxApplier<Prepared = unknown> = {
    */
   discard?: (op: OutboxOp) => Promise<void>
 }
+
+/** A failure worth retrying (a file the browser had locked, say). Other errors fail the op at once. */
+export class OutboxOpRetryableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'OutboxOpRetryableError'
+  }
+}
+
+/** File-system errors that pass (another tab or the OS holding the file). */
+const RETRYABLE_ERROR_NAMES = new Set(['NoModificationAllowedError', 'NotReadableError', 'InvalidStateError'])
+
+/**
+ * Whether an op that failed with `error` may apply later: the database was busy (BaseDb.transaction
+ * has already retried for about a second), a file was busy, or the applier said so. Anything else
+ * (a broken rule, a missing row, a bug) would fail the same way again.
+ */
+const isRetryable = (error: unknown): boolean =>
+  error instanceof OutboxOpRetryableError ||
+  isSqliteBusyError(error) ||
+  (error instanceof Error && RETRYABLE_ERROR_NAMES.has(error.name))
 
 /** An op that can never apply (a broken rule, an item the client doesn't own). Not retried. */
 export class OutboxOpRejectedError extends Error {
@@ -136,6 +159,20 @@ export async function appendOutboxOps(inputs: AppendOutboxOpInput[]): Promise<st
 export async function appendOutboxOp(input: AppendOutboxOpInput): Promise<string> {
   const [opId] = await appendOutboxOps([input])
   return opId
+}
+
+/**
+ * Appends one op and waits until it settles: its applier's result once applied, or `superseded`
+ * when a newer op of its property replaced it. Rejects with OutboxOpFailedError when it fails.
+ */
+export async function appendOutboxOpAndWait<Result = unknown>(
+  input: AppendOutboxOpInput,
+): Promise<{ superseded: false; result: Result | undefined } | { superseded: true }> {
+  const opId = await appendOutboxOp(input)
+  await waitForOutboxOp(opId)
+  const [op] = await getOutboxOps([opId])
+  if (op?.status !== 'applied') return { superseded: true }
+  return { superseded: false, result: outboxOpResult<Result>(op) }
 }
 
 /** An op's stored value, decoded. */
@@ -229,8 +266,10 @@ const isDue = (op: OutboxOp) => (notBefore.get(op.opId) ?? 0) <= Date.now()
 
 /**
  * The units to apply now, oldest first. A property's ops apply in order, so its queue waits
- * behind its oldest pending op, including one waiting for a retry. A group waits until none of its
- * ops is behind another op of its property.
+ * behind its oldest pending op, including one waiting for a retry. An op on the seed itself (no
+ * property: create, delete) is ordered against all of its seed's ops: it waits for every earlier
+ * one, and every later one waits for it. A group waits until none of its ops is behind another op
+ * of its property or seed.
  */
 function planUnits(pending: OutboxOp[]): Unit[] {
   const queues = new Map<string, OutboxOp[]>()
@@ -241,8 +280,18 @@ function planUnits(pending: OutboxOp[]): Unit[] {
   }
   const blockedByOthers = (op: OutboxOp) => {
     const queue = queues.get(keyOf(op))!
-    return queue.slice(0, queue.indexOf(op)).some((earlier) => earlier.groupId !== op.groupId)
+    if (queue.slice(0, queue.indexOf(op)).some((earlier) => earlier.groupId !== op.groupId)) return true
+    return blockedBySeed(op)
   }
+  // Seed-level ordering: an earlier op of the seed this op must wait for (outside its group)
+  const blockedBySeed = (op: OutboxOp) =>
+    pending.some(
+      (earlier) =>
+        earlier.id < op.id &&
+        earlier.seedLocalId === op.seedLocalId &&
+        (earlier.groupId == null || earlier.groupId !== op.groupId) &&
+        (earlier.propertyName == null || op.propertyName == null),
+    )
   const units: Array<{ unit: Unit; order: number }> = []
   const plannedGroups = new Set<string>()
   for (const queue of queues.values()) {
@@ -256,9 +305,18 @@ function planUnits(pending: OutboxOp[]): Unit[] {
       units.push({ unit: { groupId: head.groupId }, order: members[0].id })
       continue
     }
+    if (blockedBySeed(head)) continue
     let end = 0
     if (VALUE_KINDS.has(head.kind)) {
-      while (end + 1 < queue.length && VALUE_KINDS.has(queue[end + 1].kind) && !queue[end + 1].groupId) end++
+      // Not across a later seed-level op: the run stops before it
+      while (
+        end + 1 < queue.length &&
+        VALUE_KINDS.has(queue[end + 1].kind) &&
+        !queue[end + 1].groupId &&
+        !blockedBySeed(queue[end + 1])
+      ) {
+        end++
+      }
     }
     units.push({ unit: { op: queue[end], superseded: queue.slice(0, end) }, order: head.id })
   }
@@ -333,7 +391,7 @@ function applierFor(op: OutboxOp): OutboxApplier<unknown> {
 async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
   const attempts = Math.max(...ops.map((op) => op.attempts)) + 1
-  const permanent = error instanceof OutboxOpRejectedError || attempts >= OUTBOX_MAX_ATTEMPTS
+  const permanent = !isRetryable(error) || attempts >= OUTBOX_MAX_ATTEMPTS
   const ids = ops.map((op) => op.opId)
   const db = BaseDb.getAppDb()
   if (!permanent) {
@@ -464,6 +522,24 @@ export function waitForOutboxOp(opId: string): Promise<void> {
     void check()
     poll = setInterval(() => void check(), WAIT_POLL_MS)
   })
+}
+
+/**
+ * Resolves once every op pending when it was called has settled (applied, superseded or failed),
+ * so a reader of `metadata` sees every edit made before. Publish waits on this before it reads.
+ */
+export async function waitForPendingOutboxOps(): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  const pending: Array<{ opId: string }> = await db
+    .select({ opId: pendingWrites.opId })
+    .from(pendingWrites)
+    .where(eq(pendingWrites.status, 'pending'))
+  if (pending.length === 0) return
+  startOutbox()
+  if (isLeaderTab()) scheduleDrain()
+  else postTabMessage({ type: 'outbox-nudge' })
+  await Promise.allSettled(pending.map(({ opId }) => waitForOutboxOp(opId)))
 }
 
 /** The status of each op, by id; ops not found are left out. */

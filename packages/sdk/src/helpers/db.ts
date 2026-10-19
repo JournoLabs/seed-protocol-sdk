@@ -4,8 +4,10 @@ import {
   models as modelsTable,
   NewModelRecord,
   NewPropertyRecord,
+  pendingWrites,
   properties,
   PropertyType,
+  seeds,
 } from '@/seedSchema'
 import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
@@ -13,7 +15,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
 import { easName } from '@seedprotocol/eas'
 import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
-import { and, eq, isNull, SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -244,6 +246,21 @@ export async function migrateMetadataForPropertyRename(
       `[migrateMetadataForPropertyRename] Fallback updated ${updatedByFallback} rows (propertyId was null)`,
     )
   }
+
+  // Edits of the property still in the outbox (ADR 0019) apply under its new name
+  await db
+    .update(pendingWrites)
+    .set({ propertyName: newPropertyName })
+    .where(
+      and(
+        eq(pendingWrites.propertyName, oldPropertyName),
+        eq(pendingWrites.status, 'pending'),
+        inArray(
+          pendingWrites.seedLocalId,
+          db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, modelType)),
+        ),
+      ),
+    )
 
   const total = updatedByPropertyId + updatedByFallback
   if (total > 0) {

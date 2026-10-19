@@ -6,7 +6,7 @@ import debug from 'debug'
 import { appState } from '@/seedSchema'
 import fs from 'fs'
 import { createClient } from '@libsql/client'
-import { withSqliteBusyRetry } from '@/browser/db/sqliteBusyRetry'
+import { createSingleConnectionTransactions } from './singleConnectionTransactions'
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
@@ -111,9 +111,11 @@ export class NodeDb implements IDb {
     return !!this.db
   }
 
+  transactions: ReturnType<typeof createSingleConnectionTransactions> | undefined
+
   async transaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
-    if (!this.db) throw new Error('Database not prepared')
-    return this.db.transaction(fn)
+    if (!this.db || !this.transactions) throw new Error('Database not prepared')
+    return this.transactions.transaction(fn)
   }
 
   /**
@@ -154,15 +156,9 @@ export class NodeDb implements IDb {
     }
 
     const client = createClient({ url: dbUrl })
-    // A transaction takes the client's connection and later statements open another, so two
-    // connections in this process can lock each other out: retry statements rejected as busy, as
-    // the browser's driver does. Each is a single statement or an atomic batch, so a retry can't
-    // replay part of one. A busy transaction is retried whole by BaseDb.transaction.
-    client.execute = withSqliteBusyRetry(client.execute.bind(client)) as typeof client.execute
-    client.batch = withSqliteBusyRetry(client.batch.bind(client)) as typeof client.batch
-    // With the default rollback journal a commit waits for every other connection's reads, and
-    // libsql keeps several open (see above). In WAL readers don't block the writer. Stored in the
-    // database file, so it covers every connection.
+    // One connection for everything, transactions included (see singleConnectionTransactions)
+    this.transactions = createSingleConnectionTransactions(client, schema)
+    // Readers in other processes (a CLI on the same file) don't block a commit in WAL
     if (localDbFilePath(dbUrl)) await client.execute('PRAGMA journal_mode = WAL')
     const db = drizzle(client, { schema })
 

@@ -2,13 +2,14 @@
  * The appliers for item ops (ADR 0019). Every tab registers them at init: the leader applies ops
  * that other tabs appended.
  */
-import { and, eq, or } from 'drizzle-orm'
+import { and, eq, inArray, or } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { createSeed, type NewSeedFields } from '@/db/write/createSeed'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
-import { metadata, type MetadataType } from '@/seedSchema'
+import { getSeedPublisher } from '@/db/read/getSeedPublisher'
+import { metadata, seeds, type MetadataType } from '@/seedSchema'
 import type { PropertyType } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
@@ -73,9 +74,15 @@ export async function applyStorageValue(
   db: ReturnType<typeof BaseDb.getAppDb>,
 ): Promise<SetPropertyValueResult> {
   const { storageSeed } = value
+  // The item's publisher as it is now: a draft claimed while the op waited passes it on
+  const parentPublisher = await getSeedPublisher(seedLocalId, db)
   await createSeed(
     { type: storageSeed.type, modelFileId: storageSeed.modelFileId },
-    { db, fields: storageSeed.fields, localId: storageSeed.localId },
+    {
+      db,
+      fields: { ...storageSeed.fields, publisher: parentPublisher ?? storageSeed.fields.publisher },
+      localId: storageSeed.localId,
+    },
   )
   await createVersion({ seedLocalId: storageSeed.localId, seedType: storageSeed.type }, { db })
 
@@ -218,6 +225,134 @@ export async function applyItemStorageValue(
   return { localId: draft.localId!, uid: draft.uid ?? null, schemaUid: draft.schemaUid ?? '', fileName, localStorageDir }
 }
 
+/**
+ * A new item (Item.create): its seed, its first version and a row per property, applied in one
+ * transaction, so a failure leaves nothing. The seed's local id is the op's `seedLocalId`.
+ * ItemStorage initial values are staged files, moved into the item's files when applied.
+ */
+export type CreateItemOp = {
+  modelName: string
+  seed: { type: string; modelFileId?: string; fields: NewSeedFields }
+  rows: Array<{
+    propertyName: string
+    propertyValue?: unknown
+    /** EAS schema uid, resolved before the transaction. */
+    schemaUid?: string
+    propertyRecordSchema?: PropertyType
+    /** An ItemStorage initial value: its staged file, moved to the item's file. */
+    itemStorage?: { stagedPath: string; fileName: string; localStorageDir: string }
+  }>
+}
+
+export type CreateItemResult = { seedLocalId: string; versionLocalId: string }
+
+/** Writes a new item's rows on `db` (see CreateItemOp). */
+export async function applyCreateItem(
+  seedLocalId: string,
+  value: CreateItemOp,
+  db: ReturnType<typeof BaseDb.getAppDb>,
+): Promise<CreateItemResult> {
+  await createSeed(
+    { type: value.seed.type, modelFileId: value.seed.modelFileId },
+    { db, fields: value.seed.fields, localId: seedLocalId },
+  )
+  const versionLocalId = await createVersion({ seedLocalId, seedType: value.seed.type }, { db })
+  for (const row of value.rows) {
+    if (row.itemStorage) {
+      const { stagedPath, fileName, localStorageDir } = row.itemStorage
+      await moveStagedFile(stagedPath, BaseFileManager.getFilesPath(getItemStorageSubdir(localStorageDir), fileName))
+    }
+    await createMetadata(
+      {
+        seedLocalId,
+        versionLocalId,
+        propertyName: row.propertyName,
+        propertyValue: row.itemStorage ? undefined : row.propertyValue,
+        ...(row.itemStorage && {
+          refResolvedValue: row.itemStorage.fileName,
+          localStorageDir: row.itemStorage.localStorageDir,
+          refValueType: 'file',
+        }),
+        ...(row.schemaUid && { schemaUid: row.schemaUid }),
+        modelName: value.modelName,
+      } as Parameters<typeof createMetadata>[0],
+      row.propertyRecordSchema,
+      { db, skipValidation: true, modelFileId: value.seed.modelFileId },
+    )
+  }
+  return { seedLocalId, versionLocalId }
+}
+
+/**
+ * Removes an item: `discard` hard-deletes a draft Item.create made and couldn't finish (the seed,
+ * its versions and rows, the storage seeds its rows point at), `item` soft-deletes the seed
+ * (Item.destroy), `property` deletes a property's rows (ItemProperty.destroy).
+ */
+export type DeleteOp =
+  | { mode: 'discard' }
+  | { mode: 'item' }
+  | { mode: 'property'; propertyNames: string[] }
+
+/** Files a discarded draft's rows named, deleted once the op applied. */
+export type DeleteResult = { filePaths: string[] }
+
+/** Storage seeds a property row points at: Html, Image and File values are seeds of their own. */
+const STORAGE_REF_TYPES = new Set(['html', 'image', 'file'])
+
+export async function applyDelete(
+  op: Pick<OutboxOp, 'opId' | 'seedLocalId'>,
+  value: DeleteOp,
+  db: ReturnType<typeof BaseDb.getAppDb>,
+): Promise<DeleteResult> {
+  if (value.mode === 'item') {
+    await db.update(seeds).set({ _markedForDeletion: 1 }).where(eq(seeds.localId, op.seedLocalId))
+    return { filePaths: [] }
+  }
+  if (value.mode === 'property') {
+    await db
+      .delete(metadata)
+      .where(and(eq(metadata.seedLocalId, op.seedLocalId), inArray(metadata.propertyName, value.propertyNames)))
+    return { filePaths: [] }
+  }
+  const rows = await db
+    .select({
+      propertyValue: metadata.propertyValue,
+      refSeedType: metadata.refSeedType,
+      refResolvedValue: metadata.refResolvedValue,
+      localStorageDir: metadata.localStorageDir,
+    })
+    .from(metadata)
+    .where(eq(metadata.seedLocalId, op.seedLocalId))
+  const childSeedLocalIds: string[] = []
+  const filePaths: string[] = []
+  for (const row of rows) {
+    if (row.refSeedType && STORAGE_REF_TYPES.has(row.refSeedType) && row.propertyValue) {
+      childSeedLocalIds.push(row.propertyValue)
+    }
+    if (row.localStorageDir && row.refResolvedValue) {
+      filePaths.push(BaseFileManager.getFilesPath(row.localStorageDir, row.refResolvedValue))
+    }
+  }
+  const { hardDeleteLocalSeedsByLocalIds } = await import('@/db/write/removeLocalCopiesForAddresses')
+  await hardDeleteLocalSeedsByLocalIds([op.seedLocalId, ...childSeedLocalIds], { db, keepOpId: op.opId })
+  return { filePaths }
+}
+
+/** Deletes files after the op that removed their rows applied; best-effort. */
+export async function deleteFiles(filePaths: string[]): Promise<void> {
+  if (filePaths.length === 0) return
+  const fs = await BaseFileManager.getFs()
+  for (const path of filePaths) {
+    try {
+      if (!(await BaseFileManager.pathExists(path))) continue
+      if (fs?.promises?.unlink) await fs.promises.unlink(path)
+      else fs?.unlinkSync?.(path)
+    } catch {
+      // Best-effort: a file left behind has no row pointing at it
+    }
+  }
+}
+
 const isItemStorageOp = (value: unknown): value is ItemStorageValueOp =>
   typeof value === 'object' && value !== null && 'itemStorage' in value
 
@@ -262,6 +397,20 @@ export function startItemOutbox(): void {
           : run()
       },
       discard: discardStorageValue,
+    })
+    registerOutboxApplier('create', {
+      apply: async (op, tx): Promise<CreateItemResult> =>
+        applyCreateItem(op.seedLocalId, outboxOpValue<CreateItemOp>(op)!, tx),
+      // Staged ItemStorage values of a create that never applied
+      discard: async (op) => {
+        const paths = (outboxOpValue<CreateItemOp>(op)?.rows ?? []).flatMap((row) =>
+          row.itemStorage ? [row.itemStorage.stagedPath] : [],
+        )
+        await deleteFiles(paths)
+      },
+    })
+    registerOutboxApplier('delete', {
+      apply: async (op, tx): Promise<DeleteResult> => applyDelete(op, outboxOpValue<DeleteOp>(op)!, tx),
     })
   }
   startOutbox()
