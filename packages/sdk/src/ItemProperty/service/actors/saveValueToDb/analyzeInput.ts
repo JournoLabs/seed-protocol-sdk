@@ -226,14 +226,14 @@ export const analyzeInput = fromCallback<
     return true
   }
 
-  _analyzeInput().finally(() => writeSlot?.release()).then(
-    (isDone) => {
+  _analyzeInput()
+    .finally(() => writeSlot?.release())
+    .then((isDone) => {
       if (isDone) {
         sendBack({ type: 'saveValueToDbSuccess' })
       }
-    },
-    (error: unknown) => {
+    })
+    .catch((error: unknown) => {
       sendBack({ type: 'saveFailed', error })
-    },
-  )
+    })
 })
