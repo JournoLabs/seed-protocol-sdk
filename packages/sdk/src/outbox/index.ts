@@ -3,6 +3,7 @@ export {
   appendOutboxOpAndWait,
   appendOutboxOps,
   drainOutbox,
+  pruneOutbox,
   getOutboxOps,
   outboxOpResult,
   outboxOpValue,
@@ -14,6 +15,8 @@ export {
   OutboxOpRejectedError,
   OutboxOpRetryableError,
   OUTBOX_MAX_ATTEMPTS,
+  OUTBOX_PRUNE_AFTER_MS,
+  OUTBOX_PRUNE_FAILED_AFTER_MS,
   OUTBOX_RETRY_DELAYS_MS,
 } from './outbox'
 export { startItemOutbox } from './itemAppliers'

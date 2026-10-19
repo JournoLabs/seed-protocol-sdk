@@ -11,7 +11,7 @@
  * (registerOutboxApplier).
  */
 import debug from 'debug'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { pendingWrites, type PendingWriteType } from '@/seedSchema/PendingWriteSchema'
 import { generateId } from '@/helpers/generateId'
@@ -116,6 +116,12 @@ export const OUTBOX_MAX_ATTEMPTS = 8
 const WAIT_POLL_MS = 1_000
 /** Ops read per drain pass. */
 const DRAIN_BATCH = 200
+/** Applied and superseded ops are kept this long, then pruned. */
+export const OUTBOX_PRUNE_AFTER_MS = 24 * 60 * 60 * 1000
+/** Failed ops are kept longer, so a refused write can still be looked into. */
+export const OUTBOX_PRUNE_FAILED_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/** How often the leader prunes, at most. */
+const PRUNE_EVERY_MS = 60 * 60 * 1000
 
 const appliers = new Map<string, OutboxApplier<any>>()
 
@@ -229,7 +235,41 @@ function scheduleDrain(): void {
     } finally {
       draining = undefined
     }
+    if (Date.now() - lastPrunedAt >= PRUNE_EVERY_MS) {
+      lastPrunedAt = Date.now()
+      pruneOutbox().catch((error) => logger('prune failed', error))
+    }
   })()
+}
+
+let lastPrunedAt = 0
+
+/**
+ * Deletes settled ops older than their retention: applied and superseded ops after
+ * OUTBOX_PRUNE_AFTER_MS, failed ones after OUTBOX_PRUNE_FAILED_AFTER_MS. An applied op with an
+ * unresolved conflict stays until the conflict is resolved. Pending ops are never pruned. The
+ * leader runs it after a drain, at most hourly. Returns how many ops it deleted.
+ */
+export async function pruneOutbox(now = Date.now()): Promise<number> {
+  const db = BaseDb.getAppDb()
+  if (!db) return 0
+  const settledBefore = now - OUTBOX_PRUNE_AFTER_MS
+  const deleted = await db
+    .delete(pendingWrites)
+    .where(
+      or(
+        and(
+          eq(pendingWrites.status, 'applied'),
+          lt(sql`coalesce(${pendingWrites.appliedAt}, ${pendingWrites.createdAt})`, settledBefore),
+          or(isNull(pendingWrites.conflict), isNotNull(pendingWrites.conflictResolvedAt)),
+        ),
+        and(eq(pendingWrites.status, 'superseded'), lt(pendingWrites.createdAt, settledBefore)),
+        and(eq(pendingWrites.status, 'failed'), lt(pendingWrites.createdAt, now - OUTBOX_PRUNE_FAILED_AFTER_MS)),
+      ),
+    )
+    .returning({ opId: pendingWrites.opId })
+  if (deleted.length > 0) logger(`pruned ${deleted.length} settled ops`)
+  return deleted.length
 }
 
 /**

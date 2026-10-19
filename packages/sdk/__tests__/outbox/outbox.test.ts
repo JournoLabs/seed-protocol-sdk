@@ -7,6 +7,9 @@ import {
   appendOutboxOp,
   appendOutboxOps,
   drainOutbox,
+  pruneOutbox,
+  OUTBOX_PRUNE_AFTER_MS,
+  OUTBOX_PRUNE_FAILED_AFTER_MS,
   getOutboxOps,
   outboxOpValue,
   registerOutboxApplier,
@@ -258,5 +261,33 @@ testDescribe('outbox', () => {
 
     pauseOutboxDrainForTests(false)
     await vi.waitFor(async () => expect(await stored(s, 'title')).toBe('resumed'), { timeout: 5000 })
+  })
+
+  it('prunes settled ops past their retention, but not pending ops or unresolved conflicts', async () => {
+    const s = seed()
+    const ids = await appendOutboxOps(
+      ['applied', 'superseded', 'failed', 'failedRecent', 'conflict', 'resolved', 'pending', 'appliedRecent'].map(
+        (name) => ({ seedLocalId: s, propertyName: name, kind: 'set' as const, value: name, groupId: generateId() }),
+      ),
+    )
+    const [applied, superseded, failed, failedRecent, conflict, resolved, pending, appliedRecent] = ids
+    const now = Date.now()
+    const old = now - OUTBOX_PRUNE_AFTER_MS - 1
+    const db = BaseDb.getAppDb()
+    const set = (opId: string, fields: Partial<OutboxOp>) =>
+      db.update(pendingWrites).set(fields).where(eq(pendingWrites.opId, opId))
+    await set(applied, { status: 'applied', appliedAt: old, createdAt: old })
+    await set(superseded, { status: 'superseded', createdAt: old })
+    await set(failed, { status: 'failed', createdAt: now - OUTBOX_PRUNE_FAILED_AFTER_MS - 1 })
+    await set(failedRecent, { status: 'failed', createdAt: old })
+    await set(conflict, { status: 'applied', appliedAt: old, createdAt: old, conflict: '{}' })
+    await set(resolved, { status: 'applied', appliedAt: old, createdAt: old, conflict: '{}', conflictResolvedAt: now })
+    await set(pending, { createdAt: old })
+    await set(appliedRecent, { status: 'applied', appliedAt: now })
+
+    expect(await pruneOutbox(now)).toBe(4)
+
+    const left = (await getOutboxOps(ids)).map((row) => row.opId).sort()
+    expect(left).toEqual([failedRecent, conflict, pending, appliedRecent].sort())
   })
 })
