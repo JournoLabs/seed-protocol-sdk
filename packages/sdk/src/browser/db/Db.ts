@@ -4,6 +4,7 @@ import debug from "debug";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { applyEmbeddedMigrations, canRunInTransaction, getEmbeddedMigrations } from "./embeddedMigrations"
 import { withSqliteBusyRetry } from "./sqliteBusyRetry"
+import { countDbStatements, countLiveQueryRuns } from "@/helpers/timing"
 import { withSeedDbLock } from "@/helpers/tabLocks"
 import { sql } from "drizzle-orm"
 import { BaseFileManager } from "@/helpers";
@@ -97,7 +98,7 @@ export class BrowserDb implements IDb {
       )
 
       const { batchDriver } = sqlocalDrizzle
-      const driver = withSqliteBusyRetry(sqlocalDrizzle.driver)
+      const driver = countDbStatements(withSqliteBusyRetry(sqlocalDrizzle.driver))
 
       // Store SQLocalDrizzle instance for reactive queries
       this.sqlocalInstance = sqlocalDrizzle
@@ -416,9 +417,11 @@ export class BrowserDb implements IDb {
       // Setup errors (bad SQL, a closed database) go to the subscriber like query errors, so
       // callers see them as an error notification rather than only in the console.
       let subscription: { unsubscribe: () => void }
+      const countRun = countLiveQueryRuns()
       try {
         subscription = this.sqlocalInstance!.reactiveQuery(statement).subscribe(
           (data: Record<string, any>[]) => {
+            countRun()
             subscriber.next(data as T[])
           },
           (err: Error) => {

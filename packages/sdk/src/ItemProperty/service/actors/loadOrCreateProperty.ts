@@ -16,6 +16,7 @@ import {
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
+import { timingMarks } from '@/helpers/timing'
 import { ensureImageLocal } from '@/helpers/ensureImageLocal'
 import { ImageSize } from '@/helpers/constants'
 import { downloadTransactionIdWithDedupe } from '@/events/files/download'
@@ -48,6 +49,8 @@ export const loadOrCreateProperty = fromCallback<
     if (!db) {
       throw new Error('Database not available')
     }
+    const timing = timingMarks()
+    const timingLabel = `property ${seedLocalId ?? seedUid} ${propertyName} loadOrCreateProperty`
 
     // Use getMetadataLatest subquery pattern to get the latest metadata record for the property
     const metadataLatest = getMetadataLatest({ 
@@ -68,6 +71,7 @@ export const loadOrCreateProperty = fromCallback<
       .from(metadataLatest)
       .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
       .limit(5)
+    timing.mark('metadata')
 
     if (metadataRecords.length === 0) {
       // Metadata not found - this is a new property, will be created elsewhere.
@@ -132,6 +136,7 @@ export const loadOrCreateProperty = fromCallback<
     const { getPendingSetValue } = await import('@/outbox/pendingValues')
     const pendingValue = await getPendingSetValue(metadataRecord.seedLocalId ?? seedLocalId, propertyName)
     if (pendingValue !== undefined) metadataRecord.propertyValue = pendingValue
+    timing.mark('pending value')
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
@@ -147,6 +152,7 @@ export const loadOrCreateProperty = fromCallback<
       seedUid: seedUid ?? metadataRecord.seedUid,
       propertyId: metadataRecord.propertyId,
     })
+    timing.mark('model file id')
     if (modelName) {
       try {
         // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
@@ -154,6 +160,7 @@ export const loadOrCreateProperty = fromCallback<
         // Query properties table to get property schema
         const modelRecord = await resolveModelRecord(normalizedModelName, { modelFileId }, db)
         const modelRecords = modelRecord ? [modelRecord] : []
+        timing.mark('model record')
 
         if (modelRecords.length > 0 && modelRecords[0].id) {
           const propertyRecords = await db
@@ -166,6 +173,7 @@ export const loadOrCreateProperty = fromCallback<
               )
             )
             .limit(1)
+          timing.mark('property record')
 
           if (propertyRecords.length > 0) {
             const propRecord = propertyRecords[0]
@@ -194,6 +202,7 @@ export const loadOrCreateProperty = fromCallback<
             const validation = await resolvePropertyValidationRules(normalizedModelName, propertyName, {
               modelFileId: modelRecord?.schemaFileId ?? modelFileId,
             })
+            timing.mark('validation rules')
             if (validation) {
               propertyRecordSchema = { ...propertyRecordSchema, validation }
             }
@@ -397,6 +406,8 @@ export const loadOrCreateProperty = fromCallback<
       renderValue = propertyValueOut
     }
 
+    timing.mark('value')
+    timing.log(timingLabel)
     // Return loaded property data (use propertyName from context to match schema key, e.g. "html" not "htmlId")
     sendBack({
       type: 'loadOrCreatePropertySuccess',

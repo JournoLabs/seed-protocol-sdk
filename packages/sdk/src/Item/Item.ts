@@ -1,5 +1,5 @@
 import { IItem, IItemProperty } from '@/interfaces'
-import { timed, timingLogger } from '@/helpers/timing'
+import { timed, timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import {
   INTERNAL_PROPERTY_NAMES,
@@ -607,10 +607,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     item: Item<any>,
     readyTimeout: number,
   ): Promise<void> {
-    await waitForEntityIdle(item, { timeout: readyTimeout })
+    const label = `item ${item.seedLocalId ?? item.seedUid}`
+    await timedDb(`${label} ready: item idle`, () => waitForEntityIdle(item, { timeout: readyTimeout }))
     const svc = item.getService()
     try {
-      await waitFor(
+      await timed(`${label} ready: property instances`, () => waitFor(
         svc,
         (snap: any) => {
           if ('value' in snap && snap.value === 'error') {
@@ -619,7 +620,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           return Item.isItemSnapshotReadyForRead(snap)
         },
         { timeout: readyTimeout },
-      )
+      ))
     } catch (e: any) {
       if (e?.message === 'Entity failed to load') {
         throw e
@@ -641,14 +642,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (!pis || pis.size === 0) {
       return
     }
-    await Promise.all(
+    await timedDb(`${label} ready: ${pis.size} properties idle`, () => Promise.all(
       [...pis.values()].map((prop) =>
         waitForEntityIdle(prop, {
           timeout: readyTimeout,
           throwOnError: false,
         }),
       ),
-    )
+    ))
     if (timingLogger.enabled) {
       const notIdle = [...pis.entries()]
         .filter(([, prop]) => {
@@ -1072,17 +1073,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
     // Determine if id is seedUid or seedLocalId by querying database
     // Try seedUid first, then seedLocalId
-    let itemData = await getItemData({
+    let itemData = await timedDb(`load ${id} item data by uid`, () => getItemData({
       modelName,
       seedUid: id,
-    })
+    }))
 
     if (!itemData) {
       // Try as seedLocalId
-      itemData = await getItemData({
+      itemData = await timedDb(`load ${id} item data by local id`, () => getItemData({
         modelName,
         seedLocalId: id,
-      })
+      }))
     }
 
     if (!itemData) {
@@ -1090,10 +1091,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
 
     // Item.create() will handle caching the new instance
-    return await Item.create({
+    return await timedDb(`load ${id} Item.create`, () => Item.create({
       ...itemData,
       modelName,
-    })
+    }))
   }
 
   static async find({
@@ -1118,7 +1119,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
     let cached = false
     try {
-      return await timed(
+      return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
         () =>
           findEntity<Item<any>>(
@@ -1911,6 +1912,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
       setupState.subscriptionSetUp = true
       logger(`[Item._setupLiveQuerySubscription] Setting up liveQuery for seedLocalId: ${seedLocalId}`)
+      const timingStart = timingNow()
 
       const itemActor = this._service
       const sendToItemMachine = (event: Parameters<typeof itemActor.send>[0]) => {
@@ -2115,8 +2117,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           })
 
           // Subscribe to versions updates
+          let versionsRuns = 0
+          const versionsSubscribedAt = timingNow()
           const versionsSubscription = versions$.subscribe({
             next: async (versionRows) => {
+              const versionsRun = ++versionsRuns
+              const runStart = timingNow()
+              if (versionsRun === 1 && timingLogger.enabled) {
+                timingLogger(
+                  `item ${watchedSeedLocalId} versions live query first run ${timingSince(versionsSubscribedAt)}ms after subscribe, ${timingSince(timingStart)}ms after live-query setup began`,
+                )
+              }
               if (versionRows.length === 0) return
 
               // Get the most recent version that isn't revoked. When every version is revoked (the
@@ -2207,6 +2218,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                     }
                   })
                   await Promise.all(createPromises)
+                  if (timingLogger.enabled) {
+                    timingLogger(
+                      `item ${watchedSeedLocalId} versions run ${versionsRun}: metadata read + ${metadataRows.length} ItemProperty.find ${timingSince(runStart)}ms`,
+                    )
+                  }
                 } catch (error) {
                   logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances from liveQuery: ${error}`)
                 }

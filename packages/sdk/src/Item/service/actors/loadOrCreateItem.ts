@@ -14,6 +14,7 @@ import {
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { isDataType } from '@/helpers/property'
 import debug from 'debug'
+import { timingLogger, timingNow, timingSince } from '@/helpers/timing'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
 
@@ -352,6 +353,7 @@ export const loadOrCreateItem = fromCallback<
       whereClauses.push(eq(seeds.uid, seedUid))
     }
 
+    const timingStart = timingNow()
     const seedRecords = await db
       .select()
       .from(seeds)
@@ -388,6 +390,7 @@ export const loadOrCreateItem = fromCallback<
     const modelFileId = seedRecord.modelFileId || context.modelFileId || undefined
     const modelScope = { modelFileId, schemaName: context.schemaName }
 
+    const seedMs = timingSince(timingStart)
     // Step 2: Query versions table to find all versions for that seed
     const versionData = getVersionData()
     const versionRecords = await db
@@ -459,6 +462,7 @@ export const loadOrCreateItem = fromCallback<
 
     // Step 3: Latest metadata row per property_name for this seed (matches loadOrCreateProperty /
     // getItemProperties). Strict version_local_id = latest would drop properties whose rows lag version bumps.
+    const versionsMs = timingSince(timingStart) - seedMs
     const metadataLatest = getMetadataLatest({
       seedLocalId: resolvedSeedLocalId,
       seedUid: resolvedSeedUid,
@@ -473,6 +477,7 @@ export const loadOrCreateItem = fromCallback<
       `Found ${metadataRecords.length} latest-per-property metadata rows for seed ${resolvedSeedLocalId} (latestVersionLocalId=${latestVersionLocalId} used for placeholders only)`,
     )
 
+    const metadataMs = timingSince(timingStart) - seedMs - versionsMs
     // Step 4: Create ItemProperty instances from metadata records + placeholders for model schema properties
     // Always call when we have a valid version so placeholders are created for properties without metadata
     const propertyInstances = await createItemPropertyInstances(
@@ -494,6 +499,13 @@ export const loadOrCreateItem = fromCallback<
         waitForEntityIdle(prop, { timeout: propertyIdleTimeoutMs, throwOnError: false })
       )
     ).catch(() => {})
+
+    if (timingLogger.enabled) {
+      const totalMs = timingSince(timingStart)
+      timingLogger(
+        `item ${resolvedSeedLocalId} loadOrCreateItem ${totalMs}ms: seed ${seedMs}, versions ${versionsMs}, metadata ${metadataMs}, ${propertyInstances.size} property instances ${totalMs - seedMs - versionsMs - metadataMs}`,
+      )
+    }
 
     // Step 5: Return loaded item data with property instances
     sendBack({
