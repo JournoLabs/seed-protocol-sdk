@@ -470,8 +470,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           context.refResolvedValue
         ) {
           const dir = context.localStorageDir?.replace(/^\//, '') || (isHtml ? 'html' : 'images')
-          const filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
+          let filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
           try {
+            // An ItemStorage value whose op is pending is in its staged file (ADR 0019)
+            if (isItemStorage) {
+              const { getPendingPropertyRow } = await import('@/outbox/pendingValues')
+              const staged = (await getPendingPropertyRow(context.seedLocalId, context.propertyName))?.stagedPath
+              if (staged && (await BaseFileManager.pathExists(staged))) filePath = staged
+            }
             let exists = await BaseFileManager.pathExists(filePath)
             if (!exists && isHtml) {
               await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
