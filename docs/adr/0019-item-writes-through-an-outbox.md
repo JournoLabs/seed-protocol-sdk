@@ -41,7 +41,10 @@ on `property.validation` and is not appended; `save()` rejects with
 and appends one op. The setter checks ownership before it appends, so a refusal in the usual case
 appends nothing; the drainer checks it again in the applier's `prepare` step, because the op may
 come from another tab or from before a reload, and the client may have lost the item's wallet since.
-Creates and discards are not checked. Relation targets are not checked yet.
+Creates and discards are not checked. A `set` op's Relation value is checked there too: each seed it
+names by local id must exist (an attestation uid passes, since a related seed may have no local
+copy). A target whose create op is still pending defers the op; any other missing target fails it
+with `RelationTargetError`. Whether a target is of the relation's model is not checked.
 
 **Draining.** The leader tab (ADR 0012) drains the outbox. Other tabs append and post a nudge on
 the existing BroadcastChannel. This is an exception to ADR 0012's rule that receivers never write:
@@ -82,15 +85,19 @@ attestation synced again) is not a conflict, nor is a synced value equal to the 
 the edit's. When the edit had no base row, only an attested row written after the edit counts.
 `resolveConflict('remote')` deletes the property's local draft rows through a `delete` op, so the
 synced row is the newest again. The `itemProperty.conflict` event fires in the tab that made the
-edit; other tabs see the conflict when they load the property. Storage ops carry no base row and
+edit, or that ran the sync; other tabs see the conflict when they load the property. Storage ops carry no base row and
 record no conflicts. For whole-value sets this replay is
 the same as "local wins"; a field-level merge (lists, rich text) needs finer ops and is not part
 of this decision.
 
 **Reads.** A property's value is its newest pending op if it has one, else the stored row. The
 metadata liveQuery's `hasPendingPropertyWrite` check becomes this rule. SDK read helpers that
-build item values apply the same overlay; raw SQL and liveQueries over `metadata` see a value
-once it is applied.
+build item values apply the same overlay (`getPendingPropertyRows`): an ItemProperty's load and
+hydrate, and `getItemProperties` (so `getItemData` and `getEditedProperties`), where an overlaid
+value counts as an unpublished edit. A pending storage value shows its row: an Html, File or Image
+file is already at its final path, and an ItemStorage value is read from its staged file until the
+op moves it. The local query data source reads published rows only and has no overlay. Raw SQL
+and liveQueries over `metadata` see a value once it is applied.
 
 **`await property.save()`** resolves when its op is applied and rejects when it fails. An
 assignment without `save()` returns at once.
@@ -106,14 +113,20 @@ its file written at its final path, named after it, so nothing else uses the fil
 applies; applying creates the seed, its version and the property row. An ItemStorage value goes in
 the item's own file, which other writers also touch, so it is written to a staging file; applying
 moves it into place and updates the draft row. That op's applier takes the file's lock (ADR 0012)
-around the transaction, the order the file's other writers use. SQLocal's transaction then takes its
+around the transaction, the order the file's other writers use, but only when the lock is free:
+when another writer holds it, the op throws `OutboxOpDeferredError` and the drainer sets it aside
+for `OUTBOX_DEFER_MS` without counting an attempt and goes on with other ops, so one held file
+doesn't hold up the outbox. The property's later ops still wait behind it. SQLocal's transaction then takes its
 own shared Web Lock while the file lock is held, an exception to ADR 0012's rule that nothing is
 requested inside it; shared locks can't deadlock with each other.
 
-**Other writers.** Sync ingest only adds attested rows and never touches drafts, so a pending op
-that meets one applies the conflict rule. An edit that applied before sync lands is not covered:
-readers take the newest row by attestation time, so a newer attestation hides the draft without a
-recorded conflict. Publish waits for a seed's pending ops to
+**Other writers.** Sync ingest only adds attested rows, so a pending op that meets one applies the
+conflict rule when it applies. For an edit already written as a draft, sync applies the rule after
+it inserts property rows (`keepLocalDraftsOverSyncedRows`): readers take the newest row by
+`COALESCE(attestation_created_at, created_at)`, so a draft older than the synced attestation gets
+its `created_at` moved just past it and stays the value, and the conflict is recorded on an
+`applied` op row of its own. A draft's `created_at` is still set to the time of its last edit;
+that and this move are what make the local edit the newest row. Publish waits for a seed's pending ops to
 apply before building its payload. `claimUnpublishedDrafts` stamps pending ops' publisher.
 `removeLocalCopiesForAddresses` and purges delete the seed's ops. A property rename rewrites
 pending ops that use the old name.
