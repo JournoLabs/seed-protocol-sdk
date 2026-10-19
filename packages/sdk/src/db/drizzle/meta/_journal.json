@@ -152,8 +152,15 @@
     {
       "idx": 21,
       "version": "6",
-      "when": 1792415106824,
-      "tag": "0021_add_read_indexes",
+      "when": 1792414753260,
+      "tag": "0021_add_pending_write_error_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792453791787,
+      "tag": "0022_add_read_indexes",
       "breakpoints": true
     }
   ]

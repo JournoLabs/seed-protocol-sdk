@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8a91657c-3c03-4cf3-96f3-e68d0e342e45",
+  "id": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
   "prevId": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
   "tables": {
     "appState": {
@@ -532,21 +532,6 @@
             "local_id"
           ],
           "isUnique": true
-        },
-        "metadata_seed_local_id_property_name_idx": {
-          "name": "metadata_seed_local_id_property_name_idx",
-          "columns": [
-            "seed_local_id",
-            "property_name"
-          ],
-          "isUnique": false
-        },
-        "metadata_seed_uid_idx": {
-          "name": "metadata_seed_uid_idx",
-          "columns": [
-            "seed_uid"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -958,6 +943,13 @@
         },
         "error": {
           "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_name": {
+          "name": "error_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1375,20 +1367,6 @@
             "local_id"
           ],
           "isUnique": true
-        },
-        "seeds_uid_idx": {
-          "name": "seeds_uid_idx",
-          "columns": [
-            "uid"
-          ],
-          "isUnique": false
-        },
-        "seeds_type_idx": {
-          "name": "seeds_type_idx",
-          "columns": [
-            "type"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -1550,13 +1528,6 @@
             "local_id"
           ],
           "isUnique": true
-        },
-        "versions_seed_local_id_idx": {
-          "name": "versions_seed_local_id_idx",
-          "columns": [
-            "seed_local_id"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},

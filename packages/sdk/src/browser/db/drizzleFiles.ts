@@ -385,7 +385,9 @@ export const migrationSql_0020_add_pending_writes = `CREATE TABLE \`pending_writ
 CREATE UNIQUE INDEX \`pending_writes_op_id_unique\` ON \`pending_writes\` (\`op_id\`);--> statement-breakpoint
 CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`seed_local_id\`,\`property_name\`,\`created_at\`);`
 
-export const migrationSql_0021_add_read_indexes = `CREATE INDEX \`metadata_seed_local_id_property_name_idx\` ON \`metadata\` (\`seed_local_id\`,\`property_name\`);--> statement-breakpoint
+export const migrationSql_0021_add_pending_write_error_name = `ALTER TABLE \`pending_writes\` ADD \`error_name\` text;`
+
+export const migrationSql_0022_add_read_indexes = `CREATE INDEX \`metadata_seed_local_id_property_name_idx\` ON \`metadata\` (\`seed_local_id\`,\`property_name\`);--> statement-breakpoint
 CREATE INDEX \`metadata_seed_uid_idx\` ON \`metadata\` (\`seed_uid\`);--> statement-breakpoint
 CREATE INDEX \`seeds_uid_idx\` ON \`seeds\` (\`uid\`);--> statement-breakpoint
 CREATE INDEX \`seeds_type_idx\` ON \`seeds\` (\`type\`);--> statement-breakpoint
@@ -546,8 +548,15 @@ export const journalJson = `{
     {
       "idx": 21,
       "version": "6",
-      "when": 1792415106824,
-      "tag": "0021_add_read_indexes",
+      "when": 1792414753260,
+      "tag": "0021_add_pending_write_error_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792453791787,
+      "tag": "0022_add_read_indexes",
       "breakpoints": true
     }
   ]
@@ -558,8 +567,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "8a91657c-3c03-4cf3-96f3-e68d0e342e45",
-  "prevId": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
+  "id": "781ce7c2-f397-4df2-a32c-9267c4a4163d",
+  "prevId": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1515,6 +1524,13 @@ export const snapshotJson = `{
         },
         "error": {
           "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_name": {
+          "name": "error_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -122,6 +122,8 @@ describe.sequential(
       await setupTestEnvironment({
         testFileUrl: import.meta.url,
         timeout: SETUP_HOOK_TIMEOUT_MS,
+        // The synced item is the client's, so its edits pass the drainer's ownership check
+        configOverrides: { addresses: [attester] },
       })
 
       const { importJsonSchema } = await import('@/imports/json')

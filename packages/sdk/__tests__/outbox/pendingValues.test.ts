@@ -56,7 +56,7 @@ testDescribe('getPendingSetValue', () => {
     // Other SDK code may read meanwhile; count only selects shaped like this read
     const pendingReads = selectSpy.mock.calls.filter(([fields]) => {
       const keys = Object.keys((fields as object | undefined) ?? {}).sort()
-      return keys.join(',') === 'propertyName,value'
+      return keys.join(',') === 'kind,propertyName,value'
     })
     expect(pendingReads).toHaveLength(1)
   })
