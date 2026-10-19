@@ -1114,6 +1114,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId?: string
       /** ... or the schema that defines it. */
       schemaName?: string
+      /**
+       * Stops building items once aborted and rejects with the signal's reason. Items already
+       * built stay loaded.
+       */
+      signal?: AbortSignal
     },
   ): Promise<Item<any>[]> {
     const {
@@ -1123,11 +1128,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       addressFilter,
       modelFileId,
       schemaName,
+      signal,
     } = options ?? {}
+    signal?.throwIfAborted()
     const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     // Built without waiting; with waitForReady the items are then awaited together, below.
     for (const itemData of itemsData) {
+      signal?.throwIfAborted()
       itemInstances.push(
         await Item.create(
           {
@@ -1146,6 +1154,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         ),
       )
     }
+    signal?.throwIfAborted()
 
     return orderBy(itemInstances, ['createdAt'], ['desc'])
   }

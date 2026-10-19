@@ -1081,6 +1081,47 @@ describe('React Item Hooks Integration Tests', () => {
           // Clean up
           newItem.unload()
         })
+
+        it('lists an item created while its first fetch is still running', async () => {
+          // Hold the first Item.all result until a new item is written, so the list's live query
+          // sees the item while that fetch is in flight and its invalidation joins the fetch.
+          let release!: () => void
+          const held = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const realAll = Item.all.bind(Item)
+          let fetched = 0
+          const allSpy = vi.spyOn(Item, 'all').mockImplementation(async (...args) => {
+            const rows = await realAll(...args)
+            if (++fetched === 1) await held
+            return rows
+          })
+          let newItem: Awaited<ReturnType<typeof Item.create>> | undefined
+          try {
+            render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+            await waitFor(() => expect(fetched).toBe(1), { timeout: WAIT_TIMEOUT_MS })
+
+            newItem = await Item.create({
+              modelName: 'Post',
+              schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
+              title: 'Created During Load',
+            } as any)
+            await waitForItemIdle(newItem)
+            await waitForItemPersisted(newItem, { title: 'Created During Load' })
+            // Time for the live query to emit the new seed while the fetch is still held.
+            await new Promise((resolve) => setTimeout(resolve, 500))
+            release()
+
+            await waitFor(
+              () => expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBe(4),
+              { timeout: 15000 },
+            )
+          } finally {
+            release()
+            allSpy.mockRestore()
+            newItem?.unload()
+          }
+        })
       })
 
       describe('ItemProperty edit persistence and reload', () => {

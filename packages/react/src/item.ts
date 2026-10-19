@@ -257,8 +257,13 @@ export const useItems: UseItems = ({
   }, [queryClient])
 
   const itemsRef = useRef<IItem<any>[]>([])
+  // The live seed ids a refetch was last requested for.
   const lastFetchedIdsRef = useRef<Set<string>>(new Set())
-  const hasSeenLiveSeedsSnapshotRef = useRef(false)
+  // Fetches started, and how many had started when the last refetch was requested. Only a fetch
+  // started after the request can answer it: an invalidation while a fetch with no data yet is
+  // running joins that fetch instead of starting one.
+  const fetchesStartedRef = useRef(0)
+  const refetchRequestedAtRef = useRef(0)
   const [addressesForFilter, setAddressesForFilter] = useState<string[] | null>(null)
 
   useEffect(() => {
@@ -281,22 +286,27 @@ export const useItems: UseItems = ({
   )
 
   useEffect(() => {
-    hasSeenLiveSeedsSnapshotRef.current = false
+    lastFetchedIdsRef.current = new Set()
   }, [queryKey])
 
   const {
     data: items = [],
     isLoading,
+    isFetching,
+    dataUpdatedAt,
     error: queryError,
   } = useQuery({
     queryKey,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
+      fetchesStartedRef.current++
       const rows = await Item.all(modelName, deleted, {
         waitForReady: true,
         includeEas,
         addressFilter,
         modelFileId,
         schemaName,
+        // A superseded fetch (new key, cancelled refetch, unmount) stops building items.
+        signal,
       })
       return rows
     },
@@ -361,7 +371,7 @@ export const useItems: UseItems = ({
   }, [db, isClientReady, modelName, deleted, includeEas, addressFilter, addressesForFilter])
   const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
-  // Invalidate when table data actually changes so useQuery refetches
+  // Refetch when the live seed ids differ from the listed items.
   useEffect(() => {
     if (!isClientReady || !seedsTableData) return
 
@@ -381,35 +391,31 @@ export const useItems: UseItems = ({
       return
     }
 
-    if (!hasSeenLiveSeedsSnapshotRef.current) {
-      hasSeenLiveSeedsSnapshotRef.current = true
-      if (tableDataItemsSet.size > 0 && currentItemsSet.size === 0) {
-        lastFetchedIdsRef.current = new Set(tableDataItemsSet)
-        queryClient.invalidateQueries({ queryKey })
-        return
-      }
-    }
-
-    const lastFetched = lastFetchedIdsRef.current
-    if (
-      lastFetched.size === tableDataItemsSet.size &&
-      [...lastFetched].every((id) => tableDataItemsSet.has(id))
-    ) {
+    if (sameIds(currentItemsSet, tableDataItemsSet)) {
+      lastFetchedIdsRef.current = tableDataItemsSet
       return
     }
 
-    const setsAreEqual =
-      currentItemsSet.size === tableDataItemsSet.size &&
-      [...currentItemsSet].every((id) => tableDataItemsSet.has(id))
+    const requestRefetch = () => {
+      lastFetchedIdsRef.current = tableDataItemsSet
+      refetchRequestedAtRef.current = fetchesStartedRef.current
+      queryClient.invalidateQueries({ queryKey })
+    }
 
-    if (setsAreEqual) {
-      lastFetchedIdsRef.current = new Set(tableDataItemsSet)
+    if (!sameIds(lastFetchedIdsRef.current, tableDataItemsSet)) {
+      requestRefetch()
       return
     }
 
-    lastFetchedIdsRef.current = new Set(tableDataItemsSet)
-    queryClient.invalidateQueries({ queryKey })
-  }, [isClientReady, seedsTableData, queryClient, queryKey])
+    // A refetch was already requested for these ids. If a fetch started after the request, it
+    // answers it, or failed and retries on its own: Item.all and the live query can disagree
+    // (an item still loading), so don't loop.
+    if (fetchesStartedRef.current > refetchRequestedAtRef.current) return
+    // The request joined a fetch that started before the change. Wait for it to settle (this
+    // effect runs again then), and refetch: it listed the old ids.
+    if (isFetching) return
+    requestRefetch()
+  }, [isClientReady, seedsTableData, queryClient, queryKey, dataUpdatedAt, isFetching])
 
   // Same array while the data is the same, so `items` can be an effect/memo dependency.
   const sortedItems = useMemo(
@@ -565,4 +571,8 @@ export const usePublishItem = (): UsePublishItemReturn => {
     error,
     resetError,
   }
+}
+
+function sameIds(a: Set<string>, b: Set<string>): boolean {
+  return a.size === b.size && [...a].every((id) => b.has(id))
 }
