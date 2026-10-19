@@ -1,4 +1,4 @@
-import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { InferSelectModel } from 'drizzle-orm'
 
 export const versions = sqliteTable('versions', {
@@ -18,6 +18,6 @@ export const versions = sqliteTable('versions', {
    * unpublish time until sync confirms it). Null while live or unpublished.
    */
   revokedAt: int('revoked_at'),
-})
+}, (table) => [index('versions_seed_local_id_idx').on(table.seedLocalId)])
 
 export type VersionsType = InferSelectModel<typeof versions>

@@ -385,6 +385,12 @@ export const migrationSql_0020_add_pending_writes = `CREATE TABLE \`pending_writ
 CREATE UNIQUE INDEX \`pending_writes_op_id_unique\` ON \`pending_writes\` (\`op_id\`);--> statement-breakpoint
 CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`seed_local_id\`,\`property_name\`,\`created_at\`);`
 
+export const migrationSql_0021_add_read_indexes = `CREATE INDEX \`metadata_seed_local_id_property_name_idx\` ON \`metadata\` (\`seed_local_id\`,\`property_name\`);--> statement-breakpoint
+CREATE INDEX \`metadata_seed_uid_idx\` ON \`metadata\` (\`seed_uid\`);--> statement-breakpoint
+CREATE INDEX \`seeds_uid_idx\` ON \`seeds\` (\`uid\`);--> statement-breakpoint
+CREATE INDEX \`seeds_type_idx\` ON \`seeds\` (\`type\`);--> statement-breakpoint
+CREATE INDEX \`versions_seed_local_id_idx\` ON \`versions\` (\`seed_local_id\`);`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -536,6 +542,13 @@ export const journalJson = `{
       "when": 1792354539632,
       "tag": "0020_add_pending_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792415106824,
+      "tag": "0021_add_read_indexes",
+      "breakpoints": true
     }
   ]
 }`
@@ -545,8 +558,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
-  "prevId": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
+  "id": "8a91657c-3c03-4cf3-96f3-e68d0e342e45",
+  "prevId": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1076,6 +1089,21 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "metadata_seed_local_id_property_name_idx": {
+          "name": "metadata_seed_local_id_property_name_idx",
+          "columns": [
+            "seed_local_id",
+            "property_name"
+          ],
+          "isUnique": false
+        },
+        "metadata_seed_uid_idx": {
+          "name": "metadata_seed_uid_idx",
+          "columns": [
+            "seed_uid"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -1904,6 +1932,20 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "seeds_uid_idx": {
+          "name": "seeds_uid_idx",
+          "columns": [
+            "uid"
+          ],
+          "isUnique": false
+        },
+        "seeds_type_idx": {
+          "name": "seeds_type_idx",
+          "columns": [
+            "type"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -2065,6 +2107,13 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "versions_seed_local_id_idx": {
+          "name": "versions_seed_local_id_idx",
+          "columns": [
+            "seed_local_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
