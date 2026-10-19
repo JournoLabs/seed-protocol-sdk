@@ -16,7 +16,14 @@ import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLat
 import { getItemStorageFilePath, withItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
-import { outboxOpValue, registerOutboxApplier, startOutbox, type OutboxOp } from './outbox'
+import { isItemOwned, OwnershipError } from '@/helpers/ownership'
+import {
+  OutboxOpFailedError,
+  outboxOpValue,
+  registerOutboxApplier,
+  startOutbox,
+  type OutboxOp,
+} from './outbox'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -366,6 +373,26 @@ async function discardStorageValue(op: OutboxOp): Promise<void> {
   else fs?.unlinkSync?.(path)
 }
 
+/**
+ * The ownership rule, checked before an op applies (ADR 0019's async rules): the op may come from
+ * another tab, or from before a reload, and the client may have lost the item's wallet since it
+ * was appended. OwnershipError fails the op without a retry.
+ */
+async function requireOwned(op: OutboxOp): Promise<void> {
+  if (!(await isItemOwned({ seedLocalId: op.seedLocalId }))) throw new OwnershipError()
+}
+
+/**
+ * Rethrows a failed item op's error as its caller expects it: OwnershipError when the drainer
+ * refused the op for ownership, else the OutboxOpFailedError as is.
+ */
+export function throwItemWriteError(error: unknown): never {
+  if (error instanceof OutboxOpFailedError && error.errorName === 'OwnershipError') {
+    throw new OwnershipError(error.message)
+  }
+  throw error
+}
+
 let registered = false
 
 /** Registers the item appliers and starts draining. Safe to call more than once. */
@@ -373,6 +400,7 @@ export function startItemOutbox(): void {
   if (!registered) {
     registered = true
     registerOutboxApplier('set', {
+      prepare: requireOwned,
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         const result = await updateItemPropertyValue(
@@ -383,6 +411,7 @@ export function startItemOutbox(): void {
       },
     })
     registerOutboxApplier('storage', {
+      prepare: requireOwned,
       apply: async (op, tx): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)!
         return isItemStorageOp(value)
@@ -410,6 +439,10 @@ export function startItemOutbox(): void {
       },
     })
     registerOutboxApplier('delete', {
+      // A discarded draft is the client's own create rolled back
+      prepare: async (op) => {
+        if (outboxOpValue<DeleteOp>(op)?.mode !== 'discard') await requireOwned(op)
+      },
       apply: async (op, tx): Promise<DeleteResult> => applyDelete(op, outboxOpValue<DeleteOp>(op)!, tx),
     })
   }

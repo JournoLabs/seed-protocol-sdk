@@ -18,7 +18,14 @@ export {
 } from './outbox'
 export { startItemOutbox } from './itemAppliers'
 export { getPendingSetValue } from './pendingValues'
-export { applyCreateItem, applyDelete, applyItemStorageValue, applyStorageValue, deleteFiles } from './itemAppliers'
+export {
+  applyCreateItem,
+  applyDelete,
+  applyItemStorageValue,
+  applyStorageValue,
+  deleteFiles,
+  throwItemWriteError,
+} from './itemAppliers'
 export type {
   CreateItemOp,
   CreateItemResult,

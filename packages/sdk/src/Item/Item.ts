@@ -2329,13 +2329,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           return
         }
         // Through the outbox (ADR 0019): after the item's pending edits, not before them
-        const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+        const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
         startItemOutbox()
         await appendOutboxOpAndWait({
           seedLocalId: context.seedLocalId,
           kind: 'delete',
           value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
-        })
+        }).catch(throwItemWriteError)
       },
     })
   }

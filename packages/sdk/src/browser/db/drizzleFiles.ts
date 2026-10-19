@@ -385,6 +385,8 @@ export const migrationSql_0020_add_pending_writes = `CREATE TABLE \`pending_writ
 CREATE UNIQUE INDEX \`pending_writes_op_id_unique\` ON \`pending_writes\` (\`op_id\`);--> statement-breakpoint
 CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`seed_local_id\`,\`property_name\`,\`created_at\`);`
 
+export const migrationSql_0021_add_pending_write_error_name = `ALTER TABLE \`pending_writes\` ADD \`error_name\` text;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -536,6 +538,13 @@ export const journalJson = `{
       "when": 1792354539632,
       "tag": "0020_add_pending_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792414753260,
+      "tag": "0021_add_pending_write_error_name",
+      "breakpoints": true
     }
   ]
 }`
@@ -545,8 +554,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
-  "prevId": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
+  "id": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
+  "prevId": "3cf4e0c7-569e-4f14-bb99-56cef0694448",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1487,6 +1496,13 @@ export const snapshotJson = `{
         },
         "error": {
           "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_name": {
+          "name": "error_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

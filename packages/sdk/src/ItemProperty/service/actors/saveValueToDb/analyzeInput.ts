@@ -62,7 +62,8 @@ export const analyzeInput = fromCallback<
       const result = await updateItemPropertyValue({ ...props, seedLocalId, propertyName: propertyNameRaw } as any)
       return { skipped: false as const, result }
     }
-    const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
+    const { appendOutboxOp, getOutboxOps, outboxOpResult, startItemOutbox, throwItemWriteError, waitForOutboxOp } =
+      await import('@/outbox')
     startItemOutbox()
     // Checked right before appending (no await in between): ops apply in append order
     if (writeTicket && !writeTicket.isLatest()) return { skipped: true as const }
@@ -73,7 +74,7 @@ export const analyzeInput = fromCallback<
       value: props,
       baseRowId: localId ?? null,
     })
-    await waitForOutboxOp(opId)
+    await waitForOutboxOp(opId).catch(throwItemWriteError)
     const [op] = await getOutboxOps([opId])
     if (op?.status !== 'applied') return { skipped: true as const }
     return { skipped: false as const, result: outboxOpResult<SetPropertyValueResult>(op) ?? undefined }

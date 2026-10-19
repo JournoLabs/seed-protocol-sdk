@@ -100,6 +100,8 @@ export class OutboxOpFailedError extends Error {
   constructor(
     readonly opId: string,
     message: string,
+    /** The name of the error that failed the op, when it was recorded. */
+    readonly errorName: string | null = null,
   ) {
     super(message)
     this.name = 'OutboxOpFailedError'
@@ -390,6 +392,7 @@ function applierFor(op: OutboxOp): OutboxApplier<unknown> {
 
 async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
+  const errorName = error instanceof Error ? error.name : null
   const attempts = Math.max(...ops.map((op) => op.attempts)) + 1
   const permanent = !isRetryable(error) || attempts >= OUTBOX_MAX_ATTEMPTS
   const ids = ops.map((op) => op.opId)
@@ -398,7 +401,7 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
     logger(`op ${ids.join(', ')} failed (attempt ${attempts}), retrying: ${message}`)
     await db
       .update(pendingWrites)
-      .set({ attempts, error: message })
+      .set({ attempts, error: message, errorName })
       .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
     const delay = OUTBOX_RETRY_DELAYS_MS[Math.min(attempts - 1, OUTBOX_RETRY_DELAYS_MS.length - 1)]
     for (const id of ids) notBefore.set(id, Date.now() + delay)
@@ -408,14 +411,14 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
   logger(`op ${ids.join(', ')} failed: ${message}`)
   await db
     .update(pendingWrites)
-    .set({ status: 'failed', attempts, error: message })
+    .set({ status: 'failed', attempts, error: message, errorName })
     .where(and(inArray(pendingWrites.opId, ids), eq(pendingWrites.status, 'pending')))
   // The values they superseded were replaced by the user; they don't come back.
   const supersededIds = superseded.map((op) => op.opId)
   if (supersededIds.length > 0) {
     await db
       .update(pendingWrites)
-      .set({ status: 'superseded', error: message })
+      .set({ status: 'superseded', error: message, errorName })
       .where(and(inArray(pendingWrites.opId, supersededIds), eq(pendingWrites.status, 'pending')))
   }
   for (const id of ids) notBefore.delete(id)
@@ -471,7 +474,7 @@ function settleWaiters(row: OutboxOp): void {
   waiters.delete(row.opId)
   for (const waiter of set) {
     if (outcome === 'ok') waiter.resolve()
-    else waiter.reject(new OutboxOpFailedError(row.opId, row.error ?? 'The write failed'))
+    else waiter.reject(new OutboxOpFailedError(row.opId, row.error ?? 'The write failed', row.errorName))
   }
 }
 

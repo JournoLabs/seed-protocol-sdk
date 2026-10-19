@@ -1816,14 +1816,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (db && seedLocalId) {
           // Through the outbox (ADR 0019): after the property's pending edits, which would
           // otherwise write its rows back
-          const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+          const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
           startItemOutbox()
           await appendOutboxOpAndWait({
             seedLocalId,
             propertyName,
             kind: 'delete',
             value: { mode: 'property', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
-          })
+          }).catch(throwItemWriteError)
         } else if (db) {
           const seedSchemaMod = await import('../seedSchema')
           const { metadata } = seedSchemaMod
