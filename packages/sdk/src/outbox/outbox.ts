@@ -125,6 +125,12 @@ export function registerOutboxApplier<Prepared>(kind: OutboxOpKind, applier: Out
   }
 }
 
+/** Bumped before every append in this tab, so a pending-value read begun earlier isn't reused after it. */
+let appendGeneration = 0
+
+/** How many appends this tab has started; see getPendingSetValue. */
+export const outboxAppendGeneration = (): number => appendGeneration
+
 /**
  * Appends one op, or several that apply together (they share a new group id unless they carry
  * one), and tells the leader to drain. Returns the op ids in order.
@@ -148,6 +154,7 @@ export async function appendOutboxOps(inputs: AppendOutboxOpInput[]): Promise<st
     status: 'pending' as OutboxOpStatus,
     attempts: 0,
   }))
+  appendGeneration += 1
   await BaseDb.getAppDb().insert(pendingWrites).values(rows)
   startOutbox()
   if (isLeaderTab()) scheduleDrain()
