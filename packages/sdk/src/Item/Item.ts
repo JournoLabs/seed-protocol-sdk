@@ -1058,9 +1058,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * The ID can be either seedUid or seedLocalId
    * @param id - seedUid or seedLocalId
    * @param modelName - Optional model name for querying
+   * @param idKind - 'localId' when the id was given as a seedLocalId: looked up as one first
    * @returns Item instance or undefined if not found
    */
-  static async createById(id: string, modelName?: string): Promise<Item<any> | undefined> {
+  static async createById(
+    id: string,
+    modelName?: string,
+    idKind?: 'localId',
+  ): Promise<Item<any> | undefined> {
     if (!id) {
       return undefined
     }
@@ -1071,20 +1076,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return cached
     }
 
-    // Determine if id is seedUid or seedLocalId by querying database
-    // Try seedUid first, then seedLocalId
-    let itemData = await timedDb(`load ${id} item data by uid`, () => getItemData({
-      modelName,
-      seedUid: id,
-    }))
-
-    if (!itemData) {
-      // Try as seedLocalId
-      itemData = await timedDb(`load ${id} item data by local id`, () => getItemData({
-        modelName,
-        seedLocalId: id,
-      }))
-    }
+    // Try seedUid first, then seedLocalId; local id first when the caller says it's one (a find by
+    // seedLocalId), which saves the uid lookup. Either way the other is tried if the first misses.
+    const byUid = () => timedDb(`load ${id} item data by uid`, () => getItemData({ modelName, seedUid: id }))
+    const byLocalId = () => timedDb(`load ${id} item data by local id`, () => getItemData({ modelName, seedLocalId: id }))
+    const itemData = idKind === 'localId'
+      ? (await byLocalId()) ?? (await byUid())
+      : (await byUid()) ?? (await byLocalId())
 
     if (!itemData) {
       return undefined
@@ -1131,7 +1129,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               },
               createById: async (id) => {
                 // Pass modelName to createById if available
-                return await Item.createById(id, modelName)
+                return await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined)
               },
             },
             { id },
