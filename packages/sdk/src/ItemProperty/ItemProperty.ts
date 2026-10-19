@@ -36,12 +36,13 @@ import {
   forceRemoveFromCaches,
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
+import { timed } from '@/helpers/timing'
 import { eventEmitter } from '@/eventBus'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteQueue'
+import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import {
   ModelPropertyDataTypes,
   isDataType,
@@ -276,6 +277,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   protected _dataType: string | undefined
   /** Set while the value setter resolves a missing schema before sending `save`; save() awaits it. */
   protected _pendingSchemaSave: Promise<boolean> | undefined
+  /** What showed before the first `showValue` since the last save; that save rolls back to it. */
+  protected _unsavedBefore: PropertyValueSnapshot | undefined
   protected _schemaUid: string | undefined
   /** Name passed to the constructor; the public name if the machine later moves to a List-of-relation storage name. */
   protected readonly _constructedPropertyName: string | undefined
@@ -467,8 +470,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           context.refResolvedValue
         ) {
           const dir = context.localStorageDir?.replace(/^\//, '') || (isHtml ? 'html' : 'images')
-          const filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
+          let filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
           try {
+            // An ItemStorage value whose op is pending is in its staged file (ADR 0019)
+            if (isItemStorage) {
+              const { getPendingPropertyRow } = await import('@/outbox/pendingValues')
+              const staged = (await getPendingPropertyRow(context.seedLocalId, context.propertyName))?.stagedPath
+              if (staged && (await BaseFileManager.pathExists(staged))) filePath = staged
+            }
             let exists = await BaseFileManager.pathExists(filePath)
             if (!exists && isHtml) {
               await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
@@ -1427,6 +1436,29 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return true
   }
 
+  /**
+   * Stops an item's cached properties that nobody holds. Internal lookups cache a property without
+   * a hold for the item to take; one that finished after the item stopped (a liveQuery handler's
+   * find, say) never got that hold and would otherwise keep running. Called when the item stops.
+   */
+  static unloadUnheldForItem(seedIds: Array<string | null | undefined>): void {
+    const prefixes = seedIds
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => this.cacheKey(id, ''))
+    if (prefixes.length === 0) return
+    const unheld = new Set<ItemProperty<any>>()
+    for (const [key, entry] of this.instanceCache) {
+      if (entry.refCount <= 0 && prefixes.some((prefix) => key.startsWith(prefix))) unheld.add(entry.instance)
+    }
+    for (const instance of unheld) {
+      try {
+        instance.unload()
+      } catch {
+        // Already stopped
+      }
+    }
+  }
+
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
     return `Item_${uid || localId}_${propertyName}`
@@ -1555,6 +1587,38 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return this._alias
   }
 
+  /**
+   * The unresolved conflict between this property's last local edit and a value sync wrote while
+   * the edit was pending (ADR 0019): the local edit was kept, and `remoteValue` is what sync wrote.
+   * Null when there is none. Cleared by the next edit or `resolveConflict`.
+   */
+  get conflict(): import('@/outbox/conflicts').PropertyConflict | null {
+    return this._getSnapshotContext().conflict ?? null
+  }
+
+  /**
+   * Settles `conflict`. `'local'` keeps the local edit. `'remote'` drops the local draft, so the
+   * synced value shows again (and publish has nothing to send for this property).
+   */
+  async resolveConflict(choice: 'local' | 'remote'): Promise<void> {
+    const { seedLocalId, propertyName } = this._getSnapshotContext()
+    if (!seedLocalId || !propertyName) return
+    const { appendOutboxOpAndWait, markPropertyConflictsResolved, startItemOutbox, throwItemWriteError } =
+      await import('@/outbox')
+    if (choice === 'remote') {
+      startItemOutbox()
+      await appendOutboxOpAndWait({
+        seedLocalId,
+        propertyName,
+        kind: 'delete',
+        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+      }).catch(throwItemWriteError)
+    }
+    await markPropertyConflictsResolved(seedLocalId, propertyName)
+    this._service.send({ type: 'updateContext', conflict: null })
+    if (choice === 'remote') this._service.send({ type: 'rehydrateFromDb' })
+  }
+
   get value() {
     // Use string literal to avoid circular dependency
     const context = this._getSnapshotContext()
@@ -1585,19 +1649,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * Shows `value` at once and saves it; `await property.save()` to wait for the result. Unlike
    * assigning `property.value`, it saves even when `value` is already in context.
    *
-   * @param options.before - The values to restore if the save is refused or fails. Defaults to the
-   *   current context; pass it when you already put `value` into context (a debounced input, say),
-   *   so a refusal still rolls back to what was there before.
+   * @param options.before - The values to restore if the save is refused or fails. Defaults to what
+   *   showed before the first `showValue` since the last save, else the current context.
    */
   setValue(value: any, options: { before?: PropertyValueSnapshot } = {}): void {
     const context = this._getSnapshotContext()
     // Restored if the save is refused (item not owned), breaks a validation rule, or fails.
-    const before = options.before ?? { propertyValue: context.propertyValue, renderValue: context.renderValue }
-    // Update context immediately so UI shows the value before save completes
+    const before = options.before ??
+      this._unsavedBefore ?? { propertyValue: context.propertyValue, renderValue: context.renderValue }
+    this._unsavedBefore = undefined
+    // Update context immediately so UI shows the value before save completes. A new edit settles
+    // the property's conflict (ADR 0019).
     this._service.send({
       type: 'updateContext',
       propertyValue: value,
       renderValue: value,
+      conflict: null,
     })
 
     // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)
@@ -1630,6 +1697,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
+  /**
+   * Shows `value` without saving it, for input that saves later (a debounced text field). The next
+   * `setValue` or assignment saves, and if that save is refused or fails, the property goes back to
+   * what showed before the first `showValue`.
+   */
+  showValue(value: any): void {
+    if (!this._unsavedBefore) {
+      const context = this._getSnapshotContext()
+      this._unsavedBefore = { propertyValue: context.propertyValue, renderValue: context.renderValue }
+    }
+    this._service.send({ type: 'updateContext', propertyValue: value, renderValue: value })
+  }
+
   get published(): boolean {
     return !!this._getSnapshot().context.uid
   }
@@ -1647,23 +1727,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   async save(): Promise<void> {
     const ctx = this._getSnapshotContext()
+    const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
     const { assertItemOwned } = await import('@/helpers/ownership')
-    await assertItemOwned({
-      seedLocalId: ctx?.seedLocalId ?? undefined,
-      seedUid: ctx?.seedUid ?? undefined,
-    })
+    await timed(`${label} ownership`, () =>
+      assertItemOwned({
+        seedLocalId: ctx?.seedLocalId ?? undefined,
+        seedUid: ctx?.seedUid ?? undefined,
+      }),
+    )
     // Without this, save() would see `idle` before the deferred `save` event and resolve unsaved.
     if (this._pendingSchemaSave && !(await this._pendingSchemaSave)) {
       throw new Error(
         `Failed to save property ${ctx?.propertyName}: no schema found for ${ctx?.modelName}.${ctx?.propertyName}`,
       )
     }
-    const settled = await waitFor(
-      this._service,
-      (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-      {
+    const settled = await timed(`${label} until idle`, () =>
+      waitFor(this._service, (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle', {
         timeout: 10_000,
-      },
+      }),
     )
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
       settled.context
@@ -1762,11 +1843,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       onUnload: (instance) => (instance as ItemProperty<any>)._subscription?.unsubscribe(),
     })
 
-    forceRemoveFromCaches(this, {
-      getCacheKeys: () => cacheKeys,
-      caches: [ItemProperty.instanceCache as Map<string, unknown>],
-    })
+    // Out of the cache once its rows are gone (below): removed earlier, a lookup that read a row
+    // before the delete applied would build a new instance for it
+    const removeFromCaches = () =>
+      forceRemoveFromCaches(this, {
+        getCacheKeys: () => cacheKeys,
+        caches: [ItemProperty.instanceCache as Map<string, unknown>],
+      })
 
+    try {
+      await this._destroyRows(context)
+    } finally {
+      removeFromCaches()
+    }
+  }
+
+  private async _destroyRows(context: PropertyMachineContext): Promise<void> {
     await runDestroyLifecycle(this, {
       getService: (instance) =>
         instance._service as { send: (ev: unknown) => void; stop: () => void },
@@ -1777,7 +1869,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const propertyName = context.propertyName
         if (!propertyName || (!seedLocalId && !seedUid)) return
 
-        if (db) {
+        if (db && seedLocalId) {
+          // Through the outbox (ADR 0019): after the property's pending edits, which would
+          // otherwise write its rows back
+          const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
+          startItemOutbox()
+          await appendOutboxOpAndWait({
+            seedLocalId,
+            propertyName,
+            kind: 'delete',
+            value: { mode: 'property', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+          }).catch(throwItemWriteError)
+        } else if (db) {
           const seedSchemaMod = await import('../seedSchema')
           const { metadata } = seedSchemaMod
           const drizzleMod = await import('drizzle-orm')

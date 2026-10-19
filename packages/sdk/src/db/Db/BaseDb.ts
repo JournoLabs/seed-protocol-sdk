@@ -1,5 +1,6 @@
 import type { IDb } from '@/interfaces/IDb'
 import { Observable } from 'rxjs'
+import { isSqliteBusyError, SQLITE_BUSY_RETRY_DELAYS_MS } from '@/browser/db/sqliteBusyRetry'
 
 export abstract class BaseDb {
   static filesDir: string | undefined
@@ -58,5 +59,26 @@ export abstract class BaseDb {
    */
   static liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
     return BaseDb.requireImpl().liveQuery<T>(query)
+  }
+
+  /**
+   * Runs `fn` in one transaction: every query it runs on `tx` (a Drizzle database, used like
+   * `getAppDb()`) commits together, or none does when `fn` throws. Queries on `getAppDb()` inside
+   * `fn` are not part of the transaction, and in the browser they wait for it to end, so don't
+   * call `getAppDb()` or `BaseDb.transaction` from `fn`.
+   *
+   * When another connection (another tab) holds the database lock, the whole transaction is
+   * retried, so `fn` must have no side effects outside `tx`.
+   */
+  static async transaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    const impl = BaseDb.requireImpl()
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await impl.transaction(fn)
+      } catch (error) {
+        if (!isSqliteBusyError(error) || attempt >= SQLITE_BUSY_RETRY_DELAYS_MS.length) throw error
+        await new Promise((resolve) => setTimeout(resolve, SQLITE_BUSY_RETRY_DELAYS_MS[attempt]))
+      }
+    }
   }
 }

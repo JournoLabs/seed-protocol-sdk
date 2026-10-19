@@ -5,7 +5,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, type MetadataType } from '@/seedSchema'
+import { metadata, pendingWrites, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { convertVerbatimItemStorageRow } from '@/db/write/convertVerbatimItemStorageRow'
 import { saveItemStorage } from '@/ItemProperty/service/actors/saveValueToDb/saveItemStorage'
@@ -16,9 +16,11 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 /**
  * Writers of one ItemStorage file (saveItemStorage, the legacy-row conversion used by the migration
  * and publish) take turns under `seed:item-storage:<file path>`, so the file and the row always end
- * with the same writer's content. Steps are interleaved deterministically by holding a writer inside
- * BaseFileManager.saveFile. Runs in both the NodeJS and browser projects; each race also runs
- * without Web Locks (the in-process fallback).
+ * with the same writer's content. A save stages its content in a file of its own, then its outbox
+ * op (ADR 0019) moves it into place and updates the row under the lock. Steps are interleaved
+ * deterministically by holding a writer inside BaseFileManager.saveFile (the conversion's write, or
+ * a save's staged write). Runs in both the NodeJS and browser projects; each race also runs without
+ * Web Locks (the in-process fallback).
  *
  * Later writes are shorter than earlier ones, so a write that left the old tail in place (as
  * @zenfs/dom's WebAccessFS.write did in the browser) would show in the file's content.
@@ -101,11 +103,13 @@ const save = (item: { seedLocalId: string; localId: string }, newValue: string):
 type Gate = { reached: Promise<void>; release: () => void }
 
 /**
- * Spies on BaseFileManager.saveFile: records each write's content, and holds a write of a gated
- * content until its gate is released (before the write lands).
+ * Spies on BaseFileManager.saveFile: records the content of each write to an item's file (a save's
+ * staged write goes elsewhere), and holds a write of a gated content, wherever it goes, until its
+ * gate is released (before the write lands).
  */
 const instrumentWrites = () => {
   const writes: string[] = []
+  const isStaged = (filePath: string) => filePath.includes('/staging/')
   const gates = new Map<string, { gate: Gate; arrive: () => void; released: Promise<void> }>()
   const original = BaseFileManager.saveFile.bind(BaseFileManager)
   vi.spyOn(BaseFileManager, 'saveFile').mockImplementation(async (filePath, content) => {
@@ -116,7 +120,7 @@ const instrumentWrites = () => {
       gated.arrive()
       await gated.released
     }
-    writes.push(text)
+    if (!isStaged(filePath)) writes.push(text)
     return original(filePath, content)
   })
   const gate = (content: string): Gate => {
@@ -137,9 +141,6 @@ const hasWebLocks = () => typeof navigator !== 'undefined' && !!navigator.locks
 
 const heldLockNames = async (): Promise<string[]> =>
   hasWebLocks() ? ((await navigator.locks.query()).held ?? []).map((lock) => lock.name ?? '') : []
-
-const pendingLockNames = async (): Promise<string[]> =>
-  hasWebLocks() ? ((await navigator.locks.query()).pending ?? []).map((lock) => lock.name ?? '') : []
 
 /**
  * - `web locks`: navigator.locks (Chromium; Node >= 24.5).
@@ -189,16 +190,18 @@ testDescribe('ItemStorage file write lock', () => {
           expect(await heldLockNames()).toContain(itemStorageFileLockName(item.filePath))
         }
 
-        // A save now waits for the conversion instead of writing first and being overwritten.
+        // A save stages its content, then waits for the conversion instead of writing first and
+        // being overwritten.
         const saving = save(item, '<p>saved</p>')
         await settle()
         expect(writes).toEqual([])
+        expect(await BaseFileManager.pathExists(item.filePath)).toBe(false)
 
         legacyWrite.release()
         expect(await converting).toMatchObject({ fileName: `${item.seedLocalId}.html`, content: '<p>legacy content, longer than the save</p>' })
         await saving
 
-        expect(writes).toEqual(['<p>legacy content, longer than the save</p>', '<p>saved</p>'])
+        expect(writes).toEqual(['<p>legacy content, longer than the save</p>'])
         expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
@@ -208,26 +211,31 @@ testDescribe('ItemStorage file write lock', () => {
         })
       }, 60000)
 
-      it('a conversion that arrives during a save skips the row the save converted', async () => {
+      it('a save waits for the file’s lock before it writes the file and the row', async () => {
         const item = await legacyItem('<p>legacy</p>')
-        const { writes, gate } = instrumentWrites()
         useMode(mode)
 
-        const savedWrite = gate('<p>saved text</p>')
-        const saving = save(item, '<p>saved text</p>')
-        await savedWrite.reached
+        let release!: () => void
+        let locked!: () => void
+        const lockTaken = new Promise<void>((resolve) => (locked = resolve))
+        const holding = withItemStorageFileLock(item.filePath, () => {
+          locked()
+          return new Promise<void>((resolve) => (release = resolve))
+        })
+        await lockTaken
 
-        // The conversion reads the row (still legacy: the save hasn't updated it) and waits for the lock.
-        const converting = convertVerbatimItemStorageRow(item.localId, { localStorageDir: '/html', filenameSuffix: '.html' })
+        let saved = false
+        const saving = save(item, '<p>saved text</p>').then(() => (saved = true))
         await settle()
-        expect(writes).toEqual([])
+        expect(saved).toBe(false)
+        expect(await BaseFileManager.pathExists(item.filePath)).toBe(false)
+        expect((await rowByLocalId(item.localId)).propertyValue).toBe('<p>legacy</p>')
 
-        savedWrite.release()
+        release()
+        await holding
         await saving
-        // Re-read under the lock: no longer a legacy row, so nothing is written.
-        expect(await converting).toBeUndefined()
-
-        expect(writes).toEqual(['<p>saved text</p>'])
+        // The row the save converted is no longer legacy: a conversion now has nothing to do.
+        expect(await convertVerbatimItemStorageRow(item.localId, { localStorageDir: '/html', filenameSuffix: '.html' })).toBeUndefined()
         expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved text</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
@@ -236,28 +244,30 @@ testDescribe('ItemStorage file write lock', () => {
         })
       }, 60000)
 
-      it('two saves of one file take turns; the later one ends in the file', async () => {
+      it('of two quick saves the later one ends in the file, and the earlier one drops its staged file', async () => {
         const item = await legacyItem('<p>legacy</p>')
-        const { writes, gate } = instrumentWrites()
+        const { gate } = instrumentWrites()
         useMode(mode)
 
-        const firstWrite = gate('<p>first save, the longer one</p>')
+        // The first save is held while staging its content; the second starts after it.
+        const firstStaged = gate('<p>first save, the longer one</p>')
         const first = save(item, '<p>first save, the longer one</p>')
-        await firstWrite.reached
+        await firstStaged.reached
+        await save(item, '<p>2nd</p>')
+        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>2nd</p>')
 
-        const second = save(item, '<p>2nd</p>')
-        await settle()
-        expect(writes).toEqual([])
+        firstStaged.release()
+        await first
 
-        firstWrite.release()
-        await Promise.all([first, second])
-
-        expect(writes).toEqual(['<p>first save, the longer one</p>', '<p>2nd</p>'])
         expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>2nd</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
           propertyValue: null,
         })
+        const stagingDir = BaseFileManager.getFilesPath('staging')
+        const fs = await BaseFileManager.getFs()
+        const staged = (await BaseFileManager.pathExists(stagingDir)) ? await fs.promises.readdir(stagingDir) : []
+        expect(staged).toEqual([])
       }, 60000)
 
       it('locks per file: a held file does not block saves of another file', async () => {
@@ -278,16 +288,22 @@ testDescribe('ItemStorage file write lock', () => {
         expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved</p>')
         expect(await convertVerbatimItemStorageRow(other.localId)).toBeUndefined()
 
-        // The held file's writers wait until it is released.
+        // The held file's writers wait until it is released, without holding up other files' saves:
+        // the drainer sets the held file's op aside and applies the ones after it.
         let saved = false
         const saving = save(held, '<p>held saved</p>').then(() => (saved = true))
-        if (mode === 'web locks') {
-          // The save has reached the lock and is queued behind the holder.
-          await vi.waitFor(
-            async () => expect(await pendingLockNames()).toContain(itemStorageFileLockName(held.filePath)),
-            { timeout: WAIT_TIMEOUT_MS },
-          )
-        }
+        await vi.waitFor(
+          async () =>
+            expect(
+              await db()
+                .select()
+                .from(pendingWrites)
+                .where(and(eq(pendingWrites.seedLocalId, held.seedLocalId), eq(pendingWrites.status, 'pending'))),
+            ).toHaveLength(1),
+          { timeout: WAIT_TIMEOUT_MS },
+        )
+        await save(other, '<p>other saved again</p>')
+        expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved again</p>')
         await settle()
         expect(saved).toBe(false)
         release()

@@ -29,7 +29,18 @@ type UpdateItemPropertyValueProps = Partial<MetadataType> & {
   refValueType?: string
 }
 
-type UpdateItemPropertyValue = (props: UpdateItemPropertyValueProps) => Promise<UpdateItemPropertyValueResult | undefined>
+type WriteOptions = {
+  /**
+   * The database or transaction to write (a `BaseDb.transaction` callback's `tx`); the app database
+   * by default. Every read this writer makes goes through it too.
+   */
+  db?: ReturnType<typeof BaseDb.getAppDb>
+}
+
+type UpdateItemPropertyValue = (
+  props: UpdateItemPropertyValueProps,
+  options?: WriteOptions,
+) => Promise<UpdateItemPropertyValueResult | undefined>
 
 export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   localId: localIdParam,
@@ -47,7 +58,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   localStorageDir,
   dataType,
   refValueType,
-}) => {
+}, options = {}) => {
   if (!localIdParam && !seedLocalId) {
     logger(
       `[db/write] [updateItemPropertyValue] no propertyLocalId or seedLocalId for property: ${propertyName}`,
@@ -58,7 +69,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   // Every write below binds parameters: store the value as given (no SQL escaping).
   const safeNewValue = newValue
 
-  const appDb = BaseDb.getAppDb()
+  const appDb = options.db ?? BaseDb.getAppDb()
 
   // Path 1: When localId is provided, query by local_id first (avoids property name mismatch)
   let rows: (MetadataType & { localId?: string | null })[]
@@ -182,13 +193,13 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       return { localId, uid: null, schemaUid: schemaUid ?? '' }
     }
 
-    const seedDataFromDb = seedLocalId ? await getSeedData({ seedLocalId }) : null
-    const versionDataFromDb = versionLocalId ? await getVersionData({ localId: versionLocalId }) : null
+    const seedDataFromDb = seedLocalId ? await getSeedData({ seedLocalId }, appDb) : null
+    const versionDataFromDb = versionLocalId ? await getVersionData({ localId: versionLocalId }, appDb) : null
 
     // Here we don't have a local-only record so we need to create a new one
     const newLocalId = generateId()
     // The row belongs to its seed's wallet, like createMetadata's.
-    const publisher = await getSeedPublisher(seedLocalIdFromDb ?? seedLocalId)
+    const publisher = await getSeedPublisher(seedLocalIdFromDb ?? seedLocalId, appDb)
 
     await appDb.insert(metadata).values({
       localId: newLocalId,
@@ -221,20 +232,20 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   const newLocalId = generateId()
 
   if (!seedUid) {
-    const seedData = await getSeedData({ seedLocalId: seedLocalId || undefined })
+    const seedData = await getSeedData({ seedLocalId: seedLocalId || undefined }, appDb)
     if (seedData) {
       seedUid = seedData.uid || undefined
     }
   }
 
   if (!versionUid) {
-    const versionData = await getVersionData({ localId: versionLocalId })
+    const versionData = await getVersionData({ localId: versionLocalId }, appDb)
     if (versionData) {
       versionUid = versionData.uid
     }
   }
 
-  const publisher = await getSeedPublisher(seedLocalId)
+  const publisher = await getSeedPublisher(seedLocalId, appDb)
 
   await appDb.insert(metadata).values({
     localId: newLocalId,

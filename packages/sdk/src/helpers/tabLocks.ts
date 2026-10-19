@@ -62,6 +62,25 @@ export async function withTabLock<T>(
   }
 }
 
+/**
+ * Runs `fn` holding lock `name` only if no one holds it or waits for it now; otherwise runs nothing
+ * and returns `{ acquired: false }`. For work that has something else to do meanwhile (the outbox
+ * drainer).
+ */
+export async function tryWithTabLock<T>(
+  name: string,
+  fn: () => Promise<T>,
+): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
+  if (!locks) {
+    if (processLockTails.has(name)) return { acquired: false }
+    return { acquired: true, value: await withProcessLock(name, fn) }
+  }
+  return locks.request(name, { mode: 'exclusive', ifAvailable: true }, async (lock) =>
+    lock ? { acquired: true as const, value: await fn() } : { acquired: false as const },
+  )
+}
+
 /** Tail of each name's queue: resolves once every section queued so far has finished or given up. */
 const processLockTails = new Map<string, Promise<void>>()
 

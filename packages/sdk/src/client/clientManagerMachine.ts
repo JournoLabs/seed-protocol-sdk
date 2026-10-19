@@ -12,14 +12,14 @@ import { addModelsToStore } from "./actors/addModelsToStore"
 import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
-import { emitAcrossTabs } from "@/helpers/tabEvents"
+import { announceAddressesPersisted } from "@/client/addressesPersisted"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
 import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
 import { startAlignRowPublishers } from "@/db/alignRowPublishers"
 import { startClearStoredDisplayUrls } from "@/db/clearStoredDisplayUrls"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
+import { startItemOutbox } from "@/outbox"
 import {
-  ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
 } from "@/client/events"
 
@@ -104,7 +104,7 @@ function emitAddressesPersistedIfAddressesKey(event: {
 }) {
   if (event.key !== "addresses") return
   const payload = parseAddressesPersistedPayload(event.value)
-  emitAcrossTabs(ADDRESSES_PERSISTED_EVENT, payload)
+  announceAddressesPersisted(payload)
 }
 
 function errorFromEvent(event: unknown, fallbackMessage: string): Error {
@@ -300,6 +300,9 @@ export const clientManagerMachine = setup({
         () => startClearStoredDisplayUrls(),
         // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
         () => startCanonicalizeModelTypes(),
+        // Registers the item appliers and resumes outbox ops left pending (a reload, a closed
+        // leader tab) once this tab leads
+        () => startItemOutbox(),
       ],
       on: {
         [SAVE_APP_STATE_SUCCESS]: {

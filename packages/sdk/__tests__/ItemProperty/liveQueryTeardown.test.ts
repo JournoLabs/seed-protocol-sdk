@@ -84,11 +84,16 @@ describe.skipIf(typeof window === 'undefined')('ItemProperty liveQuery teardown'
   }
 
   it('destroy closes both liveQueries', async () => {
-    const { property, filters } = await createWatchedTitle('destroy')
+    const { item, property, filters } = await createWatchedTitle('destroy')
 
     await property.destroy()
 
     expect(property.getService().getSnapshot().status).toBe('stopped')
+    expectClosed(filters)
+    // The item stays loaded otherwise, and its own new title property would match the next test's
+    // definition-query filter (by model and property name, not by item)
+    item.unload()
+    await new Promise((resolve) => setTimeout(resolve, 300))
     expectClosed(filters)
   }, 30000)
 

@@ -17,7 +17,7 @@ export interface ClearDestroySubscriptionsConfig<T extends object> {
 
 /**
  * Unsubscribe the entity's liveQueries and any extra subscription (e.g. Item/ItemProperty
- * _subscription). Swallows errors so one failure doesn't block the rest.
+ * _subscription), and drop its instance state. Swallows errors so one failure doesn't block the rest.
  */
 export function clearDestroySubscriptions<T extends object>(
   instance: T,
@@ -34,6 +34,8 @@ export function clearDestroySubscriptions<T extends object>(
       // Ignore errors during cleanup
     }
   }
+  // Gone, so liveQuery setup still running (destroy waits for its write) finds nothing to subscribe for
+  config.instanceState.delete(instance)
   if (config.onUnload) {
     try {
       config.onUnload(instance)

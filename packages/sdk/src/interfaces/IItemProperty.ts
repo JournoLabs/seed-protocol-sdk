@@ -29,6 +29,11 @@ export interface IItemProperty<_PropertyType = any> {
   subscribe(callback: Partial<BehaviorSubject<any>>): Subscription;
   /** Shows `value` and saves it, even when it is already in context. See ItemProperty.setValue. */
   setValue(value: any, options?: { before?: import('@/types/property').PropertyValueSnapshot }): void;
+  /** The unresolved conflict between the last local edit and a value sync wrote meanwhile; null when none. */
+  /** Shows `value` without saving it; the next setValue or assignment saves. */
+  showValue(value: any): void;
+  readonly conflict: import('@/outbox/conflicts').PropertyConflict | null;
+  resolveConflict(choice: 'local' | 'remote'): Promise<void>;
   save(): Promise<void>;
   unload(): void;
   destroy(): Promise<void>;

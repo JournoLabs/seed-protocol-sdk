@@ -10,8 +10,13 @@ export const SQLITE_BUSY_RETRY_DELAYS_MS = [25, 75, 150, 300, 450]
  * SQLITE_BUSY ("database is locked") or SQLITE_LOCKED ("database table is locked").
  */
 export function isSqliteBusyError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /SQLITE_BUSY|SQLITE_LOCKED|database (table )?is locked/i.test(message)
+  // Drizzle wraps a driver's error ("Failed query: ...") and keeps it as `cause`
+  for (let current: unknown = error, depth = 0; current != null && depth < 5; depth++) {
+    const message = current instanceof Error ? current.message : String(current)
+    if (/SQLITE_BUSY|SQLITE_LOCKED|database (table )?is locked/i.test(message)) return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
 }
 
 /**

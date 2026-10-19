@@ -1,16 +1,16 @@
 import { ModelValues } from '@/types'
 // Dynamic import to break circular dependency: Model -> BaseItem -> createNewItem -> Model
 // import { Model } from '@/Model/Model'
-import { createSeed } from './createSeed'
-import { createVersion } from './createVersion'
-import { createMetadata } from './createMetadata'
+import { resolveNewSeedFields } from './createSeed'
+import { resolveMetadataSchemaUid } from './createMetadata'
 import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
-import {
-  getItemStorageFilePath,
-  withItemStorageFileLock,
-  writeItemStorageFile,
-} from '@/helpers/itemStorageFile'
+import { generateId } from '@/helpers/generateId'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
+import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
+import type { CreateItemOp, CreateItemResult } from '@/outbox/itemAppliers'
+import { timed } from '@/helpers/timing'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -24,6 +24,11 @@ type CreateNewItemReturnType = {
   versionLocalId: string
 }
 
+/**
+ * Writes a new item (ADR 0019): its seed, first version and a row per property go in one outbox op
+ * applied in one transaction, so a failure leaves nothing behind. ItemStorage initial values are
+ * staged first and moved into the item's files when the op applies.
+ */
 export const createNewItem = async ({
   modelName,
   modelFileId,
@@ -38,87 +43,99 @@ export const createNewItem = async ({
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const model = await Model.resolveAsync(modelName, { modelFileId })
+  const label = `createNewItem ${modelName}`
+  const model = await timed(`${label} model`, () => Model.resolveAsync(modelName, { modelFileId }))
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
   modelFileId ??= model?.id
 
-  const newSeedId = await createSeed({ type: seedType, modelFileId })
+  // Chosen now: ItemStorage files are named after it before the seed row exists
+  const seedLocalId = generateId()
 
-  try {
-    return await writeVersionAndRows(newSeedId)
-  } catch (error) {
-    // The rows are separate inserts (no transaction): remove what was written so a failure leaves
-    // no half-made draft.
-    const { discardNewDraft } = await import('./discardNewDraft')
-    await discardNewDraft(newSeedId).catch(() => undefined)
-    throw error
+  // Build set of all properties to create metadata for: union of model schema + propertyData
+  // This ensures we create metadata for ALL model properties even when creating with no initial values
+  // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
+  const allPropertyNames = new Set<string>(Object.keys(propertyData))
+  if (propertySchemas) {
+    for (const name of Object.keys(propertySchemas)) {
+      allPropertyNames.add(name)
+    }
   }
 
-  async function writeVersionAndRows(newSeedId: string): Promise<CreateNewItemReturnType> {
-    const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
+  // Resolved now: applying runs in a transaction and doesn't wait on EAS. One parallel round,
+  // not one indexer request per property in turn.
+  const schemaUids = new Map<string, string | undefined>()
+  await timed(`${label} schema lookups`, () =>
+    Promise.all(
+      [...allPropertyNames].map(async (propertyName) => {
+        const propertyRecordSchema = propertySchemas?.[propertyName]
+        if (!propertyRecordSchema || propertyRecordSchema.storageType === 'ItemStorage') return
+        schemaUids.set(
+          propertyName,
+          await resolveMetadataSchemaUid(
+            listRelationEasPropertyName(propertyName, propertyRecordSchema) ?? propertyName,
+            propertyRecordSchema,
+          ),
+        )
+      }),
+    ),
+  )
 
-    // Build set of all properties to create metadata for: union of model schema + propertyData
-    // This ensures we create metadata for ALL model properties even when creating with no initial values
-    // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
-    const allPropertyNames = new Set<string>(Object.keys(propertyData))
-    if (propertySchemas) {
-      for (const name of Object.keys(propertySchemas)) {
-        allPropertyNames.add(name)
-      }
-    }
-
+  const rows: CreateItemOp['rows'] = []
+  const stagedPaths: string[] = []
+  try {
     for (const propertyName of allPropertyNames) {
       const propertyValue = propertyData[propertyName]
       const propertyRecordSchema = propertySchemas?.[propertyName]
+      const isItemStorage = propertyRecordSchema?.storageType === 'ItemStorage'
 
       // ItemStorage content lives in the property's file (`<seedLocalId><extension>`), as a save puts
       // it; the row records where. Stored verbatim in the row, publish would never upload it.
-      const isItemStorageValue =
-        propertyRecordSchema?.storageType === 'ItemStorage' &&
-        propertyValue != null &&
-        propertyValue !== ''
-      const insertRow = (
-        storageFields?: { refResolvedValue: string; localStorageDir: string; refValueType: string },
-      ) =>
-        createMetadata(
-          {
-            seedLocalId: newSeedId,
-            versionLocalId: newVersionId,
-            propertyName,
-            propertyValue: storageFields ? undefined : propertyValue,
-            ...storageFields,
-            modelName,
-          } as Parameters<typeof createMetadata>[0],
+      if (isItemStorage && propertyValue != null && propertyValue !== '') {
+        const stagedPath = BaseFileManager.getFilesPath('staging', generateId())
+        await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('staging'))
+        await BaseFileManager.saveFile(stagedPath, propertyValue as string | Blob | ArrayBuffer)
+        stagedPaths.push(stagedPath)
+        const dir = getItemStorageSubdir(propertyRecordSchema.localStorageDir)
+        rows.push({
+          propertyName,
           propertyRecordSchema,
-          { skipValidation: true, modelFileId },
-        )
-
-      if (!isItemStorageValue) {
-        await insertRow()
+          itemStorage: {
+            stagedPath,
+            fileName: getItemStorageLocalFileName(seedLocalId, propertyRecordSchema.filenameSuffix),
+            localStorageDir: propertyRecordSchema.localStorageDir || `/${dir}`,
+          },
+        })
         continue
       }
 
-      // File and row under the file's lock, like every writer of a local draft's file (see
-      // withItemStorageFileLock). The seed is new, so nothing else should be writing it yet.
-      const target = {
-        seedId: newSeedId,
-        localStorageDir: propertyRecordSchema.localStorageDir,
-        filenameSuffix: propertyRecordSchema.filenameSuffix,
-      }
-      await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
-        const written = await writeItemStorageFile(target, propertyValue as string | Blob | ArrayBuffer)
-        await insertRow({
-          refResolvedValue: written.fileName,
-          localStorageDir: written.localStorageDir,
-          refValueType: 'file',
-        })
-      })
+      rows.push({ propertyName, propertyValue, propertyRecordSchema, schemaUid: schemaUids.get(propertyName) })
     }
 
-    return {
-      modelName,
-      seedLocalId: newSeedId,
-      versionLocalId: newVersionId,
+    const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+    startItemOutbox()
+    const fields = await timed(`${label} seed fields`, () => resolveNewSeedFields(seedType))
+    const applied = await timed(
+      `${label} outbox apply`,
+      () =>
+        appendOutboxOpAndWait<CreateItemResult>({
+          seedLocalId,
+          kind: 'create',
+          value: {
+            modelName,
+            seed: { type: seedType, modelFileId, fields },
+            rows,
+          } satisfies CreateItemOp,
+        }),
+      () => `(${rows.length} rows)`,
+    )
+    if (applied.superseded || !applied.result) {
+      throw new Error(`The new ${modelName} item was not written`)
     }
+    return { modelName, seedLocalId, versionLocalId: applied.result.versionLocalId }
+  } catch (error) {
+    // Staged values of a create that never got appended (once appended, the op's discard does it)
+    const { deleteFiles } = await import('@/outbox/itemAppliers')
+    await deleteFiles(stagedPaths)
+    throw error
   }
-} 
+}

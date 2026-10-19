@@ -140,6 +140,10 @@ export default defineConfig({
           dir: './packages/sdk/__tests__',
           env: {
             DEBUG: debugNamespaces,
+            // __tests__/bench/itemLatency.test.ts runs only when SEED_BENCH is set.
+            SEED_BENCH: process.env.SEED_BENCH ?? '',
+            SEED_BENCH_ITEMS: process.env.SEED_BENCH_ITEMS ?? '',
+            SEED_BENCH_EAS_MS: process.env.SEED_BENCH_EAS_MS ?? '',
           },
           setupFiles: [
             './packages/sdk/__tests__/setup.browser.ts',

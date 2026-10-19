@@ -29,6 +29,7 @@ import {
 } from '@/query/registerSeedQueryLocalSource'
 import { LOCAL_COPIES_REMOVED_EVENT } from '@/client/events'
 import { emitAcrossTabs } from '@/helpers/tabEvents'
+import { resetAddressesPersistedAnnouncement } from '@/client/addressesPersisted'
 import {
   findLocalOnchainCopiesForAddresses,
   hardDeleteLocalSeedsByLocalIds,
@@ -112,6 +113,7 @@ const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
   activeInitConfig = undefined
   cancelAllRetriesWhenOnline()
   unregisterSeedQueryLocalSource()
+  resetAddressesPersistedAnnouncement()
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()

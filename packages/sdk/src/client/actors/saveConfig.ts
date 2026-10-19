@@ -11,8 +11,7 @@ import { eq } from 'drizzle-orm'
 import { loadLocalDbChain } from '@/helpers/localDbChain'
 import { withSeedDbLock } from '@/helpers/tabLocks'
 import { isLeaderTab } from '@/helpers/tabCoordinator'
-import { emitAcrossTabs } from '@/helpers/tabEvents'
-import { ADDRESSES_PERSISTED_EVENT } from '@/client/events'
+import { announceAddressesPersisted } from '@/client/addressesPersisted'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
@@ -70,7 +69,7 @@ export async function persistInitAddresses(
     .onConflictDoUpdate({ target: appState.key, set: { value } })
   // Same event setAddresses emits, so listeners (e.g. React's session context) also see the
   // addresses init saved. Their sync is init's startup sync, which reads them from the DB.
-  emitAcrossTabs(ADDRESSES_PERSISTED_EVENT, { owned, watched })
+  announceAddressesPersisted({ owned, watched })
 }
 
 export const saveConfig = fromCallback<

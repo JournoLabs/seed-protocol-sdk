@@ -10,14 +10,19 @@ type GetVersionDataProps = {
 
 type GetVersionData = (
   props: GetVersionDataProps,
+  /** The database or transaction to read; the app database by default. */
+  db?: ReturnType<typeof BaseDb.getAppDb>,
 ) => Promise<VersionsType | undefined>
 
-export const getVersionData: GetVersionData = async ({
-  localId,
-  seedLocalId,
-  uid,
-}) => {
-  const appDb = BaseDb.getAppDb()
+export const getVersionData: GetVersionData = async (
+  {
+    localId,
+    seedLocalId,
+    uid,
+  },
+  db = BaseDb.getAppDb(),
+) => {
+  const appDb = db
 
   const whereClauses = []
 

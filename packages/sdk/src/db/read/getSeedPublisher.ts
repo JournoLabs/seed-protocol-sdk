@@ -9,9 +9,13 @@ import { resolvePublisherFromSeedRow } from '@/helpers/ownership'
  * attester of its stored attestation). Undefined for a draft that belongs to no wallet yet; those
  * rows are then claimed together with their seed (claimUnpublishedDrafts).
  */
-export async function getSeedPublisher(seedLocalId: string | null | undefined): Promise<string | undefined> {
+export async function getSeedPublisher(
+  seedLocalId: string | null | undefined,
+  /** The database or transaction to read; the app database by default. */
+  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
+): Promise<string | undefined> {
   if (!seedLocalId) return undefined
-  const appDb = BaseDb.getAppDb()
+  const appDb = db
   if (!appDb) return undefined
   const [row] = await appDb
     .select({ publisher: seeds.publisher, attestationRaw: seeds.attestationRaw, uid: seeds.uid })

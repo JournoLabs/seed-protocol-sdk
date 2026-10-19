@@ -11,4 +11,6 @@ export interface IDb {
   connectToDb(pathToDir: string): Promise<unknown>
   migrate(pathToDbDir: string, dbName: string, dbId: string): Promise<void>
   liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]>
+  /** Runs `fn` in one transaction; `fn` must run its queries on the `tx` it is given. */
+  transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>
 }

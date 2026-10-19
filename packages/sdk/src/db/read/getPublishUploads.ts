@@ -758,6 +758,9 @@ export const getPublishUploads = async (
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUpload[]> => {
+  // Every edit made before publishing is in `metadata` and its files first (ADR 0019)
+  const { waitForPendingOutboxOps } = await import('@/outbox')
+  await waitForPendingOutboxOps()
   const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
   // Each createTransaction fetches the price / anchor from the gateway: run a few at once.
   const created = await mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
