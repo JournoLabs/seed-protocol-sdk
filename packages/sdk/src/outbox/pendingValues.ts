@@ -57,6 +57,7 @@ export async function getPendingPropertyRows(
   if (!seedLocalId) return rows
   const db = BaseDb.getAppDb()
   if (!db) return rows
+  if (beforePendingRead && (await beforePendingRead(propertyNames))) beforePendingRead = undefined
   const names = propertyNames?.flatMap(propertyNameVariants)
   const ops: Array<Pick<OutboxOp, 'kind' | 'value' | 'propertyName'>> = await db
     .select({ kind: pendingWrites.kind, value: pendingWrites.value, propertyName: pendingWrites.propertyName })
@@ -101,7 +102,11 @@ export async function getPendingSetValue(
   seedLocalId: string | null | undefined,
   propertyName: string | null | undefined,
 ): Promise<string | null | undefined> {
-  const row = await getPendingPropertyRow(seedLocalId, propertyName)
+  return pendingSetValueOf(await getPendingPropertyRow(seedLocalId, propertyName))
+}
+
+/** A pending row's value when it comes from a `set` op (see getPendingSetValue). */
+export function pendingSetValueOf(row: PendingPropertyRow | undefined): string | null | undefined {
   if (!row || row.stagedPath || row.refSeedType) return undefined
   return row.propertyValue
 }
@@ -110,4 +115,17 @@ export async function getPendingSetValue(
 export function applyPendingRow<Row extends Partial<MetadataType>>(row: Row, pending: PendingPropertyRow): Row {
   const { stagedPath: _stagedPath, ...fields } = pending
   return { ...row, ...fields }
+}
+
+// --- Tests ------------------------------------------------------------------------------------
+
+type BeforePendingRead = (propertyNames: string[] | undefined) => Promise<boolean>
+let beforePendingRead: BeforePendingRead | undefined
+
+/**
+ * Tests only: runs `hook` just before each read of pending ops, with the property names it asks
+ * for (undefined for all of them), until the hook returns true.
+ */
+export function beforePendingReadForTests(hook: BeforePendingRead | undefined): void {
+  beforePendingRead = hook
 }

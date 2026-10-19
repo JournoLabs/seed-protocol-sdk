@@ -62,6 +62,11 @@ export const loadOrCreateProperty = fromCallback<
         ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
         : eq(metadataLatest.propertyName, propertyNames[0])
 
+    // A value whose outbox op hasn't applied yet (ADR 0019), read before the stored row: an op that
+    // applies between the two reads is then in one of them
+    const { applyPendingRow, getPendingPropertyRow, pendingSetValueOf } = await import('@/outbox/pendingValues')
+    const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
+
     const metadataRecords = await db
       .with(metadataLatest)
       .select()
@@ -102,9 +107,8 @@ export const loadOrCreateProperty = fromCallback<
         }
       }
       logger(`Metadata not found in database for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
-      // No row yet, but maybe a value waiting in the outbox (ADR 0019)
-      const { getPendingSetValue } = await import('@/outbox/pendingValues')
-      const pendingValue = (await getPendingSetValue(seedLocalId, propertyName)) ?? undefined
+      // No row yet, but maybe a value waiting in the outbox
+      const pendingValue = pendingSetValueOf(pendingFirst) ?? undefined
       sendBack({
         type: 'loadOrCreatePropertySuccess',
         property: {
@@ -131,9 +135,10 @@ export const loadOrCreateProperty = fromCallback<
       metadataRecords as (MetadataType & { refResolvedValue?: string | null; refSeedType?: string })[],
       propertyName
     )
-    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
-    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
-    const pending = await getPendingPropertyRow(metadataRecord.seedLocalId ?? seedLocalId, propertyName)
+    // An assigned value whose outbox op hasn't applied yet wins over the stored row
+    const pending = seedLocalId
+      ? pendingFirst
+      : await getPendingPropertyRow(metadataRecord.seedLocalId, propertyName)
     if (pending) Object.assign(metadataRecord, applyPendingRow({}, pending))
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
