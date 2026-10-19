@@ -5,7 +5,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, type MetadataType } from '@/seedSchema'
+import { metadata, pendingWrites, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { convertVerbatimItemStorageRow } from '@/db/write/convertVerbatimItemStorageRow'
 import { saveItemStorage } from '@/ItemProperty/service/actors/saveValueToDb/saveItemStorage'
@@ -141,9 +141,6 @@ const hasWebLocks = () => typeof navigator !== 'undefined' && !!navigator.locks
 
 const heldLockNames = async (): Promise<string[]> =>
   hasWebLocks() ? ((await navigator.locks.query()).held ?? []).map((lock) => lock.name ?? '') : []
-
-const pendingLockNames = async (): Promise<string[]> =>
-  hasWebLocks() ? ((await navigator.locks.query()).pending ?? []).map((lock) => lock.name ?? '') : []
 
 /**
  * - `web locks`: navigator.locks (Chromium; Node >= 24.5).
@@ -291,16 +288,22 @@ testDescribe('ItemStorage file write lock', () => {
         expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved</p>')
         expect(await convertVerbatimItemStorageRow(other.localId)).toBeUndefined()
 
-        // The held file's writers wait until it is released.
+        // The held file's writers wait until it is released, without holding up other files' saves:
+        // the drainer sets the held file's op aside and applies the ones after it.
         let saved = false
         const saving = save(held, '<p>held saved</p>').then(() => (saved = true))
-        if (mode === 'web locks') {
-          // The save has reached the lock and is queued behind the holder.
-          await vi.waitFor(
-            async () => expect(await pendingLockNames()).toContain(itemStorageFileLockName(held.filePath)),
-            { timeout: WAIT_TIMEOUT_MS },
-          )
-        }
+        await vi.waitFor(
+          async () =>
+            expect(
+              await db()
+                .select()
+                .from(pendingWrites)
+                .where(and(eq(pendingWrites.seedLocalId, held.seedLocalId), eq(pendingWrites.status, 'pending'))),
+            ).toHaveLength(1),
+          { timeout: WAIT_TIMEOUT_MS },
+        )
+        await save(other, '<p>other saved again</p>')
+        expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved again</p>')
         await settle()
         expect(saved).toBe(false)
         release()

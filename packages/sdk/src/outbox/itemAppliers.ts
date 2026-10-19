@@ -13,11 +13,12 @@ import { metadata, seeds, type MetadataType } from '@/seedSchema'
 import type { PropertyType } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
-import { getItemStorageFilePath, withItemStorageFileLock } from '@/helpers/itemStorageFile'
+import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
 import {
+  OutboxOpDeferredError,
   OutboxOpFailedError,
   outboxOpValue,
   registerOutboxApplier,
@@ -439,12 +440,15 @@ export function startItemOutbox(): void {
         await recordPropertyEdit(op, null, tx)
         return result
       },
-      // ItemStorage: the file's lock before the transaction, the order its other writers use
-      around: (op, run) => {
+      // ItemStorage: the file's lock before the transaction, the order its other writers use. Taken
+      // only when free: another writer holding it would otherwise hold up every other op.
+      around: async (op, run) => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
-        return value && isItemStorageOp(value)
-          ? withItemStorageFileLock(itemStorageTargetPath(op.seedLocalId, value.itemStorage), run)
-          : run()
+        if (!value || !isItemStorageOp(value)) return run()
+        const path = itemStorageTargetPath(op.seedLocalId, value.itemStorage)
+        const outcome = await tryWithItemStorageFileLock(path, run)
+        if (!outcome.acquired) throw new OutboxOpDeferredError(`ItemStorage file ${path} is locked`)
+        return outcome.value
       },
       discard: discardStorageValue,
     })

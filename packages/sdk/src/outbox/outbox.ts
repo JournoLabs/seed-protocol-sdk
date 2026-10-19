@@ -55,7 +55,9 @@ export type OutboxApplier<Prepared = unknown> = {
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
   /**
    * Wraps the op's transaction, for locks that must be taken before it: an ItemStorage file's
-   * lock, whose other writers take it before touching the database. Calls `run` once.
+   * lock, whose other writers take it before touching the database. Calls `run` once, or throws
+   * OutboxOpDeferredError without calling it when the lock is held, so the drainer isn't kept
+   * waiting while other ops could apply.
    */
   around?: <T>(op: OutboxOp, run: () => Promise<T>) => Promise<T>
   /**
@@ -85,6 +87,21 @@ const isRetryable = (error: unknown): boolean =>
   error instanceof OutboxOpRetryableError ||
   isSqliteBusyError(error) ||
   (error instanceof Error && RETRYABLE_ERROR_NAMES.has(error.name))
+
+/**
+ * An op that can't apply yet for a reason that will pass without counting as a failure: an applier's
+ * `around` found a lock held. The drainer sets the op (and its property's queue) aside for
+ * OUTBOX_DEFER_MS and goes on with other ops; its attempts aren't counted.
+ */
+export class OutboxOpDeferredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OutboxOpDeferredError'
+  }
+}
+
+/** How long a deferred op waits before the drainer tries it again. */
+export const OUTBOX_DEFER_MS = 50
 
 /** An op that can never apply (a broken rule, an item the client doesn't own). Not retried. */
 export class OutboxOpRejectedError extends Error {
@@ -424,6 +441,12 @@ async function applyUnit(unit: Unit): Promise<void> {
     discardAll(superseded)
   } catch (error) {
     if (error instanceof ClaimLostError) return
+    if (error instanceof OutboxOpDeferredError) {
+      logger(`op ${ids.join(', ')} deferred: ${error.message}`)
+      for (const id of ids) notBefore.set(id, Date.now() + OUTBOX_DEFER_MS)
+      scheduleRetry()
+      return
+    }
     await recordFailure(ops, superseded, error)
   }
 }

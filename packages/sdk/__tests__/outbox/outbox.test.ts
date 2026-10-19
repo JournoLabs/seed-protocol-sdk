@@ -14,6 +14,7 @@ import {
   outboxOpValue,
   registerOutboxApplier,
   waitForOutboxOp,
+  OutboxOpDeferredError,
   OutboxOpFailedError,
   OutboxOpRejectedError,
   OutboxOpRetryableError,
@@ -289,5 +290,35 @@ testDescribe('outbox', () => {
 
     const left = (await getOutboxOps(ids)).map((row) => row.opId).sort()
     expect(left).toEqual([failedRecent, conflict, pending, appliedRecent].sort())
+  })
+
+  it('an op whose lock is held is set aside without counting an attempt, and later ops apply meanwhile', async () => {
+    let deferrals = 2
+    unregister.push(
+      registerOutboxApplier('storage', {
+        around: async (_op, run) => {
+          if (deferrals > 0) {
+            deferrals--
+            throw new OutboxOpDeferredError('locked')
+          }
+          return run()
+        },
+        apply: async (op) => {
+          applied.push(`${op.propertyName}=${outboxOpValue(op)}`)
+        },
+      }),
+    )
+    const s = seed()
+    const locked = await appendOutboxOp({ seedLocalId: s, propertyName: 'notes', kind: 'storage', value: 'staged' })
+    const other = await appendOutboxOp({ seedLocalId: seed(), propertyName: 'title', kind: 'set', value: 'after' })
+
+    pauseOutboxDrainForTests(false)
+    await waitForOutboxOp(other)
+    await waitForOutboxOp(locked)
+
+    expect(applied).toEqual(['title=after', 'notes=staged'])
+    const [row] = await getOutboxOps([locked])
+    expect(row.attempts).toBe(0)
+    expect(row.status).toBe('applied')
   })
 })
