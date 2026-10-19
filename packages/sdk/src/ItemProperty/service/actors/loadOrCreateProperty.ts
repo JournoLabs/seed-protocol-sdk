@@ -3,7 +3,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, models, properties, type MetadataType } from '@/seedSchema'
+import { metadata, type MetadataType } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
 import { camelCase, upperFirst } from 'lodash-es'
@@ -145,7 +145,7 @@ export const loadOrCreateProperty = fromCallback<
     const modelName =
       context.modelName || (metadataRecord.modelType ? upperFirst(camelCase(metadataRecord.modelType)) : undefined)
     // Model names are only unique per schema: pin lookups to the item's own model row.
-    const { resolveItemModelFileId, resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+    const { resolveItemModelFileId } = await import('../../../db/read/resolveModelRecord')
     const modelFileId = await resolveItemModelFileId({
       modelFileId: context.modelFileId,
       seedLocalId: seedLocalId ?? metadataRecord.seedLocalId,
@@ -157,57 +157,11 @@ export const loadOrCreateProperty = fromCallback<
       try {
         // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
         const normalizedModelName = upperFirst(camelCase(modelName))
-        // Query properties table to get property schema
-        const modelRecord = await resolveModelRecord(normalizedModelName, { modelFileId }, db)
-        const modelRecords = modelRecord ? [modelRecord] : []
-        timing.mark('model record')
-
-        if (modelRecords.length > 0 && modelRecords[0].id) {
-          const propertyRecords = await db
-            .select()
-            .from(properties)
-            .where(
-              and(
-                eq(properties.modelId, modelRecords[0].id),
-                eq(properties.name, propertyName)
-              )
-            )
-            .limit(1)
-          timing.mark('property record')
-
-          if (propertyRecords.length > 0) {
-            const propRecord = propertyRecords[0]
-            // properties table has refModelId but not refModelName; resolve ref model name when refModelId is set
-            let refModelName: string | undefined
-            if (propRecord.refModelId != null) {
-              const refModelRows = await db
-                .select({ name: models.name })
-                .from(models)
-                .where(eq(models.id, propRecord.refModelId))
-                .limit(1)
-              refModelName = refModelRows[0]?.name ?? undefined
-            }
-            propertyRecordSchema = {
-              id: propRecord.id,
-              dataType: propRecord.dataType,
-              ref: refModelName ?? undefined,
-              refValueType: propRecord.refValueType || undefined,
-              storageType: propRecord.storageType || undefined,
-              localStorageDir: propRecord.localStorageDir || undefined,
-              filenameSuffix: propRecord.filenameSuffix || undefined,
-              required: (propRecord as { required?: boolean }).required ?? undefined,
-            }
-            // Validation rules (enum, pattern, ...) aren't in the properties table
-            const { resolvePropertyValidationRules } = await import('../../../helpers/propertyValidationRules')
-            const validation = await resolvePropertyValidationRules(normalizedModelName, propertyName, {
-              modelFileId: modelRecord?.schemaFileId ?? modelFileId,
-            })
-            timing.mark('validation rules')
-            if (validation) {
-              propertyRecordSchema = { ...propertyRecordSchema, validation }
-            }
-          }
-        }
+        // One read for the whole model, shared by the item's other properties loading now
+        const { loadModelPropertyRecordSchemas } = await import('./modelPropertyRecordSchemas')
+        const schemas = await loadModelPropertyRecordSchemas(normalizedModelName, modelFileId, db)
+        propertyRecordSchema = schemas.get(propertyName)
+        timing.mark('model schema')
       } catch (error) {
         logger(`Error loading propertyRecordSchema from database: ${error}`)
         // Continue without propertyRecordSchema
