@@ -183,6 +183,13 @@ function syncPropertyHolds(itemService: object, propertyInstances: Map<PropertyK
   }
 }
 
+/** When the item's actor stops: its holds, then its properties nobody holds (see unloadUnheldForItem). */
+function releaseItemProperties(itemService: ActorRefFrom<typeof itemMachineSingle>): void {
+  releasePropertyHolds(itemService)
+  const { seedLocalId, seedUid } = itemService.getSnapshot().context
+  ItemProperty.unloadUnheldForItem([seedLocalId, seedUid])
+}
+
 function releasePropertyHolds(itemService: object): void {
   const held = propertyHolds.get(itemService)
   if (!held) return
@@ -281,8 +288,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const itemService = this._service
     itemService.subscribe({
       next: (snapshot) => syncPropertyHolds(itemService, snapshot.context?.propertyInstances),
-      complete: () => releasePropertyHolds(itemService),
-      error: () => releasePropertyHolds(itemService),
+      complete: () => releaseItemProperties(itemService),
+      error: () => releaseItemProperties(itemService),
     })
 
     this._service.start()
@@ -882,7 +889,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return proxiedInstance
   }
 
-  /** Stops a just-created item and deletes what create wrote (see discardNewDraft). */
+  /**
+   * Stops a just-created item and deletes what create wrote: a `discard` outbox op (ADR 0019),
+   * applied after the item's other pending ops, hard-deletes the draft and the storage seeds its
+   * rows point at; their files go once it has applied.
+   */
   private static async discardCreatedItem(item: Item<any>, seedLocalId: string): Promise<void> {
     try {
       this.dropCachedInstancesForSeedIds([seedLocalId])
@@ -890,8 +901,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       /* best-effort cache cleanup */
     }
     try {
-      const { discardNewDraft } = await import('@/db/write/discardNewDraft')
-      await discardNewDraft(seedLocalId)
+      const { appendOutboxOpAndWait, deleteFiles, startItemOutbox } = await import('@/outbox')
+      startItemOutbox()
+      const applied = await appendOutboxOpAndWait<import('@/outbox').DeleteResult>({
+        seedLocalId,
+        kind: 'delete',
+        value: { mode: 'discard' } satisfies import('@/outbox').DeleteOp,
+      })
+      if (!applied.superseded) await deleteFiles(applied.result?.filePaths ?? [])
     } catch (error) {
       itemLogger(`Item.create: could not remove the draft ${seedLocalId} after a failure:`, error)
     }
@@ -1250,6 +1267,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 modelName: itemModelName,
                 hold: false,
               })
+              // The item stopped while the lookup ran: it can't take its hold, so nothing would
+              if (property && isActorStopped(svc)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
               if (property) {
                 sendToItemMachine({
                   type: 'addPropertyInstance',
@@ -1948,6 +1967,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                     modelName: itemModelName,
                     hold: false,
                   })
+                  // The item stopped while the lookup ran: it can't take its hold, so nothing would
+                  if (property && isActorStopped(this._service)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
                   if (property) {
                     logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
                   }
@@ -2132,6 +2153,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                         modelName: itemModelName,
                         hold: false,
                       })
+                      // The item stopped while the lookup ran: it can't take its hold, so nothing would
+                      if (property && isActorStopped(this._service)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
                       if (property) {
                         sendToItemMachine({
                           type: 'addPropertyInstance',
@@ -2264,9 +2287,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       getService: (instance) =>
         instance._service as { send: (ev: unknown) => void; stop: () => void },
       doDestroy: async () => {
-        await deleteItem({
+        if (!context.seedLocalId) {
+          await deleteItem({ seedUid: context.seedUid })
+          return
+        }
+        // Through the outbox (ADR 0019): after the item's pending edits, not before them
+        const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+        startItemOutbox()
+        await appendOutboxOpAndWait({
           seedLocalId: context.seedLocalId,
-          seedUid: context.seedUid,
+          kind: 'delete',
+          value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
         })
       },
     })

@@ -7,12 +7,11 @@ import {
   PropertyMachineContext,
   SaveValueToDbEvent,
 } from '@/types/property'
-import { createSeed } from '@/db/write/createSeed'
+import { resolveNewSeedFields } from '@/db/write/createSeed'
+import { generateId } from '@/helpers/generateId'
+import { writeStorageValue } from './storageValue'
+import { beginPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
 import { getDataTypeFromString, getMimeType, toMetadataPropertyName } from '@/helpers'
-import { createVersion } from '@/db/write/createVersion'
-import { createMetadata } from '@/db/write/createMetadata'
-import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { rowContext } from './rowContext'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -55,6 +54,10 @@ export const saveImage = fromCallback<
 
   // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
   // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
+
+  // Taken when the save starts: a newer save of the property makes this one drop its value
+  const writeKey = propertyWriteKey(seedLocalId ?? seedUid, propertyNameRaw)
+  const writeTicket = writeKey ? beginPropertyWrite(writeKey) : undefined
 
   const _saveImage = async (): Promise<void> => {
     if (!propertyNameRaw) {
@@ -122,10 +125,8 @@ export const saveImage = fromCallback<
       throw new Error('No file data found')
     }
 
-    const newImageSeedLocalId = await createSeed({
-      type: 'image',
-      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
-    })
+    // Named now so the file can be named after it; the seed row is written when the op applies
+    const newImageSeedLocalId = generateId()
 
     if (!fileName) {
       fileName = newImageSeedLocalId
@@ -139,11 +140,6 @@ export const saveImage = fromCallback<
     const filePath = BaseFileManager.getFilesPath('images', fileName)
 
     await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
-
-    await createVersion({
-      seedLocalId: newImageSeedLocalId,
-      seedType: 'image',
-    })
 
     if (fileData instanceof ArrayBuffer) {
       try {
@@ -167,7 +163,64 @@ export const saveImage = fromCallback<
       }
     }
 
-    // Resize image (skip for existing file reference - file may already have sized versions)
+    const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
+
+    const resolvedPropertySchemaUid =
+      schemaUid && schemaUid !== imageSchemaUid
+        ? schemaUid
+        : (await getEasSchemaForItemProperty({
+            propertyName,
+            easDataType: 'bytes32',
+          }))?.id
+
+    const written = await writeStorageValue(
+      { seedLocalId, seedUid, propertyName },
+      {
+        storageSeed: {
+          localId: newImageSeedLocalId,
+          type: 'image',
+          modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
+          fields: await resolveNewSeedFields('image'),
+        },
+        // A reference to a file that was already there isn't this value's to delete
+        ownedFilePath: isExistingFileReference ? undefined : filePath,
+        create: {
+          values: {
+            propertyName,
+            propertyValue: newImageSeedLocalId,
+            seedUid,
+            versionLocalId,
+            versionUid,
+            modelName,
+            schemaUid: resolvedPropertySchemaUid,
+            refSeedType: 'image',
+            refModelUid: imageSchemaUid,
+            refResolvedValue: fileName,
+            localStorageDir: '/images',
+            easDataType: 'bytes32',
+          },
+          propertyRecordSchema,
+        },
+        update: {
+          newValue: newImageSeedLocalId,
+          versionLocalId,
+          modelName,
+          schemaUid: resolvedPropertySchemaUid,
+          refSeedType: 'image',
+          refResolvedValue: fileName,
+          refModelUid: imageSchemaUid,
+          localStorageDir: '/images',
+          easDataType: 'bytes32',
+          dataType: 'Image',
+        },
+      },
+      writeTicket,
+    )
+    // A newer value superseded this one; its save sets the context
+    if (written.skipped) return
+
+    // Resize the image now it's stored (not for a reference to an existing file, which may already
+    // have sized versions, nor for a value a newer one superseded: its file is gone)
     // Resize may not be implemented in all environments (e.g. Node); continue save if it fails
     if (!isExistingFileReference) {
       try {
@@ -189,65 +242,10 @@ export const saveImage = fromCallback<
       }
     }
 
-    const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
-
-    let newLocalId
-    const resolvedPropertySchemaUid =
-      schemaUid && schemaUid !== imageSchemaUid
-        ? schemaUid
-        : (await getEasSchemaForItemProperty({
-            propertyName,
-            easDataType: 'bytes32',
-          }))?.id
-
-    if (!localId) {
-      const result = await createMetadata(
-        {
-          propertyName,
-          propertyValue: newImageSeedLocalId,
-          seedLocalId,
-          seedUid,
-          versionLocalId,
-          versionUid,
-          modelName,
-          schemaUid: resolvedPropertySchemaUid,
-          refSeedType: 'image',
-          refModelUid: imageSchemaUid,
-          refResolvedValue: fileName,
-          localStorageDir: '/images',
-          easDataType: 'bytes32',
-        },
-        propertyRecordSchema,
-      )
-
-      if (result && result.localId) {
-        newLocalId = result.localId
-      }
-    }
-
-    let writtenRow: Partial<PropertyMachineContext> = {}
-    if (localId) {
-      writtenRow = rowContext(await updateItemPropertyValue({
-        localId: localId,
-        propertyName,
-        newValue: newImageSeedLocalId,
-        seedLocalId,
-        versionLocalId,
-        modelName,
-        schemaUid: resolvedPropertySchemaUid,
-        refSeedType: 'image',
-        refResolvedValue: fileName,
-        refModelUid: imageSchemaUid,
-        localStorageDir: '/images',
-        easDataType: 'bytes32',
-        dataType: 'Image',
-      } as any)) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
-    }
-
     sendBack({
       type: 'updateContext',
-      localId: newLocalId || localId,
-      ...writtenRow,
+      localId,
+      ...written.row,
       propertyValue: newImageSeedLocalId,
       refSeedType: 'image',
       refSchemaUid: imageSchemaUid,
@@ -261,6 +259,7 @@ export const saveImage = fromCallback<
   }
 
   _saveImage()
+    .finally(() => writeTicket?.end())
     .then(() => sendBack({ type: 'saveImageSuccess' }))
     .catch((error) => sendBack({ type: 'saveImageError', error }))
 })

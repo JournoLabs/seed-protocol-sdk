@@ -4,11 +4,12 @@ import {
   arweaveL1FinalizeJobs,
   htmlEmbeddedImageCoPublish,
   metadata,
+  pendingWrites,
   publishProcesses,
   seeds,
   versions,
 } from '@/seedSchema'
-import { inArray, isNotNull, or } from 'drizzle-orm'
+import { and, inArray, isNotNull, ne, or } from 'drizzle-orm'
 
 export type RemoveLocalCopiesResult = {
   removedSeedLocalIds: string[]
@@ -82,16 +83,31 @@ export async function findLocalOnchainCopiesForAddresses(
 }
 
 /**
- * Hard-delete the given seed local ids and related local rows (cascade).
+ * Hard-delete the given seed local ids and related local rows (cascade), their outbox ops included
+ * (ADR 0019: an edit of a removed seed has nothing left to apply to; a waiter on one rejects).
  * Does not touch schemas, app_state, or chain.
  */
 export async function hardDeleteLocalSeedsByLocalIds(
   seedLocalIds: string[],
+  options: {
+    /** The database or transaction to write; the app database by default. */
+    db?: ReturnType<typeof BaseDb.getAppDb>
+    /** An outbox op to keep: the one whose applier is deleting these seeds. */
+    keepOpId?: string
+  } = {},
 ): Promise<void> {
   if (seedLocalIds.length === 0) return
 
-  const appDb = BaseDb.getAppDb()
+  const appDb = options.db ?? BaseDb.getAppDb()
   if (!appDb) return
+
+  await appDb
+    .delete(pendingWrites)
+    .where(
+      options.keepOpId
+        ? and(inArray(pendingWrites.seedLocalId, seedLocalIds), ne(pendingWrites.opId, options.keepOpId))
+        : inArray(pendingWrites.seedLocalId, seedLocalIds),
+    )
 
   await appDb
     .delete(htmlEmbeddedImageCoPublish)

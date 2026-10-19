@@ -109,7 +109,11 @@ export const hydrateFromDb = fromCallback<
       return
     }
 
-    const firstRow = rows[0]
+    const firstRow = { ...rows[0] }
+    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019)
+    const { getPendingSetValue } = await import('@/outbox/pendingValues')
+    const pendingValue = await getPendingSetValue(firstRow.seedLocalId ?? seedLocalId, propertyName)
+    if (pendingValue !== undefined) firstRow.propertyValue = pendingValue
 
     const {
       localId,

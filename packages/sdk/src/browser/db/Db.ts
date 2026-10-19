@@ -10,7 +10,7 @@ import { BaseFileManager } from "@/helpers";
 import { DatabaseNotPersistentError } from "@/helpers/FileManager/errors";
 import * as schema from '@/seedSchema'
 import { SQLocalDrizzle } from 'sqlocal/drizzle'
-import {} from 'sqlocal'
+import type { Sqlite3Method } from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
@@ -323,6 +323,30 @@ export class BrowserDb implements IDb {
       for (const query of statements) {
         await tx.query({ sql: query, params: [] })
       }
+    })
+  }
+
+  /**
+   * One SQLocal transaction (Drizzle's own `transaction()` isn't isolated over the SQLocal
+   * driver). `fn` gets a Drizzle database whose statements SQLocal runs in the transaction: each
+   * is handed to the transaction's `query` shaped as a Drizzle statement, so SQLocal tags it with
+   * the transaction and runs it through its driver, and the raw result goes back to Drizzle.
+   */
+  async transaction<T>(fn: (tx: SqliteRemoteDatabase<Record<string, unknown>>) => Promise<T>): Promise<T> {
+    const sqlocal = this.sqlocalInstance
+    if (!sqlocal || !this.appDb) throw new Error('Database not prepared')
+    return sqlocal.transaction(async (handle) => {
+      const txDriver = async (sqlText: string, params: unknown[], method: Sqlite3Method) => {
+        const statement = {
+          getSQL: () => undefined,
+          toSQL: () => ({ sql: sqlText, params }),
+          // Called synchronously by `query` right after it queues the transaction's key, which
+          // the driver takes before its first await.
+          all: () => sqlocal.driver(sqlText, params, method),
+        }
+        return (await handle.query(statement as never)) as unknown as { rows: any[] }
+      }
+      return fn(drizzle(txDriver, { schema }))
     })
   }
 

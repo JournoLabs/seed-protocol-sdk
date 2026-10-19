@@ -7,10 +7,14 @@ type GetSeedDataProps = {
   seedUid?: string
 }
 
-type GetSeedData = (props: GetSeedDataProps) => Promise<SeedType | undefined>
+type GetSeedData = (
+  props: GetSeedDataProps,
+  /** The database or transaction to read; the app database by default. */
+  db?: ReturnType<typeof BaseDb.getAppDb>,
+) => Promise<SeedType | undefined>
 
-export const getSeedData: GetSeedData = async ({ seedLocalId, seedUid }) => {
-  const appDb = BaseDb.getAppDb()
+export const getSeedData: GetSeedData = async ({ seedLocalId, seedUid }, db = BaseDb.getAppDb()) => {
+  const appDb = db
 
   let query
 

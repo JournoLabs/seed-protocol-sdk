@@ -6,6 +6,7 @@ import debug from 'debug'
 import { appState } from '@/seedSchema'
 import fs from 'fs'
 import { createClient } from '@libsql/client'
+import { createSingleConnectionTransactions } from './singleConnectionTransactions'
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
@@ -110,6 +111,13 @@ export class NodeDb implements IDb {
     return !!this.db
   }
 
+  transactions: ReturnType<typeof createSingleConnectionTransactions> | undefined
+
+  async transaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    if (!this.db || !this.transactions) throw new Error('Database not prepared')
+    return this.transactions.transaction(fn)
+  }
+
   /**
    * Copy prebuilt SQL migrations into the app db directory (overwrite to stay current).
    */
@@ -148,6 +156,10 @@ export class NodeDb implements IDb {
     }
 
     const client = createClient({ url: dbUrl })
+    // One connection for everything, transactions included (see singleConnectionTransactions)
+    this.transactions = createSingleConnectionTransactions(client, schema)
+    // Readers in other processes (a CLI on the same file) don't block a commit in WAL
+    if (localDbFilePath(dbUrl)) await client.execute('PRAGMA journal_mode = WAL')
     const db = drizzle(client, { schema })
 
     logger('[Db.prepareDb] running migrations from %s', outDir)

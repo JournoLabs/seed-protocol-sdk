@@ -1673,6 +1673,9 @@ export const getPublishPayload = async (
   uploadedTransactions: UploadedTransaction[],
   options?: GetPublishPayloadOptions,
 ): Promise<MultiPublishPayload> => {
+  // Every edit made before publishing is in `metadata` first (ADR 0019)
+  const { waitForPendingOutboxOps } = await import('@/outbox')
+  await waitForPendingOutboxOps()
   const validationCtx: PublishValidationContext = { errors: [] }
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
   // A revoked seed can't be published under again: republishing creates a new seed attestation

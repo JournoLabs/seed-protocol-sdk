@@ -4,8 +4,10 @@ import {
   models as modelsTable,
   NewModelRecord,
   NewPropertyRecord,
+  pendingWrites,
   properties,
   PropertyType,
+  seeds,
 } from '@/seedSchema'
 import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
@@ -13,7 +15,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
 import { easName } from '@seedprotocol/eas'
 import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
-import { and, eq, isNull, SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -75,14 +77,15 @@ const hasStorageSettings = (columns: PropertyStorageColumns): boolean =>
 /**
  * Resolve property_id (integer properties.id) from a property's schemaFileId (the string `id` in
  * schema files and propertyRecordSchema). Scoped to the model since schemaFileIds are per schema file.
+ * Reads `db` (a transaction's `tx`, say), the app database by default.
  * @returns properties.id or null if not found
  */
 export async function getPropertyIdForSchemaFileId(
   modelNameOrType: string,
   schemaFileId: string,
   scope: ModelScope = {},
+  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
 ): Promise<number | null> {
-  const db = BaseDb.getAppDb()
   if (!db || !modelNameOrType || !schemaFileId) return null
   const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
   if (!modelRecord) return null
@@ -100,14 +103,15 @@ export async function getPropertyIdForSchemaFileId(
  * @param modelNameOrType - Model name (PascalCase) or model type (snake_case)
  * @param propertyName - Property name as stored in metadata (may have Id/Ids suffix)
  * @param scope - Which model is meant when several schemas define one with this name
+ * @param db - The database or transaction to read; the app database by default
  * @returns properties.id or null if not found
  */
 export async function getPropertyIdForModelAndName(
   modelNameOrType: string,
   propertyName: string,
   scope: ModelScope = {},
+  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
 ): Promise<number | null> {
-  const db = BaseDb.getAppDb()
   if (!db) return null
   if (!modelNameOrType || !propertyName) return null
 
@@ -242,6 +246,21 @@ export async function migrateMetadataForPropertyRename(
       `[migrateMetadataForPropertyRename] Fallback updated ${updatedByFallback} rows (propertyId was null)`,
     )
   }
+
+  // Edits of the property still in the outbox (ADR 0019) apply under its new name
+  await db
+    .update(pendingWrites)
+    .set({ propertyName: newPropertyName })
+    .where(
+      and(
+        eq(pendingWrites.propertyName, oldPropertyName),
+        eq(pendingWrites.status, 'pending'),
+        inArray(
+          pendingWrites.seedLocalId,
+          db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, modelType)),
+        ),
+      ),
+    )
 
   const total = updatedByPropertyId + updatedByFallback
   if (total > 0) {
