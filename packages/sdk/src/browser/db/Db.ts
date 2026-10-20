@@ -21,10 +21,7 @@ const logger = debug('seedSdk:browser:db:Db')
 
 export class BrowserDb implements IDb {
 
-  sqliteWasmClient: any
   filesDir: string | undefined
-  pathToDb: string | undefined
-  dbId: string | undefined
   appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
   sqlocalInstance: SQLocalDrizzle | undefined
   /** Live queries by SQL + params while they have subscribers; see liveQuery. */
@@ -168,85 +165,8 @@ export class BrowserDb implements IDb {
     }
   }
 
-  // static async prepareDb(filesDir: string) {
-  //   console.log('prepareDb', filesDir)
-  //   if (Db.sqliteWasmClient) {
-  //     return this.dbId
-  //   }
-
-  //   this.filesDir = filesDir
-  //   this.pathToDb = `${filesDir}/db/${DB_NAME_APP}.db`
-
-  //   if (typeof document === 'undefined') {
-  //     return
-  //   }
-
-  //   let promiser
-
-  //   try {
-
-  //       let sqlite3Worker1Promiser
-
-  //       const sqliteWasm = await import('@sqlite.org/sqlite-wasm')
-
-  //       if (sqliteWasm && sqliteWasm.sqlite3Worker1Promiser) {
-  //         sqlite3Worker1Promiser = sqliteWasm.sqlite3Worker1Promiser
-  //       }
-
-  //       if (!sqlite3Worker1Promiser && window.sqlite3Worker1Promiser) {
-  //         sqlite3Worker1Promiser = window.sqlite3Worker1Promiser
-  //       }
-
-  //       if (!sqlite3Worker1Promiser) {
-  //         throw new Error('Failed to load sqlite3Worker1Promiser')
-  //       }
-
-  //       promiser = await new Promise<(event: string, config: Record<string, unknown>) => Promise<any>>((resolve) => {
-  //         const _promiser = sqlite3Worker1Promiser({
-  //           onready: () => {
-  //             resolve(_promiser);
-  //           },
-  //         });
-  //       }).catch((error) => {
-  //         console.error('Error from sqlite proxy server: ', JSON.stringify(error))
-  //       });
-
-  //   } catch ( e ) {
-  //     console.error('Error from sqlite proxy server: ', JSON.stringify(e))
-  //   }
-
-
-  //   if (!promiser) {
-  //     throw new Error('Failed to create promiser')
-  //   }
-
-  //   this.sqliteWasmClient = promiser
-
-  //   const responseGet = await this.sqliteWasmClient('config-get', {});
-
-  //   logger('[Db.prepareDb] Running SQLite3 version', responseGet.result.version.libVersion);
-
-  //   const responseOpen = await this.sqliteWasmClient('open', {
-  //     filename: `file:${filesDir}/db/${DB_NAME_APP}.db?vfs=opfs`,
-  //   });
-  //   const { dbId } = responseOpen;
-  //   logger(
-  //     '[Db.prepareDb] OPFS is available, created persisted database at',
-  //     responseOpen.result.filename.replace(/^file:(.*?)\?vfs=opfs/, '$1'),
-  //   );
-
-  //   logger('[Db.prepareDb] dbId', dbId)
-    
-  //   this.dbId = dbId
-    
-  //   await this.migrate()
-  // }
-
-  async connectToDb(_filesDir: string,): Promise<string | undefined> {
-
-
-
-    return this.dbId
+  async connectToDb(_filesDir: string): Promise<string | undefined> {
+    return undefined
   }
 
   async copyDrizzleFiles(filesDir: string): Promise<void> {
