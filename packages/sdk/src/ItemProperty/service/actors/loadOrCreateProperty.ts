@@ -3,7 +3,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, models, properties, type MetadataType } from '@/seedSchema'
+import { metadata, type MetadataType } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
 import { camelCase, upperFirst } from 'lodash-es'
@@ -16,6 +16,7 @@ import {
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
+import { timingMarks } from '@/helpers/timing'
 import { ensureImageLocal } from '@/helpers/ensureImageLocal'
 import { ImageSize } from '@/helpers/constants'
 import { downloadTransactionIdWithDedupe } from '@/events/files/download'
@@ -48,6 +49,8 @@ export const loadOrCreateProperty = fromCallback<
     if (!db) {
       throw new Error('Database not available')
     }
+    const timing = timingMarks()
+    const timingLabel = `property ${seedLocalId ?? seedUid} ${propertyName} loadOrCreateProperty`
 
     // Use getMetadataLatest subquery pattern to get the latest metadata record for the property
     const metadataLatest = getMetadataLatest({ 
@@ -66,6 +69,7 @@ export const loadOrCreateProperty = fromCallback<
     // applies between the two reads is then in one of them
     const { applyPendingRow, getPendingPropertyRow, pendingSetValueOf } = await import('@/outbox/pendingValues')
     const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
+    timing.mark('pending value')
 
     const metadataRecords = await db
       .with(metadataLatest)
@@ -73,6 +77,7 @@ export const loadOrCreateProperty = fromCallback<
       .from(metadataLatest)
       .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
       .limit(5)
+    timing.mark('metadata')
 
     if (metadataRecords.length === 0) {
       // Metadata not found - this is a new property, will be created elsewhere.
@@ -148,65 +153,23 @@ export const loadOrCreateProperty = fromCallback<
     const modelName =
       context.modelName || (metadataRecord.modelType ? upperFirst(camelCase(metadataRecord.modelType)) : undefined)
     // Model names are only unique per schema: pin lookups to the item's own model row.
-    const { resolveItemModelFileId, resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+    const { resolveItemModelFileId } = await import('../../../db/read/resolveModelRecord')
     const modelFileId = await resolveItemModelFileId({
       modelFileId: context.modelFileId,
       seedLocalId: seedLocalId ?? metadataRecord.seedLocalId,
       seedUid: seedUid ?? metadataRecord.seedUid,
       propertyId: metadataRecord.propertyId,
     })
+    timing.mark('model file id')
     if (modelName) {
       try {
         // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
         const normalizedModelName = upperFirst(camelCase(modelName))
-        // Query properties table to get property schema
-        const modelRecord = await resolveModelRecord(normalizedModelName, { modelFileId }, db)
-        const modelRecords = modelRecord ? [modelRecord] : []
-
-        if (modelRecords.length > 0 && modelRecords[0].id) {
-          const propertyRecords = await db
-            .select()
-            .from(properties)
-            .where(
-              and(
-                eq(properties.modelId, modelRecords[0].id),
-                eq(properties.name, propertyName)
-              )
-            )
-            .limit(1)
-
-          if (propertyRecords.length > 0) {
-            const propRecord = propertyRecords[0]
-            // properties table has refModelId but not refModelName; resolve ref model name when refModelId is set
-            let refModelName: string | undefined
-            if (propRecord.refModelId != null) {
-              const refModelRows = await db
-                .select({ name: models.name })
-                .from(models)
-                .where(eq(models.id, propRecord.refModelId))
-                .limit(1)
-              refModelName = refModelRows[0]?.name ?? undefined
-            }
-            propertyRecordSchema = {
-              id: propRecord.id,
-              dataType: propRecord.dataType,
-              ref: refModelName ?? undefined,
-              refValueType: propRecord.refValueType || undefined,
-              storageType: propRecord.storageType || undefined,
-              localStorageDir: propRecord.localStorageDir || undefined,
-              filenameSuffix: propRecord.filenameSuffix || undefined,
-              required: (propRecord as { required?: boolean }).required ?? undefined,
-            }
-            // Validation rules (enum, pattern, ...) aren't in the properties table
-            const { resolvePropertyValidationRules } = await import('../../../helpers/propertyValidationRules')
-            const validation = await resolvePropertyValidationRules(normalizedModelName, propertyName, {
-              modelFileId: modelRecord?.schemaFileId ?? modelFileId,
-            })
-            if (validation) {
-              propertyRecordSchema = { ...propertyRecordSchema, validation }
-            }
-          }
-        }
+        // One read for the whole model, shared by the item's other properties loading now
+        const { loadModelPropertyRecordSchemas } = await import('./modelPropertyRecordSchemas')
+        const schemas = await loadModelPropertyRecordSchemas(normalizedModelName, modelFileId, db)
+        propertyRecordSchema = schemas.get(propertyName)
+        timing.mark('model schema')
       } catch (error) {
         logger(`Error loading propertyRecordSchema from database: ${error}`)
         // Continue without propertyRecordSchema
@@ -405,6 +368,8 @@ export const loadOrCreateProperty = fromCallback<
       renderValue = propertyValueOut
     }
 
+    timing.mark('value')
+    timing.log(timingLabel)
     // Return loaded property data (use propertyName from context to match schema key, e.g. "html" not "htmlId")
     sendBack({
       type: 'loadOrCreatePropertySuccess',

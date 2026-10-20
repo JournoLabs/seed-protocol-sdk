@@ -381,7 +381,9 @@ export async function getTestProjectPath(): Promise<string> {
     const fs = await import('fs')
     
     // Create a unique temporary directory
-    const tmpDir = os.tmpdir()
+    // The NodeJS project's globalSetup provides a per-run parent dir and removes it after the run.
+    const { inject } = await import('vitest')
+    const tmpDir = inject('seedTestRunDir') ?? os.tmpdir()
     const testDirName = `seed-test-${Date.now()}-${Math.random().toString(36).substring(7)}`
     const testProjectPath = path.join(tmpDir, testDirName)
     
@@ -560,42 +562,12 @@ export async function setupTestEnvironment(options: {
     await BaseDb.getAppDb()?.delete(appState).where(eq(appState.key, 'addresses'))
   }
 
-  // Store test project path for cleanup if it's a temporary directory
-  if (isNodeEnv && testProjectPath && !options.projectPath) {
-    const os = await import('os')
-    const tmpDir = os.tmpdir()
-    // Only track for cleanup if it's in the temp directory
-    if (testProjectPath.startsWith(tmpDir)) {
-      testProjectPathForCleanup = testProjectPath
-    }
-  }
-  
   // Return the test project path so tests can use it
   return testProjectPath
 }
 
-// Store test project path for cleanup
-let testProjectPathForCleanup: string | undefined
-
-const tempDirsToRemoveOnExit = new Set<string>()
-
-function scheduleTempDirCleanup(dir: string, fs: typeof import('fs')): void {
-  if (tempDirsToRemoveOnExit.size === 0) {
-    process.once('exit', () => {
-      for (const d of tempDirsToRemoveOnExit) {
-        try {
-          fs.rmSync(d, { recursive: true, force: true })
-        } catch {
-          // best effort; the OS temp dir is cleaned eventually
-        }
-      }
-    })
-  }
-  tempDirsToRemoveOnExit.add(dir)
-}
-
 /**
- * Restore the original working directory and clean up temporary test directories
+ * Restore the original working directory. The NodeJS project's globalSetup removes temp project dirs.
  * Call this in afterAll hook
  */
 export async function teardownTestEnvironment(): Promise<void> {
@@ -619,23 +591,6 @@ export async function teardownTestEnvironment(): Promise<void> {
       process.chdir(originalCwd)
       console.log(`[teardownTestEnvironment] Restored working directory to: ${originalCwd}`)
       originalCwd = undefined
-    }
-    
-    // Clean up temporary test project directory if it was created
-    if (testProjectPathForCleanup) {
-      const fs = await import('fs')
-      const path = await import('path')
-      const os = await import('os')
-      
-      // Only clean up if it's in the temp directory (safety check)
-      const tmpDir = os.tmpdir()
-      if (testProjectPathForCleanup.startsWith(tmpDir)) {
-        // Defer deletion to process exit. Node tests run with isolate: false, so the client
-        // initialized here (and its SQLite file in this directory) is reused by later test files;
-        // deleting it now makes their writes fail with SQLITE_READONLY_DBMOVED.
-        scheduleTempDirCleanup(testProjectPathForCleanup, fs)
-      }
-      testProjectPathForCleanup = undefined
     }
   }
 }

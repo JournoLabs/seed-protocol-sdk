@@ -12,17 +12,39 @@ export async function resolvePropertyValidationRules(
   propertyName: string,
   scope: { modelFileId?: string | null; schemaName?: string | null } = {},
 ): Promise<ValidationRules | undefined> {
+  const rules = await resolveModelValidationRules(modelName, [propertyName], scope)
+  return rules.get(propertyName)
+}
+
+/**
+ * resolvePropertyValidationRules for several properties of one model. The stored schema data is
+ * read and parsed once for all the properties the loaded schema has no rules for.
+ */
+export async function resolveModelValidationRules(
+  modelName: string,
+  propertyNames: string[],
+  scope: { modelFileId?: string | null; schemaName?: string | null } = {},
+): Promise<Map<string, ValidationRules>> {
+  const rules = new Map<string, ValidationRules>()
   const { getPropertySchema } = await import('./property')
-  const fromSchema = await getPropertySchema(modelName, propertyName, scope).catch(() => undefined)
-  if (fromSchema?.validation) return fromSchema.validation as ValidationRules
+  const missing: string[] = []
+  const fromSchemas = await Promise.all(
+    propertyNames.map((propertyName) => getPropertySchema(modelName, propertyName, scope).catch(() => undefined)),
+  )
+  propertyNames.forEach((propertyName, i) => {
+    const validation = fromSchemas[i]?.validation
+    if (validation) rules.set(propertyName, validation as ValidationRules)
+    else missing.push(propertyName)
+  })
+  if (missing.length === 0) return rules
 
   const { BaseDb } = await import('../db/Db/BaseDb')
   const db = BaseDb.getAppDb()
-  if (!db) return undefined
+  if (!db) return rules
   try {
     const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
     const modelRecord = await resolveModelRecord(modelName, scope, db)
-    if (!modelRecord?.id) return undefined
+    if (!modelRecord?.id) return rules
     const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
     const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
     const rows = await db
@@ -32,12 +54,16 @@ export async function resolvePropertyValidationRules(
       .where(eq(modelSchemas.modelId, modelRecord.id))
       .limit(1)
     const schemaData = rows[0]?.schemaData
-    if (!schemaData) return undefined
+    if (!schemaData) return rules
     const parsed = JSON.parse(schemaData) as {
       models?: Record<string, { properties?: Record<string, { validation?: ValidationRules }> }>
     }
-    return parsed?.models?.[modelName]?.properties?.[propertyName]?.validation
+    for (const propertyName of missing) {
+      const validation = parsed?.models?.[modelName]?.properties?.[propertyName]?.validation
+      if (validation) rules.set(propertyName, validation)
+    }
   } catch {
-    return undefined
+    // Same as no rules: the property loads without validation
   }
+  return rules
 }

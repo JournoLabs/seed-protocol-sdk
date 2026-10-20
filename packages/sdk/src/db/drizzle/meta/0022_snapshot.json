@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "66e8dfbd-9c3d-44fe-94ef-ec8aaa3377f6",
+  "id": "781ce7c2-f397-4df2-a32c-9267c4a4163d",
   "prevId": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
   "tables": {
     "appState": {
@@ -277,66 +277,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "entity_changes": {
-      "name": "entity_changes",
-      "columns": {
-        "seq": {
-          "name": "seq",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "tbl": {
-          "name": "tbl",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "seed_local_id": {
-          "name": "seed_local_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "seed_uid": {
-          "name": "seed_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "property_name": {
-          "name": "property_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "entity_changes_at": {
-          "name": "entity_changes_at",
-          "columns": [
-            "at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "html_embedded_image_co_publish": {
       "name": "html_embedded_image_co_publish",
       "columns": {
@@ -592,6 +532,21 @@
             "local_id"
           ],
           "isUnique": true
+        },
+        "metadata_seed_local_id_property_name_idx": {
+          "name": "metadata_seed_local_id_property_name_idx",
+          "columns": [
+            "seed_local_id",
+            "property_name"
+          ],
+          "isUnique": false
+        },
+        "metadata_seed_uid_idx": {
+          "name": "metadata_seed_uid_idx",
+          "columns": [
+            "seed_uid"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -1427,6 +1382,20 @@
             "local_id"
           ],
           "isUnique": true
+        },
+        "seeds_uid_idx": {
+          "name": "seeds_uid_idx",
+          "columns": [
+            "uid"
+          ],
+          "isUnique": false
+        },
+        "seeds_type_idx": {
+          "name": "seeds_type_idx",
+          "columns": [
+            "type"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -1588,6 +1557,13 @@
             "local_id"
           ],
           "isUnique": true
+        },
+        "versions_seed_local_id_idx": {
+          "name": "versions_seed_local_id_idx",
+          "columns": [
+            "seed_local_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

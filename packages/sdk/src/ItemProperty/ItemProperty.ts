@@ -18,7 +18,7 @@ import { camelCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { changeFeedCursor, queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
+import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
 import {
   BaseFileManager,
   getCorrectId,
@@ -679,14 +679,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           propertyNames.length > 1
             ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
             : eq(metadataLatest.propertyName, propertyNames[0])
-        // A change dispatched between this read and the watch below is caught by `since`.
-        const feedCursorBeforeRead = changeFeedCursor()
-        const initialMetadata = await db
-          .with(metadataLatest)
-          .select()
-          .from(metadataLatest)
-          .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
-          .limit(15)
+        // In the browser the feed watch below reads the same row at once, so only Node (no change
+        // feed) reads it here.
+        const initialMetadata = isBrowser
+          ? []
+          : await db
+              .with(metadataLatest)
+              .select()
+              .from(metadataLatest)
+              .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
+              .limit(15)
 
         if (initialMetadata.length > 0) {
           const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
@@ -849,7 +851,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               })
             },
             {
-              since: feedCursorBeforeRead,
+              immediate: true,
               onError: (error) => logger(`[ItemProperty._setupLiveQuerySubscription] Metadata read error: ${error}`),
             },
           )

@@ -3,7 +3,7 @@ import { InferSelectModel } from 'drizzle-orm'
 
 /**
  * The entity change log (ADR 0020): one row per row written to `seeds`, `versions` or `metadata`,
- * inserted by triggers (migration 0022), so it commits or rolls back with the write. The browser's
+ * inserted by triggers (migration 0023), so it commits or rolls back with the write. The browser's
  * change feed reads it to tell loaded Items and ItemProperties which seeds changed. Nothing else
  * writes it; the leader tab prunes rows older than 10 minutes.
  */

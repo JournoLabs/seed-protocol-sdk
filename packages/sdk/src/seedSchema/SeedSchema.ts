@@ -1,5 +1,5 @@
 import { InferSelectModel } from 'drizzle-orm'
-import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const seeds = sqliteTable(
   'seeds',
@@ -19,6 +19,7 @@ export const seeds = sqliteTable(
     _markedForDeletion: int('_marked_for_deletion'),
     revokedAt: int('revoked_at'),
   },
+  (table) => [index('seeds_uid_idx').on(table.uid), index('seeds_type_idx').on(table.type)],
   // {
   //   triggers: [
   //     sql<string>`CREATE TRIGGER IF NOT EXISTS seeds_created_at_trigger

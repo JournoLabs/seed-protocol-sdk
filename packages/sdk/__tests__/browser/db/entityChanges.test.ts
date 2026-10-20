@@ -18,7 +18,7 @@ import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 
 /**
- * Migration 0022's triggers log every row written to seeds, versions and metadata in
+ * Migration 0023's triggers log every row written to seeds, versions and metadata in
  * entity_changes (ADR 0020), whichever writer wrote it. One writer per group of the design note's
  * write-path list, the OLD-keys rows of key changes, rollback and an unconditional delete.
  */

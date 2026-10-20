@@ -1,4 +1,4 @@
-import { int, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, int, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { InferSelectModel } from 'drizzle-orm'
 import { properties } from './ModelSchema'
 
@@ -36,6 +36,9 @@ export const metadata = sqliteTable('metadata', {
   // attestation (uid null, ref_value_type 'file', value = the transaction id): that attestation's
   // uid. Null for every other row. Marks the row as published content, not a local draft.
   derivedFromUid: text('derived_from_uid'),
-})
+}, (table) => [
+  index('metadata_seed_local_id_property_name_idx').on(table.seedLocalId, table.propertyName),
+  index('metadata_seed_uid_idx').on(table.seedUid),
+])
 
 export type MetadataType = InferSelectModel<typeof metadata>

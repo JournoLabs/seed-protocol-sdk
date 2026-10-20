@@ -387,7 +387,13 @@ CREATE INDEX \`pending_writes_drain_order\` ON \`pending_writes\` (\`status\`,\`
 
 export const migrationSql_0021_add_pending_write_error_name = `ALTER TABLE \`pending_writes\` ADD \`error_name\` text;`
 
-export const migrationSql_0022_add_entity_changes = `CREATE TABLE \`entity_changes\` (
+export const migrationSql_0022_add_read_indexes = `CREATE INDEX \`metadata_seed_local_id_property_name_idx\` ON \`metadata\` (\`seed_local_id\`,\`property_name\`);--> statement-breakpoint
+CREATE INDEX \`metadata_seed_uid_idx\` ON \`metadata\` (\`seed_uid\`);--> statement-breakpoint
+CREATE INDEX \`seeds_uid_idx\` ON \`seeds\` (\`uid\`);--> statement-breakpoint
+CREATE INDEX \`seeds_type_idx\` ON \`seeds\` (\`type\`);--> statement-breakpoint
+CREATE INDEX \`versions_seed_local_id_idx\` ON \`versions\` (\`seed_local_id\`);`
+
+export const migrationSql_0023_add_entity_changes = `CREATE TABLE \`entity_changes\` (
 	\`seq\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	\`tbl\` text NOT NULL,
 	\`seed_local_id\` text,
@@ -598,8 +604,15 @@ export const journalJson = `{
     {
       "idx": 22,
       "version": "6",
-      "when": 1792453539761,
-      "tag": "0022_add_entity_changes",
+      "when": 1792453791787,
+      "tag": "0022_add_read_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792455641631,
+      "tag": "0023_add_entity_changes",
       "breakpoints": true
     }
   ]
@@ -610,8 +623,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "66e8dfbd-9c3d-44fe-94ef-ec8aaa3377f6",
-  "prevId": "c33040d2-3fd4-4a1a-a55b-2cd5fc622377",
+  "id": "7767667b-3cf0-4630-b1ff-02913f2f35ad",
+  "prevId": "781ce7c2-f397-4df2-a32c-9267c4a4163d",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1201,6 +1214,21 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "metadata_seed_local_id_property_name_idx": {
+          "name": "metadata_seed_local_id_property_name_idx",
+          "columns": [
+            "seed_local_id",
+            "property_name"
+          ],
+          "isUnique": false
+        },
+        "metadata_seed_uid_idx": {
+          "name": "metadata_seed_uid_idx",
+          "columns": [
+            "seed_uid"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -2036,6 +2064,20 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "seeds_uid_idx": {
+          "name": "seeds_uid_idx",
+          "columns": [
+            "uid"
+          ],
+          "isUnique": false
+        },
+        "seeds_type_idx": {
+          "name": "seeds_type_idx",
+          "columns": [
+            "type"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -2197,6 +2239,13 @@ export const snapshotJson = `{
             "local_id"
           ],
           "isUnique": true
+        },
+        "versions_seed_local_id_idx": {
+          "name": "versions_seed_local_id_idx",
+          "columns": [
+            "seed_local_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
 import type { MetadataType } from '@/seedSchema'
-import { outboxOpValue, type OutboxOp } from './outbox'
+import { outboxAppendGeneration, outboxOpValue, type OutboxOp } from './outbox'
 import type { ItemStorageValueOp, SetPropertyValueOp, StorageValueOp } from './itemAppliers'
 
 /**
@@ -80,13 +80,35 @@ export async function getPendingPropertyRows(
   return rows
 }
 
+/**
+ * One read of all of a seed's pending rows while it's in flight: an item's properties load together
+ * and would otherwise each send the same query. A caller joins a read only if this tab hasn't
+ * appended an op since it began, so none misses a value assigned before it asked. Each caller still
+ * has the pending rows before it reads the stored row. The test hook sees these reads as reads of
+ * all properties (undefined names).
+ */
+const sharedReads = new Map<string, { generation: number; read: Promise<Map<string, PendingPropertyRow>> }>()
+
+function sharedPendingPropertyRows(seedLocalId: string): Promise<Map<string, PendingPropertyRow>> {
+  const generation = outboxAppendGeneration()
+  const existing = sharedReads.get(seedLocalId)
+  if (existing && existing.generation === generation) return existing.read
+  const created = { generation, read: getPendingPropertyRows(seedLocalId) }
+  sharedReads.set(seedLocalId, created)
+  const forget = () => {
+    if (sharedReads.get(seedLocalId) === created) sharedReads.delete(seedLocalId)
+  }
+  created.read.then(forget, forget)
+  return created.read
+}
+
 /** One property's pending row (see getPendingPropertyRows); undefined when it has none. */
 export async function getPendingPropertyRow(
   seedLocalId: string | null | undefined,
   propertyName: string | null | undefined,
 ): Promise<PendingPropertyRow | undefined> {
-  if (!propertyName) return undefined
-  const rows = await getPendingPropertyRows(seedLocalId, [propertyName])
+  if (!propertyName || !seedLocalId) return undefined
+  const rows = await sharedPendingPropertyRows(seedLocalId)
   for (const name of propertyNameVariants(propertyName)) {
     const row = rows.get(name)
     if (row) return row

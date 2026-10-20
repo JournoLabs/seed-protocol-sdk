@@ -4,6 +4,7 @@ import debug from "debug";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { applyEmbeddedMigrations, canRunInTransaction, getEmbeddedMigrations } from "./embeddedMigrations"
 import { withSqliteBusyRetry } from "./sqliteBusyRetry"
+import { countDbStatements, countLiveQueryRuns } from "@/helpers/timing"
 import { withSeedDbLock } from "@/helpers/tabLocks"
 import { sql } from "drizzle-orm"
 import { BaseFileManager } from "@/helpers";
@@ -15,7 +16,7 @@ import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
 import { startChangeFeed } from './changeFeed'
-import { Observable, distinctUntilChanged } from 'rxjs'
+import { Observable, ReplaySubject, distinctUntilChanged, finalize, share, throwError } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
 
 
@@ -27,6 +28,8 @@ export class BrowserDb implements IDb {
   dbId: string | undefined
   appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
   sqlocalInstance: SQLocalDrizzle | undefined
+  /** Live queries by SQL + params while they have subscribers; see liveQuery. */
+  private sharedLiveQueries = new Map<string, Observable<unknown[]>>()
 
 
   getAppDb() {
@@ -96,10 +99,12 @@ export class BrowserDb implements IDb {
       )
 
       const { batchDriver } = sqlocalDrizzle
-      const driver = withSqliteBusyRetry(sqlocalDrizzle.driver)
+      const driver = countDbStatements(withSqliteBusyRetry(sqlocalDrizzle.driver))
 
       // Store SQLocalDrizzle instance for reactive queries
       this.sqlocalInstance = sqlocalDrizzle
+      // Shared live queries still open belong to the previous instance; new calls start fresh.
+      this.sharedLiveQueries.clear()
 
       // Create db instance but do NOT set this.appDb yet. restoreFromDb (and other
       // callers of getAppDb()) must not see the db until migrations have completed,
@@ -404,13 +409,27 @@ export class BrowserDb implements IDb {
       throw new Error('Reactive queries not enabled. Initialize SQLocalDrizzle with reactive: true.')
     }
 
+    // Resolve an SQL tag function here, with the same tag SQLocal uses, so the statement's SQL and
+    // params are known before any query runs and identical live queries can share one.
+    let statement: any
+    try {
+      statement = typeof query === 'function' ? query(sqlTag) : query
+    } catch (error) {
+      return throwError(() => error)
+    }
+    const key = liveQueryKey(statement)
+    const existing = key ? this.sharedLiveQueries.get(key) : undefined
+    if (existing) return existing as Observable<T[]>
+
     const baseObservable = new Observable<T[]>((subscriber) => {
       // Setup errors (bad SQL, a closed database) go to the subscriber like query errors, so
       // callers see them as an error notification rather than only in the console.
       let subscription: { unsubscribe: () => void }
+      const countRun = countLiveQueryRuns()
       try {
-        subscription = this.sqlocalInstance!.reactiveQuery(query).subscribe(
+        subscription = this.sqlocalInstance!.reactiveQuery(statement).subscribe(
           (data: Record<string, any>[]) => {
+            countRun()
             subscriber.next(data as T[])
           },
           (err: Error) => {
@@ -432,19 +451,46 @@ export class BrowserDb implements IDb {
     // Compare stable JSON snapshots via keySelector. SQLocal may reuse one array reference
     // and mutate rows in place; comparing (prev, curr) on the same reference makes
     // JSON.stringify(prev) === JSON.stringify(curr) after mutation and suppresses emissions.
-    return baseObservable.pipe(
+    const distinct = baseObservable.pipe(
       distinctUntilChanged(
         (a, b) => a === b,
         (x: T[]) => JSON.stringify(x)
       )
     )
+    if (!key) return distinct
+
+    // Every caller with the same SQL and params gets this observable: one SQLocal reactiveQuery
+    // (one run per table change) however many subscribe. A late subscriber gets the last rows at
+    // once. When the last subscriber leaves, the reactiveQuery closes and the entry is dropped,
+    // so the next call starts a fresh query.
+    const shared: Observable<T[]> = distinct.pipe(
+      finalize(() => {
+        if (this.sharedLiveQueries.get(key) === shared) this.sharedLiveQueries.delete(key)
+      }),
+      share({ connector: () => new ReplaySubject<T[]>(1) }),
+    )
+    this.sharedLiveQueries.set(key, shared)
+    return shared
   }
 }
 
-/** @deprecated Prefer BrowserDb */
-export const Db = BrowserDb
+/** SQLocal's own SQL tag (sqlocal/dist/lib/sql-tag.js), which the package does not export. */
+function sqlTag(queryTemplate: TemplateStringsArray, ...params: unknown[]) {
+  return { sql: queryTemplate.join('?'), params }
+}
 
-BaseDb.configure(new BrowserDb())
-
-const _check: IDb = new BrowserDb()
-void _check
+/**
+ * Identifies a live query by its SQL and bound params. Undefined (not shared) for a Drizzle query
+ * builder, whose row mapping depends on its select object and not only on the SQL text, and when
+ * the params can't be serialized.
+ */
+function liveQueryKey(statement: any): string | undefined {
+  if (typeof statement?.getSQL === 'function') return undefined
+  try {
+    const { sql, params } = statement ?? {}
+    if (typeof sql !== 'string') return undefined
+    return JSON.stringify([sql, params ?? []])
+  } catch {
+    return undefined
+  }
+}

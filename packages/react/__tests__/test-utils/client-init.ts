@@ -178,7 +178,9 @@ export async function getTestProjectPath(): Promise<string> {
     const os = await import('os')
     const path = await import('path')
     const fs = await import('fs')
-    const tmpDir = os.tmpdir()
+    // The NodeJS project's globalSetup provides a per-run parent dir and removes it after the run.
+    const { inject } = await import('vitest')
+    const tmpDir = inject('seedTestRunDir') ?? os.tmpdir()
     const testDirName = `seed-test-${Date.now()}-${Math.random().toString(36).substring(7)}`
     const testProjectPath = path.join(tmpDir, testDirName)
     if (!fs.existsSync(testProjectPath)) {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { Db } from '@/browser/db/Db'
 import { models, properties, modelSchemas, schemas } from '@/seedSchema'
@@ -313,6 +313,62 @@ describe('Browser Db Integration Tests', () => {
       for (let i = 1; i < emissions.length; i++) {
         expect(emissions[i]).not.toEqual(emissions[i - 1])
       }
+    })
+  })
+
+  describe('Shared live queries', () => {
+    it('runs one reactiveQuery per SQL and params while it has subscribers', async () => {
+      const db = BaseDb.getAppDb()!
+      const [model] = await db.insert(models).values({ name: 'SharedModel' }).returning()
+      const sqlocal = (BaseDb as any).requireImpl().sqlocalInstance
+      const reactiveQuery = vi.spyOn(sqlocal, 'reactiveQuery')
+      const query = (sql: any) => sql`SELECT * FROM models WHERE id = ${model.id}`
+
+      try {
+        const first = BaseDb.liveQuery<typeof models.$inferSelect>(query)
+        const firstRows: string[] = []
+        const firstSub = first.subscribe((rows) => firstRows.push(rows[0]?.name ?? '<none>'))
+        await waitUntilOrThrow(() => firstRows.length >= 1, 'first subscriber emission')
+
+        // Same SQL and params from another caller: same query, and the rows arrive at once.
+        const second = BaseDb.liveQuery<typeof models.$inferSelect>(query)
+        expect(second).toBe(first)
+        const secondRows: string[] = []
+        const secondSub = second.subscribe((rows) => secondRows.push(rows[0]?.name ?? '<none>'))
+        expect(secondRows).toEqual(['SharedModel'])
+
+        // Different params: its own query.
+        const other = BaseDb.liveQuery<typeof models.$inferSelect>(
+          (sql: any) => sql`SELECT * FROM models WHERE id = ${model.id! + 1}`,
+        )
+        expect(other).not.toBe(first)
+        expect(reactiveQuery).toHaveBeenCalledTimes(1)
+
+        await db.update(models).set({ name: 'SharedModelUpdated' }).where(eq(models.id, model.id!))
+        await waitUntilOrThrow(
+          () => firstRows.includes('SharedModelUpdated') && secondRows.includes('SharedModelUpdated'),
+          'both subscribers see the update',
+        )
+
+        // One subscriber left keeps the query; the last one closes it, and the next call starts fresh.
+        firstSub.unsubscribe()
+        expect(BaseDb.liveQuery(query)).toBe(first)
+        secondSub.unsubscribe()
+        const fresh = BaseDb.liveQuery<typeof models.$inferSelect>(query)
+        expect(fresh).not.toBe(first)
+        const freshRows = await firstValueFrom(fresh.pipe(take(1), timeout({ first: 5000 })))
+        expect(freshRows[0]?.name).toBe('SharedModelUpdated')
+        expect(reactiveQuery).toHaveBeenCalledTimes(2)
+      } finally {
+        reactiveQuery.mockRestore()
+      }
+    })
+
+    it('does not share Drizzle query builders', () => {
+      const db = BaseDb.getAppDb()!
+      const a = BaseDb.liveQuery(db.select().from(models).where(eq(models.id, 1)))
+      const b = BaseDb.liveQuery(db.select().from(models).where(eq(models.id, 1)))
+      expect(a).not.toBe(b)
     })
   })
 

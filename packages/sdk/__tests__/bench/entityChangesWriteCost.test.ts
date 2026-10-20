@@ -1,5 +1,5 @@
 /**
- * Write cost of the entity_changes triggers (ADR 0020, migration 0022): createNewItem and
+ * Write cost of the entity_changes triggers (ADR 0020, migration 0023): createNewItem and
  * property.save with one item loaded, with the triggers dropped and with them in place, in
  * alternating rounds so drift on a busy machine hits both. Skipped unless SEED_BENCH is set:
  *
@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { migrationSql_0022_add_entity_changes } from '@/browser/db/drizzleFiles'
+import { migrationSql_0023_add_entity_changes } from '@/browser/db/drizzleFiles'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { createNewItem } from '@/db/write/createNewItem'
@@ -42,7 +42,7 @@ const testSchema: SchemaFileFormat = {
 }
 const values = (n: number) => Object.fromEntries(props.map((p) => [p, `${p} ${n}`]))
 
-const triggerStatements = migrationSql_0022_add_entity_changes
+const triggerStatements = migrationSql_0023_add_entity_changes
   .split('--> statement-breakpoint')
   .map((s) => s.trim())
   .filter((s) => s.startsWith('CREATE TRIGGER'))

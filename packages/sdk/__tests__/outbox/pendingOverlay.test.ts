@@ -150,10 +150,10 @@ testDescribe('read overlay for pending values', () => {
 
   // A reader takes the stored row and the pending ops in two reads. The op applying between them
   // must leave the value in one of the two, so these apply it just before the pending read: the
-  // first one, or the first one for `propertyName`.
+  // first one, or the first one that covers `propertyName` (undefined names cover every property).
   const applyBeforePendingRead = (propertyName?: string) =>
     beforePendingReadForTests(async (names) => {
-      if (propertyName && !names?.includes(propertyName)) return false
+      if (propertyName && names && !names.includes(propertyName)) return false
       await drainOutbox()
       return true
     })

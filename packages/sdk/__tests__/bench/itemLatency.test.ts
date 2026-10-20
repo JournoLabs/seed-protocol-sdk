@@ -16,6 +16,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { waitFor } from 'xstate'
+import debug from 'debug'
+import { sql } from 'drizzle-orm'
 import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { Model } from '@/Model/Model'
@@ -25,6 +27,7 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
+import { dbTimingCounters } from '@/helpers/timing'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
@@ -33,6 +36,8 @@ const env = (import.meta as { env?: Record<string, string | undefined> }).env ??
 const enabled = Boolean(env.SEED_BENCH)
 const itemCount = Number(env.SEED_BENCH_ITEMS || 40)
 const easDelayMs = Number(env.SEED_BENCH_EAS_MS || 0)
+// The browser build of `debug` reads only localStorage, not the DEBUG the config passes in.
+if (enabled && env.DEBUG) debug.enable(env.DEBUG)
 
 const schemaName = 'Bench Item Latency'
 const testSchema: SchemaFileFormat = {
@@ -74,6 +79,24 @@ const stats = (ms: number[]) => {
   const sorted = [...ms].sort((a, b) => a - b)
   const at = (q: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!)
   return { n: ms.length, median: at(0.5), p90: at(0.9), max: Math.round(sorted[sorted.length - 1]!) }
+}
+
+/** Round trip of a trivial statement: how long the SQLite worker's queue is right now. */
+const probeQueue = () => time(() => BaseDb.getAppDb()!.all(sql`SELECT 1`))
+
+/**
+ * Waits until the live-query re-runs a write started are done. SQLocal announces written tables
+ * after a 32 ms debounce (180 ms at most), so an empty queue right after a write means nothing:
+ * wait past that window first, then until a trivial statement comes back within `quietMs`.
+ */
+const waitForQuietQueue = async (quietMs = 5, timeoutMs = 10_000) => {
+  const start = performance.now()
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  while (performance.now() - start < timeoutMs) {
+    if ((await probeQueue()) < quietMs) return performance.now() - start
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  return performance.now() - start
 }
 
 const time = async (fn: () => Promise<unknown>) => {
@@ -208,34 +231,39 @@ describe.skipIf(!enabled)('item latency bench', () => {
     }
     report(`${when}: Item.find (cached)`, cachedFinds)
 
-    const coldFinds: number[] = []
-    for (let i = 0; i < 5; i++) {
-      const created = await createNewItem({ modelName: 'BenchClip', schemaName, ...values(1000 + i) } as never)
-      let found: Item<any> | undefined
-      coldFinds.push(
-        await time(async () => {
-          found = (await Item.find({ modelName: 'BenchClip', seedLocalId: created.seedLocalId })) as Item<any>
-        }),
-      )
-      expect(found).toBeDefined()
-      found?.unload()
+    // Right after a create, as before; then again once the worker has drained the re-runs the
+    // create's writes started, so the difference is time spent queued behind them.
+    for (const drained of [false, true]) {
+      const coldFinds: number[] = []
+      const probes: number[] = []
+      const drainWaits: number[] = []
+      const waveRuns: number[] = []
+      for (let i = 0; i < 5; i++) {
+        const runsBefore = dbTimingCounters.liveQueryRuns
+        const created = await createNewItem({ modelName: 'BenchClip', schemaName, ...values(1000 + i) } as never)
+        if (drained) {
+          drainWaits.push(await waitForQuietQueue())
+          // Counted only under DEBUG=seedSdk:timing.
+          waveRuns.push(dbTimingCounters.liveQueryRuns - runsBefore)
+        }
+        probes.push(await probeQueue())
+        let found: Item<any> | undefined
+        coldFinds.push(
+          await time(async () => {
+            found = (await Item.find({ modelName: 'BenchClip', seedLocalId: created.seedLocalId })) as Item<any>
+          }),
+        )
+        expect(found).toBeDefined()
+        found?.unload()
+      }
+      const suffix = drained ? ', queue drained first' : ''
+      if (drained) {
+        report(`${when}: wait for quiet queue after create`, drainWaits)
+        report(`${when}: live-query runs one create started`, waveRuns)
+      }
+      report(`${when}: SELECT 1 before find${suffix}`, probes)
+      report(`${when}: Item.find (not cached${suffix})`, coldFinds)
     }
-    report(`${when}: Item.find (not cached)`, coldFinds)
-
-    // The same once the create's re-runs have drained, for comparison.
-    const drainedFinds: number[] = []
-    for (let i = 0; i < 5; i++) {
-      const created = await createNewItem({ modelName: 'BenchClip', schemaName, ...values(2000 + i) } as never)
-      await sleep(1000)
-      let found: Item<any> | undefined
-      drainedFinds.push(
-        await time(async () => {
-          found = (await Item.find({ modelName: 'BenchClip', seedLocalId: created.seedLocalId })) as Item<any>
-        }),
-      )
-      found?.unload()
-    }
-    report(`${when}: Item.find (not cached, after 1 s)`, drainedFinds)
   }
 
   it(
@@ -246,18 +274,16 @@ describe.skipIf(!enabled)('item latency bench', () => {
       const loadStart = performance.now()
       const loads: number[] = []
       for (let i = 0; i < itemCount; i++) {
-        let item: Item<any> | undefined
         loads.push(
           await time(async () => {
-            item = (await Item.create({ modelName: 'BenchClip', schemaName, ...values(i) })) as Item<any>
+            const item = await Item.create({ modelName: 'BenchClip', schemaName, ...values(i) })
             await waitForIdle(item as unknown as HasService, 'Item', 30_000)
+            loaded.push(item as Item<any>)
           }),
         )
-        loaded.push(item!)
       }
-      const half = Math.floor(loads.length / 2)
-      report(`Item.create + waitForIdle, items 1-${half}`, loads.slice(0, half))
-      report(`Item.create + waitForIdle, items ${half + 1}-${loads.length}`, loads.slice(half))
+      report('load: Item.create + waitForIdle, first half', loads.slice(0, Math.ceil(itemCount / 2)))
+      report('load: Item.create + waitForIdle, second half', loads.slice(Math.ceil(itemCount / 2)))
       console.log(
         JSON.stringify({
           bench: 'itemLatency',
