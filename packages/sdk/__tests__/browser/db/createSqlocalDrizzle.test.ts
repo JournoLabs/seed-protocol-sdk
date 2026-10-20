@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  NESTED_WORKER_SHIM_SOURCE,
   createBlobModuleWorkerSource,
   createSqlocalDrizzle,
   raceSqlocalStartup,
@@ -74,6 +75,12 @@ describe('createSqlocalDrizzle', () => {
     )
   })
 
+  it('imports the nested-worker shim before the worker URL', () => {
+    expect(
+      createBlobModuleWorkerSource('https://example.com/worker-HASH.js', 'blob:shim'),
+    ).toBe('import "blob:shim";\nimport "https://example.com/worker-HASH.js";')
+  })
+
   it('starts https module workers from a blob that imports the original URL', async () => {
     installMocks()
     const url = 'https://example.com/assets/worker-HASH.js'
@@ -85,8 +92,12 @@ describe('createSqlocalDrizzle', () => {
 
     expect(String(worker.scriptURL)).toMatch(/^blob:/)
     expect(worker.options?.type).toBe('module')
-    expect(createdBlobs).toHaveLength(1)
-    await expect(createdBlobs[0].text()).resolves.toBe(`import ${JSON.stringify(url)};`)
+    // The shim blob is minted first, then the blob that imports it and the worker URL.
+    expect(createdBlobs).toHaveLength(2)
+    await expect(createdBlobs[0].text()).resolves.toBe(NESTED_WORKER_SHIM_SOURCE)
+    await expect(createdBlobs[1].text()).resolves.toBe(
+      `import "blob:mock/1";\nimport ${JSON.stringify(url)};`,
+    )
   })
 
   it('does not wrap classic or blob workers', () => {

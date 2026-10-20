@@ -16,8 +16,53 @@ export function shouldBlobWrapModuleWorker(
   return HTTP_MODULE_WORKER_URL.test(String(scriptURL))
 }
 
-export function createBlobModuleWorkerSource(scriptURL: string | URL): string {
-  return `import ${JSON.stringify(String(scriptURL))};`
+/**
+ * Source of a module that replaces `self.Worker` inside sqlocal's worker. SQLite's OPFS VFS starts
+ * its async proxy from there with `new Worker(new URL('sqlite3-opfs-async-proxy.js', import.meta.url))`,
+ * and some Chromium builds fail any worker started from a worker with an http(s) URL (an `error`
+ * event with no message). They do start a blob worker, so an http(s) URL is started from a blob that
+ * loads it: `import` for a module worker, `importScripts` for a classic one. The classic blob also
+ * resolves later `importScripts` calls against the original URL, because Vite dev prepends a
+ * root-relative `importScripts("/@vite/env")`, which has no base inside a blob worker.
+ *
+ * Plain JS in a string so bundlers and transpilers can't add helpers that don't exist in the worker.
+ */
+export const NESTED_WORKER_SHIM_SOURCE = `(() => {
+  const OriginalWorker = self.Worker;
+  if (typeof OriginalWorker !== 'function' || OriginalWorker.__seedNestedWorkerWrap) return;
+  const HTTP_URL = /^https?:/i;
+  const classicSource = (url) =>
+    'const __seedWorkerUrl = ' + JSON.stringify(url) + ';\\n' +
+    'const __seedImportScripts = self.importScripts.bind(self);\\n' +
+    'self.importScripts = (...urls) => __seedImportScripts(...urls.map((u) => new URL(String(u), __seedWorkerUrl).href));\\n' +
+    '__seedImportScripts(__seedWorkerUrl);\\n';
+  function NestedWorker(scriptURL, options) {
+    const url = String(scriptURL);
+    if (!HTTP_URL.test(url)) return new OriginalWorker(scriptURL, options);
+    const isModule = options && options.type === 'module';
+    const source = isModule ? 'import ' + JSON.stringify(url) + ';\\n' : classicSource(url);
+    const blobUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    const worker = new OriginalWorker(blobUrl, options);
+    worker.addEventListener('error', (event) => {
+      console.warn('[seed] A worker started inside the SQLite worker failed to load: ' + url, event.message || '');
+    });
+    return worker;
+  }
+  NestedWorker.prototype = OriginalWorker.prototype;
+  Object.setPrototypeOf(NestedWorker, OriginalWorker);
+  NestedWorker.__seedNestedWorkerWrap = true;
+  self.Worker = NestedWorker;
+})();
+`
+
+/**
+ * Source of the blob module that starts sqlocal's worker. The shim is a separate import ahead of
+ * the worker's: static imports are hoisted, so shim code in this module's body would run after the
+ * worker module, while imports evaluate in the order they're written.
+ */
+export function createBlobModuleWorkerSource(scriptURL: string | URL, shimURL?: string): string {
+  const workerImport = `import ${JSON.stringify(String(scriptURL))};`
+  return shimURL ? `import ${JSON.stringify(shimURL)};\n${workerImport}` : workerImport
 }
 
 export type CreatedSqlocalDrizzle<T> = {
@@ -29,7 +74,8 @@ export type CreatedSqlocalDrizzle<T> = {
  * Construct SQLocal while starting its HTTPS module worker from a blob that
  * only imports the bundled worker URL. Some Chrome profiles kill
  * `new Worker(https://…/worker-HASH.js, { type: 'module' })` as an entry
- * script; importing the same URL from a blob worker reaches connect.
+ * script; importing the same URL from a blob worker reaches connect. The blob also installs
+ * {@link NESTED_WORKER_SHIM_SOURCE} first, for the OPFS proxy worker SQLite starts inside it.
  *
  * The `Worker` patch is scoped to `factory()` so Vite still sees sqlocal's
  * own `new Worker(new URL('./worker', import.meta.url))` and emits a real
@@ -92,12 +138,12 @@ function installModuleWorkerBlobWrap(
     scriptURL: string | URL,
     options?: WorkerOptions,
   ): Worker {
+    const toBlobURL = (source: string) =>
+      URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
     const worker = shouldBlobWrapModuleWorker(scriptURL, options)
       ? new OriginalWorker(
-          URL.createObjectURL(
-            new Blob([createBlobModuleWorkerSource(scriptURL)], {
-              type: 'text/javascript',
-            }),
+          toBlobURL(
+            createBlobModuleWorkerSource(scriptURL, toBlobURL(NESTED_WORKER_SHIM_SOURCE)),
           ),
           { ...options, type: 'module' },
         )
