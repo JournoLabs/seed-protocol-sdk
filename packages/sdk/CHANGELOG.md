@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.8 (2026-10-20)
 
 - New exports `watchEntityChanges(watch, listener)` and `watchEntityRows(watch, read, onRows, options)` subscribe to the change feed (ADR 0020) for one seed's `seeds`, `versions` or `metadata` rows, and `isChangeFeedRunning()` says whether this tab has a feed (browser only). `@seedprotocol/react` uses them for `useItemProperties`.
 - A write no longer re-runs a query for every loaded Item and ItemProperty. Each Item held two liveQueries and each ItemProperty one, and every write to `seeds`, `versions` or `metadata` re-ran all of them in every tab: 400 statements per create and 320 per property save with 40 items of 8 properties loaded, which held up any find or load issued meanwhile (563 ms for an uncached `Item.find` right after a create). Now migration 0023 adds an `entity_changes` table that triggers fill on every write to those tables, each tab runs one query on it, and only the entities whose seed was written re-read their rows (ADR 0020): 2 statements per create and 3 per save, and the same find takes 114 ms. The triggers add 1–3 ms to a write. Other tabs' writes still reach loaded entities. `BaseDb.liveQuery` and the React hooks' own liveQueries are unchanged.
@@ -16,6 +16,64 @@ All notable changes to this package are documented in this file.
 - A property unloaded while a context update was still being processed could be put back in the instance cache as a stopped, unproxied instance, and a later `find` returned it. Re-keying after create now reuses the instance's own cache entry and skips stopped instances.
 - `client.subscribeService(listener)` calls `listener` with the clientManager actor when `client.init()` after `client.stop()` replaces it and when `stop()` ends it. It returns an unsubscribe function. `getService()` is unchanged.
 - `BaseDb.liveQuery` in the browser logs SQLite errors through `debug` (`seedSdk:browser:db:Db`) instead of `console.error`. Subscribers still get the error.
+
+### Commits
+
+#### Features
+
+- react: useItemProperties re-reads through the change feed (96029c26)
+- Item watches its seed row and versions through the change feed (59aca5c5)
+- ItemProperty watches its metadata rows through the change feed (0a823e56)
+- one change feed per tab over entity_changes (54d23644)
+- log seeds, versions and metadata writes in entity_changes (e8288870)
+- the drainer checks a Relation value's local targets (cddab0fa)
+- sync keeps a local draft over a newer synced value and records the conflict (e050188e)
+- read overlay for item property lists and storage values (6ecfcafc)
+- react: property.showValue; useDebouncedItemProperty no longer sends machine events (82fd557b)
+- prune settled outbox ops (dce7e2b4)
+- record conflicts between a pending edit and a synced value (32a497e4)
+- the outbox checks item ownership before applying an op (317438e3)
+- Item.create, deletes and the other writers go through the outbox (fa4463b2)
+- seedSdk:timing phase logs and an item latency bench (984a4d7e)
+- ItemStorage values through the outbox; propertyWriteQueue becomes tickets (c38cc040)
+- Html, File and Image values are written through the outbox (d07e3bd6)
+- plain item values are written through the outbox (b48f7241)
+- outbox core: append, coalesce, claim-and-apply, retry, leader drain (3686a277)
+- pending_writes table for the item write outbox (5077bea8)
+- BaseDb.transaction; upgrade SQLocal to 0.18 (bfe30123)
+- client.subscribeService reports clientManager swaps and stop (6d3a1d2f)
+
+#### Fixes
+
+- drop unused BaseDb import in browser Db (c60552ff)
+- set updated_at on every seeds, versions and metadata write (2a6f10f1)
+- overlay readers read pending ops before the stored row (b25eff1e)
+- the drainer doesn't wait on a held ItemStorage file lock (9dde5d2f)
+- claimUnpublishedDrafts claims drafts whose create op is pending (b0bd8e5f)
+- replace the Node connection after SQLITE_BUSY so later writes aren't lost (d7842498)
+- analyzeInput reports failures through .catch (ee24aa0d)
+- react: useItems lists an item created during its first load (37bbd22d)
+- a property dropped with its item stays out of the cache (954ca315)
+- Item.all honors waitForReady; item context keeps early keys (5959803a)
+- a schema's last unload releases its models (1fe5cbf4)
+- count ItemProperty holds by owner (9bf5053f)
+- Image and File values keep one blob URL, and replaced ones are revoked (0ff7b0ae)
+- separate peeking from holding in entity caches (351dad8f)
+- key entity state by actor so proxies find their liveQueries (d13c4998)
+
+#### Other
+
+- let column hooks stamp created_at and updated_at (70f4458c)
+- Item.find by seedLocalId looks up the local id first (a1d68174)
+- an item's property loads share one read of the model's property schemas (175bf953)
+- an item's properties share one read of its pending outbox values (d7eb8949)
+- timing lines for worker queue, live-query runs and item/property loads (9b0e8dde)
+- share identical live queries and drop duplicate initial reads (03105d32)
+- index metadata, versions and seeds lookup columns (migration 0021) (6548f692)
+- saves and creates read EAS schema UIDs from the lookup cache (ec022380)
+- item writers take a db, for use inside a transaction (33809d6a)
+- compare entities by actor in cache lookups; save-order and dual-key tests (475936af)
+- one reactive proxy factory for every entity (71cb5da8)
 
 ## 0.7.7 (2026-10-18)
 
