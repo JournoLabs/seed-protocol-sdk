@@ -43,12 +43,14 @@ export const ENTITY_CHANGES_PRUNE_EVERY_MS = 60_000
 
 type FeedDb = SqliteRemoteDatabase<Record<string, unknown>>
 type LiveQuery = <T>(query: (sql: any) => any) => Observable<T[]>
+/** SQLocal's `sql` template tag: runs the statement and resolves to its rows. */
+type SqlTag = (strings: TemplateStringsArray, ...params: unknown[]) => Promise<Record<string, unknown>[]>
 
 const byLocalId = new Map<string, Set<Registration>>()
 const byUid = new Map<string, Set<Registration>>()
 const registrations = new Set<Registration>()
 
-let feed: { db: FeedDb; unsubscribe: () => void } | undefined
+let feed: { db: FeedDb; sql: SqlTag; unsubscribe: () => void } | undefined
 let cursor = 0
 let reading: Promise<void> | undefined
 let readAgain = false
@@ -93,8 +95,9 @@ export function watchEntityChanges(watch: ChangeWatch, listener: () => void): ()
 }
 
 /**
- * Watches `watch` and runs `read` once per dispatch, handing its result to `onRows`. A read that
- * finishes after a newer one started is dropped, so an older result never replaces a newer one.
+ * Watches `watch` and runs `read` once per dispatch, handing its result to `onRows` when it differs
+ * from the last one handed over. A read that finishes after a newer one started is dropped, so an
+ * older result never replaces a newer one.
  *
  * Pass `since` (the `changeFeedCursor()` taken before the caller's own initial read) to run `read`
  * once right away when the feed moved on in between: a change dispatched before this watch was
@@ -108,11 +111,17 @@ export function watchEntityRows<T>(
 ): { unsubscribe: () => void } {
   let latest = 0
   let closed = false
+  let lastJson: string | undefined
   const run = () => {
     const token = ++latest
     read().then(
       (rows) => {
         if (closed || token !== latest) return
+        // Like BaseDb.liveQuery's distinctUntilChanged: a write that left these rows as they were
+        // (this entity's own write, read back) doesn't reach the handler again.
+        const json = JSON.stringify(rows)
+        if (json === lastJson) return
+        lastJson = json
         onRows(rows)
       },
       (error) => {
@@ -130,6 +139,15 @@ export function watchEntityRows<T>(
       unregister()
     },
   }
+}
+
+/**
+ * Runs an SQL-tag query once, the way BaseDb.liveQuery's query function is written
+ * (`(sql) => sql\`SELECT ...\``), so an entity can keep its liveQuery's text for its feed reads.
+ */
+export async function queryEntityRows<T>(query: (sql: any) => any): Promise<T[]> {
+  if (!feed) throw new Error('The change feed has not started')
+  return (await query(feed.sql)) as T[]
 }
 
 /** The seq of the newest log row this tab has dispatched. */
@@ -240,7 +258,10 @@ const scheduleRead = (db: FeedDb) => {
  * Starts this tab's feed on `db` (once its migrations ran), at the newest seq allocated so far:
  * entities do their own initial read. A second call replaces the first feed.
  */
-export async function startChangeFeed(db: FeedDb, liveQuery: LiveQuery): Promise<void> {
+export async function startChangeFeed(
+  db: FeedDb,
+  { liveQuery, sql: sqlTag }: { liveQuery: LiveQuery; sql: SqlTag },
+): Promise<void> {
   stopChangeFeed()
   // sqlite_sequence keeps the last seq even when pruning emptied the table.
   const [row] = await db.all<{ seq: number | null }>(
@@ -255,7 +276,7 @@ export async function startChangeFeed(db: FeedDb, liveQuery: LiveQuery): Promise
     },
     error: (error) => logger('feed query failed', error),
   })
-  feed = { db, unsubscribe: () => subscription.unsubscribe() }
+  feed = { db, sql: sqlTag, unsubscribe: () => subscription.unsubscribe() }
   logger(`started at seq ${cursor}`)
 }
 

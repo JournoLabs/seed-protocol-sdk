@@ -134,7 +134,10 @@ export class BrowserDb implements IDb {
 
         // Loaded Items and ItemProperties hear about row changes through it (ADR 0020). Started
         // after the fixups above, so their log rows aren't dispatched.
-        await startChangeFeed(db, (query) => this.liveQuery(query))
+        await startChangeFeed(db, {
+          liveQuery: (query) => this.liveQuery(query),
+          sql: sqlocalDrizzle.sql as never,
+        })
       })(), workerFailed)
 
       return this.appDb
