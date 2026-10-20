@@ -56,6 +56,7 @@
     "test": "node scripts/test-all.js",
     "test:watch": "vitest",
     "test:scripts": "node --test 'scripts/__tests__/*.test.js'",
+    "ci:local": "node scripts/ci-local.js",
     "lint": "eslint .",
     "prettier": "prettier --config .prettierrc --write .",
     "codegen": "bun run --filter @seedprotocol/eas codegen && bun run --filter @seedprotocol/arweave codegen",
