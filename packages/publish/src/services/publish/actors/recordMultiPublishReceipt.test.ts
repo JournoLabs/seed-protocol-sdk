@@ -116,7 +116,12 @@ const extensionSeedPublished = (uids: `0x${string}`[]) => ({
   data: encodeAbiParameters([{ type: 'bytes' }], [encodeAbiParameters([{ type: 'bytes32[]' }], [uids])]),
 })
 
-const att = (schema: `0x${string}`, name: string) => ({ schema, data: [{ data: '0x' }], _propertyName: name })
+const att = (schema: `0x${string}`, name: string, metadataLocalId?: string) => ({
+  schema,
+  data: [{ data: '0x' }],
+  _propertyName: name,
+  ...(metadataLocalId ? { _metadataLocalId: metadataLocalId } : {}),
+})
 
 /** An Image published with the Post that shows it (both new), in the order they are sent. */
 const requests = () => [
@@ -134,7 +139,7 @@ const requests = () => [
     seedSchemaUid: SCHEMA_POST_SEED,
     versionUid: ZERO,
     versionSchemaUid: SCHEMA_VERSION,
-    listOfAttestations: [att(SCHEMA_POST_TITLE, 'title'), att(SCHEMA_POST_COVER, 'coverImage')],
+    listOfAttestations: [att(SCHEMA_POST_TITLE, 'title', 'titleRow01'), att(SCHEMA_POST_COVER, 'coverImage')],
   },
 ]
 
@@ -154,7 +159,13 @@ const expected = {
   postLocal01: {
     versionUid: POST_VERSION,
     pairs: [
-      { schemaUid: SCHEMA_POST_TITLE, attestationUid: POST_TITLE, propertyName: 'title' },
+      // The title row the payload read is recorded by id (audit 1.1).
+      {
+        schemaUid: SCHEMA_POST_TITLE,
+        attestationUid: POST_TITLE,
+        propertyName: 'title',
+        metadataLocalId: 'titleRow01',
+      },
       { schemaUid: SCHEMA_POST_COVER, attestationUid: POST_COVER, propertyName: 'coverImage' },
     ],
   },

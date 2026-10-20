@@ -18,6 +18,12 @@ export type PropertyAttestationApplyPair = {
   attestationUid: string
   /** When set, match the latest placeholder with this property_name (even if schemaUid is empty). */
   propertyName?: string | null
+  /**
+   * The metadata row whose value was attested (the payload's `_metadataLocalId`). When the seed has
+   * that row, it is the one recorded: no search by name, which could pick a newer row holding a
+   * value the chain doesn't have.
+   */
+  metadataLocalId?: string | null
 }
 
 /**
@@ -106,21 +112,26 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
       pairName ? [pairName, ...(pairDef ? [pairDef.schemaKey, pairDef.storageName] : [])] : [],
     )
 
-    const candidates = working
-      .filter((r: MetadataType) => {
-        // Rows sync derived for ItemStorage properties aren't placeholders for an attestation.
-        if (r.derivedFromUid != null) return false
-        if (pairName) {
-          if (!r.propertyName || !pairNames.has(r.propertyName)) return false
-          if (r.schemaUid) {
-            return normalizeBytes32Hex(r.schemaUid) === wantSchema
+    const attestedRow = pair.metadataLocalId
+      ? working.find((r: MetadataType) => r.localId === pair.metadataLocalId)
+      : undefined
+    const candidates = attestedRow
+      ? [attestedRow]
+      : working
+        .filter((r: MetadataType) => {
+          // Rows sync derived for ItemStorage properties aren't placeholders for an attestation.
+          if (r.derivedFromUid != null) return false
+          if (pairName) {
+            if (!r.propertyName || !pairNames.has(r.propertyName)) return false
+            if (r.schemaUid) {
+              return normalizeBytes32Hex(r.schemaUid) === wantSchema
+            }
+            return true
           }
-          return true
-        }
-        if (!r.schemaUid) return false
-        return normalizeBytes32Hex(r.schemaUid) === wantSchema
-      })
-      .sort(compareMetadataRowsLatestFirst)
+          if (!r.schemaUid) return false
+          return normalizeBytes32Hex(r.schemaUid) === wantSchema
+        })
+        .sort(compareMetadataRowsLatestFirst)
 
     const target = candidates.find((r: MetadataType) => isPlaceholderUid(r.uid))
     if (!target?.localId) {

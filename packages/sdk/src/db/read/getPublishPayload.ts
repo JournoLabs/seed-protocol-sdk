@@ -679,6 +679,8 @@ const processBasicProperties = async (
     const attestationEntry: Omit<AttestationRequest, 'data'> & {
       data: AttestationRequestData[]
       _propertyName?: string
+      /** Metadata row the attested value was read from. */
+      _metadataLocalId?: string
       /** Same as encode step (getPropertyData); resolvePublishPayloadValues must use this, not easName(propertyName). */
       _propertyNameForSchema?: string
       _schemaDef?: string
@@ -697,6 +699,8 @@ const processBasicProperties = async (
       ],
       // Always set so persist can match metadata rows that lack schemaUid
       _propertyName: basicProperty.propertyName,
+      // The row whose value this attests; recording gives the uid to exactly that row.
+      ...((context as any).localId ? { _metadataLocalId: (context as any).localId as string } : {}),
     }
 
     // For relation/image properties with seedLocalId, store resolution hints for resolvePublishPayloadValues
@@ -1485,6 +1489,7 @@ type PublishPayload = {
   listOfAttestations: (Omit<AttestationRequest, 'data'> & {
     data: AttestationRequestData[]
     _propertyName?: string
+    _metadataLocalId?: string
     _propertyNameForSchema?: string
     _schemaDef?: string
     _unresolvedValue?: string

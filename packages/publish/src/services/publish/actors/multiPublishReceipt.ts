@@ -16,13 +16,20 @@ export type MultiPublishRequestLike = {
   seedSchemaUid?: string
   versionUid?: string
   versionSchemaUid?: string
-  listOfAttestations?: Array<{ schema?: string; data?: unknown[]; _propertyName?: string }>
+  listOfAttestations?: Array<{
+    schema?: string
+    data?: unknown[]
+    _propertyName?: string
+    _metadataLocalId?: string
+  }>
 }
 
 export type AttributedPropertyPair = {
   schemaUid: string
   attestationUid: string
   propertyName?: string
+  /** The metadata row whose value was attested. */
+  metadataLocalId?: string
 }
 
 /** What one request of a multiPublish transaction created. */
@@ -41,15 +48,19 @@ const sameSchema = (a: string | undefined, b: string | undefined): boolean =>
   !!a && !!b && toHex32Normalized(a) === toHex32Normalized(b)
 
 /** Property attestations EAS creates for one request: one per data entry of each list entry. */
-function expandPropertySlots(
-  req: MultiPublishRequestLike,
-): Array<{ schema?: string; propertyName?: string }> {
-  const out: Array<{ schema?: string; propertyName?: string }> = []
+type PropertySlot = { schema?: string; propertyName?: string; metadataLocalId?: string }
+
+function expandPropertySlots(req: MultiPublishRequestLike): PropertySlot[] {
+  const out: PropertySlot[] = []
   for (const att of req.listOfAttestations ?? []) {
     const count = Array.isArray(att?.data) ? att.data.length : 1
     const propertyName =
       typeof att?._propertyName === 'string' && att._propertyName !== '' ? att._propertyName : undefined
-    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName })
+    const metadataLocalId =
+      typeof att?._metadataLocalId === 'string' && att._metadataLocalId !== ''
+        ? att._metadataLocalId
+        : undefined
+    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName, metadataLocalId })
   }
   return out
 }
@@ -207,6 +218,7 @@ export function attributeMultiPublishReceipt(params: {
         schemaUid,
         attestationUid: got.attestationUid,
         ...(slot.propertyName ? { propertyName: slot.propertyName } : {}),
+        ...(slot.metadataLocalId ? { metadataLocalId: slot.metadataLocalId } : {}),
       })
     })
     return out
