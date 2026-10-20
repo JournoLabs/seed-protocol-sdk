@@ -8,10 +8,16 @@
  * as on an edit page. The EAS indexer is a stub that answers "no schema" after
  * SEED_BENCH_EAS_MS (default 0). Results print as one JSON line per phase. Add
  * DEBUG=seedSdk:timing for per-phase lines from the SDK.
+ *
+ * The `re-runs after` phases count statements the SQLite worker ran from the start of a write until
+ * 600 ms after it returned (SQLocal debounces table changes 32 ms, 180 ms at most): `sqlTag` counts
+ * SQL-tag statements (liveQueries, the change feed's query and its entity reads; the write itself
+ * uses none), `all` every statement, the write's own included.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { waitFor } from 'xstate'
 import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
+import { BaseDb } from '@/db/Db/BaseDb'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
@@ -76,9 +82,13 @@ const time = async (fn: () => Promise<unknown>) => {
   return performance.now() - start
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 describe.skipIf(!enabled)('item latency bench', () => {
   const loaded: Item<any>[] = []
   let restoreEasClient: (() => void) | undefined
+  let restoreCounters: (() => void) | undefined
+  const statements = { sqlTag: 0, all: 0 }
 
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
@@ -98,10 +108,27 @@ describe.skipIf(!enabled)('item latency bench', () => {
     })
     restoreEasClient = () => BaseEasClient.configure({ getEasClient: () => online })
     resetSchemaUidCaches()
+
+    // sql() takes SQL-tag statements; exec() takes every statement, sql()'s included.
+    const instance = (BaseDb as any)._impl.sqlocalInstance
+    const { sql: originalSql, exec: originalExec } = instance
+    instance.sql = (...args: any[]) => {
+      statements.sqlTag++
+      return originalSql(...args)
+    }
+    instance.exec = (...args: any[]) => {
+      statements.all++
+      return originalExec(...args)
+    }
+    restoreCounters = () => {
+      instance.sql = originalSql
+      instance.exec = originalExec
+    }
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     for (const item of loaded) item.unload()
+    restoreCounters?.()
     restoreEasClient?.()
     resetSchemaUidCaches()
     await teardownTestEnvironment()
@@ -111,7 +138,37 @@ describe.skipIf(!enabled)('item latency bench', () => {
     console.log(JSON.stringify({ bench: 'itemLatency', phase, loadedItems: loaded.length, easDelayMs, ...stats(ms) }))
   }
 
+  /**
+   * Statements run from the start of `write` until 600 ms after it returns, once the previous
+   * write's have drained. A save waits for its op to apply, so its re-runs can start before it returns.
+   */
+  const reRuns = async (write: () => Promise<unknown>) => {
+    await sleep(400)
+    const before = { ...statements }
+    await write()
+    await sleep(600)
+    return { sqlTag: statements.sqlTag - before.sqlTag, all: statements.all - before.all }
+  }
+
+  const reportReRuns = (phase: string, runs: { sqlTag: number; all: number }[]) => {
+    console.log(
+      JSON.stringify({
+        bench: 'itemLatency',
+        phase,
+        loadedItems: loaded.length,
+        sqlTag: stats(runs.map((r) => r.sqlTag)),
+        all: stats(runs.map((r) => r.all)),
+      }),
+    )
+  }
+
   const measure = async (when: string) => {
+    const createRuns = []
+    for (let i = 0; i < 5; i++) {
+      createRuns.push(await reRuns(() => createNewItem({ modelName: 'BenchClip', schemaName, ...values(500 + i) } as never)))
+    }
+    reportReRuns(`${when}: re-runs after createNewItem`, createRuns)
+
     const creates: number[] = []
     for (let i = 0; i < 5; i++) {
       creates.push(await time(() => createNewItem({ modelName: 'BenchClip', schemaName, ...values(i) } as never)))
@@ -119,6 +176,19 @@ describe.skipIf(!enabled)('item latency bench', () => {
     report(`${when}: createNewItem`, creates)
 
     if (loaded.length === 0) return
+
+    const saveRuns = []
+    for (let i = 0; i < 5; i++) {
+      const property = loaded[i]!.properties.find((p) => p.propertyName === 'title') as ItemProperty<any>
+      // The assignment appends the write; save() waits for it.
+      saveRuns.push(
+        await reRuns(() => {
+          property.value = `rerun ${i}`
+          return property.save()
+        }),
+      )
+    }
+    reportReRuns(`${when}: re-runs after property.save`, saveRuns)
 
     const saves: number[] = []
     const names = ['title', 'width', 'savedAt', 'summary'] as const
@@ -151,6 +221,21 @@ describe.skipIf(!enabled)('item latency bench', () => {
       found?.unload()
     }
     report(`${when}: Item.find (not cached)`, coldFinds)
+
+    // The same once the create's re-runs have drained, for comparison.
+    const drainedFinds: number[] = []
+    for (let i = 0; i < 5; i++) {
+      const created = await createNewItem({ modelName: 'BenchClip', schemaName, ...values(2000 + i) } as never)
+      await sleep(1000)
+      let found: Item<any> | undefined
+      drainedFinds.push(
+        await time(async () => {
+          found = (await Item.find({ modelName: 'BenchClip', seedLocalId: created.seedLocalId })) as Item<any>
+        }),
+      )
+      found?.unload()
+    }
+    report(`${when}: Item.find (not cached, after 1 s)`, drainedFinds)
   }
 
   it(
@@ -159,11 +244,20 @@ describe.skipIf(!enabled)('item latency bench', () => {
       await measure('empty')
 
       const loadStart = performance.now()
+      const loads: number[] = []
       for (let i = 0; i < itemCount; i++) {
-        const item = await Item.create({ modelName: 'BenchClip', schemaName, ...values(i) })
-        await waitForIdle(item as unknown as HasService, 'Item', 30_000)
-        loaded.push(item as Item<any>)
+        let item: Item<any> | undefined
+        loads.push(
+          await time(async () => {
+            item = (await Item.create({ modelName: 'BenchClip', schemaName, ...values(i) })) as Item<any>
+            await waitForIdle(item as unknown as HasService, 'Item', 30_000)
+          }),
+        )
+        loaded.push(item!)
       }
+      const half = Math.floor(loads.length / 2)
+      report(`Item.create + waitForIdle, items 1-${half}`, loads.slice(0, half))
+      report(`Item.create + waitForIdle, items ${half + 1}-${loads.length}`, loads.slice(half))
       console.log(
         JSON.stringify({
           bench: 'itemLatency',

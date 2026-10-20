@@ -136,7 +136,7 @@ export class BrowserDb implements IDb {
         // after the fixups above, so their log rows aren't dispatched.
         await startChangeFeed(db, {
           liveQuery: (query) => this.liveQuery(query),
-          sql: sqlocalDrizzle.sql as never,
+          sql: ((...args: Parameters<typeof sqlocalDrizzle.sql>) => sqlocalDrizzle.sql(...args)) as never,
         })
       })(), workerFailed)
 
