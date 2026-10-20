@@ -23,16 +23,23 @@ export class FileSystemLockedError extends Error {
  * (COOP `same-origin` and COEP `require-corp` or `credentialless` response headers). Without it,
  * SQLocal falls back to an in-memory database and every reload would lose the app's data, so init
  * fails instead. Hosts can check `code === 'DB_NOT_PERSISTENT'`.
+ *
+ * `reason` picks the advice: `'headers'` when the page isn't cross-origin isolated, `'vfs'` when it
+ * is and SQLite's OPFS VFS still failed to install inside the database worker.
  */
 export class DatabaseNotPersistentError extends Error {
   readonly code = 'DB_NOT_PERSISTENT' as const
 
-  constructor(detail: string) {
+  constructor(detail: string, reason: 'headers' | 'vfs' = 'headers') {
+    const advice =
+      reason === 'vfs'
+        ? `The page is cross-origin isolated, but SQLite's OPFS VFS failed to install inside its database worker. ` +
+          `SQLite logs the reason to the browser console, on lines starting "OPFS syncer" or "Ignoring inability to install OPFS".`
+        : `Serve the app with Cross-Origin-Opener-Policy: same-origin and ` +
+          `Cross-Origin-Embedder-Policy: require-corp (or credentialless). ` +
+          `@seedprotocol/vite sets these on the Vite dev and preview servers; production hosting has to set them too.`
     super(
-      `SQLite can't store the Seed database in the browser's private file system: ${detail}. ` +
-        `Serve the app with Cross-Origin-Opener-Policy: same-origin and ` +
-        `Cross-Origin-Embedder-Policy: require-corp (or credentialless). ` +
-        `@seedprotocol/vite sets these on the Vite dev and preview servers; production hosting has to set them too.`,
+      `SQLite can't store the Seed database in the browser's private file system: ${detail}. ${advice}`,
     )
     this.name = 'DatabaseNotPersistentError'
   }
