@@ -47,6 +47,7 @@ import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/It
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
 import { properties as propertiesTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
@@ -2038,38 +2039,36 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           })
         }
 
-        // Only set up liveQuery subscription in browser environment
+        // Only watch for changes in the browser (the change feed is browser-only)
         if (isBrowser) {
           // Watch the seed row by local id: its uid changes when an unpublished item is published
           // again (a new seed attestation), and a watch on the uid would stop seeing the row.
-          const seeds$ = BaseDb.liveQuery<{
+          type SeedRow = {
             localId: string
             uid: string | null
             schemaUid: string | null
             revokedAt: number | null
             publisher: string | null
-          }>(
-            (sql: any) => sql`
+          }
+          const seedsQuery = (sql: any) => sql`
               SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher
               FROM seeds
               WHERE local_id = ${watchedSeedLocalId}
             `
-          )
 
-          // Set up liveQuery to watch versions table for this seed
-          const versions$ = BaseDb.liveQuery<{
+          // Watch the versions table for this seed
+          type VersionRow = {
             localId: string
             uid: string | null
             seedLocalId: string
             revokedAt: number | null
-          }>(
-            (sql: any) => sql`
+          }
+          const versionsQuery = (sql: any) => sql`
               SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
               FROM versions
               WHERE seed_local_id = ${watchedSeedLocalId}
               ORDER BY COALESCE(attestation_created_at, created_at) DESC
             `
-          )
 
           const instanceState = itemInstanceState.get(this)
           if (!instanceState) {
@@ -2077,12 +2076,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             return
           }
 
-          // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+          // Unloaded or destroyed while setup awaited: watching now would leak the watches.
           if (isActorStopped(this._service)) return
 
-          // Subscribe to seeds updates
-          const seedsSubscription = seeds$.subscribe({
-            next: async (seedRows) => {
+          // Re-read the seed row and the versions on each change to them (ADR 0020). Both run once
+          // now too, as the liveQueries' first emissions did: the versions handler adds the
+          // property instances to the item's context.
+          const seedsSubscription = watchEntityRows<SeedRow[]>(
+            { seedLocalId: watchedSeedLocalId, tables: ['seeds'] },
+            () => queryEntityRows<SeedRow>(seedsQuery),
+            async (seedRows) => {
               if (seedRows.length === 0) return
               
               const seedRow = seedRows[0]
@@ -2118,21 +2121,23 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 ...(seedRow.publisher ? { publisher: seedRow.publisher } : {}),
               })
             },
-            error: (error) => {
-              logger(`[Item._setupLiveQuerySubscription] Seeds liveQuery error: ${error}`)
+            {
+              immediate: true,
+              onError: (error) => logger(`[Item._setupLiveQuerySubscription] Seeds read error: ${error}`),
             },
-          })
+          )
 
-          // Subscribe to versions updates
           let versionsRuns = 0
           const versionsSubscribedAt = timingNow()
-          const versionsSubscription = versions$.subscribe({
-            next: async (versionRows) => {
+          const versionsSubscription = watchEntityRows<VersionRow[]>(
+            { seedLocalId: watchedSeedLocalId, tables: ['versions'] },
+            () => queryEntityRows<VersionRow>(versionsQuery),
+            async (versionRows) => {
               const versionsRun = ++versionsRuns
               const runStart = timingNow()
               if (versionsRun === 1 && timingLogger.enabled) {
                 timingLogger(
-                  `item ${watchedSeedLocalId} versions live query first run ${timingSince(versionsSubscribedAt)}ms after subscribe, ${timingSince(timingStart)}ms after live-query setup began`,
+                  `item ${watchedSeedLocalId} versions read first result ${timingSince(versionsSubscribedAt)}ms after watching, ${timingSince(timingStart)}ms after watch setup began`,
                 )
               }
               if (versionRows.length === 0) return
@@ -2242,10 +2247,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 latestVersionUid: latestVersion.uid || undefined,
               })
             },
-            error: (error) => {
-              logger(`[Item._setupLiveQuerySubscription] Versions liveQuery error: ${error}`)
+            {
+              immediate: true,
+              onError: (error) => logger(`[Item._setupLiveQuerySubscription] Versions read error: ${error}`),
             },
-          })
+          )
 
           // Store combined subscription
           instanceState.liveQuerySubscription = {

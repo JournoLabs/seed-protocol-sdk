@@ -1,6 +1,6 @@
 # 0020. Loaded entities learn about row changes from one trigger-fed change log
 
-- **Status:** Accepted (being implemented)
+- **Status:** Accepted
 - **Date:** 2026-10-19
 - **Scope:** `@seedprotocol/sdk` (`browser/db`, migrations, Item, ItemProperty), `@seedprotocol/react`
   (indirectly); amends ADR 0015 for Item and ItemProperty
@@ -23,7 +23,7 @@ it: an uncached `Item.find` took 677 ms after a create and 157 ms once the queue
 
 ## Decision
 
-**A change-log table written by SQLite triggers.** A migration adds `entity_changes` (`seq`
+**A change-log table written by SQLite triggers.** Migration 0023 adds `entity_changes` (`seq`
 integer primary key autoincrement, `tbl`, `seed_local_id`, `seed_uid`, `property_name`, `at`) and
 `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers on `seeds`, `versions` and `metadata`.
 Each trigger inserts one row with the written row's keys (`NEW` for inserts and updates, `OLD` for
@@ -41,15 +41,17 @@ and every writer added later.
 entity_changes`, and a cursor. When it emits a higher `seq`, the feed reads `WHERE seq > cursor`,
 advances the cursor and calls the listeners registered for each changed row's seed, keyed by
 `seed_local_id` and by lowercased `seed_uid`, and for metadata rows by `property_name`. A listener
-called several times in one read runs once. The feed starts at the current `max(seq)`; an entity
-does its own initial read, as now.
+called several times in one read runs once. The feed starts at the last seq SQLite allocated
+(`sqlite_sequence`, which survives pruning).
 
 **Entities re-read on dispatch instead of holding a liveQuery.** An Item registers for its seed's
 `seeds` and `versions` changes and, when called, runs the same seeds and versions queries once and
 feeds the rows to today's handlers. An ItemProperty registers for its seed and its 1–3 metadata
 property names and runs its metadata query once. The handlers stay as they are, including the
 `hasPendingPropertyWrite` skip and the superseded-uid check, and a newer read discards an older
-one's result, as SQLocal's `updateOrder` does now.
+one's result, as SQLocal's `updateOrder` did. Each read also runs once when the entity registers,
+as a liveQuery's first emission did, and a read that returns the rows already handed over doesn't
+reach the handler, as `BaseDb.liveQuery`'s `distinctUntilChanged` did.
 
 **Pruning.** The leader tab deletes log rows older than 10 minutes, at most once a minute. A tab
 whose cursor is older than the oldest remaining row (it was suspended) calls every listener once.
@@ -66,11 +68,16 @@ queries, the React list hooks, and app code. Node has no entity reactivity today
 
 Per write, each tab runs the feed query, one cursor read and one read for each loaded entity whose
 seed the write touched, instead of (2 + P) × N re-runs. A create of an item that isn't loaded runs
-2 statements; a save of a loaded property runs 3. The spike measured the cursor read at 1.1–1.3 ms
+2 statements; a save of a loaded property runs 3. The bench (`bench/itemLatency.test.ts`, 40 items
+of 8 properties) measured that, against 400 and 320 before; an uncached `Item.find` right after a
+create went from 563 ms to 114 ms, the same as with a drained queue, and item loads no longer grow
+with the number loaded (245 ms for items 1–20 and 240 ms for 21–40, against 362 and 608). The spike measured the cursor read at 1.1–1.3 ms
 after the first and one feed emission per write, including writes made outside the outbox.
 
 - Every write to the three tables writes one more row per written row (11 for a create of a 9-row
-  item). The write cost of the triggers is not measured yet.
+  item). Measured with one item loaded (`bench/entityChangesWriteCost.test.ts`, medians of 40),
+  the triggers add 1.4 ms to a `createNewItem` (43.9 to 45.3 ms) and 3 ms to a `property.save`
+  (43.0 to 46.1 ms).
 - Migrations and init fixups that rewrite many rows fill the log. They run before entities load,
   so the feed starts past them; the rows are pruned on schedule.
 - An unconditional `DELETE` (as in `resetAmbiguousLegacyItemData`) fires a trigger per row, since

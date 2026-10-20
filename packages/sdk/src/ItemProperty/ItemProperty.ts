@@ -18,6 +18,7 @@ import { camelCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
 import {
   BaseFileManager,
   getCorrectId,
@@ -678,8 +679,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           propertyNames.length > 1
             ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
             : eq(metadataLatest.propertyName, propertyNames[0])
-        // In the browser the metadata liveQuery below emits the same row at once, so only Node (no
-        // liveQuery) reads it here.
+        // In the browser the feed watch below reads the same row at once, so only Node (no change
+        // feed) reads it here.
         const initialMetadata = isBrowser
           ? []
           : await db
@@ -719,9 +720,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           })
         }
 
-        // Only set up liveQuery subscription in browser environment
+        // Only watch for changes in the browser (the change feed is browser-only)
         if (isBrowser) {
-          // Set up liveQuery to watch metadata table for this property
           // Use proper SQL parameter binding - ensure values are strings, not objects
           const resolvedSeedUid = seedUid || null
           const resolvedSeedLocalId = seedLocalId || null
@@ -730,74 +730,73 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           // Build query with primitive params only (SQLocal bind rejects SQL fragment objects)
           // ORDER BY spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason
           const [p0, p1, p2] = propertyNames
-          const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }>(
-            (sql: any) => {
-              if (resolvedSeedUid) {
-                if (propertyNames.length === 1) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
-                if (propertyNames.length === 2) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
-                if (propertyNames.length >= 3) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
-              } else if (resolvedSeedLocalId) {
-                if (propertyNames.length === 1) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
-                if (propertyNames.length === 2) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
-                if (propertyNames.length >= 3) {
-                  return sql`
-                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                    FROM metadata
-                    WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                  `
-                }
+          type MetadataRow = { localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }
+          const metadataQuery = (sql: any) => {
+            if (resolvedSeedUid) {
+              if (propertyNames.length === 1) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
               }
-              return sql`SELECT 1 WHERE 1 = 0`
+              if (propertyNames.length === 2) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
+              }
+              if (propertyNames.length >= 3) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
+              }
+            } else if (resolvedSeedLocalId) {
+              if (propertyNames.length === 1) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
+              }
+              if (propertyNames.length === 2) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
+              }
+              if (propertyNames.length >= 3) {
+                return sql`
+                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                  FROM metadata
+                  WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
+                  ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                `
+              }
             }
-          )
+            return sql`SELECT 1 WHERE 1 = 0`
+          }
 
           const instanceState = itemPropertyInstanceState.get(this)
           if (!instanceState) {
@@ -805,12 +804,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             return
           }
 
-          // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
+          // Unloaded or destroyed while setup awaited: watching now would leak the watch.
           if (isActorStopped(this._service)) return
 
-          // Subscribe to liveQuery updates
-          const subscription = metadata$.subscribe({
-            next: async (metadataRows) => {
+          // Re-read on each change to this property's metadata rows (ADR 0020)
+          const subscription = watchEntityRows<MetadataRow[]>(
+            {
+              seedLocalId: resolvedSeedLocalId,
+              seedUid: resolvedSeedUid,
+              tables: ['metadata'],
+              propertyNames,
+            },
+            () => queryEntityRows<MetadataRow>(metadataQuery),
+            (metadataRows) => {
               if (metadataRows.length === 0) return
               
               const metaRow = metadataRows[0]
@@ -844,10 +850,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 localStorageDir: metaRow.localStorageDir || undefined,
               })
             },
-            error: (error) => {
-              logger(`[ItemProperty._setupLiveQuerySubscription] LiveQuery error: ${error}`)
+            {
+              immediate: true,
+              onError: (error) => logger(`[ItemProperty._setupLiveQuerySubscription] Metadata read error: ${error}`),
             },
-          })
+          )
 
           instanceState.liveQuerySubscription = subscription
           logger(`[ItemProperty._setupLiveQuerySubscription] LiveQuery subscription set up for propertyName: ${propertyName}`)

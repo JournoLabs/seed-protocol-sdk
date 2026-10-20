@@ -8,6 +8,11 @@
  * as on an edit page. The EAS indexer is a stub that answers "no schema" after
  * SEED_BENCH_EAS_MS (default 0). Results print as one JSON line per phase. Add
  * DEBUG=seedSdk:timing for per-phase lines from the SDK.
+ *
+ * The `re-runs after` phases count statements the SQLite worker ran from the start of a write until
+ * 600 ms after it returned (SQLocal debounces table changes 32 ms, 180 ms at most): `sqlTag` counts
+ * SQL-tag statements (liveQueries, the change feed's query and its entity reads; the write itself
+ * uses none), `all` every statement, the write's own included.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { waitFor } from 'xstate'
@@ -100,9 +105,13 @@ const time = async (fn: () => Promise<unknown>) => {
   return performance.now() - start
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 describe.skipIf(!enabled)('item latency bench', () => {
   const loaded: Item<any>[] = []
   let restoreEasClient: (() => void) | undefined
+  let restoreCounters: (() => void) | undefined
+  const statements = { sqlTag: 0, all: 0 }
 
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
@@ -122,10 +131,27 @@ describe.skipIf(!enabled)('item latency bench', () => {
     })
     restoreEasClient = () => BaseEasClient.configure({ getEasClient: () => online })
     resetSchemaUidCaches()
+
+    // sql() takes SQL-tag statements; exec() takes every statement, sql()'s included.
+    const instance = (BaseDb as any)._impl.sqlocalInstance
+    const { sql: originalSql, exec: originalExec } = instance
+    instance.sql = (...args: any[]) => {
+      statements.sqlTag++
+      return originalSql(...args)
+    }
+    instance.exec = (...args: any[]) => {
+      statements.all++
+      return originalExec(...args)
+    }
+    restoreCounters = () => {
+      instance.sql = originalSql
+      instance.exec = originalExec
+    }
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     for (const item of loaded) item.unload()
+    restoreCounters?.()
     restoreEasClient?.()
     resetSchemaUidCaches()
     await teardownTestEnvironment()
@@ -135,7 +161,37 @@ describe.skipIf(!enabled)('item latency bench', () => {
     console.log(JSON.stringify({ bench: 'itemLatency', phase, loadedItems: loaded.length, easDelayMs, ...stats(ms) }))
   }
 
+  /**
+   * Statements run from the start of `write` until 600 ms after it returns, once the previous
+   * write's have drained. A save waits for its op to apply, so its re-runs can start before it returns.
+   */
+  const reRuns = async (write: () => Promise<unknown>) => {
+    await sleep(400)
+    const before = { ...statements }
+    await write()
+    await sleep(600)
+    return { sqlTag: statements.sqlTag - before.sqlTag, all: statements.all - before.all }
+  }
+
+  const reportReRuns = (phase: string, runs: { sqlTag: number; all: number }[]) => {
+    console.log(
+      JSON.stringify({
+        bench: 'itemLatency',
+        phase,
+        loadedItems: loaded.length,
+        sqlTag: stats(runs.map((r) => r.sqlTag)),
+        all: stats(runs.map((r) => r.all)),
+      }),
+    )
+  }
+
   const measure = async (when: string) => {
+    const createRuns = []
+    for (let i = 0; i < 5; i++) {
+      createRuns.push(await reRuns(() => createNewItem({ modelName: 'BenchClip', schemaName, ...values(500 + i) } as never)))
+    }
+    reportReRuns(`${when}: re-runs after createNewItem`, createRuns)
+
     const creates: number[] = []
     for (let i = 0; i < 5; i++) {
       creates.push(await time(() => createNewItem({ modelName: 'BenchClip', schemaName, ...values(i) } as never)))
@@ -143,6 +199,19 @@ describe.skipIf(!enabled)('item latency bench', () => {
     report(`${when}: createNewItem`, creates)
 
     if (loaded.length === 0) return
+
+    const saveRuns = []
+    for (let i = 0; i < 5; i++) {
+      const property = loaded[i]!.properties.find((p) => p.propertyName === 'title') as ItemProperty<any>
+      // The assignment appends the write; save() waits for it.
+      saveRuns.push(
+        await reRuns(() => {
+          property.value = `rerun ${i}`
+          return property.save()
+        }),
+      )
+    }
+    reportReRuns(`${when}: re-runs after property.save`, saveRuns)
 
     const saves: number[] = []
     const names = ['title', 'width', 'savedAt', 'summary'] as const

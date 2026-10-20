@@ -3,7 +3,8 @@
  * under `?filesDir=` and exposes `window.seedTab` for the test to drive through Playwright.
  */
 import { eq, sql } from 'drizzle-orm'
-import { appState } from '@/seedSchema'
+import { appState, seeds } from '@/seedSchema'
+import { watchEntityChanges } from '@/browser/db/changeFeed'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eventEmitter } from '@/eventBus'
@@ -24,6 +25,9 @@ new BroadcastChannel(`seed:tabs:${filesDir}/db/seed.db`).onmessage = (event) => 
     filesChangedMessages.push({ from: event.data.from, paths: event.data.paths })
   }
 }
+
+/** Change-feed calls per watched seed local id. */
+const changeCalls = new Map<string, number>()
 
 const db = () => {
   const appDb = BaseDb.getAppDb()
@@ -111,6 +115,23 @@ const seedTab = {
     const rows = await db().select().from(appState).where(eq(appState.key, key))
     return Number(rows[0]?.value ?? 0)
   },
+  /** Inserts a seed row straight into the table, as a writer outside the outbox does; returns its local id. */
+  async insertSeed(): Promise<string> {
+    const localId = `tab-seed-${Math.random().toString(36).slice(2, 10)}`
+    await db().insert(seeds).values({ localId, type: 'tab_post', createdAt: Date.now() })
+    return localId
+  },
+  async touchSeed(localId: string): Promise<void> {
+    await db().update(seeds).set({ updatedAt: Date.now() }).where(eq(seeds.localId, localId))
+  },
+  /** Counts this tab's change-feed calls for the seed's rows (ADR 0020). */
+  watchSeed(localId: string): void {
+    changeCalls.set(localId, 0)
+    watchEntityChanges({ seedLocalId: localId, tables: ['seeds'] }, () =>
+      changeCalls.set(localId, (changeCalls.get(localId) ?? 0) + 1),
+    )
+  },
+  changeCalls: (localId: string) => changeCalls.get(localId) ?? 0,
   tabId: () => TAB_ID,
   filesChanged: () => filesChanged,
   filesChangedMessages: () => filesChangedMessages,

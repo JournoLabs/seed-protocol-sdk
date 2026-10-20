@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { importJsonSchema } from '@/imports/json'
@@ -6,16 +6,16 @@ import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
 import type { IItemProperty } from '@/interfaces'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
-import { countLiveQueries, type LiveQueryCounter } from '../test-utils/liveQueryCounter'
+import { countChangeWatches } from '../test-utils/changeWatches'
 import { waitUntilOrThrow } from '../test-utils/waitUntil'
 
 /**
  * Who holds an ItemProperty: its Item holds each property in its map once, and every public
  * `find`/`create` call is one more hold for that caller. Releasing the Item and each find stops the
- * property. SDK lookups that feed the Item's map (its constructor, loadOrCreateItem, its liveQuery)
- * take none of their own.
+ * property. SDK lookups that feed the Item's map (its constructor, loadOrCreateItem, its change-feed
+ * watch) take none of their own.
  *
- * The holds the Item's liveQuery used to take only happen in the browser; the rest runs in both.
+ * The holds the Item's change-feed reads used to take only happen in the browser; the rest runs in both.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -60,8 +60,6 @@ const status = (property: IItemProperty<any>) => property.getService().getSnapsh
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
 
 testDescribe('ItemProperty refCount', () => {
-  let liveQueries: LiveQueryCounter | undefined
-
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const file = schemaFile()
@@ -72,22 +70,14 @@ testDescribe('ItemProperty refCount', () => {
     await teardownTestEnvironment()
   })
 
-  beforeEach(() => {
-    liveQueries = isBrowser ? countLiveQueries() : undefined
-  })
-
-  afterEach(() => {
-    liveQueries?.restore()
-  })
-
-  /** Creates an item and, in the browser, waits until its liveQuery setup (which looks up every property) is done. */
+  /** Creates an item and, in the browser, waits until its watch setup (which looks up every property) is done. */
   const createPost = async (title: string) => {
     const item = await Item.create({ modelName: 'RefCountPost', schemaName: SCHEMA_NAME, title } as never)
-    if (liveQueries) {
-      // The item subscribes to its seeds row after looking up its properties' metadata
+    if (isBrowser) {
+      // The item watches its seeds row after looking up its properties' metadata
       await waitUntilOrThrow(
-        () => liveQueries!.active({ param: item.seedLocalId, sql: /FROM\s+"?seeds"?/i }) > 0,
-        "the item's seeds liveQuery to be subscribed",
+        () => countChangeWatches({ seedLocalId: item.seedLocalId, table: 'seeds' }) > 0,
+        "the item's seeds watch to be registered",
       )
     }
     await settle()
@@ -134,8 +124,8 @@ testDescribe('ItemProperty refCount', () => {
 
     await settle()
     expect(entryFor(first!), 'no cache key points at the stopped instance').toBeUndefined()
-    if (liveQueries) {
-      expect(liveQueries.active({ param: [item.seedLocalId, 'title'], sql: /FROM\s+metadata/ })).toBe(0)
+    if (isBrowser) {
+      expect(countChangeWatches({ seedLocalId: item.seedLocalId, table: 'metadata', propertyName: 'title' })).toBe(0)
     }
   }, 30000)
 
