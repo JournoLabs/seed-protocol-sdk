@@ -9,7 +9,7 @@ const IMAGE_FILES_QUERY_KEY = ['seed', 'imageFiles'] as const
 
 /**
  * Returns an up-to-date list of image filenames stored in the file system (OPFS in browser).
- * Automatically refetches when images are saved (file-saved) or after bulk downloads (fs.downloadAll.success).
+ * Refetches when an image is saved, here or by a worker or another tab.
  *
  * Use within SeedProvider, after client.init().
  *
@@ -40,9 +40,6 @@ export function useImageFiles() {
         queryClient.invalidateQueries({ queryKey: IMAGE_FILES_QUERY_KEY })
       }
     }
-    const downloadSuccessHandler = () => {
-      queryClient.invalidateQueries({ queryKey: IMAGE_FILES_QUERY_KEY })
-    }
     // Files written by workers or other tabs.
     const filesChangedHandler = (filePaths: string[]) => {
       if (filePaths.some((filePath) => filePath.includes('/images/'))) {
@@ -50,11 +47,9 @@ export function useImageFiles() {
       }
     }
     eventEmitter.on('file-saved', fileSavedHandler)
-    eventEmitter.on('fs.downloadAll.success', downloadSuccessHandler)
     eventEmitter.on(FILES_CHANGED_EVENT, filesChangedHandler)
     return () => {
       eventEmitter.off('file-saved', fileSavedHandler)
-      eventEmitter.off('fs.downloadAll.success', downloadSuccessHandler)
       eventEmitter.off(FILES_CHANGED_EVENT, filesChangedHandler)
     }
   }, [queryClient])

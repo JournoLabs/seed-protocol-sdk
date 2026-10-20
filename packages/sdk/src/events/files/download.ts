@@ -1,4 +1,3 @@
-import { eventEmitter } from '@/eventBus'
 import { appState } from '@/seedSchema'
 import { and, eq, isNotNull, or } from 'drizzle-orm'
 import { getAllAddressesFromDb } from '@/helpers/db'
@@ -17,7 +16,6 @@ import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySelected } from '@/helpers'
 import { getArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
-import { Endpoints } from '@/types'
 import type { TransactionTag } from '@/types/arweave'
 import { getTransactionTagsByIds } from '@seedprotocol/arweave'
 import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
@@ -31,14 +29,6 @@ const AUTO_BULK_DOWNLOAD_THROTTLE_MS = 10000
 const GET_FILES_METADATA_STALE_MS = 120_000
 let bulkDownloadInFlight: Promise<void> | null = null
 const lazyDownloadInFlightByTransactionId = new Map<string, Promise<boolean>>()
-
-// syncDbFiles helper - internal service removed, functionality moved here
-const syncDbFiles = async (_endpoints: any) => {
-  // TODO: Implement syncDbFiles functionality if needed
-  // This was previously in @/services/internal/helpers
-  logger('[download] syncDbFiles called but not yet implemented')
-  return Promise.resolve()
-}
 
 const getAppDbReady = async () => {
   if (!BaseDb.isAppDbReady()) {
@@ -350,36 +340,10 @@ const runBulkDownloadWithDedupe = async (transactionIds: string[]): Promise<void
 }
 
 
-type DownloadAllFilesRequestHandlerProps = {
-  endpoints: Endpoints
-  eventId: string
-}
-
-export const downloadAllFilesRequestHandler = async ({
-  endpoints,
-  eventId,
-}: DownloadAllFilesRequestHandlerProps) => {
-
+export const downloadAllFilesBinaryRequestHandler = async (addressesHint?: string[]) => {
   if (!supportsOpfsFileDownloads()) {
     return
   }
-
-  await syncDbFiles(endpoints)
-
-  eventEmitter.emit('fs.downloadAll.success', { eventId })
-  eventEmitter.emit('fs.downloadAllBinary.request', { endpoints })
-}
-
-export const downloadAllFilesBinaryRequestHandler = async (
-  addressesHintOrPayload?: string[] | { endpoints?: Endpoints },
-) => {
-  if (!supportsOpfsFileDownloads()) {
-    return
-  }
-
-  const addressesHint = Array.isArray(addressesHintOrPayload)
-    ? addressesHintOrPayload
-    : undefined
 
   let fromDb: string[] = []
   if (BaseDb.isAppDbReady()) {
