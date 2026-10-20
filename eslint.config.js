@@ -11,6 +11,8 @@ export default tseslint.config(
             '**/node_modules/**',
             '**/target/**',
             '**/coverage/**',
+            // Next builds of packages/next's test fixture.
+            '**/.next*/**',
             '**/*.min.js',
             '**/*.bundle.js',
             'packages/eas/src/graphql/gql/**',

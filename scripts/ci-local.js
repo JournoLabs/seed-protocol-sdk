@@ -27,6 +27,7 @@ const workflowPath = path.join(rootDir, '.github/workflows/release.yml')
 const JOB = 'test'
 const TEST_STEP = 'bun run test'
 const IMAGE = 'seed-ci-local'
+const STEPS_ENV = 'CI_LOCAL_STEPS'
 
 async function loadWorkflow() {
   let yaml
@@ -131,6 +132,27 @@ function checkoutFiles() {
   return out.stdout.split('\0').filter((file) => file && fs.existsSync(path.join(rootDir, file)))
 }
 
+const WATCH_INTERVAL_MS = 30_000
+
+/**
+ * `docker run` keeps waiting when its container is removed under it (a Docker Desktop
+ * restart, `docker rm -f`), so this fails the run once the container is missing on two
+ * checks in a row. Two, because a container that just exited is removed by `--rm` before
+ * the client's own exit arrives.
+ */
+function watchContainer(name, docker, reject) {
+  let misses = 0
+  const timer = setInterval(() => {
+    const inspect = spawnSync('docker', ['inspect', '-f', '{{.State.Status}}', name], { encoding: 'utf8' })
+    misses = inspect.status === 0 ? 0 : misses + 1
+    if (misses < 2) return
+    clearInterval(timer)
+    docker.kill()
+    reject(new Error(`container ${name} disappeared while \`docker run\` was still waiting`))
+  }, WATCH_INTERVAL_MS)
+  docker.on('close', () => clearInterval(timer))
+}
+
 async function runDocker(workflow, options) {
   const versions = {
     PLAYWRIGHT_VERSION: playwrightVersion(),
@@ -149,12 +171,17 @@ async function runDocker(workflow, options) {
     'cd /work',
     `node scripts/ci-local.js --repeat ${options.repeat}`,
   ].join(' && ')
+  // The container has no node_modules (so no js-yaml) until its install step, so the host
+  // reads the steps and hands them over.
+  const steps = JSON.stringify(jobSteps(workflow))
+  const name = `${IMAGE}-${process.pid}`
   const dockerArgs = [
-    'run', '--rm', '-i',
+    'run', '--rm', '-i', '--name', name,
     `--cpus=${options.cpus}`, `--memory=${options.memory}`, `--memory-swap=${options.memory}`,
     // Playwright's recommendation for Chromium; Docker's default 64 MB /dev/shm crashes it.
     '--ipc=host',
     '-e', 'CI=true',
+    '-e', `${STEPS_ENV}=${steps}`,
     ...(process.env.SEED_GATEWAY_HYPER_KEY ? ['-e', 'SEED_GATEWAY_HYPER_KEY'] : []),
     // Bun's download cache only; node_modules is rebuilt in the container every run.
     '-v', `${IMAGE}-bun-cache:/root/.bun/install/cache`,
@@ -173,6 +200,7 @@ async function runDocker(workflow, options) {
   const code = await new Promise((resolve, reject) => {
     docker.on('close', resolve)
     docker.on('error', reject)
+    watchContainer(name, docker, reject)
   })
   console.log(`\nDocker run: ${seconds(start)} (includes image start and repo copy)`)
   if (code !== 0) throw new Error(`docker run failed with exit code ${code}`)
@@ -180,6 +208,7 @@ async function runDocker(workflow, options) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
+  if (process.env[STEPS_ENV]) return runSteps(JSON.parse(process.env[STEPS_ENV]), options.repeat)
   const workflow = await loadWorkflow()
   if (options.docker) await runDocker(workflow, options)
   else await runSteps(jobSteps(workflow), options.repeat)
