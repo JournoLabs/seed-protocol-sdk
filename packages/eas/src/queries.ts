@@ -89,6 +89,27 @@ export const GET_DOMAIN_OWNERSHIPS = graphql(/* GraphQL */ `
   }
 `) as TypedDocumentNode<{ domainOwnerships: Attestation[] }>
 
+/**
+ * PublishAuthorization sidecar attestations. Selects `expirationTime` and `revoked`, which
+ * {@link assessPublishAuthorization} needs to report an expired or revoked grant.
+ */
+export const GET_PUBLISH_AUTHORIZATIONS = graphql(/* GraphQL */ `
+  query GetPublishAuthorizations($where: AttestationWhereInput!) {
+    publishAuthorizations: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {
+      id
+      decodedDataJson
+      attester
+      recipient
+      refUID
+      revoked
+      revocationTime
+      expirationTime
+      schemaId
+      timeCreated
+    }
+  }
+`) as TypedDocumentNode<{ publishAuthorizations: Attestation[] }>
+
 export const GET_SEED_IDS = graphql(/* GraphQL */ `
   query GetSeedIds($where: AttestationWhereInput!) {
     itemSeedIds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {

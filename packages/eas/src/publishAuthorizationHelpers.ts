@@ -25,7 +25,12 @@ export type PublishAuthorizationDecoded = {
   permissionsHash: `0x${string}`
 }
 
-export type PublishAuthorizationAssessStatus = 'valid' | 'expired' | 'scope_mismatch' | 'unknown'
+export type PublishAuthorizationAssessStatus =
+  | 'valid'
+  | 'revoked'
+  | 'expired'
+  | 'scope_mismatch'
+  | 'unknown'
 
 export type PublishAuthorizationAssessResult = {
   status: PublishAuthorizationAssessStatus
@@ -107,10 +112,16 @@ export function assessPublishAuthorization(params: {
   decoded: PublishAuthorizationDecoded
   /** EAS on-chain expirationTime (unix seconds), when known. */
   expirationTime?: number | null
+  /** EAS `revoked`. A revoked grant is `'revoked'` whatever its expiry. */
+  revoked?: boolean | null
   now?: number
   /** When set, scopes must equal this string (default: publish,revoke). */
   expectedScopes?: string
 }): PublishAuthorizationAssessResult {
+  if (params.revoked) {
+    return { status: 'revoked', warnings: [] }
+  }
+
   const nowSec = Math.floor((params.now ?? Date.now()) / 1000)
   const warnings: string[] = []
   const expectedScopes = params.expectedScopes ?? PUBLISH_AUTHORIZATION_SCOPES

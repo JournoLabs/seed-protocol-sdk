@@ -193,10 +193,6 @@ export async function attestDomainOwnership(
   params: AttestDomainOwnershipParams,
 ): Promise<AttestDomainOwnershipResult> {
   const sender = resolveTxSender(params.wallet)
-  const schemaUid =
-    params.ensureSchema === false
-      ? getDomainOwnershipSchemaUid()
-      : await ensureDomainOwnershipSchema(params.wallet)
 
   const scope = params.scope ?? DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE
   // Record the domain the challenge was on: a hostname-scoped challenge must not be widened to
@@ -229,6 +225,12 @@ export async function attestDomainOwnership(
     registryExpirationDate,
     override: params.expirationTime,
   })
+
+  // Register the schema only once the inputs are known good, so a bad call spends no gas.
+  const schemaUid =
+    params.ensureSchema === false
+      ? getDomainOwnershipSchemaUid()
+      : await ensureDomainOwnershipSchema(params.wallet)
 
   const data = encodeDomainOwnershipAttestationData({
     domain,

@@ -1,4 +1,5 @@
 import type { Account } from 'thirdweb/wallets'
+import { PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS } from '@seedprotocol/eas'
 import type { PublishWallet } from './seedSigner'
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
@@ -22,7 +23,11 @@ export type EnrollPublishAutomationParams = {
   sessionKeyAddress: string
   /** Optional app label stored in the sidecar (defaults to zero address). */
   appAddress?: string
-  /** Unix seconds session / grant end (optional). */
+  /**
+   * Unix seconds when the session key and the grant end. Defaults to 365 days from now
+   * ({@link PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS}); the same value goes to both, so the
+   * on-chain key never outlives its PublishAuthorization.
+   */
   expiresAt?: number
   /**
    * User-controlled ManagedAccount wallet used to add the session key and attest the sidecar.
@@ -111,7 +116,11 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
 export async function enrollPublishAutomation(
   params: EnrollPublishAutomationParams,
 ): Promise<EnrollPublishAutomationResult> {
-  const { managedAddress, sessionKeyAddress, appAddress, expiresAt } = params
+  const { managedAddress, sessionKeyAddress, appAddress } = params
+  const expiresAt =
+    typeof params.expiresAt === 'number' && params.expiresAt > 0
+      ? Math.trunc(params.expiresAt)
+      : Math.floor(Date.now() / 1000) + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS
 
   await assertExecutorModuleInstalled(managedAddress)
   await ensureAutomationSessionKey({
