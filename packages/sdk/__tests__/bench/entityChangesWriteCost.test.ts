@@ -92,7 +92,8 @@ describe.skipIf(!enabled)('entity_changes trigger write cost', () => {
     const title = item.properties.find((p) => p.propertyName === 'title') as ItemProperty<any>
     let n = 0
     for (let round = 0; round < ROUNDS; round++) {
-      for (const mode of (round % 2 === 0 ? ['off', 'on'] : ['on', 'off']) as const) {
+      const modes: Array<'off' | 'on'> = round % 2 === 0 ? ['off', 'on'] : ['on', 'off']
+      for (const mode of modes) {
         await setTriggers(mode === 'on')
         // Let the previous writes' live-query wave drain.
         await new Promise((resolve) => setTimeout(resolve, 400))

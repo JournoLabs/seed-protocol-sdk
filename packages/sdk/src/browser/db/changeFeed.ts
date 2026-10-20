@@ -101,13 +101,14 @@ export function watchEntityChanges(watch: ChangeWatch, listener: () => void): ()
  *
  * Pass `since` (the `changeFeedCursor()` taken before the caller's own initial read) to run `read`
  * once right away when the feed moved on in between: a change dispatched before this watch was
- * registered would otherwise be missed.
+ * registered would otherwise be missed. Pass `immediate` to run it once right away regardless, as
+ * a liveQuery's first emission does.
  */
 export function watchEntityRows<T>(
   watch: ChangeWatch,
   read: () => Promise<T>,
   onRows: (rows: T) => void,
-  options: { since?: number; onError?: (error: unknown) => void } = {},
+  options: { since?: number; immediate?: boolean; onError?: (error: unknown) => void } = {},
 ): { unsubscribe: () => void } {
   let latest = 0
   let closed = false
@@ -132,7 +133,7 @@ export function watchEntityRows<T>(
     )
   }
   const unregister = watchEntityChanges(watch, run)
-  if (options.since !== undefined && cursor > options.since) run()
+  if (options.immediate || (options.since !== undefined && cursor > options.since)) run()
   return {
     unsubscribe: () => {
       closed = true
