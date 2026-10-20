@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => {
     getBaseUrl: vi.fn(() => 'https://arweave.net'),
     getMetadata: vi.fn(async () => null),
     saveMetadata: vi.fn(async () => undefined),
-    saveAppState: vi.fn(async () => undefined),
     downloadAllFiles: vi.fn(async () => undefined),
     downloadFileByTransactionId: vi.fn(async () => undefined),
     resizeAllImages: vi.fn(async () => undefined),
@@ -100,10 +99,6 @@ vi.mock('@/db/read/getMetadata', () => ({
 
 vi.mock('@/db/write/saveMetadata', () => ({
   saveMetadata: mocks.saveMetadata,
-}))
-
-vi.mock('@/db/write/saveAppState', () => ({
-  saveAppState: mocks.saveAppState,
 }))
 
 vi.mock('@/eventBus', () => ({

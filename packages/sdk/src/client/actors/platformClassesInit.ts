@@ -1,11 +1,8 @@
 import { ClientManagerContext, FromCallbackInput, SeedConstructorOptions } from '@/types'
 import { fromCallback, EventObject }                      from "xstate";
 import debug                                       from 'debug'
-import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";
-import { setupServiceHandlers } from "@/events/services";
 // import { getGlobalService, } from "@/services/global/globalMachine";
-// import { GlobalState } from "@/client/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import {
   BaseArweaveClient,
@@ -152,8 +149,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     // Models are now Model instances, no registration needed
     // They should be created via Model.create() and are accessible via Model static methods
     setupAllItemsEventHandlers()
-    setupServicesEventHandlers()
-    setupServiceHandlers()
   })
 
   // Handle the promise immediately - this ensures rejections are caught synchronously

@@ -1,9 +1,3 @@
-const ENV = (typeof process !== 'undefined' && process.env) 
-            ? process.env 
-            : (typeof window !== 'undefined' && (window as any).env) 
-            ? (window as any).env 
-            : {};
-
 const MACHINE_ID_SCOPE = '@seedSdk'
 
 export enum MachineIds {
@@ -17,8 +11,6 @@ export enum MachineIds {
   MODEL       = `${MACHINE_ID_SCOPE}/model`,
   FILE_SYSTEM = `${MACHINE_ID_SCOPE}/fileSystem`,
 }
-
-const { INTERNAL, GLOBAL } = MachineIds
 
 export enum ClientManagerState {
   UNINITIALIZED = 'uninitialized',
@@ -46,82 +38,3 @@ export enum ClientManagerEvents {
   ADD_MODELS_TO_DB_SUCCESS = 'addModelsToDbSuccess',
   PROCESS_SCHEMA_FILES_SUCCESS = 'processSchemaFilesSuccess',
 }
-
-export enum GlobalState {
-  UNINITIALIZED       = 'uninitialized',
-  INITIALIZING        = 'initializing',
-  INITIALIZED         = 'initialized',
-  PUBLISHING_ITEM     = 'publishingItem',
-  ADDING_MODELS_TO_DB = 'addingModelsToDb',
-}
-
-const {
-        INITIALIZING,
-        PUBLISHING_ITEM,
-        ADDING_MODELS_TO_DB,
-      } = GlobalState
-
-export enum InternalState {
-  IDLE             = 'idle',
-  INITIALIZING     = 'initializing',
-  VALIDATING_INPUT = 'validatingInput',
-  CONFIGURING_FS   = 'configuringFs',
-  LOADING_SEED_DB  = 'loadingSeedDb',
-  SAVING_CONFIG    = 'savingConfig',
-  LOADING_APP_DB   = 'loadingAppDb',
-  LOADING_SDK_DB   = 'loadingSdkDb',
-}
-
-const { VALIDATING_INPUT, CONFIGURING_FS, LOADING_SEED_DB, LOADING_APP_DB } =
-        InternalState
-
-export const INTERNAL_VALIDATING_INPUT_SUCCESS = `${INTERNAL}.${VALIDATING_INPUT}.success`
-
-export const INTERNAL_CONFIGURING_FS_SUCCESS = `${INTERNAL}.${CONFIGURING_FS}.success`
-export const INTERNAL_CONFIGURING_FS_FAILURE = `${INTERNAL}.${CONFIGURING_FS}.failure`
-
-export const INTERNAL_LOADING_SEED_DB_SUCCESS = `${INTERNAL}.${LOADING_SEED_DB}.success`
-export const INTERNAL_LOADING_SEED_DB_FAILURE = `${INTERNAL}.${LOADING_SEED_DB}.failure`
-
-export const INTERNAL_LOADING_APP_DB_SUCCESS = `${INTERNAL}.${LOADING_APP_DB}.success`
-export const INTERNAL_LOADING_APP_DB_FAILURE = `${INTERNAL}.${LOADING_APP_DB}.failure`
-
-export const INTERNAL_SAVING_CONFIG_SUCCESS = `${INTERNAL}.savingConfig.success`
-export const INTERNAL_SAVING_CONFIG_FAILURE = `${INTERNAL}.savingConfig.failure`
-
-export const GLOBAL_GETTING_SEED_CLASS_SUCCESS             = `${GLOBAL}.${PUBLISHING_ITEM}.success`
-export const GLOBAL_INITIALIZING_SEND_CONFIG               = `${GLOBAL}.${INITIALIZING}.sendConfig`
-export const GLOBAL_INITIALIZING_INTERNAL_SERVICE_READY    = `${GLOBAL}.${INITIALIZING}.internalServiceReady`
-export const GLOBAL_INITIALIZING_CREATE_ALL_ITEMS_SERVICES = `${GLOBAL}.${INITIALIZING}.createAllItemsServices`
-export const GLOBAL_ADDING_MODELS_TO_DB_SUCCESS            = `${GLOBAL}.${ADDING_MODELS_TO_DB}.success`
-
-export const CHILD_SNAPSHOT                = 'childSnapshot'
-
-export const INTERNAL_SERVICE_SNAPSHOT = 'internalServiceSnapshot'
-
-export const BROWSER_FS_TOP_DIR = 'app-files'
-
-/**
- * @deprecated Evaluated once at import and ignores `SeedConfig.eas` / publish chain config.
- * Use `getEasEndpoint()` from `@seedprotocol/eas`.
- */
-export const EAS_ENDPOINT =
-               ENV.NEXT_PUBLIC_EAS_ENDPOINT ||
-               ENV.EAS_ENDPOINT ||
-               'https://optimism-sepolia.easscan.org/graphql'
-
-/**
- * @deprecated Use BaseArweaveClient.getHost() instead.
- * This constant is kept for backward compatibility but will be removed in a future version.
- * Migration: import { BaseArweaveClient } from '@/helpers' and use BaseArweaveClient.getHost()
- */
-export const ARWEAVE_HOST     =
-               ENV.NEXT_PUBLIC_ARWEAVE_HOST || 'ar.seedprotocol.io'
-
-/**
- * @deprecated Use BaseArweaveClient.getEndpoint() instead.
- * This constant is kept for backward compatibility but will be removed in a future version.
- * Migration: import { BaseArweaveClient } from '@/helpers' and use BaseArweaveClient.getEndpoint()
- */
-export const ARWEAVE_ENDPOINT = `https://${ARWEAVE_HOST}/graphql`
-
