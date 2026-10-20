@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
-import { getAddressesFromDbOptional } from '@/helpers/db'
+import { getOwnedAddressesFromDb } from '@/helpers/db'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
-testDescribe('getAddressesFromDbOptional', () => {
+testDescribe('getOwnedAddressesFromDb', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
@@ -21,8 +21,8 @@ testDescribe('getAddressesFromDbOptional', () => {
 
   it('returns empty array when no addresses are configured', async () => {
     // Default test setup does not pass addresses, so appState may not have 'addresses' key
-    // or may have empty value - getAddressesFromDbOptional should return [] without throwing
-    const addresses = await getAddressesFromDbOptional()
+    // or may have empty value - getOwnedAddressesFromDb should return [] without throwing
+    const addresses = await getOwnedAddressesFromDb()
     expect(Array.isArray(addresses)).toBe(true)
     // In default test setup, addresses may be [] if not configured
     expect(addresses).toBeDefined()
@@ -43,7 +43,7 @@ testDescribe('getAddressesFromDbOptional', () => {
         set: { value: JSON.stringify(testAddresses) },
       })
 
-    const addresses = await getAddressesFromDbOptional()
+    const addresses = await getOwnedAddressesFromDb()
     expect(addresses).toEqual(testAddresses)
   })
 })

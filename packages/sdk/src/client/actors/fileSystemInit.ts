@@ -1,20 +1,12 @@
 import { BaseFileManager } from "@/helpers";
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines";
 import { EventObject, fromCallback } from "xstate";
-import { areFsListenersReady, setupFsListeners } from "@/events/files";
-import { eventEmitter } from "@/eventBus";
 
 
 export const fileSystemInit = fromCallback<
 EventObject, 
 FromCallbackInput<ClientManagerContext>
 >(({sendBack, input: {context},}) => {
-
-  setupFsListeners()
-
-  if (!areFsListenersReady()) {
-    throw new Error('fs listeners not ready during init')
-  }
 
   // Check for filesDir synchronously before starting async operation
   // This ensures the error is thrown synchronously and caught by XState
@@ -25,7 +17,6 @@ FromCallbackInput<ClientManagerContext>
 
   const _fileSystemInit = async () => {
     await BaseFileManager.initializeFileSystem(filesDir)
-    eventEmitter.emit('fs.init')
   }
 
   _fileSystemInit()

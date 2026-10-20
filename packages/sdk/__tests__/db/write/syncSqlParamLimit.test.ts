@@ -52,7 +52,6 @@ vi.mock('@/eas', async () => {
 })
 
 vi.mock('@/events/files/download', () => ({
-  downloadAllFilesRequestHandler: async () => {},
   downloadAllFilesBinaryRequestHandler: async () => {},
   downloadTransactionIdWithDedupe: async () => false,
   scheduleBulkFilesDownloadFromEasSync: () => {},

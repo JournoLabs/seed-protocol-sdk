@@ -119,7 +119,7 @@ schema.name = 'My Schema'
    - No direct database reads after initialization
 
 3. **Initial load happens during construction**
-   - `loadOrCreateSchema` actor loads from DB/file
+   - The `checkExistingSchema` actor loads from the DB or the schema file
    - Context is populated with loaded data
    - Conflict detection metadata is tracked
 

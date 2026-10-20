@@ -6,7 +6,7 @@ import { currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evict
 const logger = debug('seedSdk:write:validateEntity')
 
 export type ValidateEntityInput = {
-  entityType: 'model' | 'modelProperty' | 'schema'
+  entityType: 'model' | 'modelProperty'
   entityData: any
 }
 
@@ -145,20 +145,6 @@ export const validateEntity = fromPromise<
               logger('Error validating property against schema:', error)
               // Continue with structure validation only
             }
-          }
-        }
-      } else if (entityInput.entityType === 'schema') {
-        // Schema validation - use existing validation
-        const validationServiceMod = await import('../../../Schema/service/validation/SchemaValidationService')
-        const { SchemaValidationService } = validationServiceMod
-        const validationService = new SchemaValidationService()
-        
-        const schemaResult = validationService.validateSchema(entityInput.entityData)
-        
-        if (!schemaResult.isValid) {
-          result = {
-            isValid: false,
-            errors: schemaResult.errors,
           }
         }
       }

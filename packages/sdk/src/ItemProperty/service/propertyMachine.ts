@@ -12,8 +12,7 @@ import {
   saveHtml,
   saveItemStorage,
 } from '@/ItemProperty/service/actors/saveValueToDb'
-import { analyzeInput } from '@/ItemProperty/service/actors/saveValueToDb/analyzeInput' // import { updateMachineContext } from '@/helpers'
-// import { updateMachineContext } from '@/helpers'
+import { analyzeInput } from '@/ItemProperty/service/actors/saveValueToDb/analyzeInput'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { normalizePropertyRecordSchema } from '@/helpers/property'
 
@@ -69,9 +68,6 @@ export const propertyMachine = setup({
     // stateIn return type does not satisfy setup() inference; runtime guard is correct for root state `idle`.
     propertyMachineIsIdle: stateIn('idle') as any,
   },
-  // actions: {
-  //   updateContext: updateMachineContext,
-  // },
   actors: {
     waitForDb,
     loadOrCreateProperty,

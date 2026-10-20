@@ -5,7 +5,6 @@ import { appState, pendingWrites } from '@/seedSchema'
 import { generateId } from '@/helpers'
 import {
   appendOutboxOp,
-  appendOutboxOps,
   drainOutbox,
   pruneOutbox,
   OUTBOX_PRUNE_AFTER_MS,
@@ -17,7 +16,6 @@ import {
   OutboxOpDeferredError,
   OutboxOpFailedError,
   OutboxOpRejectedError,
-  OutboxOpRetryableError,
   type OutboxOp,
 } from '@/outbox'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
@@ -54,7 +52,7 @@ testDescribe('outbox', () => {
       throw new OutboxOpRejectedError('rejected after writing')
     }
     if (b.reject) throw new OutboxOpRejectedError('not allowed')
-    if (b.failTimes && b.attempts <= b.failTimes) throw new OutboxOpRetryableError('transient')
+    if (b.failTimes && b.attempts <= b.failTimes) throw Object.assign(new Error('transient'), { name: 'NoModificationAllowedError' })
   }
 
   beforeAll(async () => {
@@ -212,30 +210,6 @@ testDescribe('outbox', () => {
     expect(row.attempts).toBe(2)
   })
 
-  it('applies a group in one transaction, or none of it', async () => {
-    const s = seed()
-    const okIds = await appendOutboxOps([
-      { seedLocalId: s, propertyName: 'title', kind: 'set', value: 'T' },
-      { seedLocalId: s, propertyName: 'body', kind: 'set', value: 'B' },
-    ])
-    await drainOutbox()
-    expect(await statuses(okIds)).toEqual(['applied', 'applied'])
-    expect([await stored(s, 'title'), await stored(s, 'body')]).toEqual(['T', 'B'])
-
-    const bad = seed()
-    behavior.set(bad, { reject: true, attempts: 0 })
-    // The second op rejects, so the first one's write is rolled back with it
-    applied = []
-    const badIds = await appendOutboxOps([
-      { seedLocalId: seed(), propertyName: 'title', kind: 'set', value: 'kept?' },
-      { seedLocalId: bad, propertyName: 'title', kind: 'set', value: 'no' },
-    ])
-    await drainOutbox()
-    expect(await statuses(badIds)).toEqual(['failed', 'failed'])
-    const firstSeed = (await getOutboxOps([badIds[0]]))[0].seedLocalId
-    expect(await stored(firstSeed, 'title')).toBeUndefined()
-  })
-
   it('two drainers at once apply each op once', async () => {
     const s = seed()
     const ids = await Promise.all(
@@ -266,11 +240,10 @@ testDescribe('outbox', () => {
 
   it('prunes settled ops past their retention, but not pending ops or unresolved conflicts', async () => {
     const s = seed()
-    const ids = await appendOutboxOps(
-      ['applied', 'superseded', 'failed', 'failedRecent', 'conflict', 'resolved', 'pending', 'appliedRecent'].map(
-        (name) => ({ seedLocalId: s, propertyName: name, kind: 'set' as const, value: name, groupId: generateId() }),
-      ),
-    )
+    const ids: string[] = []
+    for (const name of ['applied', 'superseded', 'failed', 'failedRecent', 'conflict', 'resolved', 'pending', 'appliedRecent']) {
+      ids.push(await appendOutboxOp({ seedLocalId: s, propertyName: name, kind: 'set', value: name }))
+    }
     const [applied, superseded, failed, failedRecent, conflict, resolved, pending, appliedRecent] = ids
     const now = Date.now()
     const old = now - OUTBOX_PRUNE_AFTER_MS - 1

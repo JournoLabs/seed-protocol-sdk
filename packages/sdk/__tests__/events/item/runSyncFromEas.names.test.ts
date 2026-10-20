@@ -53,7 +53,6 @@ vi.mock('@/eas', async () => {
 
 // Keep the post-sync file download from reaching the network.
 vi.mock('@/events/files/download', () => ({
-  downloadAllFilesRequestHandler: async () => {},
   downloadAllFilesBinaryRequestHandler: async () => {},
   downloadTransactionIdWithDedupe: async () => false,
   scheduleBulkFilesDownloadFromEasSync: () => {},

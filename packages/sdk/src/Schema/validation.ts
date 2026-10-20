@@ -5,7 +5,6 @@ export const DEFAULT_TEXT_MAX_LENGTH = 255
 
 /**
  * Validation rules that can be applied to properties
- * Matches the ValidationRules definition in protocol/schema.json
  */
 export type ValidationRules = {
   pattern?: string

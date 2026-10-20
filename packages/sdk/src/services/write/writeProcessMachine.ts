@@ -7,13 +7,11 @@ import debug from 'debug'
 const logger = debug('seedSdk:write:writeProcessMachine')
 
 export type WriteProcessContext = {
-  entityType: 'model' | 'modelProperty' | 'schema'
+  entityType: 'model' | 'modelProperty'
   entityId: string
   entityData: any
   validationErrors: ValidationError[]
-  writeStatus: 'idle' | 'validating' | 'writing' | 'success' | 'error'
   error: Error | null
-  retryCount: number
   pendingWrite: {
     data: any
     timestamp: number
@@ -22,13 +20,8 @@ export type WriteProcessContext = {
 
 export type WriteProcessEvent = 
   | { type: 'startWrite'; data: any }
-  | { type: 'validate' }
-  | { type: 'write' }
   | { type: 'writeSuccess'; output?: any }
   | { type: 'writeError'; error: Error }
-  | { type: 'retry' }
-  | { type: 'revert' }
-  | { type: 'reset' }
 
 export const writeProcessMachine = setup({
   types: {
@@ -48,9 +41,7 @@ export const writeProcessMachine = setup({
     entityId: input.entityId!,
     entityData: input.entityData || {},
     validationErrors: [],
-    writeStatus: 'idle',
     error: null,
-    retryCount: 0,
     pendingWrite: null,
   }),
   states: {
@@ -64,7 +55,6 @@ export const writeProcessMachine = setup({
                 data: event.data,
                 timestamp: Date.now(),
               }),
-              writeStatus: 'validating',
             }),
             ({ event, context }) => {
               logger(`[startWrite] Received startWrite for ${context.entityType} "${context.entityId}"`)
@@ -117,7 +107,6 @@ export const writeProcessMachine = setup({
             actions: [
               assign({
                 validationErrors: [],
-                writeStatus: 'writing',
               }),
               ({ context }) => {
                 const msg = `[validating] Validation passed, transitioning to writing for ${context.entityType} "${context.entityId}"`
@@ -133,7 +122,6 @@ export const writeProcessMachine = setup({
                   const result = event.output as unknown as { isValid: boolean; errors: ValidationError[] }
                   return result.errors || []
                 },
-                writeStatus: 'error',
                 error: ({ event }) => {
                   const result = event.output as unknown as { isValid: boolean; errors: ValidationError[] }
                   return new Error(`Validation failed: ${result.errors.map(e => e.message).join(', ')}`)
@@ -151,7 +139,6 @@ export const writeProcessMachine = setup({
           actions: [
             assign({
               error: ({ event }) => event.error instanceof Error ? event.error : new Error(String(event.error)),
-              writeStatus: 'error',
             }),
             ({ context, event }) => {
               const errorMsg = `[validating] Validation error for ${context.entityType} "${context.entityId}": ${event.error}`
@@ -160,9 +147,6 @@ export const writeProcessMachine = setup({
             },
           ],
         },
-      },
-      on: {
-        reset: 'idle',
       },
     },
     writing: {
@@ -184,7 +168,6 @@ export const writeProcessMachine = setup({
           target: 'success',
           actions: [
             assign({
-              writeStatus: 'success',
               pendingWrite: null,
               entityData: ({ context, event }) => {
                 // Update entityData with any returned data from write
@@ -201,8 +184,6 @@ export const writeProcessMachine = setup({
           actions: [
             assign({
               error: ({ event }) => event.error instanceof Error ? event.error : new Error(String(event.error)),
-              writeStatus: 'error',
-              retryCount: ({ context }) => context.retryCount + 1,
             }),
             ({ context, event }) => {
               const errorMsg = `[writing] Write error for ${context.entityType} "${context.entityId}": ${event.error}`
@@ -212,40 +193,14 @@ export const writeProcessMachine = setup({
             },
           ],
         },
-        reset: 'idle',
       },
     },
     success: {
       after: {
         2000: { target: 'idle' }, // Auto-reset after 2s
       },
-      on: {
-        reset: 'idle',
-      },
-      entry: assign({
-        writeStatus: 'success',
-      }),
     },
-    error: {
-      on: {
-        retry: {
-          target: 'validating',
-          guard: ({ context }) => context.retryCount < 3,
-          actions: assign({
-            error: null,
-          }),
-        },
-        revert: {
-          target: 'idle',
-          actions: assign({
-            pendingWrite: null,
-            writeStatus: 'idle',
-            error: null,
-          }),
-        },
-        reset: 'idle',
-      },
-    },
+    error: {},
   },
 })
 

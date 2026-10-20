@@ -79,37 +79,6 @@ const logger = debug('seedSdk:shared:helpers')
 
 export { easName } from '@seedprotocol/eas'
 
-/** @deprecated Use easName (ADR 0008): the one function for names written to EAS. */
-export { easName as toSnakeCase } from '@seedprotocol/eas'
-
-export const identifyString = (str: string) => {
-  try {
-    JSON.parse(str)
-    return 'json'
-  } catch {
-    // Not JSON
-  }
-
-  if (!str) {
-    return
-  }
-
-  if (str.trim().startsWith('<') && str.trim().endsWith('>')) {
-    return 'html'
-  }
-
-  // Simple markdown checks (very naive)
-  if (/^#{1,6}\s|^-{3,}|\*{3,}|^-{1,2}\s|\*\s/.test(str)) {
-    return 'markdown'
-  }
-
-  if (/^data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/]+={0,2}$/.test(str)) {
-    return 'base64'
-  }
-
-  // Default to plain text if unsure
-  return 'text'
-}
 
 export const getMimeType = (base64: string) => {
   if (!base64) {
@@ -218,45 +187,4 @@ export const convertTxIdToImage = async (
  */
 export const getArweaveUrlForTransaction = (storageTransactionId: string): string => {
   return BaseArweaveClient.getRawUrl(storageTransactionId)
-}
-
-export const getExecutionTime = async (task: (...args: any[]) => Promise<any>, args: any[]) => {
-  const start = Date.now()
-  await task(...args)
-  return Date.now() - start
-}
-
-export const capitalizeFirstLetter = (string: string) =>
-  string.charAt(0).toUpperCase() + string.slice(1)
-
-export {
-  parseEasRelationPropertyName,
-  type ParsedEasRelationPropertyName,
-} from '@seedprotocol/query'
-
-
-export const isBinary = (arrayBuffer: ArrayBuffer): boolean => {
-  const view = new Uint8Array(arrayBuffer);
-
-  let nonTextCount = 0;
-  const threshold = 0.2; // Adjust as needed (e.g., 20% non-text implies binary)
-
-  for (let i = 0; i < view.length; i++) {
-      const byte = view[i];
-
-      // ASCII printable characters (32-126) and common whitespace (9, 10, 13)
-      if (
-          (byte >= 32 && byte <= 126) || // Printable ASCII
-          byte === 9 || byte === 10 || byte === 13 // Tab, LF, CR
-      ) {
-          continue;
-      }
-
-      nonTextCount++;
-      if (nonTextCount / view.length > threshold) {
-          return true; // More than threshold are non-text bytes
-      }
-  }
-
-  return false; // Fewer than threshold are non-text bytes
 }
