@@ -20,7 +20,7 @@ import {
 } from '../../sdk/__tests__/test-utils/getPublishPayloadIntegrationHelpers'
 import { createTestRevokeExecutor } from '../../sdk/__tests__/test-utils/testRevokeExecutor'
 import type { Item as ItemClass } from '@seedprotocol/sdk'
-import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { PUBLISH_SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { waitForItemIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
@@ -82,10 +82,10 @@ describe('Unpublish React Integration Tests', () => {
       await client.setAddresses([UNPUBLISH_TEST_PUBLISHER])
     }
 
-    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: SETUP_HOOK_TIMEOUT_MS })
+    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: PUBLISH_SETUP_HOOK_TIMEOUT_MS })
     await createGetPublishPayloadTestSchema()
     setRevokeExecutor(createTestRevokeExecutor())
-  }, SETUP_HOOK_TIMEOUT_MS)
+  }, PUBLISH_SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     setRevokeExecutor(null)

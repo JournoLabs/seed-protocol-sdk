@@ -35,6 +35,13 @@ async function getClient(): Promise<ClientType> {
  */
 export const SETUP_HOOK_TIMEOUT_MS = 30_000
 
+/**
+ * Timeout for setup hooks that init the client and import the publish test schema
+ * (createGetPublishPayloadTestSchema). On a 2-CPU runner they take ~10s alone and 26-28s in the
+ * full suite (client.init alone 15-18s), too close to SETUP_HOOK_TIMEOUT_MS.
+ */
+export const PUBLISH_SETUP_HOOK_TIMEOUT_MS = 60_000
+
 export interface TestClientConfig {
   config: SeedConstructorOptions
   projectPath?: string

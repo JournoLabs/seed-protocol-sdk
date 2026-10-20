@@ -159,6 +159,7 @@ export async function ensureModelUidsForGetPublishPayloadTest(
  */
 export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: SchemaFileFormat): Promise<void> {
   const zeroAddress = '0x0000000000000000000000000000000000000000' as `0x${string}`
+  const texts = new Set<string>()
   for (const model of Object.values(schema.models ?? {})) {
     for (const [key, def] of Object.entries((model as { properties?: Record<string, any> }).properties ?? {})) {
       const dataType = normalizeDataType(def.type ?? def.dataType)
@@ -167,13 +168,16 @@ export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: S
       const names = new Set([key, `${key}Id`])
       const listName = listRelationEasPropertyName(key, { dataType, ref: def.ref ?? def.model })
       if (listName) names.add(listName)
-      for (const name of names) {
-        const text = `${eas} ${easName(name)}`
-        if (await getEasSchemaUidForSchemaDefinition({ schemaText: text })) continue
-        setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
-      }
+      for (const name of names) texts.add(`${eas} ${easName(name)}`)
     }
   }
+  // One EAS request per definition, all at once: in turn they took ~3 s of a setup hook.
+  await Promise.all(
+    [...texts].map(async (text) => {
+      if (await getEasSchemaUidForSchemaDefinition({ schemaText: text })) return
+      setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
+    }),
+  )
 }
 
 /**

@@ -72,7 +72,10 @@ export class BrowserDb implements IDb {
       await sqlocalDrizzle.destroy().catch(() => {})
       const waitMs = retryWaitsMs[attempt]
       if (waitMs === undefined) {
-        throw new DatabaseNotPersistentError(`SQLocal opened a "${storageType}" database instead of OPFS`)
+        throw new DatabaseNotPersistentError(
+          `SQLocal opened a "${storageType}" database instead of OPFS`,
+          globalThis.crossOriginIsolated === true ? 'vfs' : 'headers',
+        )
       }
       logger(`[Db.prepareDb] SQLocal opened a "${storageType}" database; retrying in ${waitMs} ms`)
       await new Promise((resolve) => setTimeout(resolve, waitMs))

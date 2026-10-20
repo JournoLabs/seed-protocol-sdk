@@ -309,6 +309,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/helpers/opfsOverwrite.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
             'packages/sdk/__tests__/browser/db/notPersistent.test.ts',
+            'packages/sdk/__tests__/browser/db/nestedWorkerShim.test.ts',
             'packages/sdk/__tests__/browser/db/opfsHandleHeld.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',

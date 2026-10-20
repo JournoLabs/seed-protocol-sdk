@@ -14,7 +14,7 @@ import {
   createItemWithBasicPropertiesOnly,
   UNPUBLISH_TEST_PUBLISHER,
 } from '../../sdk/__tests__/test-utils/getPublishPayloadIntegrationHelpers'
-import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { PUBLISH_SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 const wrapper = ({ children }: { children: React.ReactNode }) => <SeedProvider>{children}</SeedProvider>
@@ -44,9 +44,9 @@ describe('usePublishItem', () => {
     } else {
       await client.setAddresses([UNPUBLISH_TEST_PUBLISHER])
     }
-    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: SETUP_HOOK_TIMEOUT_MS })
+    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: PUBLISH_SETUP_HOOK_TIMEOUT_MS })
     await createGetPublishPayloadTestSchema()
-  }, SETUP_HOOK_TIMEOUT_MS)
+  }, PUBLISH_SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(() => {
     setPublishExecutor(null)
