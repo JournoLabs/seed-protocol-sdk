@@ -5,7 +5,7 @@
  *
  * Ops apply in append order (the row id) per item property. A property's run of consecutive
  * value ops (`set`, `storage`) is coalesced: only the newest is applied and the older ones are
- * marked superseded in the same transaction. An op with a `groupId` applies together with the rest of its group.
+ * marked superseded in the same transaction.
  *
  * This module knows nothing about items: appliers are registered per op kind
  * (registerOutboxApplier).
@@ -31,13 +31,8 @@ export type AppendOutboxOpInput = {
   kind: OutboxOpKind
   /** Stored as JSON. */
   value?: unknown
-  /** A staged file the value was written to (`storage` ops). */
-  valueRef?: string | null
   /** The stored metadata row the edit was made against. */
   baseRowId?: string | null
-  baseUid?: string | null
-  /** Ops sharing a group id apply in one transaction. */
-  groupId?: string | null
 }
 
 /** Applies ops of one kind. Registered by the code that defines the kind. */
@@ -48,8 +43,8 @@ export type OutboxApplier<Prepared = unknown> = {
   prepare?: (op: OutboxOp) => Promise<Prepared>
   /**
    * Writes the op on `tx`, inside the transaction that marks it applied. Must read and write only
-   * through `tx` (see BaseDb.transaction). Errors fail the op, except busy database or file errors
-   * and OutboxOpRetryableError, which are retried. What it returns is stored as the op's `result`
+   * through `tx` (see BaseDb.transaction). Errors fail the op, except busy database or file errors,
+   * which are retried. What it returns is stored as the op's `result`
    * (JSON).
    */
   apply: (op: OutboxOp, tx: ReturnType<typeof BaseDb.getAppDb>, prepared: Prepared) => Promise<unknown>
@@ -67,24 +62,15 @@ export type OutboxApplier<Prepared = unknown> = {
   discard?: (op: OutboxOp) => Promise<void>
 }
 
-/** A failure worth retrying (a file the browser had locked, say). Other errors fail the op at once. */
-export class OutboxOpRetryableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = 'OutboxOpRetryableError'
-  }
-}
-
 /** File-system errors that pass (another tab or the OS holding the file). */
 const RETRYABLE_ERROR_NAMES = new Set(['NoModificationAllowedError', 'NotReadableError', 'InvalidStateError'])
 
 /**
  * Whether an op that failed with `error` may apply later: the database was busy (BaseDb.transaction
- * has already retried for about a second), a file was busy, or the applier said so. Anything else
- * (a broken rule, a missing row, a bug) would fail the same way again.
+ * has already retried for about a second) or a file was busy. Anything else (a broken rule, a
+ * missing row, a bug) would fail the same way again.
  */
 const isRetryable = (error: unknown): boolean =>
-  error instanceof OutboxOpRetryableError ||
   isSqliteBusyError(error) ||
   (error instanceof Error && RETRYABLE_ERROR_NAMES.has(error.name))
 
@@ -156,41 +142,26 @@ let appendGeneration = 0
 /** How many appends this tab has started; see getPendingSetValue. */
 export const outboxAppendGeneration = (): number => appendGeneration
 
-/**
- * Appends one op, or several that apply together (they share a new group id unless they carry
- * one), and tells the leader to drain. Returns the op ids in order.
- */
-export async function appendOutboxOps(inputs: AppendOutboxOpInput[]): Promise<string[]> {
-  if (inputs.length === 0) return []
-  const groupId = inputs.length > 1 ? generateId() : null
-  const now = Date.now()
-  const rows = inputs.map((input) => ({
+/** Appends one op and tells the leader to drain. Returns the op id. */
+export async function appendOutboxOp(input: AppendOutboxOpInput): Promise<string> {
+  const row = {
     opId: generateId(),
-    groupId: input.groupId ?? groupId,
     seedLocalId: input.seedLocalId,
     propertyName: input.propertyName ?? null,
     kind: input.kind,
     value: input.value === undefined ? null : JSON.stringify(input.value),
-    valueRef: input.valueRef ?? null,
     baseRowId: input.baseRowId ?? null,
-    baseUid: input.baseUid ?? null,
-    createdAt: now,
+    createdAt: Date.now(),
     tabId: TAB_ID,
     status: 'pending' as OutboxOpStatus,
     attempts: 0,
-  }))
+  }
   appendGeneration += 1
-  await BaseDb.getAppDb().insert(pendingWrites).values(rows)
+  await BaseDb.getAppDb().insert(pendingWrites).values(row)
   startOutbox()
   if (isLeaderTab()) scheduleDrain()
   else postTabMessage({ type: 'outbox-nudge' })
-  return rows.map((row) => row.opId)
-}
-
-/** Appends one op; see appendOutboxOps. */
-export async function appendOutboxOp(input: AppendOutboxOpInput): Promise<string> {
-  const [opId] = await appendOutboxOps([input])
-  return opId
+  return row.opId
 }
 
 /**
@@ -318,11 +289,8 @@ export async function drainOutbox(): Promise<void> {
   }
 }
 
-type Unit =
-  /** One op, or the newest of a property's run of sets (the older ones are settled with it). */
-  | { op: OutboxOp; superseded: OutboxOp[] }
-  /** Every op of a group, read when the unit applies. */
-  | { groupId: string }
+/** One op, or the newest of a property's run of sets (the older ones are settled with it). */
+type Unit = { op: OutboxOp; superseded: OutboxOp[] }
 
 /** Kinds that replace a property's value: a run of them applies only its newest. */
 const VALUE_KINDS = new Set<string>(['set', 'storage'])
@@ -334,8 +302,7 @@ const isDue = (op: OutboxOp) => (notBefore.get(op.opId) ?? 0) <= Date.now()
  * The units to apply now, oldest first. A property's ops apply in order, so its queue waits
  * behind its oldest pending op, including one waiting for a retry. An op on the seed itself (no
  * property: create, delete) is ordered against all of its seed's ops: it waits for every earlier
- * one, and every later one waits for it. A group waits until none of its ops is behind another op
- * of its property or seed.
+ * one, and every later one waits for it.
  */
 function planUnits(pending: OutboxOp[]): Unit[] {
   const queues = new Map<string, OutboxOp[]>()
@@ -344,33 +311,18 @@ function planUnits(pending: OutboxOp[]): Unit[] {
     queue.push(op)
     queues.set(keyOf(op), queue)
   }
-  const blockedByOthers = (op: OutboxOp) => {
-    const queue = queues.get(keyOf(op))!
-    if (queue.slice(0, queue.indexOf(op)).some((earlier) => earlier.groupId !== op.groupId)) return true
-    return blockedBySeed(op)
-  }
-  // Seed-level ordering: an earlier op of the seed this op must wait for (outside its group)
+  // Seed-level ordering: an earlier op of the seed this op must wait for
   const blockedBySeed = (op: OutboxOp) =>
     pending.some(
       (earlier) =>
         earlier.id < op.id &&
         earlier.seedLocalId === op.seedLocalId &&
-        (earlier.groupId == null || earlier.groupId !== op.groupId) &&
         (earlier.propertyName == null || op.propertyName == null),
     )
   const units: Array<{ unit: Unit; order: number }> = []
-  const plannedGroups = new Set<string>()
   for (const queue of queues.values()) {
     const head = queue[0]
     if (!isDue(head)) continue
-    if (head.groupId) {
-      if (plannedGroups.has(head.groupId)) continue
-      const members = pending.filter((op) => op.groupId === head.groupId)
-      if (members.some((member) => !isDue(member) || blockedByOthers(member))) continue
-      plannedGroups.add(head.groupId)
-      units.push({ unit: { groupId: head.groupId }, order: members[0].id })
-      continue
-    }
     if (blockedBySeed(head)) continue
     let end = 0
     if (VALUE_KINDS.has(head.kind)) {
@@ -378,7 +330,6 @@ function planUnits(pending: OutboxOp[]): Unit[] {
       while (
         end + 1 < queue.length &&
         VALUE_KINDS.has(queue[end + 1].kind) &&
-        !queue[end + 1].groupId &&
         !blockedBySeed(queue[end + 1])
       ) {
         end++
@@ -393,16 +344,8 @@ function planUnits(pending: OutboxOp[]): Unit[] {
 class ClaimLostError extends Error {}
 
 async function applyUnit(unit: Unit): Promise<void> {
-  const ops: OutboxOp[] =
-    'groupId' in unit
-      ? await BaseDb.getAppDb()
-          .select()
-          .from(pendingWrites)
-          .where(and(eq(pendingWrites.groupId, unit.groupId), eq(pendingWrites.status, 'pending')))
-          .orderBy(asc(pendingWrites.id))
-      : [unit.op]
-  if (ops.length === 0) return
-  const superseded = 'groupId' in unit ? [] : unit.superseded
+  const ops: OutboxOp[] = [unit.op]
+  const superseded = unit.superseded
   const ids = ops.map((op) => op.opId)
   const supersededIds = superseded.map((op) => op.opId)
   try {

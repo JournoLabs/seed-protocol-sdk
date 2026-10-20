@@ -24,11 +24,11 @@ conflicts; this decision doesn't cover them.
 ## Decision
 
 **An outbox table.** User edits to items are appended as ops to `pending_writes`: `op_id`
-(unique), `group_id`, `seed_local_id`, `property_name`, `kind` (`create`, `set`, `delete`,
-`storage`), `value`, `value_ref` (a staged file for storage values), `base_row_id` and `base_uid`
-(the stored row the edit was made against), `created_at`, `tab_id`, `status` (`pending`,
-`applied`, `superseded`, `failed`), `error`, `attempts`, `applied_at`, and `conflict` (JSON, see
-below). Ops for one `(seed_local_id, property_name)` apply in append order (the row id), and a
+(unique), `seed_local_id`, `property_name`, `kind` (`create`, `set`, `delete`, `storage`),
+`value`, `base_row_id` (the stored row the edit was made against), `created_at`, `tab_id`,
+`status` (`pending`, `applied`, `superseded`, `failed`), `error`, `attempts`, `applied_at`, and
+`conflict` (JSON, see below). The table also has `group_id`, `value_ref` and `base_uid` columns
+that nothing writes. Ops for one `(seed_local_id, property_name)` apply in append order (the row id), and a
 property waits behind its oldest pending op, including one waiting for a retry. An op on the seed
 itself (no property: create, delete) is ordered against all of its seed's ops.
 
@@ -58,7 +58,7 @@ storage pipelines) and marks the op `applied` in one transaction. Superseded ops
 of a property's run of pending value ops (`set`, `storage`) only the newest is applied, and older
 ones become `superseded`. An op that never applies has its applier's `discard` step run (a storage
 value's file is deleted).
-Transient errors (`SQLITE_BUSY`, a busy file, or `OutboxOpRetryableError` from an applier) retry
+Transient errors (`SQLITE_BUSY` or a busy file) retry
 with backoff; anything else (a broken rule, ownership, a constraint) marks the op `failed` with
 its error and the error's name (`error_name`) at once, so a waiter can rethrow `OwnershipError`, and the in-memory value falls back to the next value in the
 overlay (a newer pending op, else the stored row).

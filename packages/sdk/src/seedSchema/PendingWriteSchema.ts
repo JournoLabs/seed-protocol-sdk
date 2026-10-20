@@ -11,7 +11,7 @@ export const pendingWrites = sqliteTable(
     id: int('id').primaryKey({ autoIncrement: true }),
     /** Unique per op; the drainer and `save()` refer to an op by it. */
     opId: text('op_id').notNull(),
-    /** Ops that apply together in one transaction (Item.create's seed, version and metadata rows). */
+    /** Unused: nothing appends grouped ops. Kept until a migration drops it. */
     groupId: text('group_id'),
     seedLocalId: text('seed_local_id').notNull(),
     /** Null for ops on the seed itself (`create`, `delete`). */
@@ -20,10 +20,11 @@ export const pendingWrites = sqliteTable(
     kind: text('kind').notNull(),
     /** JSON-encoded value. */
     value: text('value'),
-    /** A staged file a `storage` op's value was written to, moved into place when it applies. */
+    /** Unused: a storage op's staged path is in its JSON value. Kept until a migration drops it. */
     valueRef: text('value_ref'),
     /** The stored metadata row the edit was made against, to detect a synced row written since. */
     baseRowId: text('base_row_id'),
+    /** Unused: the base uid is read through base_row_id. Kept until a migration drops it. */
     baseUid: text('base_uid'),
     createdAt: int('created_at').notNull(),
     /** The tab that appended the op. */

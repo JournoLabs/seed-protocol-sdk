@@ -1,7 +1,6 @@
 export {
   appendOutboxOp,
   appendOutboxOpAndWait,
-  appendOutboxOps,
   drainOutbox,
   pruneOutbox,
   getOutboxOps,
@@ -14,7 +13,6 @@ export {
   OutboxOpDeferredError,
   OutboxOpFailedError,
   OutboxOpRejectedError,
-  OutboxOpRetryableError,
   OUTBOX_DEFER_MS,
   OUTBOX_MAX_ATTEMPTS,
   OUTBOX_PRUNE_AFTER_MS,
