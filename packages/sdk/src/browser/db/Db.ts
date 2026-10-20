@@ -122,7 +122,10 @@ export class BrowserDb implements IDb {
         // OPFS can still fail inside the worker (e.g. storage blocked); SQLocal then reports memory.
         const { storageType } = await sqlocalDrizzle.getDatabaseInfo()
         if (storageType !== 'opfs') {
-          throw new DatabaseNotPersistentError(`SQLocal opened a "${storageType}" database instead of OPFS`)
+          throw new DatabaseNotPersistentError(
+            `SQLocal opened a "${storageType}" database instead of OPFS`,
+            globalThis.crossOriginIsolated === true ? 'vfs' : 'headers',
+          )
         }
 
         await this.runMigrations(db)
