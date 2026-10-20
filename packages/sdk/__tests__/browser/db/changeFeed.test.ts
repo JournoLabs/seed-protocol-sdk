@@ -21,7 +21,7 @@ import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 /**
  * The tab's change feed (ADR 0020): dispatch by seed local id, uid and property name, one call
  * per log read, newer reads winning, a missed stretch of the log, and leader pruning. The
- * cross-tab path is in browser/multiTab.e2e.test.ts.
+ * cross-tab path is in browser/multiTab.e2e.test.ts. Browser only: Node has no change feed.
  */
 
 const SCHEMA_NAME = 'Test Schema Change Feed'
@@ -58,7 +58,7 @@ const insertSeed = async (uid?: string) => {
 const touchSeed = (localId: string) =>
   db().update(seeds).set({ updatedAt: Date.now() }).where(eq(seeds.localId, localId))
 
-describe.sequential('change feed', () => {
+describe.skipIf(typeof window === 'undefined').sequential('change feed', () => {
   let restoreEasClient: (() => void) | undefined
   const unwatch: Array<() => void> = []
 
