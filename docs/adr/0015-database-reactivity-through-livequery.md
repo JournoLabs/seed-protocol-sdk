@@ -1,6 +1,6 @@
 # 0015. Database reactivity goes through `BaseDb.liveQuery`
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [0020](0020-entity-reactivity-through-a-change-log.md) for Item and ItemProperty
 - **Date:** 2026-10-18 (records the design in place since 2025)
 - **Scope:** `@seedprotocol/sdk` (`db/Db/BaseDb.ts`, `browser/db/Db.ts`, `node/db/Db.ts`, entity live queries, React hooks)
 
@@ -26,14 +26,20 @@ query builder.
 
 Consumers own their subscriptions and must unsubscribe when the entity or component goes away.
 
+Since ADR 0020, loaded Items and ItemProperties don't hold liveQueries on `seeds`, `versions` and
+`metadata`: they register with the tab's change feed (`browser/db/changeFeed.ts`) and re-read when
+a write touched their seed. Everything else still uses `BaseDb.liveQuery`.
+
 ## Consequences
 
 One API covers both platforms, and cross-tab changes reach the browser without extra messaging.
 
 - Node reactivity is approximate (up to a second late) and doesn't support tag functions, so
-  code that must run in Node uses query builders. Item's own live queries run only in the browser.
+  code that must run in Node uses query builders. Item's and ItemProperty's change-feed watches
+  run only in the browser.
 - SQLocal doesn't fire for a `DELETE` without a `WHERE` clause (its truncate optimization), and
-  writes inside a transaction fire only on commit.
+  writes inside a transaction fire only on commit. The change log's triggers turn the optimization
+  off for `seeds`, `versions` and `metadata` (ADR 0020).
 - Subscriptions are long-lived, so teardown bugs leak queries. Item, ItemProperty, Schema and Model
   currently store their subscriptions where `unload` and `destroy` can't find them (see ADR 0014's
   consequences).

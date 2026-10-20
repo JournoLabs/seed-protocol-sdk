@@ -44,8 +44,13 @@ process. The Drizzle driver retries `SQLITE_BUSY` and `SQLITE_LOCKED` for about 
 
 ## Keeping other tabs current
 
-`BaseDb.liveQuery` already re-runs on other tabs' writes (SQLocal broadcasts changed tables). On
-top of that, tabs exchange messages over the BroadcastChannel `seed:tabs:<db>`:
+`BaseDb.liveQuery` already re-runs on other tabs' writes (SQLocal broadcasts changed tables).
+Loaded Items and ItemProperties hear about them through the change log instead (ADR 0020):
+triggers log every write to `seeds`, `versions` and `metadata` in `entity_changes`, SQLocal's
+broadcast re-runs each tab's one `max(seq)` query on that table, and the tab's feed re-reads only
+the entities whose seed changed. This needs no leader and works with `multiTab: 'off'`; the leader
+prunes log rows older than 10 minutes. On top of that, tabs exchange messages over the
+BroadcastChannel `seed:tabs:<db>`:
 
 - **EAS sync finished, addresses persisted, local copies removed.** Other tabs reload or drop their
   cached Items, then emit the same event locally.
