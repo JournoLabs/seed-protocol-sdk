@@ -180,7 +180,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         // Readers take the newest row by COALESCE(attestation_created_at, created_at), so a draft's
         // time is when its value was last set: a synced value older than this edit mustn't win.
         createdAt: now,
-        updatedAt: now,
       }
       if (localStorageDir !== undefined) {
         updatePayload.localStorageDir = localStorageDir ?? null
@@ -217,7 +216,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       refResolvedValue: refResolvedValue || null,
       refResolvedDisplayValue: refResolvedDisplayValue || null,
       localStorageDir: localStorageDir || null,
-      createdAt: Date.now(),
     })
 
     return {
@@ -262,7 +260,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     refResolvedValue: refResolvedValue || null,
     refResolvedDisplayValue: refResolvedDisplayValue || null,
     localStorageDir: localStorageDir || null,
-    createdAt: Date.now(),
   })
 
   return {

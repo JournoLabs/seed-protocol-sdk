@@ -8,8 +8,9 @@ const SEED_UID = '0x' + 'b'.repeat(64)
 const VERSION_UID = '0x' + 'c'.repeat(64)
 const METADATA_UID = '0x' + 'd'.repeat(64)
 
-// updated_at comes from the column's $defaultFn/$onUpdate, so writers that never name it still set it.
-testDescribe('updated_at defaults on seeds, versions and metadata', () => {
+// created_at and updated_at come from the columns' $defaultFn/$onUpdate, so writers that never name
+// them still set them.
+testDescribe('created_at and updated_at defaults on seeds, versions and metadata', () => {
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
   }, SETUP_HOOK_TIMEOUT_MS)
@@ -41,31 +42,33 @@ testDescribe('updated_at defaults on seeds, versions and metadata', () => {
       propertyName: 'title',
       propertyValue: 'Hi',
       modelType: 'updated_at_defaults_test',
-      createdAt: before,
     })
 
-    const readUpdatedAt = async () => {
-      const [seed] = await appDb.select({ v: seeds.updatedAt }).from(seeds).where(eq(seeds.localId, seedLocalId))
+    const readTimes = async () => {
+      const [seed] = await appDb
+        .select({ createdAt: seeds.createdAt, updatedAt: seeds.updatedAt })
+        .from(seeds)
+        .where(eq(seeds.localId, seedLocalId))
       const [version] = await appDb
-        .select({ v: versions.updatedAt })
+        .select({ createdAt: versions.createdAt, updatedAt: versions.updatedAt })
         .from(versions)
         .where(eq(versions.localId, versionLocalId))
       const [meta] = await appDb
-        .select({ v: metadata.updatedAt })
+        .select({ createdAt: metadata.createdAt, updatedAt: metadata.updatedAt })
         .from(metadata)
         .where(eq(metadata.localId, metadataLocalId))
-      return { seed: seed?.v, version: version?.v, meta: meta?.v }
+      return { seed, version, meta }
     }
 
-    const inserted = await readUpdatedAt()
-    for (const value of Object.values(inserted)) {
-      expect(value).toBeGreaterThanOrEqual(before)
+    for (const row of Object.values(await readTimes())) {
+      expect(row.createdAt).toBeGreaterThanOrEqual(before)
+      expect(row.updatedAt).toBeGreaterThanOrEqual(before)
     }
 
     // An explicit value still wins over the hooks.
     await appDb.update(versions).set({ updatedAt: 1 }).where(eq(versions.localId, versionLocalId))
     await appDb.update(metadata).set({ updatedAt: 1 }).where(eq(metadata.localId, metadataLocalId))
-    expect(await readUpdatedAt()).toMatchObject({ version: 1, meta: 1 })
+    expect(await readTimes()).toMatchObject({ version: { updatedAt: 1 }, meta: { updatedAt: 1 } })
 
     // updateSeedUid's versions/metadata cascade does not name updated_at.
     const beforeUpdate = Date.now()
@@ -76,5 +79,8 @@ testDescribe('updated_at defaults on seeds, versions and metadata', () => {
     expect(meta.seedUid).toBe(SEED_UID)
     expect(version.updatedAt).toBeGreaterThanOrEqual(beforeUpdate)
     expect(meta.updatedAt).toBeGreaterThanOrEqual(beforeUpdate)
+    // created_at has no $onUpdate.
+    expect(version.createdAt).toBeLessThan(beforeUpdate + 1)
+    expect(meta.createdAt).toBeLessThan(beforeUpdate + 1)
   })
 })

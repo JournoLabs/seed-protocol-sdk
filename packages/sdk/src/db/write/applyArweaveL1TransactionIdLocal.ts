@@ -38,7 +38,6 @@ export async function applyArweaveL1TransactionIdLocal(params: {
   const rows = await appDb.select().from(metadata).where(where)
   if (!rows.length) return
 
-  const now = Date.now()
   for (const row of rows) {
     const localId = row.localId
     if (!localId) continue
@@ -56,7 +55,6 @@ export async function applyArweaveL1TransactionIdLocal(params: {
         refResolvedDisplayValue: row.refResolvedDisplayValue
           ? row.refResolvedDisplayValue.split(dataItemId).join(l1TransactionId)
           : row.refResolvedDisplayValue,
-        updatedAt: now,
       })
       .where(eq(metadata.localId, localId))
   }

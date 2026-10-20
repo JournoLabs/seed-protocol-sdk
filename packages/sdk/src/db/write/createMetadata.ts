@@ -175,6 +175,7 @@ export const createMetadata: CreateMetadata = async (
       .insert(metadata)
       .values({
         ...metadataValues,
+        // Stamped here: a value carried in metadataValues would otherwise win over the column default.
         createdAt: Date.now(),
         updatedAt: Date.now(),
       })

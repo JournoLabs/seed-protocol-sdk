@@ -235,7 +235,7 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
     if (remoteAt >= (draft.createdAt ?? 0)) {
       await db
         .update(metadata)
-        .set({ createdAt: remoteAt + 1, updatedAt: now })
+        .set({ createdAt: remoteAt + 1 })
         .where(eq(metadata.localId, draft.localId))
     }
 

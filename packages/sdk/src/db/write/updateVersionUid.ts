@@ -57,14 +57,11 @@ export const updateVersionUid = async ({
       .where(eq(seeds.localId, seedLocalId))
       .limit(1)
     if (!seed) return
-    const now = Date.now()
     await appDb.insert(versions).values({
       localId: generateId(),
       seedLocalId,
       seedType: seed.type,
       uid: versionUid,
-      createdAt: now,
-      updatedAt: now,
       ...(normalizedPublisher && { publisher: normalizedPublisher }),
       ...(attestationCreatedAt != null && { attestationCreatedAt }),
     })
@@ -82,7 +79,6 @@ export const updateVersionUid = async ({
       uid: versionUid,
       ...(shouldSetPublisher && { publisher: normalizedPublisher }),
       ...(attestationCreatedAt != null && { attestationCreatedAt }),
-      updatedAt: Date.now(),
     })
     .where(eq(versions.localId, toUpdate.localId))
 }

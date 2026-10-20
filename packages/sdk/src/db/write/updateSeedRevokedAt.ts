@@ -37,7 +37,6 @@ export const updateSeedRevokedAt = async ({
     .update(seeds)
     .set({
       revokedAt,
-      updatedAt: Date.now(),
     })
     .where(eq(seeds.localId, seedLocalId))
 
@@ -45,7 +44,7 @@ export const updateSeedRevokedAt = async ({
   await writeInBatches(metadataUids ?? [], (chunk) =>
     appDb
       .update(metadata)
-      .set({ revokedAt, updatedAt: Date.now() })
+      .set({ revokedAt })
       .where(
         and(
           or(inArray(metadata.uid, chunk), inArray(metadata.derivedFromUid, chunk)),
@@ -57,7 +56,7 @@ export const updateSeedRevokedAt = async ({
   await writeInBatches(versionUids ?? [], (chunk) =>
     appDb
       .update(versions)
-      .set({ revokedAt, updatedAt: Date.now() })
+      .set({ revokedAt })
       .where(and(inArray(versions.uid, chunk), isNull(versions.revokedAt))),
   )
 }

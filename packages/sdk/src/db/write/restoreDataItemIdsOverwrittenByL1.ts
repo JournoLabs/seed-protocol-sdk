@@ -58,7 +58,6 @@ export async function restoreDataItemIdsOverwrittenByL1(): Promise<RestoreDataIt
           propertyValue: job.dataItemId,
           refResolvedValue: swap(row.refResolvedValue),
           refResolvedDisplayValue: swap(row.refResolvedDisplayValue),
-          updatedAt: Date.now(),
         })
         .where(eq(metadata.localId, row.localId!))
       restored += 1

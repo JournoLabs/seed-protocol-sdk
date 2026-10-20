@@ -32,7 +32,6 @@ export const createVersion: CreateVersion = async ({
 
   await appDb.insert(versions).values({
     localId: newVersionLocalId,
-    createdAt: Date.now(),
     seedLocalId,
     seedUid: seedUid ?? null,
     seedType,
