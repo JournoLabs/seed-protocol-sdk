@@ -265,7 +265,7 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
     // Schema can be in 'idle' state (meaning schema data is loaded in memory) 
     // but models/properties may not yet be persisted to the database.
     // 
-    // With the fix in loadOrCreateSchema, models and properties are now added
+    // Models and properties are added
     // synchronously during schema loading, so by the time Schema reaches 'idle',
     // the database should have all records. However, we verify this here to ensure
     // the client is truly ready to use.

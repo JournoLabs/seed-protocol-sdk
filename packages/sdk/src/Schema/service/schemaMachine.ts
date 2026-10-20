@@ -1,6 +1,5 @@
 import { assign, setup, ActorRefFrom } from 'xstate'
 import { SchemaFileFormat } from '@/types/import'
-import { loadOrCreateSchema } from './actors/loadOrCreateSchema'
 import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
@@ -77,9 +76,6 @@ export const schemaMachine = setup({
     input: {} as Pick<SchemaMachineContext, 'schemaName'>,
     events: {} as
       | { type: 'updateContext'; [key: string]: any }
-      | { type: 'loadOrCreateSchema' }
-      | { type: 'loadOrCreateSchemaSuccess'; schema: SchemaFileFormat }
-      | { type: 'loadOrCreateSchemaError'; error: Error }
       | { type: 'markAsDraft'; propertyKey: string }
       | { type: 'clearDraft'; _dbUpdatedAt?: number; _dbVersion?: number }
       | { type: 'validateSchema' }
@@ -104,7 +100,6 @@ export const schemaMachine = setup({
       | { type: 'destroyError'; error: unknown },
   },
   actors: {
-    loadOrCreateSchema,
     validateSchema,
     writeProcessMachine,
     // Staged loading actors
@@ -577,36 +572,6 @@ export const schemaMachine = setup({
               }),
             },
           },
-        },
-      },
-      on: {
-        // Keep backward compatibility with old loadOrCreateSchema (for external callers)
-        loadOrCreateSchemaSuccess: {
-          target: 'idle',
-          actions: assign(({ event }) => {
-            return {
-              schemaName: event.schema.metadata.name,
-              $schema: event.schema.$schema,
-              version: event.schema.version,
-              metadata: event.schema.metadata,
-              models: event.schema.models,
-              enums: event.schema.enums,
-              migrations: event.schema.migrations,
-              nameMatch: event.schema.nameMatch,
-              _isDraft: false,
-              _editedProperties: new Set<string>(),
-              _validationErrors: undefined,
-              id: event.schema.id, // schemaFileId (string)
-              _dbId: (event as any)._dbId, // Database integer ID
-              _loadedAt: (event as any).loadedAt,
-              _dbVersion: (event as any).dbVersion,
-              _dbUpdatedAt: (event as any).dbUpdatedAt,
-              _liveQueryModelIds: (event as any)._liveQueryModelIds || [],
-            }
-          }),
-        },
-        loadOrCreateSchemaError: {
-          target: 'error',
         },
       },
     },

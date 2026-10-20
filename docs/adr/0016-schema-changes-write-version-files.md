@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-18 (records the design in place since early 2026)
-- **Scope:** `@seedprotocol/sdk` (`Schema`, `loadOrCreateSchema`, `helpers/updateSchema.ts`, `helpers/schema.ts`, `helpers/db.ts`, `processSchemaFiles`)
+- **Scope:** `@seedprotocol/sdk` (`Schema`, `checkExistingSchema`, `helpers/updateSchema.ts`, `helpers/schema.ts`, `helpers/db.ts`, `processSchemaFiles`)
 
 ## Context
 
