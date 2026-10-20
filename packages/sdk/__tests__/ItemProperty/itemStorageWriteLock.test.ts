@@ -7,19 +7,17 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, pendingWrites, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { convertVerbatimItemStorageRow } from '@/db/write/convertVerbatimItemStorageRow'
 import { saveItemStorage } from '@/ItemProperty/service/actors/saveValueToDb/saveItemStorage'
 import { itemStorageFileLockName, withItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /**
- * Writers of one ItemStorage file (saveItemStorage, the legacy-row conversion used by the migration
- * and publish) take turns under `seed:item-storage:<file path>`, so the file and the row always end
- * with the same writer's content. A save stages its content in a file of its own, then its outbox
- * op (ADR 0019) moves it into place and updates the row under the lock. Steps are interleaved
- * deterministically by holding a writer inside BaseFileManager.saveFile (the conversion's write, or
- * a save's staged write). Runs in both the NodeJS and browser projects; each race also runs without
+ * Writers of one ItemStorage file take turns under `seed:item-storage:<file path>`, so the file and
+ * the row always end with the same writer's content. A save stages its content in a file of its
+ * own, then its outbox op (ADR 0019) moves it into place and updates the row under the lock. Steps
+ * are interleaved deterministically by holding a writer inside BaseFileManager.saveFile (a save's
+ * staged write). Runs in both the NodeJS and browser projects; each race also runs without
  * Web Locks (the in-process fallback).
  *
  * Later writes are shorter than earlier ones, so a write that left the old tail in place (as
@@ -177,40 +175,6 @@ testDescribe('ItemStorage file write lock', () => {
 
   for (const mode of modes) {
     describe(mode, () => {
-      it('a save that arrives while a conversion writes the legacy content wins in file and row', async () => {
-        const item = await legacyItem('<p>legacy content, longer than the save</p>')
-        const { writes, gate } = instrumentWrites()
-        useMode(mode)
-
-        // The conversion has read the row and is about to write the legacy content.
-        const legacyWrite = gate('<p>legacy content, longer than the save</p>')
-        const converting = convertVerbatimItemStorageRow(item.localId, { localStorageDir: '/html', filenameSuffix: '.html' })
-        await legacyWrite.reached
-        if (mode === 'web locks') {
-          expect(await heldLockNames()).toContain(itemStorageFileLockName(item.filePath))
-        }
-
-        // A save stages its content, then waits for the conversion instead of writing first and
-        // being overwritten.
-        const saving = save(item, '<p>saved</p>')
-        await settle()
-        expect(writes).toEqual([])
-        expect(await BaseFileManager.pathExists(item.filePath)).toBe(false)
-
-        legacyWrite.release()
-        expect(await converting).toMatchObject({ fileName: `${item.seedLocalId}.html`, content: '<p>legacy content, longer than the save</p>' })
-        await saving
-
-        expect(writes).toEqual(['<p>legacy content, longer than the save</p>'])
-        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved</p>')
-        expect(await rowByLocalId(item.localId)).toMatchObject({
-          refResolvedValue: `${item.seedLocalId}.html`,
-          localStorageDir: '/html',
-          refValueType: 'file',
-          propertyValue: null,
-        })
-      }, 60000)
-
       it('a save waits for the file’s lock before it writes the file and the row', async () => {
         const item = await legacyItem('<p>legacy</p>')
         useMode(mode)
@@ -234,8 +198,6 @@ testDescribe('ItemStorage file write lock', () => {
         release()
         await holding
         await saving
-        // The row the save converted is no longer legacy: a conversion now has nothing to do.
-        expect(await convertVerbatimItemStorageRow(item.localId, { localStorageDir: '/html', filenameSuffix: '.html' })).toBeUndefined()
         expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved text</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
@@ -286,7 +248,6 @@ testDescribe('ItemStorage file write lock', () => {
 
         await save(other, '<p>other saved</p>')
         expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved</p>')
-        expect(await convertVerbatimItemStorageRow(other.localId)).toBeUndefined()
 
         // The held file's writers wait until it is released, without holding up other files' saves:
         // the drainer sets the held file's op aside and applies the ones after it.

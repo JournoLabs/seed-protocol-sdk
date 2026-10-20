@@ -13,10 +13,6 @@ import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
 import { announceAddressesPersisted } from "@/client/addressesPersisted"
-import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
-import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
-import { startAlignRowPublishers } from "@/db/alignRowPublishers"
-import { startClearStoredDisplayUrls } from "@/db/clearStoredDisplayUrls"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import { startItemOutbox } from "@/outbox"
 import {
@@ -288,16 +284,6 @@ export const clientManagerMachine = setup({
         assign({
           isInitialized: true,
         }),
-        // One-time data migration that writes files, so it can't be a SQL migration in prepareDb.
-        // In the background after init: the app is usable at once, the properties table holds the
-        // current storage settings by now, and a failure never fails init.
-        () => startLegacyItemStorageMigration(),
-        // Also once, in the background: rows an older sync stored from other accounts' attestations.
-        () => startForeignAttestationCleanup(),
-        // Also once: version and property rows get their seed's publisher (rows from older edits had none).
-        () => startAlignRowPublishers(),
-        // Also once: File/Image rows lose the session URLs 0.7.5–0.7.6 stored (dead blob: URLs after reload).
-        () => startClearStoredDisplayUrls(),
         // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
         () => startCanonicalizeModelTypes(),
         // Registers the item appliers and resumes outbox ops left pending (a reload, a closed

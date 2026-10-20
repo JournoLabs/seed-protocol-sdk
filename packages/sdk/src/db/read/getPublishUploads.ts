@@ -28,10 +28,6 @@ import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
 import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
-import {
-  convertVerbatimItemStorageRow,
-  isVerbatimItemStorageDraftRow,
-} from '@/db/write/convertVerbatimItemStorageRow'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -266,42 +262,9 @@ const getLatestItemStorageRow = async (
 }
 
 /**
- * Write a legacy ItemStorage draft row's verbatim content to `<seedUid or seedLocalId><extension>`
- * and record it on the row (refResolvedValue, localStorageDir) and in the property context. The
- * row's propertyValue is cleared once the file is written, so the row has the same shape as one a
- * save makes and a later edit of the file never leaves stale text behind it.
- */
-const migrateVerbatimItemStorageRow = async (
-  childProperty: IItemProperty<any>,
-  row: MetadataType,
-): Promise<string | undefined> => {
-  const seedId = row.seedUid || childProperty.seedUid || row.seedLocalId || childProperty.seedLocalId
-  if (!seedId || !row.localId) return undefined
-  const propertyDef = childProperty.propertyDef
-  const converted = await convertVerbatimItemStorageRow(row.localId, {
-    seedId,
-    localStorageDir: propertyDef?.localStorageDir || row.localStorageDir,
-    filenameSuffix: propertyDef?.filenameSuffix,
-  })
-  if (!converted) return undefined
-  const { fileName, filePath, localStorageDir, content } = converted
-  // The content is still the value: keep it as renderValue (the property may show it from propertyValue).
-  childProperty.getService().send({
-    type: 'updateContext',
-    refResolvedValue: fileName,
-    localStorageDir,
-    renderValue: content,
-  })
-  logger(`resolveItemStorageChildFile: wrote verbatim ${childProperty.propertyName} content to ${filePath}`)
-  return filePath
-}
-
-/**
  * Local file of one ItemStorage child of a composite upload. Tries, in order: the property's
  * localStoragePath (context set by save / hydration / the live query), its newest metadata row's
- * refResolvedValue + localStorageDir, then (for a local draft whose propertyValue is the content
- * itself, as rows made before Item.create saved ItemStorage values) that content written to its
- * file, then (for a local draft, or no row) the name
+ * refResolvedValue + localStorageDir, then (for a local draft, or no row) the name
  * saveItemStorage gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage
  * directory). A published or derived row is never swapped for a local file of another name: that
  * file would be older content.
@@ -337,17 +300,6 @@ export const resolveItemStorageChildFile = async (
   }
 
   const isLocalDraft = !!row && !row.uid && row.derivedFromUid == null
-
-  // A local draft holding the content itself (no file reference): what Item.create / createNewItem
-  // stored for ItemStorage values before they went through the save pipeline. Write it to the file a
-  // save would have, point the row and the property at it, and upload that.
-  if (row && isVerbatimItemStorageDraftRow(row)) {
-    const migrated = await migrateVerbatimItemStorageRow(childProperty, row).catch((error) => {
-      logger('resolveItemStorageChildFile: writing verbatim ItemStorage content failed', error)
-      return undefined
-    })
-    if (migrated) return { filePath: migrated }
-  }
 
   const suffix = propertyDef?.filenameSuffix
   const seedIds = !row || isLocalDraft

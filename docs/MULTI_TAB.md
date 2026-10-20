@@ -13,8 +13,7 @@ waiting tab takes over. With `'off'`, without Web Locks, and in Node, every tab 
 ## What runs where
 
 The leader tab runs automatic EAS sync (on init, address changes and event-bus requests), the bulk
-downloads and image resizing that follow it, the legacy ItemStorage migration, and the Arweave L1
-finalize worker. A non-leader tab that skips a sync request runs it once if it becomes leader, and
+downloads and image resizing that follow it, and the Arweave L1 finalize worker. A non-leader tab that skips a sync request runs it once if it becomes leader, and
 forwards address changes to the leader. `client.syncFromEas()` runs in the tab that calls it.
 
 A publish runs in the tab that started it, which holds `seed:publish:<seedLocalId>`. When a tab
@@ -27,11 +26,10 @@ These sections run one tab at a time, whatever `multiTab` is set to:
 
 | Lock | Covers |
 |---|---|
-| `seed:migrate:<db>` | Migrations (each in one transaction) and their data backfills |
+| `seed:migrate:<db>` | Recreating a database older than 0.7.7, migrations (each in one transaction) and their data backfills |
 | `seed:init:<db>` | Config, schema-file processing and model stubs during init |
 | `seed:eas-sync:<db>` | Every EAS sync run |
 | `seed:publish:<seedLocalId>` | One publish |
-| `seed:item-storage-migration:<db>` | The one-time legacy ItemStorage migration |
 | `seed:opfs-write:<path>` | A download worker's write to one file |
 | `seed:item-storage:<file path>` | Every write to a draft's ItemStorage file, with its row |
 

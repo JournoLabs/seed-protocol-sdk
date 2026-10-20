@@ -535,16 +535,6 @@ export async function setupTestEnvironment(options: {
   
   console.log('Client initialized')
 
-  // Init starts the legacy ItemStorage migration in the background; let it finish so it can't
-  // convert rows a test seeds on purpose.
-  const { whenLegacyItemStorageMigrationSettled } = await import('@/db/migrateLegacyItemStorageRows')
-  await whenLegacyItemStorageMigrationSettled()
-  // Same for the one-time row publisher fix, which changes publishers of rows a test seeds.
-  const { whenAlignRowPublishersSettled } = await import('@/db/alignRowPublishers')
-  await whenAlignRowPublishersSettled()
-  const { whenClearStoredDisplayUrlsSettled } = await import('@/db/clearStoredDisplayUrls')
-  await whenClearStoredDisplayUrlsSettled()
-
   // The OPFS database is shared too. client.init builds Model instances for every schema still in it,
   // and a model created later by name (e.g. 'Note') can adopt another schema's same-named row and
   // instance. Start each browser test file with only the Seed Protocol schema.

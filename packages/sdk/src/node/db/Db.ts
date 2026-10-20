@@ -12,6 +12,7 @@ import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
 import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
+import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 
 const logger = debug('seedSdk:node:db:Db')
 
@@ -162,6 +163,7 @@ export class NodeDb implements IDb {
     if (localDbFilePath(dbUrl)) await client.execute('PRAGMA journal_mode = WAL')
     const db = drizzle(client, { schema })
 
+    await recreateIfOlderThanMinimumUpgradeVersion(db)
     logger('[Db.prepareDb] running migrations from %s', outDir)
     await migrate(db, { migrationsFolder: outDir })
 
@@ -169,10 +171,6 @@ export class NodeDb implements IDb {
 
     const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
     await backfillMetadataPropertyIds()
-
-    // One-time: clear item data whose model can't be determined (seeds.model_file_id, migration 0015)
-    const { resetAmbiguousLegacyItemData } = await import('@/db/resetAmbiguousLegacyItemData')
-    await resetAmbiguousLegacyItemData()
 
     return this.db
   }

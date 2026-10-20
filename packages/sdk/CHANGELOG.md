@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+### Breaking
+
+- **A local database written by an SDK older than 0.7.7 is recreated.** On the first start with this version, `prepareDb` drops every table of such a database before migrations run (browser and Node), and logs a `console.warn` saying so. Items that were never published are gone; published items come back with the next EAS sync. A database 0.7.7 or later opened is kept as it is. Files under `filesDir` are not deleted. The SDK tells the two apart by the last applied migration (0020 or later means 0.7.8+ opened it) and, for databases on migration 0019, by the `storedDisplayUrlsCleared` appState key that 0.7.7's first start wrote.
+- The repairs for data written by 0.7.1–0.7.6 are removed, since no such database is opened any more: the legacy ItemStorage row migration (and publish's lazy conversion of those rows), the ambiguous-legacy-item reset, the foreign-attestation cleanup, the row-publisher alignment, the stored display URL clearing, and sync's fixes for doubled quotes in `seeds.attestation_raw` and for foreign version and property rows.
+- Removed exports: `restoreDataItemIdsOverwrittenByL1` and `applyArweaveL1TransactionIdLocal`.
+
 ## 0.7.8 (2026-10-20)
 
 - New exports `watchEntityChanges(watch, listener)` and `watchEntityRows(watch, read, onRows, options)` subscribe to the change feed (ADR 0020) for one seed's `seeds`, `versions` or `metadata` rows, and `isChangeFeedRunning()` says whether this tab has a feed (browser only). `@seedprotocol/react` uses them for `useItemProperties`.

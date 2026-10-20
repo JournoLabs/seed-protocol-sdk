@@ -276,34 +276,6 @@ const collectRelatedSeedUids = async (
 }
 
 /**
- * Earlier syncs SQL-escaped a seed's attestation JSON (`'` -> `''`) and then bound it as a
- * parameter, so stored `seeds.attestation_raw` had every quote doubled. Doubled JSON still parses,
- * so a legacy row is recognized by comparing with the attestation EAS returns now: it is legacy
- * when it equals that attestation with quotes doubled, ignoring the revocation fields (EAS may have
- * revoked it since). A row whose data legitimately contains `''` equals the fresh JSON itself and is
- * left alone.
- */
-export const isSqlEscapedAttestationRaw = (stored: string, fresh: Attestation): boolean => {
-  if (!stored.includes("''")) return false
-  const freshJson = JSON.stringify(fresh)
-  if (stored === freshJson || !freshJson.includes("'")) return false
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stored)
-  } catch {
-    return false
-  }
-  if (!parsed || typeof parsed !== 'object') return false
-  const stored_ = parsed as Record<string, unknown>
-  const withStoredRevocation = {
-    ...fresh,
-    ...('revoked' in stored_ && { revoked: stored_.revoked }),
-    ...('revocationTime' in stored_ && { revocationTime: stored_.revocationTime }),
-  }
-  return stored === JSON.stringify(withStoredRevocation).replace(/'/g, "''")
-}
-
-/**
  * seeds.type for a seed whose EAS model name is `easModelName`: the type of the local model it
  * matches (ADR 0008), so `htmlpage` from an older SDK is stored as `html_page`, the type local seeds
  * of HTMLPage have. A name matching no local model, or several, is kept as it is.
@@ -370,17 +342,6 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
     const revokedAt = syncedRevokedAt(attestation, row.revokedAt)
     if (revokedAt == null || revokedAt === row.revokedAt) continue
     await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
-  }
-
-  // Repair seed rows an earlier sync stored with SQL-escaped (doubled) quotes.
-  for (const row of existingSeedRecordsRows) {
-    if (!row.uid || !row.attestationRaw) continue
-    const attestation = seedByUid.get(row.uid)
-    if (!attestation || !isSqlEscapedAttestationRaw(row.attestationRaw, attestation)) continue
-    await appDb
-      .update(seeds)
-      .set({ attestationRaw: JSON.stringify(attestation) })
-      .where(eq(seeds.uid, row.uid))
   }
 
   if (newSeeds.length === 0) {
@@ -1081,7 +1042,7 @@ const syncVersionsAndPropertiesForSeeds = async ({
     seedUids,
     excludeRevoked: false,
   })
-  const { kept: itemVersions, foreign: foreignVersions } = partitionByRefAttester(
+  const { kept: itemVersions } = partitionByRefAttester(
     fetchedVersions,
     itemSeeds,
   )
@@ -1091,52 +1052,20 @@ const syncVersionsAndPropertiesForSeeds = async ({
     state,
   })
 
-  let foreignProperties: Attestation[] = []
   if (versionUids.length > 0) {
     const allProperties = await getItemPropertiesFromEas({
       versionUids,
       excludeRevoked: false,
     })
-    const partitioned = partitionByRefAttester(allProperties, itemVersions)
-    foreignProperties = partitioned.foreign
+    const { kept: keptProperties } = partitionByRefAttester(allProperties, itemVersions)
 
     // The save makes the canonical pick; it also needs the other attestations to clean up after them.
     await saveEasPropertiesToDb({
-      fetchedProperties: partitioned.kept,
+      fetchedProperties: keptProperties,
       itemSeeds,
       state,
     })
   }
-
-  await deleteForeignAttestationRows({
-    versionUids: foreignVersions.map((version) => version.id),
-    propertyUids: foreignProperties.map((property) => property.id),
-  })
-}
-
-/**
- * Remove rows an earlier sync stored for versions and properties that another account attested:
- * a foreign version row would count as the seed's latest version, and a foreign property row as
- * its newest value.
- */
-const deleteForeignAttestationRows = async ({
-  versionUids,
-  propertyUids,
-}: {
-  versionUids: string[]
-  propertyUids: string[]
-}): Promise<void> => {
-  if (versionUids.length === 0 && propertyUids.length === 0) return
-  const appDb = BaseDb.getAppDb()
-  await writeInBatches(propertyUids, (chunk) =>
-    appDb.delete(metadata).where(inArray(metadata.uid, chunk)),
-  )
-  await writeInBatches(versionUids, (chunk) =>
-    appDb.delete(metadata).where(inArray(metadata.versionUid, chunk)),
-  )
-  await writeInBatches(versionUids, (chunk) =>
-    appDb.delete(versions).where(inArray(versions.uid, chunk)),
-  )
 }
 
 /**
