@@ -28,7 +28,7 @@ const resolveItem = async (seedLocalId: string): Promise<IItem<any>> => {
 }
 
 /**
- * Returns true if the item needs the Arweave upload path (reimbursement, poll, upload)
+ * Returns true if the item needs the Arweave upload path (sign data items, upload)
  * before creating attestations. Returns false when the item has no storage or no values
  * to upload, in which case the publish flow can skip straight to EAS.
  *

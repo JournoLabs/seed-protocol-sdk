@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking
+
+- **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed, so the upload server can drop its reimbursement route. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
+- `useArweaveBundler` is deprecated. `true` changes nothing; `false` makes `initPublish` throw `PublishPaymentConfigError`. Apps that left it unset now upload data items and need `signDataItems` or a `dataItemSigner` (at `createPublish` or in the config).
+- Removed: the `signArweaveTransactions` and `arweaveJwk` options (config and `createPublish`), the `SerializedPublishUpload` and `ArweaveTransactionInfoResult` types, and the context fields `reimbursementTransactionId`, `reimbursementConfirmed`, `requestResponse`, `transactionKeys`, `uploaderState` and `currentTransactionIndex`.
+- `resolvePublishPayment(...).storage.path` and a cost estimate's `arweave.path` are always `'bundler'`. `chargedUploadBytes(work, uploadTo)` drops its `path` argument; `combinePublishCostEstimate` still accepts `arweavePath: 'bundler'`.
+- A publish saved mid-way through the L1 path (`creatingArweaveTransactions`, `sendingReimbursementRequest`, `pollingForConfirmation`, `uploadingData` or their `Phase2` states) is marked interrupted on restore instead of resuming; publish the item again.
+
 ## 0.7.7 (2026-10-18)
 
 ### Commits

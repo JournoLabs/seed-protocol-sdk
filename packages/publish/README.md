@@ -46,9 +46,6 @@ initPublish({
   rpcUrl: import.meta.env.VITE_RPC_URL,
   chain: optimismSepolia,
   accountMode: 'eoa',
-  // Files (images, Html, ...) go to Arweave as data items the wallet signs. Without this, uploads
-  // take the L1 path, which needs an Arweave key: arweaveJwk or signArweaveTransactions.
-  useArweaveBundler: true,
 })
 
 function Connect() {
@@ -135,8 +132,8 @@ from the sender your config selects:
 | Permissionless EIP-7702 | `bundlerUrl` (Recipe 2) | sponsored by `paymasterUrl`, else the bundler |
 | Connected wallet | neither | the user's ETH |
 
-Storage goes through the upload API at `uploadApiBaseUrl`, and its operator pays: directly on the
-bundler path, and on the L1 path by reimbursing the user's Arweave key before the upload.
+Files go to Arweave as data items signed by the user's key. By default they go to the upload API's
+bundler routes at `uploadApiBaseUrl`, and its operator pays for them.
 
 To state the intent instead, set `payment`. It fills in those settings' defaults, and `initPublish`
 throws `PublishPaymentConfigError` when a setting contradicts it:
@@ -154,7 +151,7 @@ reports the same in `evm.userPays` / `arweave.userPays`.
 
 #### Users pay for storage (Turbo)
 
-`payment: { storage: 'user' }` sends data items (signed by the user's EVM key, as on the bundler path)
+`payment: { storage: 'user' }` sends the data items (signed by the user's EVM key)
 straight to [Turbo](https://docs.ar.io/build/upload/bundling-services/), which charges that address's
 Turbo credits. Users top up through Turbo with a card or crypto. Items under Turbo's free-tier size
 cost nothing. Before uploading, the publish checks the balance covers the items and fails with
@@ -251,27 +248,15 @@ Fund both the ManagedAccount and the in-app EOA before publishing: `bun run twin
 
 Twin quirks the SDK handles: automation pre-flight simulations retry with a balance override when the account can't cover OP's up-front L1 fee, EOA sends retry when the fork's pending-nonce lookup lags a block, and `getArweave()` follows the gateway's protocol and port (e.g. `http://localhost:1984`).
 
-### Experimental: Arweave bundler (instant uploads)
+### Arweave uploads
 
-When using your own gateway with an Arweave bundler, you can enable instant uploads instead of the default reimbursement + chunk upload flow. **This is experimental and not yet validated for production.**
+Publish signs each file (image, Html, ...) as an Arweave data item and posts them in one batch to `${uploadApiBaseUrl}/api/upload/arweave/batch`, whose operator pays for them (or to Turbo with `payment: { storage: 'user' }`). A background worker records each bundle's L1 transaction once it is anchored.
+
+`useArweaveBundler` is deprecated: `true` changes nothing, and `false` makes `initPublish` throw. The L1 path it used to select, an Arweave transaction the upload API reimbursed, has been removed along with the `signArweaveTransactions` and `arweaveJwk` options.
 
 **Memory:** Large publishes hold signed DataItems and a single packed batch body in memory briefly. Electron and other Chromium renderers often cap near ~4 GB JS heap. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for scaling, `publishMode`, and path differences (`signDataItems` vs `dataItemSigner`).
 
-Set `useArweaveBundler: true`. The bundler uses the same `uploadApiBaseUrl` (e.g. `${uploadApiBaseUrl}/upload/batch`).
-
-```tsx
-<PublishProvider
-  config={{
-    thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
-    uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
-    useArweaveBundler: true,
-  }}
->
-  <App />
-</PublishProvider>
-```
-
-When using the bundler, you must provide a signer at publish time via `PublishManager.createPublish` options:
+Provide a data item signer at publish time via `PublishManager.createPublish` options:
 
 ```tsx
 // Signer passed at publish time (recommended for apps where signer isn't available at startup)
@@ -290,7 +275,7 @@ PublishManager.createPublish(item, address, account, {
 
 You can also provide `signDataItems` or `dataItemSigner` in the PublishProvider config as a fallback when the signer is available at startup.
 
-**Html properties with embedded `data:image/...;base64,...` (materialization):** When `useArweaveBundler: true`, the publish machine runs the same two-phase flow as L1: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase, unless the Html has `seed:property/<name>` placeholders (see [docs/PUBLISHING.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISHING.md)), which always take the two-phase path.
+**Html properties with embedded `data:image/...;base64,...` (materialization):** the publish machine runs a two-phase flow: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase, unless the Html has `seed:property/<name>` placeholders (see [docs/PUBLISHING.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISHING.md)), which always take the two-phase path.
 
 ### Arweave upload tags
 

@@ -172,7 +172,6 @@ const gw = await resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(con
 initPublish({
   uploadApiBaseUrl: gw.uploadApiBaseUrl,
   arweaveGraphqlUrl: gw.arweaveGraphqlUrl,
-  useArweaveBundler: true,
   thirdwebClientId: '...',
 })
 ```

@@ -34,16 +34,16 @@ export type PublishCostEstimate = {
     /** Bytes uploaded. */
     bytes: number
     /**
-     * Bytes paid for: on L1 each transaction is charged for at least 256 KiB; on the bundler path
-     * the bundle is one transaction; with Turbo, uploads of 100 KiB or less are free.
+     * Bytes paid for: the bundle is one transaction, charged for at least 256 KiB; with Turbo,
+     * uploads of 100 KiB or less are free.
      */
     chargedBytes: number
     uploadCount: number
-    path: 'l1' | 'bundler'
+    /** Always `'bundler'`: uploads are signed data items. */
+    path: 'bundler'
     /**
      * Whether the user pays for storage (`payment.storage`). With the default `'operator'` the
-     * upload API funds it: on the bundler path directly, on the L1 path by reimbursing the user's
-     * Arweave key before the upload (the deferred-Html second pass is not reimbursed).
+     * upload API's bundler routes pay for the data items.
      */
     userPays: boolean
   }

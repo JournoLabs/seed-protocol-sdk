@@ -55,8 +55,6 @@ export const PublishMachineStates = {
 
 /** States that run for a long time without snapshot changes; need periodic saves. */
 export const LONG_RUNNING_PUBLISH_STATES = [
-  'pollingForConfirmation',
-  'uploadingData',
   'uploadingViaBundler',
   'uploadingViaBundlerPhase2',
 ] as const

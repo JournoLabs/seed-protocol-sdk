@@ -5,7 +5,6 @@ import {
   PublishPaymentConfigError,
   resolvePublishPayment,
   resolvePublishSender,
-  resolveUseArweaveBundler,
 } from './payment'
 
 describe('resolvePublishSender', () => {
@@ -45,13 +44,10 @@ describe('resolvePublishPayment', () => {
   test('wallet: the user pays', () => {
     expect(resolvePublishPayment({}).gas.payer).toBe('user')
   })
-  test('storage: operator by default, path from useArweaveBundler', () => {
-    expect(resolvePublishPayment({}).storage).toEqual({ payer: 'operator', path: 'l1', uploadTo: 'upload-api' })
-    expect(resolvePublishPayment({ useArweaveBundler: true }).storage).toEqual({
-      payer: 'operator',
-      path: 'bundler',
-      uploadTo: 'upload-api',
-    })
+  test('storage: operator by default, data items through the upload API', () => {
+    const operator = { payer: 'operator', path: 'bundler', uploadTo: 'upload-api' } as const
+    expect(resolvePublishPayment({}).storage).toEqual(operator)
+    expect(resolvePublishPayment({ useArweaveBundler: true }).storage).toEqual(operator)
   })
   test("storage 'user' uploads data items to Turbo (default endpoints)", () => {
     expect(resolvePublishPayment({ payment: { storage: 'user' } }).storage).toEqual({
@@ -69,10 +65,6 @@ describe('resolvePublishPayment', () => {
       },
     }).storage
     expect(turbo).toEqual({ uploadUrl: 'https://up.example', paymentUrl: 'https://pay.example', paidBy: ['0xapp'] })
-  })
-  test("storage 'user' turns on the bundler path in the resolved config", () => {
-    expect(resolveUseArweaveBundler({ payment: { storage: 'user' } })).toBe(true)
-    expect(resolveUseArweaveBundler({})).toBe(false)
   })
 })
 
@@ -102,8 +94,10 @@ describe('assertPublishPaymentConfig', () => {
     expect(() => assertPublishPaymentConfig({ bundlerUrl: 'https://b', payment: { gas: 'user' } })).not.toThrow()
     expect(() => assertPublishPaymentConfig({ payment: { gas: 'user', storage: 'operator' } })).not.toThrow()
   })
-  test("storage 'user' contradicts useArweaveBundler false", () => {
-    rejects({ useArweaveBundler: false, payment: { storage: 'user' } }, 'useArweaveBundler is false')
+  test('useArweaveBundler false is refused: the L1 upload path is gone', () => {
+    rejects({ useArweaveBundler: false }, 'useArweaveBundler: false is no longer supported')
+    rejects({ useArweaveBundler: false, payment: { storage: 'user' } }, 'useArweaveBundler: false is no longer supported')
+    expect(() => assertPublishPaymentConfig({ useArweaveBundler: true })).not.toThrow()
   })
   test("userStorage needs storage 'user'", () => {
     rejects({ payment: { userStorage: { provider: 'turbo' } } }, "payment.storage is not 'user'")

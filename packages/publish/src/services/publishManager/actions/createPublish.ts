@@ -88,8 +88,6 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         schemaId: item.schemaUid,
         signDataItems: options?.signDataItems,
         dataItemSigner: coerceDataItemSigner(options?.dataItemSigner),
-        signArweaveTransactions: options?.signArweaveTransactions,
-        arweaveJwk: options?.arweaveJwk,
         publishMode: options?.publishMode ?? 'patch',
         publishRunId,
         arweaveUploadTags: arweaveUploadTags.length ? arweaveUploadTags : undefined,

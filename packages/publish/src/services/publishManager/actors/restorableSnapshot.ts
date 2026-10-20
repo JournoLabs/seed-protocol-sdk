@@ -9,10 +9,6 @@ export interface PersistedSnapshot {
     item?: { seedLocalId?: string; modelName?: string; schemaId?: string }
     modelName?: string
     schemaId?: string
-    reimbursementTransactionId?: string
-    requestResponse?: unknown
-    arweaveTransactions?: unknown[]
-    publishUploads?: unknown[]
     bundlerUploadNotNeeded?: boolean
   }
 }
@@ -30,19 +26,27 @@ function getStateValue(parsed: PersistedSnapshot): string {
 /** Upload states that need the signed data items, which aren't saved with the publish. */
 const BUNDLER_UPLOAD_STATES = new Set(['uploadingViaBundler', 'uploadingViaBundlerPhase2'])
 
+/**
+ * States of the L1 upload path (an Arweave transaction reimbursed through the upload API), which
+ * was removed. The machine no longer has them, so a publish saved in one can't resume.
+ */
+const REMOVED_L1_STATES = new Set([
+  'creatingArweaveTransactions',
+  'sendingReimbursementRequest',
+  'pollingForConfirmation',
+  'uploadingData',
+  'creatingArweaveTransactionsPhase2',
+  'sendingReimbursementRequestPhase2',
+  'pollingForConfirmationPhase2',
+  'uploadingDataPhase2',
+])
+
 export function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
   const stateValue = getStateValue(parsed)
+  if (REMOVED_L1_STATES.has(stateValue)) return false
   // Resuming here would have nothing to upload, unless there was nothing to upload anyway.
   if (BUNDLER_UPLOAD_STATES.has(stateValue as string) && parsed.context?.bundlerUploadNotNeeded !== true) {
     return false
-  }
-  if (stateValue === 'pollingForConfirmation' || stateValue === 'pollingForConfirmationPhase2') {
-    if (!parsed.context?.reimbursementTransactionId || !parsed.context?.requestResponse) return false
-  }
-  if (stateValue === 'uploadingData' || stateValue === 'uploadingDataPhase2') {
-    const txs = parsed.context?.arweaveTransactions
-    const uploads = parsed.context?.publishUploads
-    if (!Array.isArray(txs) || txs.length === 0 || !Array.isArray(uploads)) return false
   }
   return true
 }

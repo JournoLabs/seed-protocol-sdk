@@ -32,36 +32,3 @@ export const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
     }, 200)
   })
 }
-
-export function deserializeChunks(
-  serialized: unknown
-): {
-  data_root: Uint8Array
-  chunks: Array<{ dataHash: Uint8Array; minByteRange: number; maxByteRange: number }>
-  proofs: Array<{ offset: number; proof: Uint8Array }>
-} | undefined {
-  if (!serialized || typeof serialized !== 'object') return undefined
-  const s = serialized as {
-    data_root?: number[]
-    chunks?: Array<{ dataHash: number[]; minByteRange: number; maxByteRange: number }>
-    proofs?: Array<{ offset: number; proof: number[] }>
-  }
-  if (!Array.isArray(s.data_root)) return undefined
-  return {
-    data_root: new Uint8Array(s.data_root),
-    chunks: (s.chunks ?? []).map((c) => ({ ...c, dataHash: new Uint8Array(c.dataHash ?? []) })),
-    proofs: (s.proofs ?? []).map((p) => ({ ...p, proof: new Uint8Array(p.proof ?? []) })),
-  }
-}
-
-export function serializeChunks(chunks: {
-  data_root: Uint8Array
-  chunks: Array<{ dataHash: Uint8Array; minByteRange: number; maxByteRange: number }>
-  proofs: Array<{ offset: number; proof: Uint8Array }>
-}): unknown {
-  return {
-    data_root: Array.from(chunks.data_root),
-    chunks: chunks.chunks.map((c) => ({ ...c, dataHash: Array.from(c.dataHash) })),
-    proofs: chunks.proofs.map((p) => ({ ...p, proof: Array.from(p.proof) })),
-  }
-}

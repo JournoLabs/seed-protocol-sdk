@@ -14,7 +14,7 @@ const request = {
   payment: {
     sender: 'wallet',
     gas: { payer: 'user' },
-    storage: { payer: 'operator', path: 'l1', uploadTo: 'upload-api' },
+    storage: { payer: 'operator', path: 'bundler', uploadTo: 'upload-api' },
   },
   getEstimate: async () => {
     throw new Error('not called')

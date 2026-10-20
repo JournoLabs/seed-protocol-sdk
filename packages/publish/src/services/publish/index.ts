@@ -3,19 +3,13 @@ import { setup, assign } from 'xstate'
 import {
   ArweaveTransactionInfo,
   PublishMachineContext,
-  ReimbursementResponse,
   PublishUpload,
 }                                                                                            from '../../types'
 import {
-  createArweaveTransactions,
-  createArweaveTransactionsPhase2,
   createArweaveDataItems,
   createArweaveDataItemsPhase2,
   createAttestations,
   createAttestationsDirectToEas,
-  sendReimbursementRequest,
-  pollForConfirmation,
-  uploadData,
   uploadViaBundler,
   checking,
   authorizing,
@@ -60,13 +54,8 @@ export const publishMachine = setup({
     input   : {} as Partial<PublishMachineContext> | undefined,
   },
   actors : {
-    createArweaveTransactions,
-    createArweaveTransactionsPhase2,
     createArweaveDataItems,
     createArweaveDataItemsPhase2,
-    sendReimbursementRequest,
-    pollForConfirmation,
-    uploadData,
     uploadViaBundler,
     createAttestations,
     createAttestationsDirectToEas,
@@ -85,25 +74,9 @@ export const publishMachine = setup({
         console.error('Unknown error (full event):', event,)
       }
     },
-    assignErrorCreatingArweaveTransactions : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'creatingArweaveTransactions',
-    },),
     assignErrorCreatingArweaveDataItems : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingArweaveDataItems',
-    },),
-    assignErrorSendingReimbursementRequest : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'sendingReimbursementRequest',
-    },),
-    assignErrorPollingForConfirmation : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'pollingForConfirmation',
-    },),
-    assignErrorUploadingData : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'uploadingData',
     },),
     assignErrorPreparingHtmlEmbedded : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -112,14 +85,6 @@ export const publishMachine = setup({
     assignErrorRewritingHtmlEmbedded : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'rewritingHtmlEmbedded',
-    },),
-    assignErrorCreatingArweaveTransactionsPhase2 : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'creatingArweaveTransactionsPhase2',
-    },),
-    assignErrorUploadingDataPhase2 : assign({
-      error     : ( { event, }, ) => getErrorFromEvent(event,),
-      errorStep : () => 'uploadingDataPhase2',
     },),
     assignErrorUploadingViaBundler : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -227,14 +192,6 @@ export const publishMachine = setup({
                 .attestationStrategy,
           }),
         },
-        validPublishProcessBundler: {
-          target: 'preparingHtmlEmbedded',
-          actions: assign({
-            attestationStrategy: ({ event }) =>
-              (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
-                .attestationStrategy,
-          }),
-        },
         skipArweave: [
           {
             guard: ({ context }) => attestationUsesDirectEas(context),
@@ -269,43 +226,16 @@ export const publishMachine = setup({
       invoke: {
         src: 'preparingHtmlEmbedded',
         input: ({ context }) => ({ context } as { context: PublishMachineContext }),
-        onDone: [
-          {
-            guard: () => getPublishConfig().useArweaveBundler,
-            target: 'creatingArweaveDataItems',
-            actions: assign({
-              htmlEmbeddedDeferredHtmlSeedLocalIds: ({ event }) =>
-                (event.output as { deferredHtmlSeedLocalIds: string[] }).deferredHtmlSeedLocalIds,
-            }),
-          },
-          {
-            target: 'creatingArweaveTransactions',
-            actions: assign({
-              htmlEmbeddedDeferredHtmlSeedLocalIds: ({ event }) =>
-                (event.output as { deferredHtmlSeedLocalIds: string[] }).deferredHtmlSeedLocalIds,
-            }),
-          },
-        ],
+        onDone: {
+          target: 'creatingArweaveDataItems',
+          actions: assign({
+            htmlEmbeddedDeferredHtmlSeedLocalIds: ({ event }) =>
+              (event.output as { deferredHtmlSeedLocalIds: string[] }).deferredHtmlSeedLocalIds,
+          }),
+        },
         onError: {
           target: FAILURE,
           actions: ['assignErrorPreparingHtmlEmbedded', 'handleError'],
-        },
-      },
-    },
-    creatingArweaveTransactions : {
-      invoke : {
-        src    : 'createArweaveTransactions',
-        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
-        onDone : {
-          target  : 'sendingReimbursementRequest',
-          actions : assign({
-            arweaveTransactions : ( { event, }, ) => event.output.arweaveTransactions as ArweaveTransactionInfo[],
-            publishUploads : ( { event, }, ) => event.output.publishUploads as PublishUpload[],
-          },),
-        },
-        onError : {
-          target  : 'failure',
-          actions : [ 'assignErrorCreatingArweaveTransactions', 'handleError', ],
         },
       },
     },
@@ -327,39 +257,6 @@ export const publishMachine = setup({
           actions : [ 'assignErrorCreatingArweaveDataItems', 'handleError', ],
         },
       },
-    },
-    sendingReimbursementRequest : {
-      invoke : {
-        src    : 'sendReimbursementRequest',
-        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
-        onDone : {
-          target  : 'pollingForConfirmation',
-          actions : assign({
-            requestResponse            : ( { event, }, ) => event.output as ReimbursementResponse,
-            reimbursementTransactionId : ( { event, }, ) => (event.output as ReimbursementResponse).transactionId as string,
-          },),
-        },
-        onError : {
-          target  : 'failure',
-          actions : [ 'assignErrorSendingReimbursementRequest', 'handleError', ],
-        },
-      },
-    },
-    pollingForConfirmation : {
-      invoke : {
-        src    : 'pollForConfirmation',
-        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
-        onDone : {
-          target  : 'uploadingData',
-          actions : assign({
-            reimbursementConfirmed : true,
-          },),
-        },
-        onError : {
-          target  : 'failure',
-          actions : [ 'assignErrorPollingForConfirmation', 'handleError', ],
-        },
-      }
     },
     uploadingViaBundler : {
       on : {
@@ -485,196 +382,17 @@ export const publishMachine = setup({
         input: ({ context }) => ({ context }) as { context: PublishMachineContext },
       },
     },
-    uploadingData : {
-      on : {
-        updatePercentage : {
-          actions : assign({
-            completionPercentage : ( { event, }, ) => {
-              const ev = event as { completionPercentage?: number }
-              return ev.completionPercentage as number
-            },
-            uploaderState : ( { event, }, ) =>
-              (event as { uploaderState?: PublishMachineContext['uploaderState'] }).uploaderState,
-            currentTransactionIndex : ( { event, }, ) =>
-              (event as { currentTransactionIndex?: number }).currentTransactionIndex,
-          },),
-        },
-        uploadComplete : [
-          {
-            guard: (args) =>
-              ((args.context?.htmlEmbeddedDeferredHtmlSeedLocalIds?.length ?? 0) > 0),
-            target: 'rewritingHtmlEmbedded',
-            actions: assign({
-              htmlEmbeddedPhase1PublishUploads: ({ context }) =>
-                (context.publishUploads ?? []) as PublishUpload[],
-              htmlEmbeddedPhase1ArweaveTransactions: ({ context }) =>
-                (context.arweaveTransactions ?? []) as ArweaveTransactionInfo[],
-            }),
-          },
-          {
-            guard: ({ context }) => attestationUsesDirectEas(context),
-            target: 'creatingAttestationsDirectToEas',
-            actions: assign({
-              completionPercentage: 100,
-            }),
-          },
-          {
-            guard: ({ context }) => attestationUsesMultiPublish(context),
-            target: 'creatingAttestations',
-            actions: assign({
-              completionPercentage: 100,
-            }),
-          },
-        ],
-        uploadError : {
-          target  : 'failure',
-          actions : [ 'assignErrorUploadingData', 'handleError', ],
-        },
-      },
-      invoke : {
-        src   : 'uploadData',
-        input : ( { context } ) => ({ context }) as { context: PublishMachineContext },
-      },
-    },
     rewritingHtmlEmbedded: {
       invoke: {
         src: 'rewritingHtmlEmbedded',
         input: ({ context }) => ({ context }) as { context: PublishMachineContext },
-        onDone: [
-          {
-            guard: () => !getPublishConfig().useArweaveBundler,
-            target: 'creatingArweaveTransactionsPhase2',
-          },
-          {
-            guard: () => getPublishConfig().useArweaveBundler,
-            target: 'creatingArweaveDataItemsPhase2',
-          },
-        ],
+        onDone: {
+          target: 'creatingArweaveDataItemsPhase2',
+        },
         onError: {
           target: FAILURE,
           actions: ['assignErrorRewritingHtmlEmbedded', 'handleError'],
         },
-      },
-    },
-    creatingArweaveTransactionsPhase2: {
-      invoke: {
-        src: 'createArweaveTransactionsPhase2',
-        input: ({ context, event }) =>
-          ({ context, event }) as { context: PublishMachineContext; event: unknown },
-        onDone: {
-          // Phase 2's transactions need funding too, like phase 1's (the operator pays on L1).
-          target: 'sendingReimbursementRequestPhase2',
-          actions: assign({
-            // sendReimbursementRequest reuses an existing id: this is a new request.
-            reimbursementTransactionId: () => undefined,
-            requestResponse: () => undefined,
-            reimbursementConfirmed: () => false,
-            arweaveTransactions: ({ event }) =>
-              (event.output as { arweaveTransactions: ArweaveTransactionInfo[] }).arweaveTransactions,
-            publishUploads: ({ event }) =>
-              (event.output as { publishUploads: PublishUpload[] }).publishUploads,
-            uploaderState: () => undefined,
-            currentTransactionIndex: () => undefined,
-          }),
-        },
-        onError: {
-          target: FAILURE,
-          actions: ['assignErrorCreatingArweaveTransactionsPhase2', 'handleError'],
-        },
-      },
-    },
-    sendingReimbursementRequestPhase2: {
-      invoke: {
-        src: 'sendReimbursementRequest',
-        input: ({ context, event }) =>
-          ({ context, event }) as { context: PublishMachineContext; event: unknown },
-        onDone: {
-          target: 'pollingForConfirmationPhase2',
-          actions: assign({
-            requestResponse: ({ event }) => event.output as ReimbursementResponse,
-            reimbursementTransactionId: ({ event }) =>
-              (event.output as ReimbursementResponse).transactionId as string,
-          }),
-        },
-        onError: {
-          target: FAILURE,
-          actions: ['assignErrorSendingReimbursementRequest', 'handleError'],
-        },
-      },
-    },
-    pollingForConfirmationPhase2: {
-      invoke: {
-        src: 'pollForConfirmation',
-        input: ({ context, event }) =>
-          ({ context, event }) as { context: PublishMachineContext; event: unknown },
-        onDone: {
-          target: 'uploadingDataPhase2',
-          actions: assign({ reimbursementConfirmed: true }),
-        },
-        onError: {
-          target: FAILURE,
-          actions: ['assignErrorPollingForConfirmation', 'handleError'],
-        },
-      },
-    },
-    uploadingDataPhase2: {
-      on: {
-        updatePercentage: {
-          actions: assign({
-            completionPercentage: ({ event }) => {
-              const ev = event as { completionPercentage?: number }
-              return ev.completionPercentage as number
-            },
-            uploaderState: ({ event }) =>
-              (event as { uploaderState?: PublishMachineContext['uploaderState'] }).uploaderState,
-            currentTransactionIndex: ({ event }) =>
-              (event as { currentTransactionIndex?: number }).currentTransactionIndex,
-          }),
-        },
-        uploadComplete: [
-          {
-            guard: ({ context }) => attestationUsesDirectEas(context),
-            target: 'creatingAttestationsDirectToEas',
-            actions: assign({
-              completionPercentage: 100,
-              publishUploads: ({ context }) =>
-                [
-                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
-                  ...((context.publishUploads ?? []) as PublishUpload[]),
-                ],
-              arweaveTransactions: ({ context }) =>
-                [
-                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
-                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
-                ],
-            }),
-          },
-          {
-            guard: ({ context }) => attestationUsesMultiPublish(context),
-            target: 'creatingAttestations',
-            actions: assign({
-              completionPercentage: 100,
-              publishUploads: ({ context }) =>
-                [
-                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
-                  ...((context.publishUploads ?? []) as PublishUpload[]),
-                ],
-              arweaveTransactions: ({ context }) =>
-                [
-                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
-                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
-                ],
-            }),
-          },
-        ],
-        uploadError: {
-          target: FAILURE,
-          actions: ['assignErrorUploadingDataPhase2', 'handleError'],
-        },
-      },
-      invoke: {
-        src: 'uploadData',
-        input: ({ context }) => ({ context }) as { context: PublishMachineContext },
       },
     },
     creatingAttestations : {

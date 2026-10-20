@@ -54,7 +54,7 @@ describe('combinePublishCostEstimate', () => {
     expect(estimate.work).toEqual(work)
     expect(estimate.arweave.bytes).toBe(1_000_000)
     expect(estimate.arweave.uploadCount).toBe(1)
-    expect(estimate.arweave.path).toBe('l1')
+    expect(estimate.arweave.path).toBe('bundler')
     expect(estimate.arweave.userPays).toBe(false)
     expect(estimate.evm.userPays).toBe(true)
     expect(estimate.totalUsd).toBe(estimate.evm.usd + estimate.arweave.usd)
@@ -154,10 +154,9 @@ describe('estimatePublishCost', () => {
     expect(estimate.evm.userPays).toBe(true)
   })
 
-  test('bundler path is reported when configured', async () => {
+  test('reports the bundler path', async () => {
     initPublish({
       uploadApiBaseUrl: 'https://example.test',
-      useArweaveBundler: true,
       getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })
@@ -168,29 +167,24 @@ describe('estimatePublishCost', () => {
 describe('Arweave charges per transaction', () => {
   const small = { ...work, uploadCount: 3, uploadBytes: 3_000, uploadSizes: [1_000, 1_000, 1_000] }
 
-  test('L1: each upload is charged for at least 256 KiB', () => {
-    expect(chargedUploadBytes(small, 'l1')).toBe(3 * ARWEAVE_MIN_CHARGED_BYTES)
-    const estimate = combinePublishCostEstimate(small, rates, { arweavePath: 'l1' })
+  test('one transaction for the whole bundle, charged for at least 256 KiB', () => {
+    expect(chargedUploadBytes(small)).toBe(ARWEAVE_MIN_CHARGED_BYTES)
+    expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] })).toBe(1_000_000)
+    const estimate = combinePublishCostEstimate(small, rates)
     expect(estimate.arweave.bytes).toBe(3_000)
-    expect(estimate.arweave.chargedBytes).toBe(3 * ARWEAVE_MIN_CHARGED_BYTES)
-    // 1 KB used to cost 1/262 of what Arweave charges.
-    expect(Number(estimate.arweave.ar)).toBeCloseTo((3 * ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
-  })
-
-  test('bundler: one transaction for the whole bundle', () => {
-    expect(chargedUploadBytes(small, 'bundler')).toBe(ARWEAVE_MIN_CHARGED_BYTES)
-    expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] }, 'bundler')).toBe(1_000_000)
+    expect(estimate.arweave.chargedBytes).toBe(ARWEAVE_MIN_CHARGED_BYTES)
+    expect(Number(estimate.arweave.ar)).toBeCloseTo((ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
   })
 
   test('Turbo: uploads of 100 KiB or less are free', () => {
     const mixed = { ...work, uploadCount: 2, uploadBytes: 1_001_000, uploadSizes: [1_000, 1_000_000] }
-    expect(chargedUploadBytes(mixed, 'bundler', 'turbo')).toBe(1_000_000)
-    expect(chargedUploadBytes(small, 'bundler', 'turbo')).toBe(0)
+    expect(chargedUploadBytes(mixed, 'turbo')).toBe(1_000_000)
+    expect(chargedUploadBytes(small, 'turbo')).toBe(0)
   })
 
   test('without upload sizes, uploads are equal parts of the total', () => {
-    expect(chargedUploadBytes({ uploadCount: 2, uploadBytes: 2_000 }, 'l1')).toBe(2 * ARWEAVE_MIN_CHARGED_BYTES)
-    expect(chargedUploadBytes({ uploadCount: 0, uploadBytes: 0 }, 'l1')).toBe(0)
+    expect(chargedUploadBytes({ uploadCount: 2, uploadBytes: 400_000 }, 'turbo')).toBe(400_000)
+    expect(chargedUploadBytes({ uploadCount: 0, uploadBytes: 0 })).toBe(0)
   })
 })
 
