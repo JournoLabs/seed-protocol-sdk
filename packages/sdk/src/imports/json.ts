@@ -9,7 +9,7 @@ import { ModelDefinitions, ModelClassType } from '@/types'
 import { generateId } from '@/helpers'
 import { easName } from '@seedprotocol/eas'
 import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
-import { clearNameMatchLevels, warnOnInvalidNameMatch } from '@/db/read/nameMatchLevels'
+import { warnOnInvalidNameMatch } from '@/db/read/nameMatchLevels'
 import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
@@ -87,134 +87,6 @@ export function getRefValueType(prop: Record<string, unknown>): string | undefin
     }
   }
   return undefined
-}
-
-/**
- * Verify that properties are persisted to the database for a given model
- * This is important in browser environments where database writes may not be immediately visible
- * @param db - Database instance
- * @param modelId - Database ID of the model
- * @param modelName - Name of the model (for logging)
- * @param maxRetries - Maximum number of retry attempts
- * @param retryDelay - Delay between retries in milliseconds
- * @returns Promise that resolves when properties are found, or rejects if not found after max retries
- */
-const verifyPropertiesPersisted = async (
-  db: any,
-  modelId: number,
-  modelName: string,
-  maxRetries: number = 10,
-  retryDelay: number = 100
-): Promise<void> => {
-  const modelSchemaMod = await import('../seedSchema/ModelSchema')
-  const { properties: propertiesTable } = modelSchemaMod
-  const drizzleMod = await import('drizzle-orm')
-  const { eq } = drizzleMod
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const props = await db
-      .select()
-      .from(propertiesTable)
-      .where(eq(propertiesTable.modelId, modelId))
-      .limit(1)
-    
-    if (props.length > 0) {
-      logger(`Verified properties exist for model "${modelName}" (modelId: ${modelId}) after ${attempt + 1} attempt(s)`)
-      return
-    }
-
-    if (attempt < maxRetries - 1) {
-      logger(`Properties not yet visible for model "${modelName}" (modelId: ${modelId}), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${maxRetries})`)
-      await new Promise(resolve => setTimeout(resolve, retryDelay))
-    }
-  }
-
-  throw new Error(`Properties not found for model "${modelName}" (modelId: ${modelId}) after ${maxRetries} attempts. This may indicate a database write issue in the browser environment.`)
-}
-
-/**
- * Compare two schema files structurally, ignoring metadata timestamps
- * This is used to determine if an existing schema file matches the schema being imported
- * @param schema1 - First schema to compare
- * @param schema2 - Second schema to compare
- * @returns true if schemas are structurally equivalent, false otherwise
- */
-function compareSchemasStructurally(
-  schema1: SchemaFileFormat,
-  schema2: SchemaFileFormat,
-): boolean {
-  // Compare basic fields
-  if (schema1.$schema !== schema2.$schema) return false
-  if (schema1.version !== schema2.version) return false
-  if (schema1.id !== schema2.id) return false
-  
-  // Compare metadata (ignoring timestamps)
-  if (schema1.metadata?.name !== schema2.metadata?.name) return false
-  
-  // Compare models structure
-  const models1 = schema1.models || {}
-  const models2 = schema2.models || {}
-  
-  const modelNames1 = Object.keys(models1).sort()
-  const modelNames2 = Object.keys(models2).sort()
-  
-  if (modelNames1.length !== modelNames2.length) return false
-  if (!modelNames1.every((name, i) => name === modelNames2[i])) return false
-  
-  // Compare each model's structure
-  for (const modelName of modelNames1) {
-    const model1 = models1[modelName]
-    const model2 = models2[modelName]
-    
-    // Compare model IDs if both have them
-    if (model1.id !== model2.id) return false
-    
-    // Compare properties
-    const props1 = model1.properties || {}
-    const props2 = model2.properties || {}
-    
-    const propNames1 = Object.keys(props1).sort()
-    const propNames2 = Object.keys(props2).sort()
-    
-    if (propNames1.length !== propNames2.length) return false
-    if (!propNames1.every((name, i) => name === propNames2[i])) return false
-    
-    // Compare each property's structure
-    for (const propName of propNames1) {
-      const prop1 = props1[propName]
-      const prop2 = props2[propName]
-      
-      // Compare property IDs if both have them
-      if (prop1.id !== prop2.id) return false
-      
-      // Compare property types
-      if (prop1.type !== prop2.type) return false
-      
-      // Compare other relevant fields (ref, refValueType for List, etc.)
-      if (prop1.ref !== prop2.ref) return false
-      const refVal1 = prop1.refValueType ?? prop1.items?.type
-      const refVal2 = prop2.refValueType ?? prop2.items?.type
-      if (refVal1 !== refVal2) return false
-      const model1 = prop1.ref ?? prop1.items?.model
-      const model2 = prop2.ref ?? prop2.items?.model
-      if (model1 !== model2) return false
-    }
-  }
-  
-  // Compare enums
-  const enums1 = schema1.enums || {}
-  const enums2 = schema2.enums || {}
-  
-  const enumNames1 = Object.keys(enums1).sort()
-  const enumNames2 = Object.keys(enums2).sort()
-  
-  if (enumNames1.length !== enumNames2.length) return false
-  if (!enumNames1.every((name, i) => name === enumNames2[i])) return false
-  
-  // Note: We don't compare migrations as they're historical records
-  // and may differ even for the same schema structure
-  
-  return true
 }
 
 /**
@@ -565,7 +437,6 @@ async function importSchema(
 
   // Use original schema file if available, otherwise transform from import format
   let schemaFile: SchemaFileFormat
-  let replacingStoredFile = false
   if (originalSchemaFile) {
     schemaFile = originalSchemaFile
     // Normalize models if provided as array (some tools output array format)
@@ -664,7 +535,6 @@ async function importSchema(
         `[seed] schema ${schemaFile.metadata.name} v${schemaFile.version}: content changed but id ` +
           `${schemaFile.id} and version did not; replacing the stored schema file. Bump "version" when the schema changes.`,
       )
-      replacingStoredFile = true
     }
     
     // Generate missing model and property IDs.
@@ -1015,8 +885,6 @@ async function importSchema(
             }
           }
           
-          // Skip expensive verifyPropertiesPersisted - addModelsToDb already persisted; verification was for browser quirks
-          
           // Skip "After properties" block for internal schema: addSchemaToDb/addModelsToDb already stored
           // correct schemaData. The per-model ID sync (6 model + 6 property selects + schema update) is
           // redundant during init and causes slow OPFS writes. Ad-hoc loadSchemaFromFile uses the same
@@ -1043,7 +911,6 @@ async function importSchema(
   }
 
   const workingDir = BaseFileManager.getWorkingDir()
-  const path = BaseFileManager.getPathModule()
 
   // Ensure schema ID is defined (should always be set by this point, but check for safety)
   if (!schemaFile.id) {
@@ -1054,69 +921,6 @@ async function importSchema(
   // Get the target file path using ID-based naming (preferred)
   const filePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, version, schemaFile.id)
   
-  // Check if schema already exists
-  const exists = !replacingStoredFile && (await BaseFileManager.pathExists(filePath))
-  if (exists) {
-    // If we have a file path and the import file is the same as the target file,
-    // and it's already a complete schema, just load it without writing
-    if (importFilePath) {
-      const normalizedImportPath = path.resolve(importFilePath)
-      const normalizedTargetPath = path.resolve(filePath)
-      
-      if (normalizedImportPath === normalizedTargetPath) {
-        // Check if the file is already a complete schema
-        try {
-          const content = await BaseFileManager.readFileAsString(importFilePath)
-          const data = JSON.parse(content) as any
-          if (data.$schema) {
-            // File is already a complete schema, just load it
-            logger(`Schema file ${filePath} already exists and is complete, loading it`)
-            return await loadSchemaFromFile(filePath)
-          }
-        } catch {
-          // If we can't read the file, proceed with the error
-        }
-      }
-    }
-    
-    // File exists - check if it matches the schema we're trying to import
-    try {
-      const existingContent = await BaseFileManager.readFileAsString(filePath)
-      const existingSchema = JSON.parse(existingContent) as SchemaFileFormat
-      
-      // Verify it's a complete schema file
-      if (existingSchema.$schema) {
-        // Compare schemas structurally
-        if (compareSchemasStructurally(schemaFile, existingSchema)) {
-          // Schemas match - just load the existing file
-          logger(`Schema ${schemaFile.metadata.name} v${version} already exists with matching content, loading it`)
-          return await loadSchemaFromFile(filePath)
-        } else {
-          // Schemas don't match - throw error to prevent data loss
-          throw new Error(
-            `Schema ${schemaFile.metadata.name} v${version} already exists with different content. ` +
-            `To update the schema, delete the existing file first or use a different version.`,
-          )
-        }
-      } else {
-        // File exists but is not a complete schema - this shouldn't happen with ID-based naming
-        // but we'll treat it as a conflict
-        throw new Error(
-          `Schema ${schemaFile.metadata.name} v${version} already exists but file is not a complete schema`,
-        )
-      }
-    } catch (error) {
-      // If error is already our custom error, re-throw it
-      if (error instanceof Error && error.message.includes('already exists')) {
-        throw error
-      }
-      // If we can't read/parse the existing file, throw a generic error
-      throw new Error(
-        `Schema ${schemaFile.metadata.name} v${version} already exists but could not be read: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
-
   // Ensure working directory exists
   await BaseFileManager.createDirIfNotExists(workingDir)
 
@@ -1411,143 +1215,13 @@ export const loadSchemaFromFile = async (
             jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds.get(modelName)),
           ]),
         )
-        const { schemaRecord } = await applySchemaToDb(
+        await applySchemaToDb(
           schemaFile,
           modelDefinitions,
           modelFileIds,
           propertyFileIds,
           propertyDefinitions,
         ).finally(rowsWritten.settle)
-          
-          // Query the database to get model IDs that were just created
-          const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
-          const { modelSchemas } = modelSchemaSchemaMod
-          const modelSchemaMod = await import('../seedSchema/ModelSchema')
-          const { models: modelsTable } = modelSchemaMod
-          const drizzleMod = await import('drizzle-orm')
-          const { eq } = drizzleMod
-
-          // Try to find models directly by schemaFileId first (more reliable than join table)
-          const seedModelId = modelFileIds.get('Seed')
-          let seedModel: any[] = []
-          if (seedModelId) {
-            // Retry querying for the model until it's visible
-            for (let attempt = 0; attempt < 10; attempt++) {
-              seedModel = await db
-                .select()
-                .from(modelsTable)
-                .where(eq(modelsTable.schemaFileId, seedModelId))
-                .limit(1)
-              
-              if (seedModel.length > 0 && seedModel[0].id) {
-                break
-              }
-              
-              if (attempt < 9) {
-                await new Promise(resolve => setTimeout(resolve, 100))
-              }
-            }
-            
-            if (seedModel.length > 0 && seedModel[0].id) {
-              await verifyPropertiesPersisted(db, seedModel[0].id, 'Seed', 10, 100)
-            }
-          }
-          
-          // Also verify via join table if schemaRecord.id is available (for completeness)
-          if (schemaRecord.id) {
-            // Retry querying join table until entries are visible
-            let modelLinks: any[] = []
-            for (let attempt = 0; attempt < 10; attempt++) {
-              modelLinks = await db
-                .select({
-                  modelId: modelSchemas.modelId,
-                  modelName: modelsTable.name,
-                })
-                .from(modelSchemas)
-                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-                .where(eq(modelSchemas.schemaId, schemaRecord.id))
-              
-              if (modelLinks.length > 0) {
-                break
-              }
-              
-              if (attempt < 9) {
-                await new Promise(resolve => setTimeout(resolve, 100))
-              }
-            }
-            
-            logger(`Verifying properties: found ${modelLinks.length} model links for schema ${schemaName} (id: ${schemaRecord.id})`)
-            
-            // If we didn't verify via direct lookup, verify via join table
-            if (!seedModelId || (seedModel.length === 0 || !seedModel[0].id)) {
-              const seedModelLink = modelLinks.find((link: { modelId: number | null; modelName: string | null }) => link.modelName === 'Seed')
-              if (seedModelLink && seedModelLink.modelId) {
-                logger(`Verifying properties for Seed model via join table (modelId: ${seedModelLink.modelId})`)
-                await verifyPropertiesPersisted(db, seedModelLink.modelId, 'Seed', 10, 100)
-              } else if (modelLinks.length > 0 && modelLinks[0].modelId) {
-                // Fallback to first model if Seed not found
-                logger(`Verifying properties for ${modelLinks[0].modelName} model via join table (modelId: ${modelLinks[0].modelId})`)
-                await verifyPropertiesPersisted(db, modelLinks[0].modelId, modelLinks[0].modelName || 'unknown', 10, 100)
-              }
-            }
-          }
-          
-          // After properties are created (file path), ensure schemaFile has the correct IDs from database
-          // Query the database to get the actual schemaFileId values that were used
-          // This ensures schemaData matches what's actually in the database
-          const modelSchemaMod2 = await import('../seedSchema/ModelSchema')
-          const { properties: propertiesTable } = modelSchemaMod2
-
-          let schemaFileUpdated = false
-          for (const [modelName, modelFileId] of modelFileIds.entries()) {
-            // Get model record to find modelId
-            const modelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.schemaFileId, modelFileId))
-              .limit(1)
-            
-            if (modelRecords.length > 0) {
-              const modelId = modelRecords[0].id
-              
-              // Get all properties for this model from database
-              const propertyRecords = await db
-                .select()
-                .from(propertiesTable)
-                .where(eq(propertiesTable.modelId, modelId))
-              
-              // Update schemaFile with actual database IDs (only if they differ)
-              for (const propRecord of propertyRecords) {
-                if (propRecord.schemaFileId && schemaFile.models[modelName]?.properties[propRecord.name]) {
-                  const currentId = schemaFile.models[modelName].properties[propRecord.name].id
-                  if (currentId !== propRecord.schemaFileId) {
-                    schemaFile.models[modelName].properties[propRecord.name].id = propRecord.schemaFileId
-                    logger(`Updated schemaFile property ID for ${modelName}.${propRecord.name} from ${currentId} to ${propRecord.schemaFileId}`)
-                    schemaFileUpdated = true
-                  }
-                }
-              }
-            }
-          }
-          
-          // Always update schemaData to ensure it matches the current schemaFile state
-          // This is important even if nothing changed, to ensure consistency
-          const updatedSchemaData = JSON.stringify(schemaFile, null, 2)
-          
-          // Update the schema record in the database with current schemaData
-          const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-          const { schemas: schemasTable } = schemaSchemaMod
-          await db
-            .update(schemasTable)
-            .set({ schemaData: updatedSchemaData })
-            .where(eq(schemasTable.id, schemaRecord.id))
-          clearNameMatchLevels()
-          
-          if (schemaFileUpdated) {
-            logger(`Updated schemaData in database with actual property IDs for schema "${schemaName}"`)
-          } else {
-            logger(`Verified schemaData in database matches schemaFile for schema "${schemaName}"`)
-          }
       }
     } catch (dbError) {
       // Database not available - log warning but continue
