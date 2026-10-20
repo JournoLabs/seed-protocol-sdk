@@ -225,8 +225,6 @@ export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublish
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
-export { applyArweaveL1TransactionIdLocal } from './db/write/applyArweaveL1TransactionIdLocal'
-export { restoreDataItemIdsOverwrittenByL1 } from './db/write/restoreDataItemIdsOverwrittenByL1'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'

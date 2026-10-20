@@ -143,40 +143,24 @@ describe.sequential("runSyncFromEas: another account's attestations", () => {
     }
   }
 
-  it('stores only versions and properties from the seed\'s attester, and removes ones stored before', async () => {
+  it('stores only versions and properties from the seed\'s attester', async () => {
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
     const modelSchemaUid = fakeEas.modelSchema!.id
 
-    const setUp = (by: string) => {
-      fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 4_000)]
-      fakeEas.versions = [
-        attestation(version, seed, uid('5b'), 4_001),
-        attestation(foreignVersion, seed, uid('5b'), 4_010, '', by),
-      ]
-      fakeEas.properties = [
-        titleProperty(ownTitle, version, 'mine', 4_002),
-        titleProperty(foreignTitle, version, 'hijacked', 4_005, by),
-        titleProperty(foreignVersionTitle, foreignVersion, 'hijacked version', 4_011, by),
-      ]
-    }
-
-    // What an SDK without the attester check stored: every attestation counts as the owner's.
-    setUp(attester)
+    fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 4_000)]
+    fakeEas.versions = [
+      attestation(version, seed, uid('5b'), 4_001),
+      attestation(foreignVersion, seed, uid('5b'), 4_010, '', otherAttester),
+    ]
+    fakeEas.properties = [
+      titleProperty(ownTitle, version, 'mine', 4_002),
+      titleProperty(foreignTitle, version, 'hijacked', 4_005, otherAttester),
+      titleProperty(foreignVersionTitle, foreignVersion, 'hijacked version', 4_011, otherAttester),
+    ]
     await runSyncFromEas({ addresses: [attester] })
-    const before = await readRows()
-    expect(before.versionUids).toEqual([version, foreignVersion].sort())
-    expect(before.titles).toEqual(
-      expect.arrayContaining([
-        [foreignTitle, 'hijacked'],
-        [foreignVersionTitle, 'hijacked version'],
-      ]),
-    )
 
-    // The same attestations, seen with their real attester.
-    setUp(otherAttester)
-    await runSyncFromEas({ addresses: [attester] })
-    const after = await readRows()
-    expect(after.versionUids).toEqual([version])
-    expect(after.titles).toEqual([[ownTitle, 'mine']])
+    const rows = await readRows()
+    expect(rows.versionUids).toEqual([version])
+    expect(rows.titles).toEqual([[ownTitle, 'mine']])
   })
 })

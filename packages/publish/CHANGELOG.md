@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Removed: the `signArweaveTransactions` and `arweaveJwk` options (config and `createPublish`), the `SerializedPublishUpload` and `ArweaveTransactionInfoResult` types, and the context fields `reimbursementTransactionId`, `reimbursementConfirmed`, `requestResponse`, `transactionKeys`, `uploaderState` and `currentTransactionIndex`.
 - `resolvePublishPayment(...).storage.path` and a cost estimate's `arweave.path` are always `'bundler'`. `chargedUploadBytes(work, uploadTo)` drops its `path` argument; `combinePublishCostEstimate` still accepts `arweavePath: 'bundler'`.
 - A publish saved mid-way through the L1 path (`creatingArweaveTransactions`, `sendingReimbursementRequest`, `pollingForConfirmation`, `uploadingData` or their `Phase2` states) is marked interrupted on restore instead of resuming; publish the item again.
+- The L1-finalize worker no longer restores data item ids that publish 0.7.4 and earlier overwrote with L1 ids. Databases that old are recreated by `@seedprotocol/sdk` (minimum upgrade-from version 0.7.7).
 
 ## 0.7.7 (2026-10-18)
 

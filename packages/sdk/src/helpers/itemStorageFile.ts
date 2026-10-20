@@ -54,12 +54,12 @@ export const itemStorageFileLockName = (filePath: string): string => `seed:item-
  * Runs `fn` holding the lock of one ItemStorage file, across tabs (Web Locks) and within this JS
  * realm (an in-process queue where Web Locks are missing, e.g. Node < 24.5; see `withTabLock`).
  *
- * Writers of a local draft's file (saveItemStorage, convertVerbatimItemStorageRow, createNewItem)
+ * Writers of a local draft's file (saveItemStorage, createNewItem)
  * hold it across "read the row → write the file → update the row", so the file and the row end
  * with the same writer's content. See docs/MULTI_TAB.md.
  *
  * Lock ordering: this lock is always the innermost. It may be taken while holding a broader lock
- * (`seed:item-storage-migration:<db>`, `seed:publish:<seedLocalId>`), never the other way round,
+ * (`seed:publish:<seedLocalId>`), never the other way round,
  * and no other lock (nor a second file lock) is requested while it is held. Keep the section to
  * local DB and file I/O: no network. Not re-entrant.
  */

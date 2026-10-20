@@ -6,7 +6,6 @@ import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
-import { clearStoredDisplayUrls } from '@/db/clearStoredDisplayUrls'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { and, eq } from 'drizzle-orm'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -117,9 +116,6 @@ testDescribe('File property values', () => {
     await vi.waitFor(() => expect(reloaded.attachment).toBe(expected), { timeout: WAIT_TIMEOUT_MS })
     await new Promise((resolve) => setTimeout(resolve, 1000))
     expect(reloaded.attachment).toBe(expected)
-
-    expect(await clearStoredDisplayUrls()).toBeGreaterThanOrEqual(1)
-    expect((await fileRow(item.seedLocalId)).refResolvedDisplayValue).toBeNull()
   }, 30000)
 
   it('fetch after a reload in the browser', async () => {
@@ -147,8 +143,5 @@ testDescribe('File property values', () => {
     await new Promise((resolve) => setTimeout(resolve, 1500))
     expect(reloaded.attachment).not.toBe(sessionUrl)
     expect(await (await fetch(String(reloaded.attachment))).text()).toBe('hi there')
-
-    expect(await clearStoredDisplayUrls()).toBeGreaterThanOrEqual(1)
-    expect((await fileRow(item.seedLocalId)).refResolvedDisplayValue).toBeNull()
   }, 30000)
 })

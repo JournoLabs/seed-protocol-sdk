@@ -4,7 +4,6 @@ import {
   getArweaveUploadStatus,
   isArweaveL1AnchoringComplete,
   queryArweaveGatewayTransactionWithFallback,
-  restoreDataItemIdsOverwrittenByL1,
 } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { getPublishConfig } from '~/config'
@@ -21,7 +20,6 @@ const logger = debug('seedProtocol:arweaveL1Finalize:worker')
 const TICK_MS = 45_000
 
 let intervalId: ReturnType<typeof setInterval> | null = null
-let restoredOverwrittenIds = false
 
 export function startArweaveL1FinalizeWorker(): void {
   if (intervalId != null) return
@@ -50,19 +48,6 @@ async function runArweaveL1FinalizeTick(): Promise<void> {
   if (!BaseDb.isAppDbReady()) return
   const db = BaseDb.getAppDb()
   if (!db) return
-
-  // The worker used to replace local data item ids with the bundle's L1 id; put them back once.
-  if (!restoredOverwrittenIds) {
-    restoredOverwrittenIds = true
-    try {
-      const { restored, ambiguous } = await restoreDataItemIdsOverwrittenByL1()
-      if (restored || ambiguous) {
-        logger(`restored ${restored} data item ids overwritten by L1 ids; ${ambiguous} bundles ambiguous, left as they are`)
-      }
-    } catch (error) {
-      logger('restoring data item ids failed', error)
-    }
-  }
 
   const pending = await db
     .select()

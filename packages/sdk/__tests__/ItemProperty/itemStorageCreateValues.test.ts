@@ -165,30 +165,6 @@ testDescribe('ItemStorage values given at creation', () => {
     expect(byName.html).toBe(html)
   }, 90000)
 
-  it('a legacy row with the content stored verbatim (no file) is written out and uploaded on publish', async () => {
-    const html = '<p>legacy verbatim</p>'
-    const { seedLocalId, filePath } = await createLegacyItem(html)
-
-    const legacy = await coldLoad(seedLocalId)
-    await vi.waitFor(() => expect(legacy.allProperties['html']?.value).toBe(html), { timeout: 15000 })
-
-    const byName = await compositeChildren(legacy)
-    expect(byName.html).toBe(html)
-    expect(Object.keys(byName)).toEqual(['html'])
-
-    // Migrated in place: the file holds the content, the row points at it instead of holding it.
-    expect(await BaseFileManager.readFileAsString(filePath)).toBe(html)
-    const after = await metadataRow(seedLocalId, 'html')
-    expect(after.refResolvedValue).toBe(`${seedLocalId}.html`)
-    expect(after.localStorageDir).toBe('/html')
-    expect(after.refValueType).toBe('file')
-    expect(after.propertyValue ?? null).toBeNull()
-    // Reads the same, on this instance and on a fresh load.
-    expect(legacy.allProperties['html']?.value).toBe(html)
-    const reloaded = await coldLoad(seedLocalId, legacy)
-    await vi.waitFor(() => expect(reloaded.allProperties['html']?.value).toBe(html), { timeout: 15000 })
-  }, 90000)
-
   it('saving over a legacy verbatim row clears the old text from the row', async () => {
     const { seedLocalId, filePath } = await createLegacyItem('<p>old text</p>')
     const legacy = await coldLoad(seedLocalId)
