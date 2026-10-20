@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import {
@@ -1135,6 +1135,48 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const propertyTexts = propertyElements.map((el) => el.textContent)
           expect(propertyTexts.some(text => text?.includes('Updated Title'))).toBe(true)
         }
+      }
+    })
+  })
+
+  describe('useItemProperties and the change feed', () => {
+    it('re-reads on a metadata write made outside the SDK, without a metadata liveQuery', async () => {
+      if (!testItem) return
+      const seedLocalId = testItem.seedLocalId
+      // Records the SQL of every liveQuery opened while the hook is mounted.
+      const liveQueries: string[] = []
+      const original = BaseDb.liveQuery.bind(BaseDb)
+      const spy = vi.spyOn(BaseDb, 'liveQuery').mockImplementation(((query: any) => {
+        liveQueries.push(typeof query?.toSQL === 'function' ? query.toSQL().sql : String(query))
+        return original(query)
+      }) as typeof BaseDb.liveQuery)
+      try {
+        render(<UseItemPropertiesWithPropsTest seedLocalId={seedLocalId} />, { container, wrapper: SeedProviderWrapper })
+        const scoped = within(container)
+        await waitFor(
+          () => expect(parseInt(scoped.getByTestId('properties-count').textContent || '0')).toBeGreaterThanOrEqual(3),
+          { timeout: WAIT_TIMEOUT_MS },
+        )
+        const qc = queryClientRef.current
+        expect(qc).toBeTruthy()
+        const key = ['seed', 'itemProperties', seedLocalId] as const
+        // Let the mount's own reads settle.
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        const updatesBefore = qc!.getQueryState(key)?.dataUpdateCount ?? 0
+
+        // A write no SDK event announces, as sync or another tab makes.
+        await BaseDb.getAppDb()
+          .update(metadata)
+          .set({ propertyValue: 'Written Elsewhere' })
+          .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, 'title')))
+
+        await waitFor(
+          () => expect(qc!.getQueryState(key)?.dataUpdateCount ?? 0).toBeGreaterThan(updatesBefore),
+          { timeout: WAIT_TIMEOUT_MS },
+        )
+        expect(liveQueries.filter((sql) => /from\s+"?metadata"?/i.test(sql))).toEqual([])
+      } finally {
+        spy.mockRestore()
       }
     })
   })

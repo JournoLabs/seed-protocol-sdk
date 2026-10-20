@@ -41,7 +41,7 @@ export function useLiveQuery<T>(
  * re-render/resubscribe cycle looped. A SQL tag function can only be identified by reference:
  * memoise it (useCallback/useMemo).
  */
-function queryKeyOf(query: unknown): unknown {
+export function queryKeyOf(query: unknown): unknown {
   if (query && typeof query === 'object' && typeof (query as { toSQL?: unknown }).toSQL === 'function') {
     try {
       const { sql, params } = (query as { toSQL: () => { sql: string; params: unknown[] } }).toSQL()
@@ -56,7 +56,7 @@ function queryKeyOf(query: unknown): unknown {
 /** Delays before resubscribing after a live query fails, in ms; the last one repeats. */
 export const LIVE_QUERY_RETRY_DELAYS_MS = [500, 1000, 2000, 5000, 10000, 30000]
 
-const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)))
+export const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)))
 
 /**
  * useLiveQuery with its error: `{ data, error }`. `data` is undefined until the first result and

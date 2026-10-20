@@ -18,6 +18,8 @@ export type {
 export { getClient, INIT_CONFIG_CONFLICT_MESSAGE } from './client/ClientManager'
 export { ClientManagerState, MachineIds } from './client/constants'
 export { BaseDb } from './db/Db/BaseDb'
+export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './browser/db/changeFeed'
+export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'
 export { createNewItem } from './db/write/createNewItem'
 export { updateVersionUid } from './db/write/updateVersionUid'
 export {

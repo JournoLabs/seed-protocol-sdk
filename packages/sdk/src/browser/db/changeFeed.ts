@@ -151,6 +151,11 @@ export async function queryEntityRows<T>(query: (sql: any) => any): Promise<T[]>
   return (await query(feed.sql)) as T[]
 }
 
+/** Whether this tab's feed runs (a browser database is open); Node has none. */
+export function isChangeFeedRunning(): boolean {
+  return feed !== undefined
+}
+
 /** The seq of the newest log row this tab has dispatched. */
 export function changeFeedCursor(): number {
   return cursor

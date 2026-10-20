@@ -3,8 +3,8 @@ import { Subscription } from 'xstate'
 import debug from 'debug'
 import { ItemProperty, ItemPropertySaveValidationError } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
-import type { IItemProperty } from '@seedprotocol/sdk'
-import { useLiveQuery } from './liveQuery'
+import type { ChangeWatch, IItemProperty } from '@seedprotocol/sdk'
+import { useEntityRowsState } from './entityRows'
 import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { metadata } from '@seedprotocol/sdk'
@@ -479,8 +479,8 @@ async function fetchItemPropertiesList(
  * 2. With seedUid: useItemProperties({ seedUid })
  * 3. With itemId: useItemProperties(itemId)
  * 
- * Uses useLiveQuery to watch for changes in the metadata table and automatically
- * updates the returned ItemProperty instances when changes occur.
+ * Re-reads the item's metadata rows when the SDK's change feed reports a write to them, and
+ * updates the returned ItemProperty instances when they change.
  *
  * The list has one entry per model property, including ones the item has no value for yet
  * (their `value` is null), plus a read-only `createdAt` entry built from the item's creation
@@ -559,9 +559,7 @@ export function useItemProperties(
   })
   useHeldItemProperties(properties)
 
-  // Watch the metadata table for changes
   // Query metadata table directly and filter for latest records in JavaScript
-  // This is simpler and works better with useLiveQuery than CTEs
   // Get db inside useMemo to avoid recreating query on each render
   // Drizzle query builders are new objects each time, but useMemo will only recreate
   // when dependencies change, which is what we want for reactive queries
@@ -628,7 +626,14 @@ export function useItemProperties(
     return query
   }, [isClientReady, seedLocalId, seedUid])
   
-  const rawPropertiesTableData = useLiveQuery<{
+  // Re-read when the change feed reports a write to this item's metadata rows (ADR 0020): a page
+  // mounting this hook per row no longer re-runs every mount's query on every metadata write.
+  const propertiesWatch = useMemo<ChangeWatch | null>(() => {
+    if (seedUid) return { seedUid, tables: ['metadata'] }
+    if (seedLocalId) return { seedLocalId, tables: ['metadata'] }
+    return null
+  }, [seedLocalId, seedUid])
+  const rawPropertiesTableData = useEntityRowsState<{
     propertyName: string | null
     propertyValue: string | null
     seedLocalId: string | null
@@ -639,7 +644,7 @@ export function useItemProperties(
     attestationCreatedAt: number | null
     localId: string | null
     revokedAt: number | null
-  }>(propertiesQuery)
+  }>(propertiesWatch, propertiesQuery).data
   
   // Filter for latest records (one per propertyName) in JavaScript
   const propertiesTableData = useMemo(() => {
