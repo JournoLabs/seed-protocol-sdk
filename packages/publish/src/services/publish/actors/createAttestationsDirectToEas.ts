@@ -150,6 +150,8 @@ type NormalizedRequest = {
       value: bigint
     }>
     _propertyName?: string
+    /** Metadata row the attested value was read from; the uid is recorded on it. */
+    _metadataLocalId?: string
     _propertyNameForSchema?: string
     /** A List (bytes32[]) attestation: filled by resolving its slots, never by propertiesToUpdate. */
     _isList?: boolean
@@ -237,6 +239,9 @@ export const createAttestationsDirectToEas = fromPromise(
           })),
           ...(typeof att?._propertyName === 'string' && att._propertyName !== ''
             ? { _propertyName: att._propertyName }
+            : {}),
+          ...(typeof att?._metadataLocalId === 'string' && att._metadataLocalId !== ''
+            ? { _metadataLocalId: att._metadataLocalId }
             : {}),
           ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
             ? { _propertyNameForSchema: att._propertyNameForSchema }
@@ -459,6 +464,7 @@ export const createAttestationsDirectToEas = fromPromise(
               sameLen && typeof list[j]?._propertyName === 'string' && list[j]!._propertyName !== ''
                 ? list[j]!._propertyName
                 : undefined,
+            metadataLocalId: sameLen ? list[j]?._metadataLocalId : undefined,
           })),
         })
       }
