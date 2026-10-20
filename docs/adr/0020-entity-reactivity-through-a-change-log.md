@@ -85,9 +85,11 @@ after the first and one feed emission per write, including writes made outside t
   "DELETE without WHERE doesn't fire" gap in ADR 0015 for these tables.
 - A trigger must be kept in step with the table: a migration that rebuilds `seeds`, `versions` or
   `metadata` must recreate its triggers.
-- Readers of the tables don't change. `useItems` and `useItemProperties` keep their own
-  liveQueries, one per mounted hook, so a page that mounts `useItemProperties` per row stays
-  O(rows) until those hooks move to the feed too.
+- `useItemProperties` registers a feed watch on its item's metadata rows instead of holding a
+  metadata liveQuery per mounted hook, so a page that mounts it per row no longer re-runs every
+  mount's query on every metadata write. `useItems` keeps its `seeds` liveQuery: it reads only
+  `seeds` and `versions`, so metadata writes (saves) don't re-run it, and a log row carries no
+  model type to filter on, so a feed watch would fire on the same writes the liveQuery does.
 
 ## Alternatives considered
 
