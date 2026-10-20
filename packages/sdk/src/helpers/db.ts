@@ -10,12 +10,11 @@ import {
   seeds,
 } from '@/seedSchema'
 import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
-import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
+import { ModelDefinitions } from '@/types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
 import { easName } from '@seedprotocol/eas'
 import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
-import { and, eq, inArray, isNull, SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -324,51 +323,6 @@ export async function moveMetadataToRenamedProperty(
   return moved
 }
 
-export const getObjectForRow = (row: any): ResultObject => {
-  const obj: ResultObject = {}
-
-  row.columnNames.forEach((colName: string, index: number) => {
-    const value = row.row[index]
-    if (typeof value !== 'string') {
-      obj[colName] = row.row[index]
-      return
-    }
-
-    // Try to parse the value as JSON
-    try {
-      obj[colName] = JSON.parse(value)
-    } catch {
-      // If it fails, just set the value as a string
-      obj[colName] = value
-    }
-  })
-
-  return obj
-}
-export const getSqlResultObject = (
-  queryResult: DbQueryResult,
-): ResultObject | ResultObject[] | undefined => {
-  if (!queryResult || !queryResult.rows || queryResult.rows.length === 0) {
-    return
-  }
-
-  let obj: ResultObject | ResultObject[] | undefined
-
-  if (queryResult.rows.length === 1) {
-    obj = getObjectForRow(queryResult.rows[0])
-  }
-
-  if (queryResult.rows.length > 1) {
-    obj = queryResult.rows.reduce((acc: ResultObject[], row: any) => {
-      const rowObj = getObjectForRow(row)
-
-      acc.push(rowObj)
-      return acc
-    }, [] as ResultObject[])
-  }
-
-  return obj
-}
 /**
  * True when the models row is linked (model_schemas) to any schema other than schemaId.
  */
@@ -400,7 +354,7 @@ const isModelLinkedToAnySchema = async (
  * Find or create a models row by schemaFileId (preferred) or name.
  * Reuses an existing same-name row (especially schemaFileId=null stubs created via
  * ref resolution) instead of inserting a second row — models.name is not unique,
- * and duplicate names break createOrUpdate lookups (e.g. Resource.tags → Tag).
+ * and duplicate names break name lookups (e.g. Resource.tags → Tag).
  *
  * When modelFileId is given, a same-name row that already carries a *different*
  * non-null schemaFileId is only adopted if no other schema is linked to it via
@@ -563,7 +517,7 @@ const findOrCreateModelRecord = async (
 /**
  * Find or create the models row a Relation property on ownerModelId points to. Model names are only
  * unique per schema, so the ref is looked up in the owner's schema(s) first; a global name lookup
- * (createOrUpdate by name) threw "Multiple records found" once two schemas defined the ref model.
+ * by name threw "Multiple records found" once two schemas defined the ref model.
  */
 const findOrCreateRefModelRecord = async (
   db: BetterSQLite3Database | SqliteRemoteDatabase,
@@ -583,82 +537,6 @@ const findOrCreateRefModelRecord = async (
     .where(eq(modelSchemas.modelId, ownerModelId))
     .limit(1)
   return findOrCreateModelRecord(db, refModelName, undefined, ownerLink?.schemaId ?? undefined)
-}
-
-export const createOrUpdate = async <T>(
-  db: BetterSQLite3Database | SqliteRemoteDatabase,
-  table: SQLiteTableWithColumns<any>,
-  values: Partial<Record<keyof T, T[keyof T]>>,
-) => {
-
-  const valueFilters: SQL[] = []
-
-  const propertiesToExcludeFromDb = ['ref']
-
-  const safeValues = Object.keys(values).reduce(
-    (acc, key) => {
-      if (!propertiesToExcludeFromDb.includes(key)) {
-        acc[key] = values[key as string & keyof T]
-      }
-      return acc
-    },
-    {} as Record<string, unknown>,
-  )
-
-  for (const [key, value] of Object.entries(safeValues)) {
-    let finalValue = value
-    if (key === 'TObject') {
-      continue
-    }
-    if (typeof value === 'object') {
-      finalValue = JSON.stringify(value)
-    }
-    const column = table[key]
-    if (!column) {
-      throw new Error(`Column not found for ${key}`)
-    }
-    if (typeof finalValue === 'undefined') {
-      finalValue = null
-    }
-    if (finalValue === null) {
-      valueFilters.push(isNull(table[key]))
-      continue
-    }
-    valueFilters.push(eq(table[key], finalValue))
-  }
-
-
-  // console.log('valueFilters:', valueFilters)
-
-  // for ( const filter of valueFilters ) {
-  //   console.log('filter:', Object.keys(filter))
-  // }
-
-  // Build a query to find the record based on properties
-  const existingRecords = await db
-    .select()
-    .from(table)
-    .where(and(...valueFilters))
-
-
-  if (existingRecords.length > 1) {
-    throw new Error('Multiple records found')
-  }
-
-  if (existingRecords.length > 0) {
-    // If record exists, update it
-    await db
-      .update(table)
-      .set(safeValues)
-      .where(and(...valueFilters))
-
-
-    return existingRecords[0] as T
-  } else {
-    // If no record exists, create a new one
-    const newRecord = await db.insert(table).values(safeValues).returning()
-    return newRecord[0] as T
-  }
 }
 
 /**
@@ -2049,23 +1927,6 @@ async function getAddressConfigFromDb(): Promise<NormalizedAddressConfig | null>
   return parseAddressConfig(addressArrayString)
 }
 
-export const getAddressesFromDb = async (): Promise<string[]> => {
-  const config = await getAddressConfigFromDb()
-  if (!config || config.owned.length === 0) {
-    throw new Error('No addresses found')
-  }
-  return config.owned
-}
-
-/**
- * Like getAddressesFromDb but returns [] instead of throwing when no addresses are configured.
- * Returns owned addresses. Use getAllAddressesFromDb for sync (owned + watched).
- */
-export const getAddressesFromDbOptional = async (): Promise<string[]> => {
-  const config = await getAddressConfigFromDb()
-  return config?.owned ?? []
-}
-
 /**
  * Write model to database and create model_schemas join entry
  * @param modelFileId - The model file ID (schema_file_id)
@@ -2415,81 +2276,6 @@ export async function writePropertyToDb(
       }
     }
   }
-}
-
-/**
- * Get schema database ID from schema name or schemaFileId
- * @param schemaNameOrFileId - Schema name (string) or schemaFileId (string)
- * @returns Schema database ID
- * @throws Error if schema not found
- */
-export async function getSchemaId(
-  schemaNameOrFileId: string
-): Promise<number> {
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not available')
-  }
-
-  const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-  const { schemas: schemasTable } = schemaSchemaMod
-  const drizzleMod = await import('drizzle-orm')
-  const { eq, desc } = drizzleMod
-
-  // Try to find by schemaFileId first (more reliable)
-  let records = await db
-    .select()
-    .from(schemasTable)
-    .where(eq(schemasTable.schemaFileId, schemaNameOrFileId))
-    .orderBy(desc(schemasTable.version))
-    .limit(1)
-
-  // If not found by schemaFileId, try by name
-  if (records.length === 0) {
-    records = await db
-      .select()
-      .from(schemasTable)
-      .where(eq(schemasTable.name, schemaNameOrFileId))
-      .orderBy(desc(schemasTable.version))
-      .limit(1)
-  }
-
-  if (records.length === 0) {
-    throw new Error(`Schema "${schemaNameOrFileId}" not found in database`)
-  }
-
-  return records[0].id
-}
-
-/**
- * Get schema database ID from schemaFileId
- * @param schemaFileId - The schema file ID
- * @returns Schema database ID
- * @throws Error if schema not found
- */
-export async function getSchemaIdByFileId(schemaFileId: string): Promise<number> {
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not available')
-  }
-
-  const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-  const { schemas: schemasTable } = schemaSchemaMod
-  const drizzleMod = await import('drizzle-orm')
-  const { eq, desc } = drizzleMod
-
-  const records = await db
-    .select()
-    .from(schemasTable)
-    .where(eq(schemasTable.schemaFileId, schemaFileId))
-    .orderBy(desc(schemasTable.version))
-    .limit(1)
-
-  if (records.length === 0) {
-    throw new Error(`Schema with file ID "${schemaFileId}" not found in database`)
-  }
-
-  return records[0].id
 }
 
 /**
