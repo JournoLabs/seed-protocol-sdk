@@ -145,8 +145,8 @@ describe('writeProcessMachine', () => {
   })
 
   // writeSuccess / writeError are only handled in the `writing` state (they're sent by the writeToDatabase
-  // actor). To exercise the retry/reset/revert transitions deterministically, stub the two invoked actors:
-  // validation always passes and the write never reports back, so the test drives the outcome itself.
+  // actor). To drive the outcome deterministically, stub the two invoked actors: validation always
+  // passes and the write never reports back, so the test sends the result itself.
   const stubbedMachine = writeProcessMachine.provide({
     actors: {
       validateEntity: fromPromise(async () => ({ isValid: true, errors: [] })) as any,
@@ -170,71 +170,27 @@ describe('writeProcessMachine', () => {
     return actor
   }
 
-  describe('Retry logic', () => {
-    it('should retry on write error', async () => {
+  describe('Write outcome', () => {
+    it('records and logs a write error', async () => {
       const actor = await startStubbedWrite()
 
       actor.send({ type: 'writeError', error: new Error('Test error') })
       const errorSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: WAIT_TIMEOUT_MS })
-      expect(errorSnapshot.context.retryCount).toBe(1)
       expect(errorSnapshot.context.error?.message).toBe('Test error')
       // A failed persist is otherwise only visible to debug logging
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining('Write error for model "test-model-id": Error: Test error'),
         expect.any(Error),
       )
-
-      // Retry goes back through validation (stubbed to pass) and into writing again
-      actor.send({ type: 'retry' })
-      const retried = await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
-      expect(retried.context.error).toBeNull()
     })
 
-    it('should not retry more than 3 times', async () => {
+    it('clears the pending write on success', async () => {
       const actor = await startStubbedWrite()
-
-      for (let i = 1; i <= 3; i++) {
-        actor.send({ type: 'writeError', error: new Error(`Test error ${i}`) })
-        const snapshot = await waitFor(actor, (s) => s.value === 'error', { timeout: WAIT_TIMEOUT_MS })
-        expect(snapshot.context.retryCount).toBe(i)
-        if (i < 3) {
-          actor.send({ type: 'retry' })
-          await waitFor(actor, (s) => s.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
-        }
-      }
-
-      // retryCount is now 3: the guard blocks a further retry
-      actor.send({ type: 'retry' })
-      const finalSnapshot = actor.getSnapshot()
-      expect(finalSnapshot.value).toBe('error')
-      expect(finalSnapshot.context.retryCount).toBe(3)
-    })
-  })
-
-  describe('State transitions', () => {
-    it('should reset from success state', async () => {
-      const actor = await startStubbedWrite()
+      expect(actor.getSnapshot().context.pendingWrite).not.toBeNull()
 
       actor.send({ type: 'writeSuccess' })
       const successSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'success', { timeout: WAIT_TIMEOUT_MS })
       expect(successSnapshot.context.pendingWrite).toBeNull()
-
-      actor.send({ type: 'reset' })
-      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
-    })
-
-    it('should revert from error state', async () => {
-      const actor = await startStubbedWrite()
-      expect(actor.getSnapshot().context.pendingWrite).not.toBeNull()
-
-      actor.send({ type: 'writeError', error: new Error('Test error') })
-      await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: WAIT_TIMEOUT_MS })
-
-      actor.send({ type: 'revert' })
-      const finalSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
-      expect(finalSnapshot.context.pendingWrite).toBeNull()
-      expect(finalSnapshot.context.error).toBeNull()
     })
   })
 })
-

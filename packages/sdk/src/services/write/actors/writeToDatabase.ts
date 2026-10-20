@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { addSchemaToDb, writeModelToDb, writePropertyToDb } from '@/helpers/db'
+import { writeModelToDb, writePropertyToDb } from '@/helpers/db'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { eq } from 'drizzle-orm'
 import debug from 'debug'
@@ -106,14 +106,6 @@ export const writeToDatabase = fromCallback<
         }
         await writePropertyToDb(input.entityId, dataToWrite)
         output = input.entityData
-      } else if (input.entityType === 'schema') {
-        const schemaRecord = await addSchemaToDb(
-          input.entityData,
-          input.entityId, // schemaFileId (string)
-          input.entityData.schemaData,
-          input.entityData.isDraft
-        )
-        output = { ...input.entityData, _dbId: schemaRecord.id } // Store as _dbId (database integer ID)
       } else {
         throw new Error(`Unknown entity type: ${input.entityType}`)
       }

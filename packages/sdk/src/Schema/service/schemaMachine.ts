@@ -1,8 +1,7 @@
-import { assign, setup, ActorRefFrom } from 'xstate'
+import { assign, setup } from 'xstate'
 import { SchemaFileFormat } from '@/types/import'
 import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
-import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import { checkExistingSchema } from './actors/checkExistingSchema'
 import { writeSchemaToDb } from './actors/writeSchemaToDb'
 import { verifySchemaInDb } from './actors/verifySchemaInDb'
@@ -57,7 +56,6 @@ export type SchemaMachineContext = {
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
-  writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   // Store model IDs from liveQuery for reactive updates
   _liveQueryModelIds?: string[]
   // Staged loading state tracking
@@ -82,7 +80,6 @@ export const schemaMachine = setup({
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      | { type: 'requestWrite'; data: any }
       // Staged loading events
       | { type: 'schemaFound'; schema: SchemaFileFormat; schemaRecord: any; modelIds?: string[]; loadedAt?: number; dbVersion?: number; dbUpdatedAt?: number }
       | { type: 'schemaNotFound' }
@@ -101,7 +98,6 @@ export const schemaMachine = setup({
   },
   actors: {
     validateSchema,
-    writeProcessMachine,
     // Staged loading actors
     checkExistingSchema,
     writeSchemaToDb,
@@ -576,45 +572,12 @@ export const schemaMachine = setup({
       },
     },
     idle: {
-      entry: assign({
-        writeProcess: ({ spawn, context }) => {
-          if (!context.writeProcess && context.id) {
-            return spawn(writeProcessMachine, {
-              input: {
-                entityType: 'schema',
-                entityId: context.id,
-                entityData: {
-                  name: context.schemaName,
-                  $schema: context.$schema,
-                  version: context.version,
-                  metadata: context.metadata,
-                  models: context.models,
-                  enums: context.enums,
-                  migrations: context.migrations,
-                  nameMatch: context.nameMatch,
-                },
-              },
-            })
-          }
-          return context.writeProcess
-        },
-      }),
       on: {
         validateSchema: {
           target: 'validating',
         },
         reloadFromDb: {
           target: 'loading',
-        },
-        requestWrite: {
-          actions: ({ context, event }) => {
-            if (context.writeProcess) {
-              context.writeProcess.send({
-                type: 'startWrite',
-                data: event.data,
-              })
-            }
-          },
         },
       },
       // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
