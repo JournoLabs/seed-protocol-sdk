@@ -22,7 +22,7 @@ function makeEstimate(totalUsd: number): PublishCostEstimate {
       usd: 0,
       bytes: 0,
       uploadCount: 0,
-      path: 'l1',
+      path: 'bundler',
       userPays: true,
     },
     prices: { ethUsd: 1, arUsd: 1, fetchedAt: Date.now() },

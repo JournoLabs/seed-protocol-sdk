@@ -21,8 +21,6 @@ export {
   type PublishConfig,
   type ResolvedPublishConfig,
   type CreatePublishOptions,
-  type SerializedPublishUpload,
-  type ArweaveTransactionInfoResult,
   type ArweaveDataItemInfoResult,
   type PublishAccountMode,
 } from './config'

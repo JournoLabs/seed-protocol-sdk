@@ -1,6 +1,5 @@
 import { arweaveL1FinalizeJobs, BaseDb } from '@seedprotocol/sdk'
 import type { ArweaveTransactionInfo, PublishMachineContext, PublishUpload } from '../../types'
-import { getPublishConfig } from '~/config'
 
 const PHASE_PENDING = 'pending_l1' as const
 
@@ -11,9 +10,6 @@ const PHASE_PENDING = 'pending_l1' as const
 export async function enqueueArweaveL1FinalizeJobsFromPublishContext(
   context: PublishMachineContext,
 ): Promise<void> {
-  const { useArweaveBundler } = getPublishConfig()
-  if (!useArweaveBundler) return
-
   const txs = context.arweaveTransactions ?? []
   const uploads = (context.publishUploads ?? []) as PublishUpload[]
   if (txs.length === 0 || txs.length !== uploads.length) return

@@ -8,7 +8,7 @@ import { createActor, createMachine } from 'xstate'
 const harness = { uploadTo: 'upload-api' as 'upload-api' | 'turbo' }
 
 mock.module('~/config', () => ({
-  getPublishConfig: () => ({ useArweaveBundler: true, uploadApiBaseUrl: 'http://127.0.0.1:9' }),
+  getPublishConfig: () => ({ uploadApiBaseUrl: 'http://127.0.0.1:9' }),
 }))
 mock.module('~/payment', () => ({
   resolvePublishPayment: () => ({

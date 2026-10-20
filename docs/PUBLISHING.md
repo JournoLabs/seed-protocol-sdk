@@ -132,7 +132,7 @@ Both publish paths (L1 transactions via `getPublishUploads`, bundler DataItems v
 
 **Merge order:** `[...config.arweaveUploadTags, ...createPublishOptions.arweaveUploadTags]` — Seed content tags always come first, then config, then per-publish.
 
-**Bundler path (`useArweaveBundler`):** each entry in **`signDataItems`** includes **`upload.tags`**, the full list to attach when building the DataItem. Use that array rather than re-deriving tags from hash/type alone.
+**`signDataItems`:** each entry includes **`upload.tags`**, the full list to attach when building the DataItem. Use that array rather than re-deriving tags from hash/type alone.
 
 **Direct SDK:** call **`item.getPublishUploads({ arweaveUploadTags: [...] })`** or import **`getPublishUploads`** with the same options object. The legacy **`runPublish`** path does not read publish config; it still calls **`getPublishUploads`** without extra tags unless you extend that flow.
 

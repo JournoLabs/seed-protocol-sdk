@@ -18,7 +18,7 @@ export const DEFAULT_TURBO_PAYMENT_URL = 'https://payment.ardrive.io'
 
 /**
  * How users pay for storage when `payment.storage` is `'user'`. The only provider so far is
- * Turbo: data items, signed by the user's EVM key as on the bundler path, go straight to the
+ * Turbo: data items, signed by the user's EVM key as with operator-paid storage, go straight to the
  * Turbo upload service, which charges that address's Turbo credits (topped up with a card or
  * crypto through Turbo). Items under Turbo's free-tier size are free.
  */
@@ -64,7 +64,8 @@ export interface ResolvedPublishPayment {
   }
   storage: {
     payer: PublishStoragePayer
-    path: 'l1' | 'bundler'
+    /** Always `'bundler'`: publish uploads signed data items. Kept for callers that pass it on. */
+    path: 'bundler'
     /** Where uploads go: the upload API, or (user-paid) Turbo directly. */
     uploadTo: 'upload-api' | 'turbo'
     /** Set when `uploadTo` is `'turbo'`. */
@@ -111,11 +112,9 @@ export function resolveSponsorGas(config: Pick<PublishConfig, 'payment' | 'third
  *   `'user'`, which sends without one
  * - wallet: the user pays
  *
- * Operator-paid storage goes through the upload API on both paths. On the bundler path the
- * user's key signs data items and the operator pays for them. On the L1 path the user's Arweave
- * key pays the fee and the upload API reimburses it before the upload; the second pass for
- * deferred Html is not reimbursed. User-paid storage uploads data items to Turbo, charged to the
- * signer's credits.
+ * Storage is uploaded as data items signed by the user's key. Operator-paid storage goes to the
+ * upload API's bundler routes, which pay for them. User-paid storage goes to Turbo, charged to
+ * the signer's credits.
  */
 export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPayment {
   const sender = resolvePublishSender(config)
@@ -150,22 +149,23 @@ export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPay
     gas,
     storage: {
       payer: 'operator',
-      path: config.useArweaveBundler ? 'bundler' : 'l1',
+      path: 'bundler',
       uploadTo: 'upload-api',
     },
   }
 }
 
-/** `useArweaveBundler` with `payment.storage: 'user'` as its default (user-paid storage uploads data items). */
-export function resolveUseArweaveBundler(config: Pick<PublishConfig, 'payment' | 'useArweaveBundler'>): boolean {
-  return config.useArweaveBundler ?? config.payment?.storage === 'user'
-}
-
 /**
  * Throws {@link PublishPaymentConfigError} when `payment` asks for something the other settings
- * can't deliver. Called by `initPublish`.
+ * can't deliver, or when `useArweaveBundler` is `false`. Called by `initPublish`.
  */
 export function assertPublishPaymentConfig(config: PaymentInputs): void {
+  if (config.useArweaveBundler === false) {
+    throw new PublishPaymentConfigError(
+      'useArweaveBundler: false is no longer supported. Publish uploads signed data items through ' +
+        "the upload API's bundler routes (or Turbo with payment.storage: 'user'); remove the option.",
+    )
+  }
   const payment = config.payment
   if (!payment) return
   const sender = resolvePublishSender(config)
@@ -193,11 +193,6 @@ export function assertPublishPaymentConfig(config: PaymentInputs): void {
     }
   }
 
-  if (payment.storage === 'user' && config.useArweaveBundler === false) {
-    throw new PublishPaymentConfigError(
-      "payment.storage is 'user', which uploads data items to Turbo, but useArweaveBundler is false.",
-    )
-  }
   if (payment.userStorage && payment.storage !== 'user') {
     throw new PublishPaymentConfigError("payment.userStorage is set but payment.storage is not 'user'.")
   }

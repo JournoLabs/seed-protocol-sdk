@@ -1,8 +1,7 @@
 /**
- * Raw upload data (bytes + Content-SHA-256 / Content-Type / configured tags) for the bundler /
- * DataItem path. The builder lives in the SDK (`getPublishUploadData`, next to `getPublishUploads`,
- * which makes L1 transactions from the same data), so both publish paths upload the same bytes
- * with the same tags.
+ * Raw upload data (bytes + Content-SHA-256 / Content-Type / configured tags) that publish signs
+ * as data items. The builder lives in the SDK (`getPublishUploadData`, next to `getPublishUploads`,
+ * which makes L1 transactions from the same data).
  *
  * Kept as a module of its own so publish actors (and their tests) have one import to mock.
  */

@@ -10,5 +10,19 @@ describe('isRestorableSnapshot', () => {
     }
     expect(isRestorableSnapshot({ value: 'creatingAttestations', context: {} })).toBe(true)
   })
-})
 
+  test('refuses a publish saved in a state of the removed L1 upload path', () => {
+    for (const value of [
+      'creatingArweaveTransactions',
+      'sendingReimbursementRequest',
+      'pollingForConfirmation',
+      'uploadingData',
+      'creatingArweaveTransactionsPhase2',
+      'sendingReimbursementRequestPhase2',
+      'pollingForConfirmationPhase2',
+      'uploadingDataPhase2',
+    ]) {
+      expect(isRestorableSnapshot({ value, context: {} })).toBe(false)
+    }
+  })
+})

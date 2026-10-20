@@ -10,11 +10,11 @@ type PublishProcessActor = {
 const HEAVY_PUBLISH_CONTEXT_KEYS = ['signedDataItems', 'arweaveUploadData'] as const
 
 /**
- * Never persist key material. `arweaveJwk` holds the private `d`; an ethers HD wallet passed as
- * `dataItemSigner` serializes its mnemonic. A restored publish falls back to the PublishProvider
- * config for both (`context.x ?? config.x`), so the key must be configured again to sign after a reload.
+ * Never persist key material: an ethers HD wallet passed as `dataItemSigner` serializes its
+ * mnemonic. A restored publish falls back to the PublishProvider config (`context.x ?? config.x`),
+ * so the key must be configured again to sign after a reload.
  */
-const SECRET_PUBLISH_CONTEXT_KEYS = ['arweaveJwk', 'dataItemSigner'] as const
+const SECRET_PUBLISH_CONTEXT_KEYS = ['dataItemSigner'] as const
 
 const STRIPPED_KEYS = new Set<string>([...HEAVY_PUBLISH_CONTEXT_KEYS, ...SECRET_PUBLISH_CONTEXT_KEYS])
 

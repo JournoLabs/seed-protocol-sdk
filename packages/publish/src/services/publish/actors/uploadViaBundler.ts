@@ -56,7 +56,7 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
     const { signedDataItems } = context
 
     const config = getPublishConfig()
-    const { uploadApiBaseUrl, useArweaveBundler } = config
+    const { uploadApiBaseUrl } = config
     const { storage } = resolvePublishPayment(config)
 
     // No items: either there is nothing to upload (the app's signDataItems uploaded them itself,
@@ -79,12 +79,10 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
       return
     }
 
-    if (!useArweaveBundler || !uploadApiBaseUrl) {
+    if (!uploadApiBaseUrl) {
       sendBack({
         type: 'uploadError',
-        error: new Error(
-          'Arweave bundler not configured. Set useArweaveBundler and uploadApiBaseUrl.'
-        ),
+        error: new Error('Arweave bundler not configured. Set uploadApiBaseUrl.'),
       })
       return
     }

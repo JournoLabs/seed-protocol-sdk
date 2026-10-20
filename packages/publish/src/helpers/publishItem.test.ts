@@ -54,10 +54,10 @@ describe('waitForPublishActor', () => {
   })
 
   test('rejects with the error and step on failure', async () => {
-    const actor = fakePublishActor('failure', { error: new Error('upload refused'), errorStep: 'uploadingData' })
+    const actor = fakePublishActor('failure', { error: new Error('upload refused'), errorStep: 'uploadingViaBundler' })
     const done = waitForPublishActor(actor, 'seed-1')
     actor.send({ type: 'finish' })
-    await expect(done).rejects.toThrow('Publish of seed-1 failed at uploadingData: upload refused')
+    await expect(done).rejects.toThrow('Publish of seed-1 failed at uploadingViaBundler: upload refused')
   })
 
   test('rejects, pointing at retryAttestations, when attestation waits for a retry', async () => {
