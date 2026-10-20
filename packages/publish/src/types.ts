@@ -8,8 +8,6 @@ export type HtmlEmbeddedDataUriPolicy = import('@seedprotocol/sdk').HtmlEmbedded
 import type { SeedSigner, PublishWallet } from './helpers/seedSigner'
 import type { ethers } from 'ethers'
 
-export type ReimbursementResponse = { transactionId: string }
-
 /** Upload data for a single publish property (storage seed). */
 export type PublishUpload = {
   itemPropertyName: string
@@ -45,18 +43,10 @@ export interface PublishMachineContext {
   existingSeedUid?: string
   arweaveTransactions?: ArweaveTransactionInfo[]
   publishUploads?: unknown[]
-  reimbursementTransactionId?: string
-  reimbursementConfirmed?: boolean
-  transactionKeys?: string
-  requestResponse?: unknown
   completionPercentage?: number
-  /** Serialized uploader state for resume (from uploader.toJSON()). */
-  uploaderState?: { chunkIndex: number; transaction: unknown; txPosted: boolean; [key: string]: unknown }
-  /** Index of current transaction being uploaded when resuming. */
-  currentTransactionIndex?: number
   /** Set when machine transitions to failure (from onError or uploadError). */
   error?: unknown
-  /** Which state failed (e.g. creatingArweaveTransactions, sendingReimbursementRequest). */
+  /** Which state failed (e.g. creatingArweaveDataItems, uploadingViaBundler). */
   errorStep?: string
   /** Raw EAS attestation payload from getPublishPayload, stored for later retrieval. */
   easPayload?: unknown
@@ -73,20 +63,14 @@ export interface PublishMachineContext {
    */
   bundlerUploadNotNeeded?: boolean
   /**
-   * Per-publish: sign DataItems when useArweaveBundler (from createPublish options).
+   * Per-publish: sign DataItems (from createPublish options).
    * Each upload has `tags` (content + arweaveUploadTags); use when building DataItems.
    */
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<import('./config').ArweaveDataItemInfoResult[]>
-  /** Per-publish: signer for DataItems when useArweaveBundler (from createPublish options). */
+  /** Per-publish: signer for DataItems (from createPublish options). */
   dataItemSigner?: ethers.Wallet | SeedSigner | PublishWallet
-  /** Per-publish: sign Arweave transactions when NOT useArweaveBundler (from createPublish options). */
-  signArweaveTransactions?: (
-    uploads: import('./config').SerializedPublishUpload[]
-  ) => Promise<import('./config').ArweaveTransactionInfoResult[]>
-  /** Per-publish: JWK for in-process signing when NOT useArweaveBundler (from createPublish options). */
-  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
    * Resolved Arweave tags for this run: initPublish defaults then createPublish extras.
    * Appended after Content-SHA-256 / Content-Type on each upload.
@@ -105,7 +89,7 @@ export interface PublishMachineContext {
    * Per-property `htmlEmbeddedDataUriPolicy` on the schema overrides this. Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy
-  /** Set during publish after embedded-image prep (non-bundler two-phase L1). */
+  /** Set during publish after embedded-image prep: Html seeds uploaded in a second pass. */
   htmlEmbeddedDeferredHtmlSeedLocalIds?: string[]
   htmlEmbeddedPhase1PublishUploads?: PublishUpload[]
   htmlEmbeddedPhase1ArweaveTransactions?: ArweaveTransactionInfo[]

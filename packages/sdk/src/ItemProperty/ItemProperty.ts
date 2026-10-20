@@ -835,11 +835,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 return
               }
 
+              // An ItemStorage row that points at its file holds no content: keep the value shown until
+              // the pass this update starts reads the file. Taking renderValue from the row showed null
+              // in between, e.g. when publish moved a legacy verbatim row's content to its file.
+              const contentInFile =
+                context.propertyRecordSchema?.storageType === 'ItemStorage' &&
+                metaRow.propertyValue == null &&
+                !!metaRow.refResolvedValue
+
               // Update context with metadata changes
               this._service.send({
                 type: 'updateContext',
                 propertyValue: metaRow.propertyValue,
-                renderValue: metaRow.propertyValue,
+                ...(contentInFile ? {} : { renderValue: metaRow.propertyValue }),
                 localId: metaRow.localId || undefined,
                 uid: metaRow.uid || undefined,
                 versionLocalId: metaRow.versionLocalId || undefined,

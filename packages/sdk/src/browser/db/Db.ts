@@ -50,6 +50,41 @@ export class BrowserDb implements IDb {
     return withSeedDbLock('migrate', filesDir, () => this.prepareDbLocked(filesDir))
   }
 
+  /**
+   * Starts SQLocal on `<filesDir>/db/seed.db` and checks it opened the OPFS file. SQLocal opens an
+   * in-memory database instead when its OPFS open throws, which also happens when another tab keeps
+   * the file's sync access handle for longer than sqlite-wasm retries (about 4.5 s), e.g. while that
+   * tab runs its first queries after migrating. That clears up, so a memory database is closed and
+   * the open tried again, waiting 1, 2 and 4 s, before it's reported as DatabaseNotPersistentError.
+   */
+  private async openPersistentSqlocal() {
+    const retryWaitsMs = [1000, 2000, 4000]
+    for (let attempt = 0; ; attempt++) {
+      // reactive: true enables reactive queries. Blob-wrap sqlocal's HTTPS module worker so Chrome
+      // profiles that kill `new Worker(https://…/worker-HASH.js, { type: 'module' })` as an entry
+      // still reach connect via `import` of the same URL.
+      const { instance: sqlocalDrizzle, workerFailed } = createSqlocalDrizzle(
+        () => new SQLocalDrizzle({
+          databasePath: `${this.filesDir}/db/seed.db`,
+          reactive: true,
+        }),
+      )
+      const { storageType } = await raceSqlocalStartup(sqlocalDrizzle.getDatabaseInfo(), workerFailed)
+      if (storageType === 'opfs') return { sqlocalDrizzle, workerFailed }
+
+      await sqlocalDrizzle.destroy().catch(() => {})
+      const waitMs = retryWaitsMs[attempt]
+      if (waitMs === undefined) {
+        throw new DatabaseNotPersistentError(
+          `SQLocal opened a "${storageType}" database instead of OPFS`,
+          globalThis.crossOriginIsolated === true ? 'vfs' : 'headers',
+        )
+      }
+      logger(`[Db.prepareDb] SQLocal opened a "${storageType}" database; retrying in ${waitMs} ms`)
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+  }
+
   private async prepareDbLocked(filesDir: string) {
     try {
       // Copy drizzle migration files from src/db/drizzle to filesDir/db
@@ -86,16 +121,7 @@ export class BrowserDb implements IDb {
         )
       }
 
-      // Initialize SQLocalDrizzle with reactive: true to enable reactive queries.
-      // Blob-wrap sqlocal's HTTPS module worker so Chrome profiles that kill
-      // `new Worker(https://…/worker-HASH.js, { type: 'module' })` as an entry
-      // still reach connect via `import` of the same URL.
-      const { instance: sqlocalDrizzle, workerFailed } = createSqlocalDrizzle(
-        () => new SQLocalDrizzle({
-          databasePath: `${this.filesDir}/db/seed.db`,
-          reactive: true,
-        }),
-      )
+      const { sqlocalDrizzle, workerFailed } = await this.openPersistentSqlocal()
 
       const { batchDriver } = sqlocalDrizzle
       const driver = countDbStatements(withSqliteBusyRetry(sqlocalDrizzle.driver))
@@ -119,15 +145,6 @@ export class BrowserDb implements IDb {
       logger('[Db.prepareDb] database prepared')
 
       await raceSqlocalStartup((async () => {
-        // OPFS can still fail inside the worker (e.g. storage blocked); SQLocal then reports memory.
-        const { storageType } = await sqlocalDrizzle.getDatabaseInfo()
-        if (storageType !== 'opfs') {
-          throw new DatabaseNotPersistentError(
-            `SQLocal opened a "${storageType}" database instead of OPFS`,
-            globalThis.crossOriginIsolated === true ? 'vfs' : 'headers',
-          )
-        }
-
         await this.runMigrations(db)
 
         this.appDb = db

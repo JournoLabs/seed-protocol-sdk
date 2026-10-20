@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.8 (2026-10-20)
 
 - `useItemProperties` re-reads its item's metadata rows only when a write touched them, through the SDK's change feed (ADR 0020). Before, each mounted hook held a metadata liveQuery that re-ran on every metadata write in the database, in every tab, so a page mounting the hook per row ran one query per row for each save. Writes from other tabs and from sync still reach it. In Node it keeps the polling liveQuery.
 - `useItems` lists an item created while its first load is still running. The live query saw the new item and asked for a refetch, but TanStack Query joins a fetch already running when the query has no data yet, so the list came back without the item and stayed that way until another seed changed. The hook now refetches once that fetch settles. A superseded load (new query key, unmount) stops building items through `Item.all`'s new `signal`.
@@ -24,6 +24,27 @@ All notable changes to this package are documented in this file.
 - `useEasSyncProcesses`, `useEasSyncProcessesState` and `useEasSyncProcessById` can mount before the client is ready; they threw `Db not configured`. They return `undefined` until then, and `useEasSyncProcessById` with an id reports `isLoading: true`.
 - `useResolvedMediaRef` reports `status: 'loading'` and no `href` after `value` changes until the new value resolves. It returned the previous value's `href` for a render or two, sometimes a `blob:` URL it had already revoked.
 - `SeedImage` forwards `ref` to its `<img>` on React 18.
+
+### Commits
+
+#### Features
+
+- useItemProperties re-reads through the change feed (96029c26)
+- sdk: property.showValue; useDebouncedItemProperty no longer sends machine events (82fd557b)
+
+#### Fixes
+
+- useItems lists an item created during its first load (37bbd22d)
+- sdk: count ItemProperty holds by owner (9bf5053f)
+- sdk: separate peeking from holding in entity caches (351dad8f)
+- settle create hooks, release useSchema hold, one fallback QueryClient (cca0b653)
+- declare react-dom as a peer dependency (1096ba39)
+- SeedImage forwards ref to its img on React 18 (d3a01b3b)
+- useResolvedMediaRef never returns the previous value's href (c8a7237f)
+- EAS sync hooks wait for the client before reading the app DB (c1d9abeb)
+- useCreateItem takes ItemCreateOptions and shares an in-flight create (c537ba97)
+- keep keystrokes in useItemProperty and save debounced edits through setValue (6d9243f1)
+- status hooks and SeedClientGate follow the current client (020eee44)
 
 ## 0.7.7 (2026-10-18)
 

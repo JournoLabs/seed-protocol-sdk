@@ -115,3 +115,50 @@ with `bun run test`; see `vite.config.js` for the three projects (NodeJS, browse
 `validation-timeout.test.ts` imports schemas with 1000 models, 500 models, and one model with 1000
 properties. Each import runs about 20,000 SQLite queries, so under heavy machine load these tests
 can still time out. If they fail, check machine load before looking for a regression.
+
+## Running the Release job locally
+
+The Release workflow's "Lint and test" job (`jobs.test` in `.github/workflows/release.yml`) runs on
+every push to main. Three local checks cover its failures before a merge, from cheapest to most
+faithful.
+
+**Pre-push hook.** `.githooks/pre-push` runs `bun install --frozen-lockfile --dry-run`, which fails
+when a `package.json` change isn't in `bun.lock`, then `bun run lint --quiet`. It isn't installed by
+default. Turn it on per clone with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`git push --no-verify` skips it once. Lint takes about 5s on a dev machine.
+
+**`bun run ci:local`** runs the job's `run:` steps in order: `bun install --frozen-lockfile`,
+`playwright install chromium`, `bun run lint`, the package build, then `bun run test`. It reads the
+steps from `release.yml`, so a step added there runs here too. The first failure stops the run, and
+it prints each step's time at the end. `--repeat N` runs the test step N times.
+
+**`bun run ci:local --docker`** runs the same job in a Linux container limited to 2 CPUs and 7 GB
+of memory (override with `--cpus` and `--memory`). Timing races that only fail on the GitHub runner
+show up here, where a 10-core Mac hides them; combine it with `--repeat N` to chase one. The image
+(`scripts/ci-docker/Dockerfile`) is the `mcr.microsoft.com/playwright` image for the playwright
+version in `bun.lock`, with the latest Node of the `.nvmrc` major and the workflow's
+`BUN_VERSION`. The repo goes in as a copy of its tracked and untracked-but-not-ignored files, so
+uncommitted changes are tested, and the container installs its own `node_modules` and builds its
+own `dist`. Only Bun's download cache persists, in the `seed-ci-local-bun-cache` volume. Docker
+Desktop must allow at least 2 CPUs and 7 GB.
+
+The container runs at the host's architecture, which is arm64 on Apple Silicon, while GitHub runs
+x64. A Node patch release after the image was built isn't picked up until you remove the image
+(`docker image rm` the `seed-ci-local:*` tag). `SEED_GATEWAY_HYPER_KEY` is passed through when set
+in your shell; the Arweave integration test asks that Hyper gateway first, as in CI.
+
+[act](https://github.com/nektos/act) can run the workflow file itself:
+
+```bash
+act push -W .github/workflows/release.yml -j test --container-options "--cpus=2 --memory=7g"
+```
+
+The `-W` is needed because `pr-tests.yml` also has a job named `test`. act runs the steps in its
+own runner image rather than GitHub's, and has no repository secrets. On Apple Silicon it runs
+arm64 unless given `--container-architecture linux/amd64`, which emulates x64 and is much slower
+than the runner. `ci:local --docker` avoids these differences for the test step, so prefer it.

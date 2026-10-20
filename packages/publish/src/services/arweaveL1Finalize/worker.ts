@@ -45,7 +45,6 @@ async function runArweaveL1FinalizeTick(): Promise<void> {
   } catch {
     return
   }
-  if (!config.useArweaveBundler) return
 
   // initPublish may start this worker before Seed platformClassesInit configures BaseDb.
   if (!BaseDb.isAppDbReady()) return

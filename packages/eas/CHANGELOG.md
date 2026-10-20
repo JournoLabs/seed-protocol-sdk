@@ -2,10 +2,20 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.8 (2026-10-20)
 
 - `DefaultEasClient` requests abort after `EAS_REQUEST_TIMEOUT_MS` (30 s). `createEasGraphQLClient(url, timeoutMs?)` builds a client with that limit.
 - `setSchemaUidForSchemaDefinition` and `setSchemaUidForModel` forget only the cached lookup misses the schema answers (the same definition, a schema name it ends with, or that model). They cleared every cached miss.
+
+### Commits
+
+#### Fixes
+
+- type the timeout fetch without DOM lib types (25375fee)
+
+#### Other
+
+- sdk: saves and creates read EAS schema UIDs from the lookup cache (ec022380)
 
 ## 0.7.6 (2026-10-17)
 

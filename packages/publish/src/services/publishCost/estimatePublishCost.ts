@@ -8,7 +8,7 @@ import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummar
 
 const WINSTON_PER_AR = 1e12
 const WEI_PER_ETH = 1e18
-/** Arweave charges every L1 transaction for at least this much data. */
+/** Arweave charges every transaction for at least this much data; a bundle is one transaction. */
 export const ARWEAVE_MIN_CHARGED_BYTES = 256 * 1024
 /** Turbo doesn't charge for uploads up to this size. */
 export const TURBO_FREE_BYTES = 100 * 1024
@@ -16,7 +16,8 @@ export const TURBO_FREE_BYTES = 100 * 1024
 type PublishCostFlags = {
   evmUserPays?: boolean
   arweaveUserPays?: boolean
-  arweavePath?: 'l1' | 'bundler'
+  /** Ignored: uploads are always bundled. Accepted so a previous estimate's `arweave.path` can be passed back. */
+  arweavePath?: 'bundler'
   /** Where uploads go; with 'turbo' small uploads are free. */
   uploadTo?: 'upload-api' | 'turbo'
   /** The publish chain is a testnet. */
@@ -36,19 +37,17 @@ function readPublishFlags(): PublishCostFlags {
     return {
       evmUserPays: payment.gas.payer === 'user',
       arweaveUserPays: payment.storage.payer === 'user',
-      arweavePath: payment.storage.path,
       uploadTo: payment.storage.uploadTo,
       testnet,
     }
   } catch {
-    return { evmUserPays: true, arweaveUserPays: false, arweavePath: 'l1', uploadTo: 'upload-api', testnet }
+    return { evmUserPays: true, arweaveUserPays: false, uploadTo: 'upload-api', testnet }
   }
 }
 
-/** The bytes Arweave (or Turbo) charges for, given how the uploads are sent. */
+/** The bytes Arweave (or Turbo) charges for, given where the uploads go. */
 export function chargedUploadBytes(
   work: Pick<PublishWorkSummary, 'uploadCount' | 'uploadBytes' | 'uploadSizes'>,
-  path: 'l1' | 'bundler',
   uploadTo: 'upload-api' | 'turbo' = 'upload-api',
 ): number {
   const sizes =
@@ -56,7 +55,6 @@ export function chargedUploadBytes(
     (work.uploadCount > 0 ? Array.from({ length: work.uploadCount }, () => work.uploadBytes / work.uploadCount) : [])
   if (sizes.length === 0) return 0
   if (uploadTo === 'turbo') return sizes.filter((size) => size > TURBO_FREE_BYTES).reduce((a, b) => a + b, 0)
-  if (path === 'l1') return sizes.reduce((total, size) => total + Math.max(size, ARWEAVE_MIN_CHARGED_BYTES), 0)
   return Math.max(sizes.reduce((a, b) => a + b, 0), ARWEAVE_MIN_CHARGED_BYTES)
 }
 
@@ -71,7 +69,6 @@ export function combinePublishCostEstimate(
 ): PublishCostEstimate {
   const evmUserPays = flags?.evmUserPays ?? true
   const arweaveUserPays = flags?.arweaveUserPays ?? false
-  const arweavePath = flags?.arweavePath ?? 'l1'
   const testnet = flags?.testnet ?? false
   const gas = heuristicPublishGas(work)
   const evmWei = gas * rates.gasPriceWei
@@ -79,7 +76,7 @@ export function combinePublishCostEstimate(
   // Testnet ETH is worth nothing; mainnet's ETH-USD price doesn't apply to it.
   const evmUsd = testnet ? 0 : evmEth * rates.ethUsd
 
-  const chargedBytes = chargedUploadBytes(work, arweavePath, flags?.uploadTo)
+  const chargedBytes = chargedUploadBytes(work, flags?.uploadTo)
   const winston = Math.max(0, Math.round(chargedBytes * rates.winstonPerByte))
   const ar = winston / WINSTON_PER_AR
   const arUsd = ar * rates.arUsd
@@ -99,7 +96,7 @@ export function combinePublishCostEstimate(
       bytes: work.uploadBytes,
       chargedBytes,
       uploadCount: work.uploadCount,
-      path: arweavePath,
+      path: 'bundler',
       userPays: arweaveUserPays,
     },
     prices: {

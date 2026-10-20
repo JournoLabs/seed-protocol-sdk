@@ -50,6 +50,20 @@ const countChanges = async (read: () => unknown, ms: number) => {
   return changes
 }
 
+// Resolves once the value has gone `quietMs` without changing.
+const waitUntilSettled = async (read: () => unknown, quietMs: number, timeoutMs: number) => {
+  let last = read()
+  let quietSince = Date.now()
+  const end = Date.now() + timeoutMs
+  while (Date.now() - quietSince < quietMs) {
+    if (Date.now() > end) throw new Error(`value still changing after ${timeoutMs}ms`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const now = read()
+    if (!Object.is(now, last)) quietSince = Date.now()
+    last = now
+  }
+}
+
 // The item and the test's find each hold the property once; it stops at the second release.
 const releaseItemAndFind = (item: { unload(): void }, property: ItemProperty<any>) => {
   item.unload()
@@ -111,6 +125,8 @@ describe('Image property value after a save', () => {
     property!.value = new File([embeddedImageBytes()], 'drop2.png', { type: 'image/png' }) as never
     await property!.save()
     await vi.waitFor(() => expect(String(property!.value)).toMatch(/^blob:/), { timeout: WAIT_TIMEOUT_MS })
+    // The save can still swap the URL once more on a slow runner; count only the remint below.
+    await waitUntilSettled(() => property!.value, 1000, WAIT_TIMEOUT_MS)
     // What displayValueFromRow does when the row names a different file (another tab's save).
     ;(property as any)._service.send({ type: 'updateContext', refResolvedDisplayValue: undefined })
     const changes = await countChanges(() => property!.value, 2000)

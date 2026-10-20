@@ -186,14 +186,9 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         }
 
         const needsArweave = await itemNeedsArweaveUpload(item)
-        const useBundler = getPublishConfig().useArweaveBundler
         const payload = { attestationStrategy } as const
         if (needsArweave) {
-          if (useBundler) {
-            sendBack({ type: 'validPublishProcessBundler', ...payload })
-          } else {
-            sendBack({ type: 'validPublishProcess', ...payload })
-          }
+          sendBack({ type: 'validPublishProcess', ...payload })
         } else {
           sendBack({ type: 'skipArweave', ...payload })
         }

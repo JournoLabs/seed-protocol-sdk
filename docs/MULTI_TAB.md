@@ -42,6 +42,11 @@ A lock wait times out after 60 s with `TabLockTimeoutError` (`code: 'TAB_LOCK_TI
 tab can't block the others' init. Without Web Locks the sections still run one at a time within the
 process. The Drizzle driver retries `SQLITE_BUSY` and `SQLITE_LOCKED` for about a second.
 
+Opening the database needs `seed.db`'s OPFS sync access handle, which another tab holds while it runs
+queries. sqlite-wasm retries for about 4.5 s and SQLocal then opens an in-memory database instead, so
+`prepareDb` closes it and opens again after 1, 2 and 4 s before failing with
+`DatabaseNotPersistentError`.
+
 ## Keeping other tabs current
 
 `BaseDb.liveQuery` already re-runs on other tabs' writes (SQLocal broadcasts changed tables).

@@ -1,4 +1,4 @@
-import { assertPublishPaymentConfig, resolveSponsorGas, resolveUseArweaveBundler } from './payment'
+import { assertPublishPaymentConfig, resolveSponsorGas } from './payment'
 import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   setAdditionalSyncAddresses,
@@ -25,20 +25,6 @@ import { getPublishWallet } from './helpers/publishWalletRegistry'
 // initPublish will set the chain. Until then the SDK's EAS sync waits instead of reading the
 // default chain into a local DB that publish is about to point elsewhere.
 expectEasReadChain('publish')
-
-/** Serialized upload item for Arweave signing (input to callback or used internally with JWK) */
-export interface SerializedPublishUpload {
-  versionLocalId: string
-  itemPropertyName: string
-  transactionJson: Record<string, unknown>
-}
-
-/** Result from Arweave signing (signed transaction + metadata) */
-export interface ArweaveTransactionInfoResult {
-  transaction: Record<string, unknown> & { chunks?: unknown }
-  versionId: string
-  modelName: string
-}
 
 /** Result from DataItem signing (compatible shape for createAttestations) */
 export interface ArweaveDataItemInfoResult {
@@ -139,7 +125,7 @@ export interface PublishConfig {
    * How non-Thirdweb wallets submit txs. Defaults to `eip7702` when `bundlerUrl` is set, else `eoa`.
    */
   accountMode?: PublishAccountMode
-  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
+  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Data items are uploaded to its bundler routes. */
   uploadApiBaseUrl: string
   /**
    * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
@@ -203,9 +189,10 @@ export interface PublishConfig {
    */
   onWalletSetupWarning?: (error: unknown) => void
   /**
-   * EXPERIMENTAL: Use Arweave bundler for instant uploads instead of reimbursement + chunk upload.
-   * When true, skips sendReimbursementRequest, pollForConfirmation, and chunk-by-chunk uploadData.
-   * Uses uploadApiBaseUrl for the bundler endpoint. Not yet validated for production.
+   * @deprecated Publish always uploads signed data items, to the upload API's bundler routes
+   * (`uploadApiBaseUrl`) or, with `payment.storage: 'user'`, to Turbo. `true` is accepted and
+   * ignored; `false` throws {@link PublishPaymentConfigError} from `initPublish`, since the L1
+   * upload path it selected has been removed.
    */
   useArweaveBundler?: boolean
   /**
@@ -220,23 +207,11 @@ export interface PublishConfig {
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
   /**
-   * Optional fallback: Sign Arweave upload transactions (non-bundler path). Prefer passing at createPublish time.
-   */
-  signArweaveTransactions?: (
-    uploads: SerializedPublishUpload[]
-  ) => Promise<ArweaveTransactionInfoResult[]>
-  /**
-   * Optional fallback: Arweave JWK for in-process signing (non-bundler path). Prefer passing at createPublish time.
-   * A publish restored after a reload never has the per-publish JWK (it is not saved to the
-   * database), so it signs with this one, or fails at creatingArweaveTransactions without it.
-   */
-  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
-  /**
-   * Optional fallback: Signer for DataItem creation when useArweaveBundler is true. Prefer passing at createPublish time.
+   * Optional fallback: Signer for DataItem creation. Prefer passing at createPublish time.
    */
   dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
   /**
-   * Optional fallback: Sign DataItems when useArweaveBundler is true. Prefer passing at createPublish time.
+   * Optional fallback: Sign DataItems. Prefer passing at createPublish time.
    * Each upload includes `tags` (content + configured {@link arweaveUploadTags}); forward them into the DataItem.
    */
   signDataItems?: (
@@ -265,24 +240,14 @@ export interface CreatePublishOptions {
   /** `patch` (default): pending properties only. `new_version`: new Version attestation + all properties. */
   publishMode?: import('./types').PublishMode
   /**
-   * Required when useArweaveBundler: sign DataItems (wallet flow).
+   * Sign DataItems (wallet flow). This or `dataItemSigner` is needed unless the config sets one.
    * Use each upload's `tags` when building the signed DataItem.
    */
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<ArweaveDataItemInfoResult[]>
-  /** Required when useArweaveBundler: signer for DataItems (backend/script flow) */
+  /** Signer for DataItems (backend/script flow). */
   dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
-  /** Required when NOT useArweaveBundler: sign Arweave transactions */
-  signArweaveTransactions?: (
-    uploads: SerializedPublishUpload[]
-  ) => Promise<ArweaveTransactionInfoResult[]>
-  /**
-   * Required when NOT useArweaveBundler: JWK for in-process signing. Kept in memory only; it is
-   * stripped from the saved publish snapshot, so a publish resumed after a reload falls back to
-   * {@link PublishConfig.arweaveJwk}.
-   */
-  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
    * Extra tags for this publish only, appended after {@link PublishConfig.arweaveUploadTags}.
    * Resolved order: `[...initPublishTags, ...theseTags]`.
@@ -408,7 +373,6 @@ export interface ResolvedPublishConfig extends PublishConfig {
   easChain: EasChainDeployment
   useDirectEas: boolean
   useModularExecutor: boolean
-  useArweaveBundler: boolean
   /** Resolved: defaults to false. */
   autoDeployManagedAccount: boolean
   /**
@@ -455,7 +419,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
       '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
-  const useArweaveBundler = resolveUseArweaveBundler(config)
   const arweaveUploadVerificationBaseUrl =
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
@@ -473,7 +436,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     easChain,
     useDirectEas: config.useDirectEas ?? false,
     useModularExecutor,
-    useArweaveBundler,
     arweaveUploadVerificationBaseUrl,
     arweaveGraphqlUrl,
     autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,
