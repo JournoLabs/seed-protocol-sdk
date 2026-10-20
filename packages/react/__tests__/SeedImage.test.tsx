@@ -281,16 +281,9 @@ describe('SeedImage integration tests', () => {
     if (!featureImageProperty) return
 
     featureImageProperty.value = blob
-
-    await waitFor(
-      () => {
-        const prop = testItem!.properties.find(
-          (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
-        ) as ItemProperty<any> | undefined
-        expect(prop?.refResolvedValue).toBeTruthy()
-      },
-      { timeout: 20000 }
-    )
+    // Not a wait on refResolvedValue: a Blob sets a placeholder one ('image') at once for the preview,
+    // so on a slow runner the reload below ran before the save wrote anything and found no value.
+    await featureImageProperty.save()
 
     const seedLocalId = testItem.seedLocalId
     testItem.unload()
