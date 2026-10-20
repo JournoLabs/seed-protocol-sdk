@@ -8,8 +8,13 @@ export const versions = sqliteTable('versions', {
   seedUid: text('seed_uid'),
   seedType: text('seed_type'),
   note: text('note'),
-  createdAt: int('created_at'),
-  updatedAt: int('updated_at'),
+  // Set on insert when the writer leaves it out. No $onUpdate: readers rank rows by
+  // COALESCE(attestation_created_at, created_at), and some writers move it on purpose.
+  createdAt: int('created_at').$defaultFn(() => Date.now()),
+  // Set on every insert and update unless the writer passes a value.
+  updatedAt: int('updated_at')
+    .$defaultFn(() => Date.now())
+    .$onUpdate(() => Date.now()),
   attestationCreatedAt: int('attestation_created_at'),
   attestationRaw: text('attestation_raw'),
   publisher: text('publisher'),

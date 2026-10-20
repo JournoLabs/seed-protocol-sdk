@@ -45,15 +45,13 @@ export async function claimUnpublishedDrafts(
 
   if (!BaseDb.getAppDb()) return emptyResult()
 
-  const now = Date.now()
-
   const isClaimable = (row: ClaimableRow): row is ClaimableRow & { localId: string } =>
     typeof row.localId === 'string' && row.localId !== '' && isLocalUnsealedDraft(row)
 
   return BaseDb.transaction(async (tx: ReturnType<typeof BaseDb.getAppDb>) => {
     const stamp = async (table: typeof seeds | typeof versions | typeof metadata, ids: string[]) => {
       await writeInBatches(ids, (chunk) =>
-        tx.update(table).set({ publisher: normalized, updatedAt: now }).where(inArray(table.localId, chunk)),
+        tx.update(table).set({ publisher: normalized }).where(inArray(table.localId, chunk)),
       )
     }
 

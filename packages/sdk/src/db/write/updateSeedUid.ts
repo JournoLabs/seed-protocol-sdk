@@ -48,7 +48,6 @@ export const updateSeedUid = async ({
       ...(replacesSeedAttestation && { revokedAt: null, attestationRaw: null }),
       ...(shouldSetPublisher && { publisher: normalizedPublisher }),
       ...(attestationCreatedAt != null && { attestationCreatedAt }),
-      updatedAt: Date.now(),
     })
     .where(eq(seeds.localId, seedLocalId))
 

@@ -62,7 +62,6 @@ export const createSeed = async (
     type,
     modelFileId: modelFileId ?? null,
     uid: seedUid,
-    createdAt: Date.now(),
     schemaUid: schemaUid || null,
     ...(publisher && { publisher }),
   })

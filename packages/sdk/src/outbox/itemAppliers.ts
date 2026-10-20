@@ -230,7 +230,6 @@ export async function applyItemStorageValue(
       localStorageDir,
       // The draft is as new as its content (see updateItemPropertyValue).
       createdAt: now,
-      updatedAt: now,
       // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
       ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
     })

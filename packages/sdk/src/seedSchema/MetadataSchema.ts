@@ -24,8 +24,13 @@ export const metadata = sqliteTable('metadata', {
   attestationRaw: text('attestation_raw'),
   attestationCreatedAt: int('attestation_created_at'),
   contentHash: text('content_hash'),
-  createdAt: int('created_at'),
-  updatedAt: int('updated_at'),
+  // Set on insert when the writer leaves it out. No $onUpdate: readers rank rows by
+  // COALESCE(attestation_created_at, created_at), and some writers move it on purpose.
+  createdAt: int('created_at').$defaultFn(() => Date.now()),
+  // Set on every insert and update unless the writer passes a value.
+  updatedAt: int('updated_at')
+    .$defaultFn(() => Date.now())
+    .$onUpdate(() => Date.now()),
   publisher: text('publisher'),
   // Unix seconds when this row's attestation was revoked on EAS; null while it's live (or for a
   // local, unpublished row). EAS sync keeps only the canonical attestation per (version, property

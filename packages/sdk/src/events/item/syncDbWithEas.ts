@@ -415,7 +415,6 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
       type: modelType,
       ...(modelFileId && { modelFileId }),
       publisher: seed.attester ? normalizeHexAddress(seed.attester) : seed.attester,
-      createdAt: Date.now(),
       attestationCreatedAt: seed.timeCreated * 1000,
       attestationRaw,
       ...(revokedAt !== undefined && { revokedAt }),
@@ -477,7 +476,7 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
         if (attestation && revokedAt !== (row.revokedAt ?? null)) {
           await appDb
             .update(versions)
-            .set({ revokedAt, updatedAt: Date.now() })
+            .set({ revokedAt })
             .where(eq(versions.uid, row.uid))
         }
       }
@@ -512,7 +511,6 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
       seedUid,
       seedLocalId,
       seedType: seedUidToModelType.get(seedUid) ?? null,
-      createdAt: Date.now(),
       attestationCreatedAt: version.timeCreated * 1000,
       attestationRaw: JSON.stringify(version),
       publisher: version.attester ? normalizeHexAddress(version.attester) : '',
@@ -656,8 +654,6 @@ const createMetadataRecordsForStorageTransactionId = async (
       // Ranked like a synced row, at its attestation's time: a local edit made after that
       // publish wins over it, a newer publish wins over an older edit.
       attestationCreatedAt: storageTransactionIdProperty.timeCreated * 1000,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
     })
   }
 }
@@ -758,7 +754,7 @@ const saveEasPropertiesToDbBody = async ({
   for (const [uid, revokedAt] of revokedAtUpdates) {
     await appDb
       .update(metadata)
-      .set({ revokedAt, updatedAt: Date.now() })
+      .set({ revokedAt })
       .where(eq(metadata.uid, uid))
   }
 
@@ -819,7 +815,6 @@ const syncDerivedStorageRows = async ({
           derivedFromUid: property.id,
           revokedAt: null,
           attestationCreatedAt: property.timeCreated * 1000,
-          updatedAt: Date.now(),
         })
         .where(inArray(metadata.derivedFromUid, chunk)),
     )
@@ -854,7 +849,7 @@ const syncDerivedStorageRows = async ({
     if (revokedAt == null) continue
     await appDb
       .update(metadata)
-      .set({ revokedAt, updatedAt: Date.now() })
+      .set({ revokedAt })
       .where(
         and(
           eq(metadata.derivedFromUid, property.id),
@@ -1035,7 +1030,6 @@ const insertSyncedProperties = async ({
       refValueType: refValueType || null,
       refSeedType: refSeedType || null,
       refModelUid: refSchemaUid || null,
-      createdAt: Date.now(),
       attestationCreatedAt,
       attestationRaw: JSON.stringify(property),
       publisher: property.attester ? normalizeHexAddress(property.attester) : '',

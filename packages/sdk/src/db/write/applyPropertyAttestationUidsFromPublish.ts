@@ -144,6 +144,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
         attestationRaw: null,
         revokedAt: null,
         derivedFromUid: null,
+// Stamped here: the spread copies the source row's times.
         createdAt: now,
         updatedAt: now,
       }
@@ -164,7 +165,6 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
         ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
         ...(validVersion && { versionUid: validVersion }),
         ...(versionLocalId && { versionLocalId }),
-        updatedAt: Date.now(),
       })
       .where(eq(metadata.localId, target.localId))
 
