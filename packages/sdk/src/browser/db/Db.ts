@@ -1,4 +1,3 @@
-import { BaseDb } from "@/db/Db/BaseDb";
 import { IDb } from "@/interfaces/IDb";
 import debug from "debug";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
