@@ -14,7 +14,6 @@ import {
 } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { camelCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -67,7 +66,7 @@ const resolvePropertyRecordSchemaFromSchemaData = async (
   try {
     const { loadAllSchemasFromDb } = await import('@/helpers/schema')
     const allSchemas = await loadAllSchemasFromDb()
-    const modelNameAlt = modelType ? upperFirst(camelCase(modelType)) : ''
+    const modelNameAlt = (await modelTypeToModelName(modelType)) ?? ''
     for (const { schema } of allSchemas) {
       // Model names are only unique per schema: when the owning schema is known, only look there.
       if (schemaName && schema.metadata?.name !== schemaName) continue
@@ -123,7 +122,7 @@ const resolvePropertyRecordSchemaFromModel = async (
     const { resolveItemModelFileId } = await import('@/db/read/resolveModelRecord')
     const modelFileId = await resolveItemModelFileId(hints)
     let model = modelFileId
-      ? await Model.resolveAsync(modelName || modelTypeToModelName(modelType ?? ''), { modelFileId })
+      ? await Model.resolveAsync(modelName || ((await modelTypeToModelName(modelType)) ?? ''), { modelFileId })
       : undefined
     if (!model?.properties?.length && modelName) {
       model = Model.peekByName(modelName)
@@ -136,7 +135,8 @@ const resolvePropertyRecordSchemaFromModel = async (
       model = await Model.getByNameAsync(modelName, undefined, { hold: false })
     }
     if (!model?.properties?.length && modelType) {
-      model = await Model.getByNameAsync(modelTypeToModelName(modelType), undefined, { hold: false })
+      const typeModelName = await modelTypeToModelName(modelType)
+      if (typeModelName) model = await Model.getByNameAsync(typeModelName, undefined, { hold: false })
     }
     if (!model?.properties?.length) {
       // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
@@ -165,9 +165,12 @@ const resolvePropertyRecordSchemaFromModel = async (
   }
 }
 
-/** Convert modelType (snake_case from DB) to Model name (PascalCase). startCase adds spaces ("Test Post"); Model names are "TestPost". */
-const modelTypeToModelName = (modelType: string): string =>
-  modelType ? upperFirst(camelCase(modelType)) : ''
+/** The model a modelType (`metadata.model_type`, an EAS name) refers to, or undefined (none, or ambiguous). */
+const modelTypeToModelName = async (modelType: string | undefined): Promise<string | undefined> => {
+  if (!modelType) return undefined
+  const { modelNameForType } = await import('@/db/read/resolveModelRecord')
+  return modelNameForType(modelType).catch(() => undefined)
+}
 
 const logger = debug('seedSdk:property:class')
 
@@ -1308,11 +1311,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         return undefined
       }
       // Ensure modelName for constructor: metadata may have modelType only, or neither (e.g. when Item passes it)
-      // Use modelTypeToModelName: modelType is snake_case ("test_post"); Model names are PascalCase ("TestPost")
+      // modelType is the EAS name ("test_post"); modelTypeToModelName finds the model it names
       const data = propertyData as { modelName?: string; modelType?: string }
       const modelName =
-        data.modelName ??
-        ((data.modelType ? modelTypeToModelName(data.modelType) : '') || modelNameOption || '')
+        data.modelName ?? ((await modelTypeToModelName(data.modelType)) || modelNameOption || '')
       // Fix 6: resolve propertyRecordSchema from Model so value setter can persist (useItemProperty path)
       // Pass modelType for fallback: "New model" -> "new_model" can't be reversed to exact name; findByModelType handles it
       const propertyRecordSchema = await resolvePropertyRecordSchemaFromModel(
@@ -1363,6 +1365,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     const { resolveItemModelFileId } = await import('../db/read/resolveModelRecord')
     const itemModelFileId = await resolveItemModelFileId({ seedLocalId, seedUid })
+    // One lookup per model type, not per property
+    const modelNameByType = new Map<string, Promise<string | undefined>>()
+    const modelNameOfType = (modelType: string | undefined): Promise<string | undefined> => {
+      if (!modelType) return Promise.resolve(undefined)
+      if (!modelNameByType.has(modelType)) modelNameByType.set(modelType, modelTypeToModelName(modelType))
+      return modelNameByType.get(modelType)!
+    }
     for (const data of propertiesData) {
       const d = data as {
         modelName?: string
@@ -1371,8 +1380,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         refSeedType?: string
         propertyId?: number
       }
-      const modelName =
-        d.modelName ?? (d.modelType ? modelTypeToModelName(d.modelType) : '') ?? ''
+      const modelName = d.modelName ?? (await modelNameOfType(d.modelType)) ?? ''
       const modelFileId =
         itemModelFileId ?? (await resolveItemModelFileId({ propertyId: d.propertyId }))
       // Normalize Id-suffix for File/Image/Relation: metadata stores "textId" but schema defines "text"

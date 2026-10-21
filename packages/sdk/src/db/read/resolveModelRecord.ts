@@ -230,6 +230,18 @@ export const resolveModelRecordByNameOrType = async (
 }
 
 /**
+ * The model name that a model name or EAS model type (`seeds.type`, `metadata.model_type`) refers
+ * to, resolved as {@link resolveModelRecordByNameOrType} resolves it: `blog_post` → "Blog Post"
+ * through the model's easName at its nameMatch level, never by re-casing the type. Undefined when
+ * no model matches; throws AmbiguousModelError when models in several schemas do.
+ */
+export const modelNameForType = async (
+  nameOrType: string | undefined | null,
+  scope: ModelScope = {},
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<string | undefined> => (await resolveModelRecordByNameOrType(nameOrType, scope, db))?.name
+
+/**
  * Work out which model (schemaFileId) an item belongs to from whatever is at hand: an explicit
  * modelFileId, the seed's model_file_id, or a metadata row's property_id → properties.model_id.
  */

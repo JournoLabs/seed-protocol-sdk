@@ -6,7 +6,6 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, type MetadataType } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
-import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import {
   BaseFileManager,
@@ -89,13 +88,15 @@ export const loadOrCreateProperty = fromCallback<
         try {
           const { Model } = await import('../../../Model/Model')
           const { modelPropertiesToObject } = await import('../../../helpers/model')
-          const { resolveItemModelFileId } = await import('../../../db/read/resolveModelRecord')
-          const normalizedModelName = upperFirst(camelCase(modelNameForNew))
+          const { resolveItemModelFileId, modelNameForType } = await import('../../../db/read/resolveModelRecord')
           const itemModelFileId = await resolveItemModelFileId({
             modelFileId: context.modelFileId,
             seedLocalId,
             seedUid,
           })
+          const normalizedModelName =
+            (await modelNameForType(modelNameForNew, { modelFileId: itemModelFileId }).catch(() => undefined)) ??
+            modelNameForNew
           let model = await Model.resolveAsync(normalizedModelName, { modelFileId: itemModelFileId })
           if (!model?.properties?.length && !itemModelFileId) {
             model = Model.findByModelType(easName(modelNameForNew))
@@ -148,12 +149,8 @@ export const loadOrCreateProperty = fromCallback<
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
-    // metadata.modelType is the snake_case model type ("test_post"), not the model name ("TestPost").
-    // It ends up in the context below, and later lookups by name (Model.getByName) can't match it.
-    const modelName =
-      context.modelName || (metadataRecord.modelType ? upperFirst(camelCase(metadataRecord.modelType)) : undefined)
     // Model names are only unique per schema: pin lookups to the item's own model row.
-    const { resolveItemModelFileId } = await import('../../../db/read/resolveModelRecord')
+    const { resolveItemModelFileId, modelNameForType } = await import('../../../db/read/resolveModelRecord')
     const modelFileId = await resolveItemModelFileId({
       modelFileId: context.modelFileId,
       seedLocalId: seedLocalId ?? metadataRecord.seedLocalId,
@@ -161,13 +158,17 @@ export const loadOrCreateProperty = fromCallback<
       propertyId: metadataRecord.propertyId,
     })
     timing.mark('model file id')
+    // metadata.modelType is the EAS model type ("test_post"), not the model name ("TestPost"); it
+    // ends up in the context below, so map it (and a context name) to the model it names.
+    const modelNameOrType = context.modelName || metadataRecord.modelType || undefined
+    const modelName = modelNameOrType
+      ? ((await modelNameForType(modelNameOrType, { modelFileId }).catch(() => undefined)) ?? modelNameOrType)
+      : undefined
     if (modelName) {
       try {
-        // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
-        const normalizedModelName = upperFirst(camelCase(modelName))
         // One read for the whole model, shared by the item's other properties loading now
         const { loadModelPropertyRecordSchemas } = await import('./modelPropertyRecordSchemas')
-        const schemas = await loadModelPropertyRecordSchemas(normalizedModelName, modelFileId, db)
+        const schemas = await loadModelPropertyRecordSchemas(modelName, modelFileId, db)
         propertyRecordSchema = schemas.get(propertyName)
         timing.mark('model schema')
       } catch (error) {
@@ -181,9 +182,8 @@ export const loadOrCreateProperty = fromCallback<
       try {
         const { Model } = await import('../../../Model/Model')
         const { modelPropertiesToObject } = await import('../../../helpers/model')
-        const normalizedModelName = upperFirst(camelCase(modelName))
-        // Try PascalCase first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
-        let model = Model.resolve(normalizedModelName, { modelFileId })
+        // Try the name first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
+        let model = Model.resolve(modelName, { modelFileId })
         if (!model?.properties?.length && !modelFileId) {
           model = Model.findByModelType(easName(modelName))
         }
