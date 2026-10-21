@@ -889,10 +889,11 @@ export async function handleFeedRequest(
     const archiveLinksForMain: FeedArchiveLink[] = [];
     if (pageNum === 1) {
       const now = new Date();
-      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      // Archive months are UTC, like queryBySchemaForMonth's bounds.
+      const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
       archiveLinksForMain.push({
         rel: 'prev-archive',
-        href: `${siteConfig.feedUrl}/${collectionName}/archive/${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}/${format}`,
+        href: `${siteConfig.feedUrl}/${collectionName}/archive/${prevMonth.getUTCFullYear()}/${prevMonth.getUTCMonth() + 1}/${format}`,
       });
     }
 
@@ -1076,7 +1077,7 @@ export async function handleArchiveFeedRequest(
     const nextYear = month === 12 ? year + 1 : year;
     const nextMonth = month === 12 ? 1 : month + 1;
     const now = new Date();
-    if (nextYear < now.getFullYear() || (nextYear === now.getFullYear() && nextMonth <= now.getMonth() + 1)) {
+    if (nextYear < now.getUTCFullYear() || (nextYear === now.getUTCFullYear() && nextMonth <= now.getUTCMonth() + 1)) {
       archiveLinks.push({ rel: 'next-archive', href: `${archiveBase}/${nextYear}/${nextMonth}/${format}` });
     }
 

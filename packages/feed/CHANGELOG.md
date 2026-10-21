@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Archive months are UTC, matching `queryBySchemaForMonth`: the main feed's `prev-archive` link and an archive's `next-archive` link are computed in UTC rather than server-local time.
 - Image metadata for items of schemas other than `image` comes from the image their enclosure uses (a feature or cover image whose Arweave URL lacks its size or type), not from the item's own storage transaction, which for a post is its HTML body. `image` items still use their own storage transaction. A cold feed probes one transaction per item with an image instead of one per item.
 - Breaking: `FEED_SITE_URL` is removed. It had no effect: item links always use `FEED_ITEM_URL_BASE` or its default (the chain's EAS explorer, else `https://easscan.org`). `loadFeedConfig()` no longer returns `siteUrl`, and `TransformOptions` drops `siteUrl` and requires `itemUrlBase` and `itemUrlPath`. The site config's `siteUrl` (channel links) is unchanged.
 - `initializeFeedPlatform` keeps EAS and Arweave clients a host app or the SDK already registered, and goes through `initializeQueryPlatform` (which checks for duplicate package copies). Before, it replaced them with Node clients on every first call. Breaking: `initializeSeedClient`, `getClient` and `teardownSeedClient` are removed; `teardownFeedPlatform` replaces the last.

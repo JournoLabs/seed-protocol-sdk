@@ -13,7 +13,7 @@ SDK EAS sync (`client.syncFromEas()`) persists the same EAS graph into SQLite us
 - `getSeed(seedUid)` — one seed’s canonical JSON envelope, optional **changelog**, at its latest version or a pinned one
 - `getSeeds(seedUids)` — many seeds of any schemas in one set of requests, keyed by UID
 - `queryBySchema(schemaName, { limit, skip })` — paginated collection (latest-only)
-- `queryBySchemaForMonth` — calendar-month listing (used by feed archives)
+- `queryBySchemaForMonth` — calendar-month listing in UTC (used by feed archives)
 - Resolve mode: **latest Version** (or a pinned one), then newest property attestation per `(version, schemaId)`
 - **`source: 'local' | 'remote' | 'auto'`** — pluggable backends (default `'remote'`)
 - **Shared collection + item cache** for **remote** reads (memory → disk)

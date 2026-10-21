@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `queryBySchemaForMonth` bounds the month in UTC on both the remote and the SDK's local source. Before, it used the server's local time zone, so an archive's contents depended on `TZ`, and seeds created near a month edge can move to the neighbouring month.
 - Breaking: the deprecated aliases are removed. `expandRelations` is gone (use `relations: 'expand'` or `'urls'`), as are `FEED_RICH_BODY_STORAGE_SCHEMAS`, `isFeedRichBodyStorageSchema`, `feedRichBodyModelPriority`, the `get`/`setFeed…StorageModel(s)` functions and `Feed…StorageModels` types, `enrichImageSeedCloneForFeed`, `hydrateArweaveRichTextInFeedItems`, `parseEasPropertyMetadataForFeed` and its two `…ForFeed` types, and `QueryCacheConfig.backgroundRefresh` / `refreshInterval`. Each had a non-`Feed` name that is unchanged.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read. Neither was ever used.
 - A property whose attestation is a removal (`''` for a `string`, a zero `bytes32`; ADR 0021) is left out of the assembled seed, and a zero `bytes32` is never fetched as a related seed. Before, query kept `''` and the zero uid as values and looked the zero uid up. The changelog reports a removal as a change to `undefined`, and version snapshots leave the property out.
