@@ -145,8 +145,9 @@ export function propertyKeyFromStoredName(
 }
 
 /**
- * For READS: property names to include in OR query (both variants).
- * When dataType is undefined, includes all variants for safety (backwards compat with getPropertyData).
+ * The names a property's rows may be stored under, for matching rows that have no property_id and
+ * outbox ops (which name a property, not its id): the name with and without its `Id` for an Image,
+ * File, Html or Relation, or when `dataType` is unknown.
  */
 export function getMetadataPropertyNamesForQuery(
   propertyName: string,
@@ -163,7 +164,7 @@ export function getMetadataPropertyNamesForQuery(
     needsMetadataIdSuffix(dataType, refValueType) ||
     (dataType === undefined && refValueType === undefined)
   if (needsId) {
-    return [propertyName, `${propertyName}Id`, `${propertyName}Ids`]
+    return [propertyName, `${propertyName}Id`]
   }
   return [propertyName]
 }

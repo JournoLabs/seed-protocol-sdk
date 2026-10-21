@@ -63,16 +63,14 @@ describe('metadataPropertyNames', () => {
   })
 
   describe('getMetadataPropertyNamesForQuery', () => {
-    it('returns [base, baseId, baseIds] for metadata types', () => {
+    it('returns [base, baseId] for metadata types', () => {
       expect(getMetadataPropertyNamesForQuery('avatarImage', 'Image')).toEqual([
         'avatarImage',
         'avatarImageId',
-        'avatarImageIds',
       ])
       expect(getMetadataPropertyNamesForQuery('html', 'Html')).toEqual([
         'html',
         'htmlId',
-        'htmlIds',
       ])
     })
 
@@ -95,7 +93,6 @@ describe('metadataPropertyNames', () => {
       expect(getMetadataPropertyNamesForQuery('avatarImage')).toEqual([
         'avatarImage',
         'avatarImageId',
-        'avatarImageIds',
       ])
     })
   })

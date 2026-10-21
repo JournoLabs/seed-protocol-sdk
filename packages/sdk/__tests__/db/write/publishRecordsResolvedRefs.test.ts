@@ -143,7 +143,8 @@ const replayPublish = async (root: Item<any>, path: Path) => {
 
 const latestRow = async (seedLocalId: string, propertyName: string) => {
   const props = await getItemProperties({ seedLocalId })
-  return props.find((p: any) => p.propertyName === propertyName) as any
+  // By the property's key (property_id) or the stored name
+  return props.find((p: any) => p.propertyName === propertyName || p.propertyKey === propertyName) as any
 }
 
 testDescribe('publish records relation and list values as the attested seed uids', () => {

@@ -4,7 +4,7 @@ import type { MetadataType } from '@/seedSchema/MetadataSchema'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
 import { isPublishedMetadataRow as isPublished } from '@/helpers/isPublishedMetadataRow'
-import { compareMetadataRowsLatestFirst, metadataPropertyGroupKey } from '@/helpers/compareMetadataRowsLatestFirst'
+import { compareMetadataRowsLatestFirst, metadataPropertyGroupKeys } from '@/helpers/compareMetadataRowsLatestFirst'
 import { readMetadataPropertiesById } from '@/db/read/metadataProperty'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
@@ -68,10 +68,11 @@ export async function getPublishPendingDiff(
 
   // One group per property: by property_id (decision D4), rows without one by stored name. A
   // property is reported under its storage name, the name its new rows are written under.
+  const groupKey = metadataPropertyGroupKeys(rows)
   const byProp = new Map<string, MetadataType[]>()
   for (const row of rows) {
     if (!row.propertyName) continue
-    const key = metadataPropertyGroupKey(row)
+    const key = groupKey(row)
     const list = byProp.get(key) ?? []
     list.push(row)
     byProp.set(key, list)
@@ -91,7 +92,8 @@ export async function getPublishPendingDiff(
     if (!latest) continue
     if (!isPublished(latest)) {
       const prevWithUid = list.find(isPublished)
-      const property = latest.propertyId != null ? propertiesById.get(latest.propertyId) : undefined
+      const groupId = list.find((row) => row.propertyId != null)?.propertyId
+      const property = groupId != null ? propertiesById.get(groupId) : undefined
       pendingProperties.push({
         propertyName: property?.storageName ?? latest.propertyName!,
         currentValue: latest.propertyValue ?? null,
