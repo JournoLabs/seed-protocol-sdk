@@ -3,7 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
 import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
-import { isPlaceholderUid } from '@/helpers/easUid'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { ZERO_BYTES32 } from '@/helpers/constants'
 import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
 

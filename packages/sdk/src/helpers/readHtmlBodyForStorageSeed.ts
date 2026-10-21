@@ -1,5 +1,5 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { fetchArweaveRawTextAcrossGateways } from '@/helpers/gateway/gatewayState'
+import { fetchArweaveRawTextAcrossGateways } from '@seedprotocol/arweave'
 
 /** Published storage seeds use `0x` + 64 hex; `saveHtml` still writes `html/{localId}.html`. */
 const SEED_UID_HEX_RE = /^0x[a-fA-F0-9]{64}$/

@@ -2,7 +2,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds } from '@/seedSchema'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
 export type SeedPublishState = {

@@ -26,7 +26,7 @@ export type ClientManagerContext = {
   schemas?: { [schemaName: string]: SchemaFileFormat }
   arweaveDomain?: string
   uploadApiBaseUrl?: string
-  gatewayTransport?: import('./gateway').SeedGatewayTransportMode
+  gatewayTransport?: import('@seedprotocol/arweave').SeedGatewayTransportMode
   gatewayHyperKey?: string
   gatewaySidecarHost?: string
   gatewaySidecarPort?: number

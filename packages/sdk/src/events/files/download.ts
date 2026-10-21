@@ -11,11 +11,15 @@ import debug from 'debug'
 import { waitFor } from 'xstate'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
-import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySelected } from '@/helpers'
-import { getArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
+import { BaseEasClient, BaseQueryClient } from '@seedprotocol/eas'
+import {
+  BaseArweaveClient,
+  ensureReadGatewaySelected,
+  getArweaveReadBaseUrls,
+  getTransactionTagsByIds,
+  type TransactionTag,
+} from '@seedprotocol/arweave'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
-import type { TransactionTag } from '@/types/arweave'
-import { getTransactionTagsByIds } from '@seedprotocol/arweave'
 import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
 import { getCompositeChildPaths } from '@/db/read/getCompositeChildPaths'
 import { throttle } from 'lodash-es'
@@ -187,6 +191,9 @@ const parseTransactionIdsFromMetadata = (filesMetadata: any[], excludedTransacti
   return transactionIds
 }
 
+/** How long looked-up transaction tags stay cached. */
+const TRANSACTION_TAGS_CACHE_MS = 5 * 60 * 1000
+
 /** Content-SHA-256 tag values for the transactions that have one, from one batched tag lookup (cached). */
 const getExpectedContentHashes = async (transactionIds: string[]): Promise<Record<string, string>> => {
   const queryClient = BaseQueryClient.getQueryClient()
@@ -209,7 +216,12 @@ const getExpectedContentHashes = async (transactionIds: string[]): Promise<Recor
         tagsById.set(transactionId, tags)
         // Seed the per-transaction cache entry (the client interface has no setQueryData).
         void queryClient
-          .fetchQuery({ queryKey: ['getTransactionTags', transactionId], queryFn: async () => tags })
+          .fetchQuery({
+            queryKey: ['getTransactionTags', transactionId],
+            queryFn: async () => tags,
+            // The query client keeps a result only as long as the caller's staleTime.
+            staleTime: TRANSACTION_TAGS_CACHE_MS,
+          })
           .catch(() => {})
       }
     } catch (error) {

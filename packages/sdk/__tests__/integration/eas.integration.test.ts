@@ -16,13 +16,12 @@ import {
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   getEasSchemaUidBySchemaName,
-} from '@/eas'
-import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { IQueryClient } from '@/interfaces/IQueryClient'
+  BaseQueryClient,
+  type IQueryClient,
+} from '@seedprotocol/eas'
 
-// Import node platform classes - sets up real EasClient and QueryClient
-import '@/node/helpers/EasClient'
-import { QueryClient as NodeQueryClient } from '@/node/helpers/QueryClient'
+// Registers the real EAS and query clients
+import { NodeQueryClient } from '@seedprotocol/eas/node'
 
 const isNodeEnv = typeof window === 'undefined'
 const NETWORK_TIMEOUT = 15000

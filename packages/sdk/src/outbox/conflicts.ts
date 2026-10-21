@@ -6,7 +6,7 @@
  */
 import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import { generateId } from '@/helpers/generateId'
-import { isPlaceholderUid } from '@/helpers/easUid'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { selectInBatches } from '@/db/sqlParamBatches'
 import { eventEmitter } from '@/eventBus'
 import { propertyNameVariants } from './pendingValues'

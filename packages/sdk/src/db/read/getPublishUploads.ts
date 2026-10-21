@@ -4,18 +4,15 @@ import {
   getItemStorageLocalFileName,
   getItemStorageSubdir,
 } from '@/helpers/storageDir'
-import {
-  isPublishedSeedRef,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@/helpers/relationSeedRef'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString, BaseArweaveClient } from '@seedprotocol/arweave'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
 import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
-import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
+import type { ArweaveTransaction, TransactionTag } from '@seedprotocol/arweave'
 import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
@@ -589,8 +586,7 @@ const processUploadPropertyData = async (
 }
 
 /** No seed uid yet: a related item in this state is published together with the item. */
-const isDraftItem = (item: IItem<any>): boolean =>
-  !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
+const isDraftItem = (item: IItem<any>): boolean => isPlaceholderUid(item.seedUid)
 
 /** One item's own uploads: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
 const getItemOwnPublishUploadData = async (

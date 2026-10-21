@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
-import { and, eq, isNotNull, ne } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 
 /**
  * Returns attestation UIDs (metadata.uid) for all metadata records belonging to a seed.
@@ -15,18 +16,10 @@ export const getMetadataAttestationUidsForSeedUid = async (
   const rows = await appDb
     .select({ uid: metadata.uid, schemaUid: metadata.schemaUid })
     .from(metadata)
-    .where(
-      and(
-        eq(metadata.seedUid, seedUid),
-        isNotNull(metadata.uid),
-        ne(metadata.uid, ''),
-        ne(metadata.uid, 'NULL'),
-        ne(metadata.uid, '0x' + '0'.repeat(64)),
-      ),
-    )
+    .where(eq(metadata.seedUid, seedUid))
 
   type Row = (typeof rows)[number]
   return rows
-    .filter((r: Row) => r.uid != null && r.schemaUid != null)
+    .filter((r: Row) => !isPlaceholderUid(r.uid) && r.schemaUid != null)
     .map((r: Row) => ({ uid: r.uid!, schemaUid: r.schemaUid! }))
 }

@@ -1,5 +1,11 @@
-import { type EASSchema, type SchemaWhereInput, GET_SCHEMAS } from '@seedprotocol/eas'
-import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
+import {
+  type EASSchema,
+  type SchemaWhereInput,
+  GET_SCHEMAS,
+  BaseEasClient,
+  BaseQueryClient,
+} from '@seedprotocol/eas'
+import { easName } from '@/helpers'
 import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
 
 // Extract TypedData type from EIP712MessageTypes

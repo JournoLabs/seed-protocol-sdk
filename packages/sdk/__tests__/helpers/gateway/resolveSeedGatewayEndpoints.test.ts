@@ -4,7 +4,7 @@ import {
   resolveSeedGatewayEndpoints,
   resolveProxyBaseUrl,
   invalidateSidecarProbeCache,
-} from '@/helpers/gateway/resolveSeedGatewayEndpoints'
+} from '@seedprotocol/arweave'
 import { DEFAULT_ARWEAVE_HOST, DEFAULT_GATEWAY_SIDECAR_PORT } from '@/helpers/constants'
 
 describe('resolveProxyBaseUrl', () => {

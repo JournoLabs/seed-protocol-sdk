@@ -1,7 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { and, eq } from 'drizzle-orm'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { versionNotRevoked } from '@/db/read/subqueries/liveVersion'
 import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 

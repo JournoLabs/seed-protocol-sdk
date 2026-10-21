@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { MockArweaveClient } from '../test-utils/MockArweaveClient'
- * import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+ * import { BaseArweaveClient } from '@seedprotocol/arweave'
  *
  * beforeEach(() => {
  *   BaseArweaveClient.configure(new MockArweaveClient())
@@ -22,16 +22,16 @@
  * ```
  */
 
-import type { IArweaveClient } from '@seedprotocol/arweave'
-import { GraphQLClient } from 'graphql-request'
 import type {
+  IArweaveClient,
   TransactionStatus,
   TransactionTag,
   GetDataOptions,
   DownloadFilesParams,
   DownloadResult,
   CreateTransactionOptions,
-} from '@/types/arweave'
+} from '@seedprotocol/arweave'
+import { GraphQLClient } from 'graphql-request'
 
 type MockTransaction = {
   data: Uint8Array

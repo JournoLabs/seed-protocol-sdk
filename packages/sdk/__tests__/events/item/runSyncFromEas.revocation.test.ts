@@ -46,37 +46,26 @@ const filterFake = (where: Record<string, any>, list: FakeAttestation[]) => {
   )
 }
 
-// The related-seed fetch queries the EAS client directly. Client init still needs `configure`.
-vi.mock('@/helpers/EasClient/BaseEasClient', async () => {
-  const actual = await import('@seedprotocol/eas')
-  class FakeEasClient extends actual.BaseEasClient {
-    static getEasClient(): any {
+/** The related-seed fetch queries the EAS client directly; installed with a spy after client init. */
+const fakeEasClient = {
+  request: async (document: any, variables: { where: Record<string, any> }) => {
+    const operation = document.definitions.find(
+      (d: any) => d.kind === 'OperationDefinition',
+    )?.name?.value as string
+    fakeEas.rawRequests.push({ operation, where: variables.where })
+    if (operation === 'GetSeeds')
+      return { itemSeeds: filterFake(variables.where, fakeEas.seeds) }
+    if (operation === 'GetVersions')
       return {
-        request: async (
-          document: any,
-          variables: { where: Record<string, any> },
-        ) => {
-          const operation = document.definitions.find(
-            (d: any) => d.kind === 'OperationDefinition',
-          )?.name?.value as string
-          fakeEas.rawRequests.push({ operation, where: variables.where })
-          if (operation === 'GetSeeds')
-            return { itemSeeds: filterFake(variables.where, fakeEas.seeds) }
-          if (operation === 'GetVersions')
-            return {
-              itemVersions: filterFake(variables.where, fakeEas.versions),
-            }
-          if (operation === 'GetProperties')
-            return {
-              itemProperties: filterFake(variables.where, fakeEas.properties),
-            }
-          throw new Error(`Unexpected EAS request ${operation}`)
-        },
+        itemVersions: filterFake(variables.where, fakeEas.versions),
       }
-    }
-  }
-  return { BaseEasClient: FakeEasClient }
-})
+    if (operation === 'GetProperties')
+      return {
+        itemProperties: filterFake(variables.where, fakeEas.properties),
+      }
+    throw new Error(`Unexpected EAS request ${operation}`)
+  },
+}
 
 // `@/eas` re-exports `@seedprotocol/eas` plus `getModelSchemasFromEas`, so the mock is built from
 // the package. (Mocking these modules with importOriginal made this file hang while loading.)
@@ -162,6 +151,8 @@ describe.sequential('runSyncFromEas: revocations', () => {
       testFileUrl: import.meta.url,
       timeout: SETUP_HOOK_TIMEOUT_MS,
     })
+    const { BaseEasClient } = await import('@seedprotocol/eas')
+    vi.spyOn(BaseEasClient, 'getEasClient').mockReturnValue(fakeEasClient as any)
 
     // Sync only follows EAS schemas that map to a local model; use whichever one exists.
     const { getModelSchemas } = await import('@/db/read/getModelSchemas')
@@ -173,6 +164,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
+    vi.restoreAllMocks()
     await teardownTestEnvironment()
   })
 

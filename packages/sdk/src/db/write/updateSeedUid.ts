@@ -2,7 +2,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds, versions } from '@/seedSchema'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { normalizePublisher } from '@/helpers/addresses'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 
 type UpdateSeedUidProps = {
   seedLocalId: string

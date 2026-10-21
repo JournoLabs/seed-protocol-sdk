@@ -2,7 +2,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { generateId } from '@/helpers'
-import { isPlaceholderUid } from '@/helpers/easUid'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { normalizePublisher } from '@/helpers/addresses'
 import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 

@@ -1,5 +1,5 @@
 import debug from 'debug'
-import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
+import { getEasSchemaUidForExactDefinition } from '@seedprotocol/eas'
 import { easSchemaDefinitionForProperty, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 
 const logger = debug('seedSdk:helpers:propertySchemaUid')

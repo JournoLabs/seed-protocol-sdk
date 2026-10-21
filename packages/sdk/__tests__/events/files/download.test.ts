@@ -64,7 +64,10 @@ vi.mock('@/helpers', () => ({
     getWorkingDir: mocks.getWorkingDir,
     getFilesPath: mocks.getFilesPath,
   },
-  ensureReadGatewaySelected: mocks.ensureReadGatewaySelected,
+}))
+
+vi.mock('@seedprotocol/eas', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   BaseEasClient: {
     getEasClient: () => ({
       request: mocks.request,
@@ -77,6 +80,11 @@ vi.mock('@/helpers', () => ({
       getQueryData: mocks.getQueryData,
     }),
   },
+}))
+
+vi.mock('@seedprotocol/arweave', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ensureReadGatewaySelected: mocks.ensureReadGatewaySelected,
   BaseArweaveClient: {
     getTransactionStatus: mocks.getTransactionStatus,
     getTransactionTags: mocks.getTransactionTags,
@@ -84,10 +92,6 @@ vi.mock('@/helpers', () => ({
     getHost: mocks.getHost,
     getBaseUrl: mocks.getBaseUrl,
   },
-}))
-
-vi.mock('@seedprotocol/arweave', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
   getTransactionTagsByIds: mocks.getTransactionTagsByIds,
 }))
 
@@ -313,6 +317,36 @@ describe('events/files/download dedupe', () => {
         expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, expectedContentHash: HASH_A }),
       )
       mocks.getQueryData.mockImplementation(() => undefined)
+    })
+
+    // The browser used its own query client that kept settled results for 5 minutes; the package's
+    // client keeps one only for the caller's staleTime, so seeding the tag cache must pass one.
+    it('caches looked-up tags in the package query client', async () => {
+      const { DefaultQueryClient } = await vi.importActual<typeof import('@seedprotocol/eas')>('@seedprotocol/eas')
+      const real = new DefaultQueryClient().getQueryClient()
+      withEasTransactions([VALID_ARWEAVE_TX])
+      const easFetch = mocks.fetchQuery.getMockImplementation()!
+      mocks.fetchQuery.mockImplementation((options: any) =>
+        options.queryKey[0] === 'getTransactionTags' ? real.fetchQuery(options) : easFetch(options),
+      )
+      mocks.getQueryData.mockImplementation((key: any) => real.getQueryData(key))
+      mocks.getTransactionTagsByIds.mockResolvedValue(
+        new Map([[VALID_ARWEAVE_TX, [{ name: 'Content-SHA-256', value: HASH_A }]]]),
+      )
+
+      const mod = await import('@/events/files/download')
+      await mod.downloadTransactionIdWithDedupe(VALID_ARWEAVE_TX)
+      await vi.waitFor(() => expect(real.getQueryData(['getTransactionTags', VALID_ARWEAVE_TX])).toBeDefined(), {
+        timeout: WAIT_TIMEOUT_MS,
+      })
+      await mod.downloadTransactionIdWithDedupe(VALID_ARWEAVE_TX)
+
+      expect(mocks.getTransactionTagsByIds).toHaveBeenCalledTimes(1)
+      expect(mocks.downloadFileByTransactionId).toHaveBeenLastCalledWith(
+        expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, expectedContentHash: HASH_A }),
+      )
+      mocks.getQueryData.mockImplementation(() => undefined)
+      mocks.getTransactionTagsByIds.mockImplementation(async () => new Map())
     })
 
     it('a failed tag lookup does not stop the download (it is just unverified)', async () => {

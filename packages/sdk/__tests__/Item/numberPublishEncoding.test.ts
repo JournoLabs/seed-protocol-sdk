@@ -10,7 +10,7 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { PublishValidationFailedError } from '@/db/read/getPublishPayload'
-import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
