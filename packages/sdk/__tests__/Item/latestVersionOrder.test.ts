@@ -10,13 +10,13 @@ import { batchLatestPublishedVersionBySeedLocalIds } from '@/db/read/batchLatest
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { updateVersionUid } from '@/db/write/updateVersionUid'
-import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
-import { waitForIdle } from '../../test-utils/waitForIdle'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitForIdle } from '../test-utils/waitForIdle'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
   UNPUBLISH_TEST_PUBLISHER,
-} from '../../test-utils/getPublishPayloadIntegrationHelpers'
+} from '../test-utils/getPublishPayloadIntegrationHelpers'
 
 // Sync inserts a batch of versions with one created_at, so every head-version reader must break
 // the tie the same way: COALESCE(attestation_created_at, created_at) DESC, local_id DESC.
@@ -43,6 +43,18 @@ const readHeads = async (seedLocalId: string) => {
     getItemsDataPublished: listRow?.publishedVersionLocalId,
     batchLatestPublished: batch.get(seedLocalId)?.localId ?? undefined,
   }
+}
+
+/** Reloads the item and returns its head version, after the browser's versions watch has run. */
+const reloadedHead = async (item: Item<any>, seedLocalId: string, expected: string) => {
+  item.unload()
+  ItemProperty.clearInstanceCacheForItem(seedLocalId)
+  const reloaded = await Item.find({ seedLocalId, modelName: 'Post' })
+  await waitForIdle(reloaded!, 'reloaded item')
+  expect(reloaded!.latestVersionLocalId).toBe(expected)
+  // In the browser the item's versions watch re-picks the head after load; it must keep it.
+  await new Promise((r) => setTimeout(r, 500))
+  return reloaded!.latestVersionLocalId
 }
 
 testDescribe('head version order when versions tie on created_at', () => {
@@ -107,19 +119,12 @@ testDescribe('head version order when versions tie on created_at', () => {
     const heads = await readHeads(seedLocalId)
     expect(heads).toEqual(Object.fromEntries(Object.keys(heads).map((k) => [k, expected])))
 
-    item.unload()
-    ItemProperty.clearInstanceCacheForItem(seedLocalId)
-    const reloaded = await Item.find({ seedLocalId, modelName: 'Post', schemaName: SCHEMA_NAME })
-    await waitForIdle(reloaded!, 'reloaded item')
-    expect(reloaded!.latestVersionLocalId).toBe(expected)
-    // In the browser the item's versions watch re-picks the head after load; it must keep it.
-    await new Promise((r) => setTimeout(r, 500))
-    expect(reloaded!.latestVersionLocalId).toBe(expected)
+    expect(await reloadedHead(item, seedLocalId, expected)).toBe(expected)
   }, 60_000)
 
   it('falls back to local_id DESC when attestation times tie too, and publish stamps that version', async () => {
     const t = Date.now() + 20_000
-    const { seedLocalId } = await seedWithTiedVersions(
+    const { item, seedLocalId } = await seedWithTiedVersions(
       'Head order full tie',
       uid('5eed', 2),
       [
@@ -148,5 +153,6 @@ testDescribe('head version order when versions tie on created_at', () => {
 
     const after = await readHeads(seedLocalId)
     expect(after).toEqual(Object.fromEntries(Object.keys(after).map((k) => [k, expected])))
+    expect(await reloadedHead(item, seedLocalId, expected)).toBe(expected)
   }, 60_000)
 })
