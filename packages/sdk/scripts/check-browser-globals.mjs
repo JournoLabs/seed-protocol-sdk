@@ -219,7 +219,6 @@ const NODE_ONLY_PATTERNS = [
   /\/cjs\//,            // CommonJS build
   /\/vite\.(js|cjs)$/,  // Vite plugin (runs in Node, not browser)
   /\/node\.(js|cjs)$/,  // Node.js entry
-  /PathResolver/,       // Node.js path resolution helper
 ]
 
 const jsFiles = walkDir(targetDir).filter(

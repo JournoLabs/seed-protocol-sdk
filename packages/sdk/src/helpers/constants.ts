@@ -22,13 +22,6 @@ export const ZERO_BYTES = '0x'
 export const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000'
 
 
-// Primary config file name for Seed Protocol SDK
-export const SEED_CONFIG_FILE = 'seed.config.ts'
-// Fallback config file names (in order of preference)
-export const SEED_CONFIG_FALLBACKS = ['seed.schema.ts', 'schema.ts']
-// Legacy constant for backward compatibility
-export const SCHEMA_TS = SEED_CONFIG_FILE
-
 export const INTERNAL_DATA_TYPES = {
   Text: {
     eas: 'string',
@@ -134,8 +127,6 @@ export enum ImageSize {
 }
 
 export const CLIENT_NOT_INITIALIZED = 'ClientManager is not initialized. Please call init() first.'
-
-export const INIT_SCRIPT_SUCCESS_MESSAGE = '[Seed Protocol] Finished running init script'
 
 export enum SeedModels {
   Seed = 'Seed',

@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
+import { getDotSeedDir } from './dotSeedDir'
 import { isUnderDotSeed } from '@/helpers/dotSeedPath'
 
 /**
@@ -12,7 +12,7 @@ import { isUnderDotSeed } from '@/helpers/dotSeedPath'
 export function resolveFilesDir(filesDir: string): string {
   // Not created here: prepareDb creates filesDir (under .seed when it's relative), so an absolute
   // filesDir works from a read-only working directory (e.g. a packaged Electron app's cwd `/`).
-  const dotSeedDir = BasePathResolver.getDotSeedDir()
+  const dotSeedDir = getDotSeedDir()
 
   // Browser OPFS paths are single-level, like '/app-files' or '/files'.
   const pathWithoutLeadingSlash = filesDir.slice(1)
