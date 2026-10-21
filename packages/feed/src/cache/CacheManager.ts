@@ -23,6 +23,10 @@ export class CacheManager {
     this.fileCache = new FileCache(config);
   }
 
+  getConfig(): CacheConfig {
+    return this.config;
+  }
+
   async getFeedContent(
     schemaName: string,
     format: FeedFormat,
@@ -40,13 +44,7 @@ export class CacheManager {
 
       cached = await this.fileCache.getFeedContent(schemaName, format, contentKeyOptions);
       if (cached) {
-        this.memoryCache.setFeedContent(
-          schemaName,
-          format,
-          cached.content,
-          cached.contentType,
-          contentKeyOptions
-        );
+        this.memoryCache.putFeedContent(schemaName, format, cached, contentKeyOptions);
         return cached;
       }
 
@@ -101,7 +99,7 @@ export class CacheManager {
   }
 
   async getImageMetadata(transactionId: string): Promise<ImageMetadata | null> {
-    if (!this.config.enabled || !this.config.imageMetadata?.enabled) {
+    if (!this.config.imageMetadata?.enabled) {
       return null;
     }
 
@@ -125,7 +123,7 @@ export class CacheManager {
   }
 
   async setImageMetadata(transactionId: string, metadata: ImageMetadata): Promise<void> {
-    if (!this.config.enabled || !this.config.imageMetadata?.enabled) {
+    if (!this.config.imageMetadata?.enabled) {
       return;
     }
 

@@ -96,7 +96,8 @@ export function resetSiteConfig(): void {
  *   objects, Html/File relations as Arweave URLs). 'false' selects `relations: 'urls'`: Html/File
  *   relations still become Arweave URLs, Image and other relations stay seed UIDs. Both fetch the
  *   same related seeds.
- * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25).
+ * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25; a value that isn't a positive
+ *   integer gives the default).
  * - FEED_INCLUDE_DATA_URI_HTML_ITEMS: When 'true', include items whose body/html contain embedded data-URI images.
  *   Default: false (omit such items to avoid huge RSS payloads).
  */
@@ -117,7 +118,7 @@ export function loadFeedConfig(): {
   const siteUrl =
     process.env.FEED_SITE_URL?.trim() || 'https://seedprotocol.io';
   const expandRelations = process.env.FEED_EXPAND_RELATIONS?.toLowerCase() !== 'false';
-  const pageSize = parseInt(process.env.FEED_PAGE_SIZE || '25', 10);
+  const pageSize = Math.max(1, parseInt(process.env.FEED_PAGE_SIZE || '25', 10) || 25);
   const richTextDataUriImages =
     process.env.FEED_INCLUDE_DATA_URI_HTML_ITEMS?.toLowerCase() === 'true'
       ? 'include_items'

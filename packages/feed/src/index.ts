@@ -53,6 +53,7 @@ import { loadCacheConfig } from './cache/config';
 import { loadFeedConfig, resolveSiteConfig, type SiteConfigOverrides } from './config';
 import { checkIfNoneMatch } from './utils/etag';
 import { ArweaveImageService } from './services/arweaveImageService';
+import { feedDebug } from './debug';
 import { resolveSeedRssImageRelationRef } from '@seedprotocol/arweave';
 import {
   pickFeedItemContent,
@@ -279,74 +280,76 @@ export function resetCacheManager(): void {
 // Feed Transformation
 // ============================================================================
 
-/**
- * Enriches feed items with media properties from Arweave storageTransactionId
- */
+/** Image probes in flight at once while enriching a page of items. */
+const ENRICH_CONCURRENCY = 8
+
+async function runWithConcurrency(tasks: Array<() => Promise<void>>, limit: number): Promise<void> {
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < tasks.length) {
+      const task = tasks[next++]!
+      await task()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
+}
+
+/** Adds `_imageMetadata` / `_hasImage` to an item whose storage transaction is an image. */
+async function enrichFeedItemWithMedia(
+  item: FeedItem,
+  imageService: ArweaveImageService,
+  cache: CacheManager,
+): Promise<void> {
+  const record = item as Record<string, unknown>
+  const transactionId = (record.storageTransactionId || record.storage_transaction_id) as
+    | string
+    | undefined
+  if (!transactionId) return
+  try {
+    let imageMetadata = await cache.getImageMetadata(transactionId)
+    if (!imageMetadata) {
+      feedDebug('detecting image for transaction %s', transactionId)
+      imageMetadata = await imageService.detectImage(transactionId)
+      // No gateway answered: leave it uncached so the next request tries again.
+      if (!imageMetadata) return
+      // Cached even when it isn't an image, to avoid probing again.
+      await cache.setImageMetadata(transactionId, imageMetadata)
+    }
+    if (imageMetadata.isImage) {
+      record._imageMetadata = imageMetadata
+      record._hasImage = true
+    }
+  } catch (error) {
+    console.warn(`Error enriching item with transaction ${transactionId}:`, error)
+  }
+}
+
+/** Enriches items in place with image metadata from their storage transaction (see above). */
 async function enrichFeedItemsWithMedia(
   items: FeedItem[],
   imageService: ArweaveImageService,
-  cache: CacheManager
+  cache: CacheManager,
 ): Promise<FeedItem[]> {
-  // Filter items that have storageTransactionId
-  const itemsToProcess = items.filter(
-    (item: any) => item.storageTransactionId || item.storage_transaction_id
+  feedDebug(
+    'enriching %d items with image metadata',
+    items.filter((item) => item.storageTransactionId || item.storage_transaction_id).length,
   )
+  await runWithConcurrency(
+    items.map((item) => () => enrichFeedItemWithMedia(item, imageService, cache)),
+    ENRICH_CONCURRENCY,
+  )
+  return items
+}
 
-  if (itemsToProcess.length === 0) {
-    return items
-  }
-
-  console.log(`Enriching ${itemsToProcess.length} items with image metadata`)
-
-  // Process all items in parallel
-  const enrichmentPromises = itemsToProcess.map(async (item: any) => {
-    const transactionId = item.storageTransactionId || item.storage_transaction_id
-    if (!transactionId) return item
-
-    try {
-      // Check cache first
-      let imageMetadata = await cache.getImageMetadata(transactionId)
-
-      // If not cached, detect image
-      if (!imageMetadata) {
-        console.log(`Detecting image for transaction ${transactionId}`)
-        imageMetadata = await imageService.detectImage(transactionId)
-        // Cache the result (even if it's not an image, to avoid retries)
-        await cache.setImageMetadata(transactionId, imageMetadata)
-      }
-
-      // If image detected, add media properties
-      if (imageMetadata.isImage) {
-        // Add media properties to the item
-        item._imageMetadata = imageMetadata
-        item._hasImage = true
-      }
-
-      return item
-    } catch (error) {
-      console.warn(`Error enriching item with transaction ${transactionId}:`, error)
-      return item // Return item unchanged on error
-    }
+/** Items with image metadata added when image metadata is enabled (main and archive feeds). */
+async function withImageMetadata(items: FeedItem[], cache: CacheManager): Promise<FeedItem[]> {
+  const imageMetadata = cache.getConfig().imageMetadata
+  if (!imageMetadata?.enabled) return items
+  const imageService = new ArweaveImageService({
+    gateways: imageMetadata.gateways,
+    timeout: imageMetadata.timeout,
   })
-
-  // Wait for all enrichments to complete
-  const enrichedItems = await Promise.all(enrichmentPromises)
-
-  // Create a map of enriched items by their ID
-  const enrichedMap = new Map<string, FeedItem>()
-  enrichedItems.forEach(item => {
-    const itemId = item.id || (item as any).seedUid || (item as any).SeedUid || ''
-    if (itemId) {
-      enrichedMap.set(itemId, item)
-    }
-  })
-
-  // Merge enriched items back into original array
-  return items.map(item => {
-    const itemId = item.id || (item as any).seedUid || (item as any).SeedUid || ''
-    const enriched = enrichedMap.get(itemId)
-    return enriched || item
-  })
+  return enrichFeedItemsWithMedia(items, imageService, cache)
 }
 
 /**
@@ -804,11 +807,8 @@ export async function handleFeedRequest(
   const contentKeyOptions =
     pageNum > 1 ? { page: pageNum } : undefined
 
-  console.log(`Schema name: ${schemaName}`);
-  console.log(`Collection name: ${collectionName}`);
-
   const cache = getCacheManager();
-  const config = loadCacheConfig();
+  const config = cache.getConfig();
 
   try {
     // Check if we have cached feed content
@@ -818,7 +818,7 @@ export async function handleFeedRequest(
       if (cachedContent) {
         // Check ETag for conditional request
         if (ifNoneMatch && checkIfNoneMatch(ifNoneMatch, cachedContent.etag)) {
-          console.log(`Cache hit with ETag match for ${schemaName}:${format} - returning 304`);
+          feedDebug('cache hit with ETag match for %s:%s, 304', schemaName, format);
           return new Response(null, {
             status: 304,
             headers: {
@@ -830,7 +830,7 @@ export async function handleFeedRequest(
         }
 
         // Return cached content
-        console.log(`Cache hit for ${schemaName}:${format}`);
+        feedDebug('cache hit for %s:%s', schemaName, format);
         return new Response(cachedContent.content, {
           status: 200,
           headers: {
@@ -847,26 +847,18 @@ export async function handleFeedRequest(
     }
 
     // Content cache miss or disabled — fetch items via query (owns collection cache)
-    console.log(`Cache miss for ${schemaName}:${format} - fetching items`);
+    feedDebug('cache miss for %s:%s, fetching items', schemaName, format);
 
-    const feedItems = await (async (): Promise<FeedItem[]> => {
-      const items = await getFeedItemsBySchemaName(schemaName, {
-        limit: pageSize,
-        skip,
-      }) as FeedItem[];
-      console.log(`Found ${items.length} feed items for schema ${schemaName}`);
-      if (config.imageMetadata?.enabled) {
-        const imageService = new ArweaveImageService({
-          gateways: config.imageMetadata.gateways,
-          timeout: config.imageMetadata.timeout,
-        });
-        return enrichFeedItemsWithMedia(items, imageService, cache);
-      }
-      return items;
-    })();
+    // One item past the page tells whether there is a next page.
+    const fetched = await getFeedItemsBySchemaName(schemaName, {
+      limit: pageSize + 1,
+      skip,
+    }) as FeedItem[];
+    feedDebug('found %d feed items for schema %s', fetched.length, schemaName);
+    const hasNext = fetched.length > pageSize;
+    const feedItems = await withImageMetadata(fetched.slice(0, pageSize), cache);
 
     const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
-    const hasNext = feedItems.length === pageSize;
     const archiveLinksForMain: FeedArchiveLink[] = [];
     if (pageNum === 1) {
       const now = new Date();
@@ -937,7 +929,7 @@ export async function handleFeedRequest(
     if (config.enabled) {
       const staleContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
       if (staleContent) {
-        console.log(`Serving stale cache due to error`);
+        feedDebug('serving stale cache for %s:%s after an error', schemaName, format);
         return new Response(staleContent.content, {
           status: 200,
           headers: {
@@ -1009,7 +1001,7 @@ export async function handleArchiveFeedRequest(
 
   const contentKeyOptions = { archive: { year, month } };
   const cache = getCacheManager();
-  const config = loadCacheConfig();
+  const config = cache.getConfig();
 
   try {
     if (config.enabled) {
@@ -1040,7 +1032,10 @@ export async function handleArchiveFeedRequest(
       }
     }
 
-    const items = await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as FeedItem[];
+    const items = await withImageMetadata(
+      await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as FeedItem[],
+      cache,
+    );
 
     const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
     const archiveBase = `${siteConfig.feedUrl}/${collectionName}/archive`;

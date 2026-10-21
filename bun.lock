@@ -107,6 +107,7 @@
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
         "@seedprotocol/query": "workspace:*",
+        "debug": "^4.4.1",
         "feedsmith": "^2.9.0",
         "image-size": "^1.1.1",
         "pluralize": "^8.0.0",

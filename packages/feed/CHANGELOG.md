@@ -4,6 +4,13 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- A feed body read back from the disk cache keeps its ETag and expiry. Before, loading it into memory gave it a new ETag (so the next `If-None-Match` missed) and a full `CACHE_TTL`, including page 2+ and archive entries that should expire after `CACHE_PAGE_TTL` / `CACHE_ARCHIVE_TTL`.
+- Image metadata probes stop at the first gateway that answers, image or not; only an error or a non-ok status moves to the next gateway. When no gateway answers, nothing is cached and the next request probes again; before, the transaction was cached as "not an image" for `IMAGE_METADATA_TTL` (7 days). `ArweaveImageService.detectImage` returns null in that case.
+- Image metadata is cached whenever `IMAGE_METADATA_ENABLED` is on, including when content caching is off (the development default), and at most 8 probes run at once.
+- Archive feeds get image metadata (enclosure size and dimensions) like the main feed.
+- A page whose last item fills it exactly no longer links a `next` page that would be empty: the handler fetches one item past the page to tell.
+- `FEED_PAGE_SIZE` that isn't a positive integer gives the default 25 instead of `NaN`.
+- The cache config is read once per process instead of on every request, and per-request logs (cache hits and misses, item counts, image probes) only print under `DEBUG=seedFeed`.
 - Breaking: `GraphQLItem` (use `FeedItem`), `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are no longer exported. Import `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`.
 - `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
 - `express`, `@types/express` and `graphql-request` are no longer dependencies.
