@@ -35,7 +35,7 @@ import {
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
-import { propertyDefinitionColumn } from '@/helpers/propertyDefinition'
+import { propertyDefinitionColumn, propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import { insertModelSchemaLink, linkModelToSchema } from '@/db/write/linkModelToSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 
@@ -886,8 +886,8 @@ export const addModelsToDb = async (
 /**
  * The models linked to a schema row (model_schemas) with their property rows, in schema-file
  * shape: `{ [modelName]: { id, properties: { [name]: { dataType, schemaFileId, ref, ... } } } }`.
- * Fields only a schema file holds (validation, description, ...) aren't here; see
- * {@link mergeDbModelsIntoSchemaModels}.
+ * Properties carry their row's definition (validation, description, ...); model-level fields only a
+ * schema file holds aren't here, see {@link mergeDbModelsIntoSchemaModels}.
  * @param schemaId - The ID of the schema record in the database
  */
 export const loadModelsFromDbForSchema = async (
@@ -926,14 +926,12 @@ export const loadModelsFromDbForSchema = async (
     for (const { property: prop, refName } of propertyRows as { property: PropertyType; refName: string | null }[]) {
       const modelName = nameById.get(prop.modelId!)
       if (!modelName) continue
+      // The row's definition without its row keys; `required` stays the file's
+      const { id: _id, _dbId, name: _name, modelId: _modelId, refModelId: _refModelId, refModelName: _refModelName, required: _required, ...definition } =
+        propertyDefinitionFromRow(prop, refName)
       models[modelName].properties[prop.name] = {
-        dataType: normalizeDataType(prop.dataType ?? undefined),
+        ...definition,
         ...(prop.schemaFileId ? { schemaFileId: prop.schemaFileId } : {}),
-        ...(refName ? { ref: refName } : {}),
-        ...(prop.refValueType ? { refValueType: normalizeDataType(prop.refValueType) } : {}),
-        ...(prop.storageType ? { storageType: prop.storageType } : {}),
-        ...(prop.localStorageDir ? { localStorageDir: prop.localStorageDir } : {}),
-        ...(prop.filenameSuffix ? { filenameSuffix: prop.filenameSuffix } : {}),
       }
     }
 
