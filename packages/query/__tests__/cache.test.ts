@@ -60,8 +60,6 @@ describe('CacheManager collection + item', () => {
     }
     cache = createQueryCacheManager(config, new FileCache({
       ...config,
-      backgroundRefresh: false,
-      refreshInterval: 300,
     }))
   })
 
@@ -122,13 +120,13 @@ describe('CacheManager collection + item', () => {
 
   it('reads the collection back from disk in a new manager', async () => {
     await cache.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
-    const config = { enabled: true, ttl: 3600, cacheDir, backgroundRefresh: false, refreshInterval: 300 }
+    const config = { enabled: true, ttl: 3600, cacheDir }
     const fresh = createQueryCacheManager(config, new FileCache(config))
     expect((await fresh.getCollection('post', KEY))?.items[0]?.seedUid).toBe('0xa')
   })
 
   it('treats a collection file from before change tracking as a miss', async () => {
-    const config = { enabled: true, ttl: 3600, cacheDir, backgroundRefresh: false, refreshInterval: 300 }
+    const config = { enabled: true, ttl: 3600, cacheDir }
     const files = new FileCache(config)
     await files.setCollection('post', KEY, {
       items: [makeRecord('0xa', 100)],
@@ -144,8 +142,6 @@ describe('CacheManager collection + item', () => {
       enabled: true,
       ttl: 1,
       cacheDir,
-      backgroundRefresh: false,
-      refreshInterval: 300,
     }
     const short = createQueryCacheManager(shortConfig, new FileCache(shortConfig))
     await short.setCollection('post', KEY, collection([makeRecord('0xa', 100)]))
@@ -234,8 +230,6 @@ describe('cached records are frozen outside production', () => {
     enabled: true,
     ttl: 3600,
     cacheDir,
-    backgroundRefresh: false,
-    refreshInterval: 300,
   })
 
   const item = (record: SeedRecord) => ({

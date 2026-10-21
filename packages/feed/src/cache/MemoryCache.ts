@@ -62,16 +62,6 @@ export class MemoryCache {
     this.feedContentCache.set(key, cachedContent);
   }
 
-  clearContentCache(schemaName: string): void {
-    const keysToDelete: string[] = [];
-    for (const key of this.feedContentCache.keys()) {
-      if (key.startsWith(`${schemaName}:`)) {
-        keysToDelete.push(key);
-      }
-    }
-    keysToDelete.forEach(key => this.feedContentCache.delete(key));
-  }
-
   getImageMetadata(transactionId: string): ImageMetadata | null {
     const cached = this.imageMetadataCache.get(transactionId);
     if (!cached) {
@@ -99,24 +89,5 @@ export class MemoryCache {
     };
 
     this.imageMetadataCache.set(transactionId, cached);
-  }
-
-  clearAll(): void {
-    this.feedContentCache.clear();
-    this.imageMetadataCache.clear();
-  }
-
-  updateConfig(config: Partial<CacheConfig>): void {
-    this.config = { ...this.config, ...config };
-  }
-
-  getStats(): {
-    feedContentCount: number;
-    imageMetadataCount: number;
-  } {
-    return {
-      feedContentCount: this.feedContentCache.size,
-      imageMetadataCount: this.imageMetadataCache.size,
-    };
   }
 }

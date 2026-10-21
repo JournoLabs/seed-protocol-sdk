@@ -13,8 +13,6 @@ import type { CacheConfig, ImageMetadataConfig } from './types';
  *   In development (NODE_ENV=development), cache is disabled by default unless CACHE_ENABLED='true'.
  * - CACHE_TTL: Cache time-to-live in seconds (default: 3600)
  * - CACHE_DIR: Directory for cache files (default: './cache')
- * - CACHE_BACKGROUND_REFRESH: Enable background refresh (default: 'false')
- * - CACHE_REFRESH_INTERVAL: Background refresh interval in seconds (default: 300)
  */
 export function loadCacheConfig(): CacheConfig {
   const ttl = parseInt(process.env.CACHE_TTL || '3600', 10);
@@ -43,12 +41,6 @@ export function loadCacheConfig(): CacheConfig {
   } else {
     enabled = true;
   }
-
-  const backgroundRefresh = process.env.CACHE_BACKGROUND_REFRESH === 'true';
-  const refreshInterval = parseInt(
-    process.env.CACHE_REFRESH_INTERVAL || '300',
-    10
-  );
 
   // Log cache status on startup
   if (!enabled) {
@@ -84,8 +76,6 @@ export function loadCacheConfig(): CacheConfig {
     ttl,
     cacheDir,
     enabled,
-    backgroundRefresh,
-    refreshInterval,
     imageMetadata,
     pageTtl,
     archiveTtl,
