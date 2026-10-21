@@ -1,13 +1,20 @@
-import { MIME_TO_EXTENSION } from '@/helpers/mimeTypes'
+import { MIME_TO_EXTENSION, sniffMimeType } from '@/helpers/mimeTypes'
+import { getDataTypeFromString, getMimeType } from '@/helpers/dataUrl'
 
 /**
  * Injected at the top of the worker source below (the worker runs from a string and cannot import):
- * the same MIME -> extension map the upload side uses, see `helpers/mimeTypes.ts`. A free global,
- * so bundlers never rename references to it.
+ * the MIME -> extension map and byte sniffer the upload side uses (`helpers/mimeTypes.ts`) and the
+ * data-URL helpers from `helpers/dataUrl.ts`. Free globals, so bundlers never rename references.
  */
 declare const SEED_MIME_TO_EXTENSION: Record<string, string>
+declare const seedSniffMimeType: typeof sniffMimeType
+declare const seedGetMimeType: typeof getMimeType
+declare const seedGetDataTypeFromString: typeof getDataTypeFromString
 
 export default `const SEED_MIME_TO_EXTENSION = ${JSON.stringify(MIME_TO_EXTENSION)};
+const seedSniffMimeType = ${sniffMimeType.toString()};
+const seedGetMimeType = ${getMimeType.toString()};
+const seedGetDataTypeFromString = ${getDataTypeFromString.toString()};
 (
   ${
     function () {
@@ -39,47 +46,6 @@ const identifyString = (str: string) => {
 
   // Default to plain text if unsure
   return 'text'
-}
-
-const getMimeType = (base64: string) => {
-  if (!base64) {
-    return null
-  }
-  const result = base64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,/)
-
-  if (result && result.length > 1) {
-    return result[1]
-  } else {
-    return null // MIME type could not be determined
-  }
-}
-
-const getDataTypeFromString = (
-  data: string,
-): 'imageBase64' | 'base64' | 'url' | null => {
-  const nonImageBase64Regex =
-    /^(?!data:image\/(?:jpeg|png|gif|bmp|webp);base64,)[A-Za-z0-9+/=]+$/
-
-  if (nonImageBase64Regex.test(data)) {
-    return 'base64'
-  }
-
-  // Regular expression for base64 (simple version, checking for base64 format)
-  const imageBase64Regex = /^data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/]+={0,2}$/
-
-  if (imageBase64Regex.test(data)) {
-    return 'imageBase64'
-  }
-
-  // Regular expression for URL (simple version, checking for common URL format)
-  const urlRegex =
-    /^(http:\/\/www\.|https:\/\/www\.|http:\/\/|https:\/\/)?[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$/
-
-  if (urlRegex.test(data)) {
-    return 'url'
-  }
-
-  return null
 }
 
 const isBinary = (arrayBuffer: ArrayBuffer | Uint8Array): boolean => {
@@ -285,24 +251,7 @@ const transformDownloadedContent = async (
 ): Promise<Uint8Array> => bytes
 
 /** True when the bytes start with the signature of an image format the SDK stores in `images/`. */
-const hasImageSignature = (bytes: Uint8Array): boolean => {
-  const at = (offset: number, ...sig: number[]) => sig.every((b, i) => bytes[offset + i] === b)
-  const ascii = (offset: number, s: string) =>
-    at(offset, ...Array.from(s).map((c) => c.charCodeAt(0)))
-  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return true // PNG
-  if (at(0, 0xff, 0xd8, 0xff)) return true // JPEG
-  if (ascii(0, 'GIF87a') || ascii(0, 'GIF89a')) return true
-  if (ascii(0, 'RIFF') && ascii(8, 'WEBP')) return true
-  if (ascii(0, 'BM')) return true // BMP
-  if (at(0, 0x00, 0x00, 0x01, 0x00)) return true // ICO
-  if (at(0, 0x49, 0x49, 0x2a, 0x00) || at(0, 0x4d, 0x4d, 0x00, 0x2a)) return true // TIFF
-  if (ascii(4, 'ftyp')) {
-    // ISO-BMFF images (AVIF / HEIC); ftyp is also MP4, so check the brand
-    const brand = String.fromCharCode(...Array.from(bytes.slice(8, 12)))
-    return ['avif', 'avis', 'heic', 'heix', 'heif', 'mif1', 'msf1'].includes(brand)
-  }
-  return false
-}
+const hasImageSignature = (bytes: Uint8Array): boolean => (seedSniffMimeType(bytes) || '').startsWith('image/')
 
 /**
  * Content-Types that say nothing about the content: these are sniffed instead. `text/plain` is
@@ -626,7 +575,7 @@ const downloadFile = async (
     textType !== 'base64' &&
     textType !== 'html'
   ) {
-    const possibleImageType = getDataTypeFromString(dataString)
+    const possibleImageType = seedGetDataTypeFromString(dataString)
     if (!possibleImageType) {
       // Plain text / markdown / anything else textual.
       await saveToFiles(bytes)
@@ -674,7 +623,7 @@ const downloadFile = async (
   let fileName = transactionId
 
   if (textType === 'base64') {
-    const mimeType = getMimeType(dataString as string)
+    const mimeType = seedGetMimeType(dataString as string)
     const isDataUri = dataString.startsWith('data:')
     // Remove the Base64 header if it exists (e.g., "data:image/png;base64,")
     const binaryData = decodeBase64(dataString.split(',').pop() || '')

@@ -156,7 +156,8 @@ export const getExtensionForMimeType = (mimeType: string | null | undefined): st
 
 /**
  * MIME type from the leading bytes, for formats with an unambiguous signature. Used when a local
- * file has no (known) extension, e.g. a file seed named after its id.
+ * file has no (known) extension, e.g. a file seed named after its id. Self-contained: the download
+ * and resize workers get it as source text.
  */
 export const sniffMimeType = (bytes: Uint8Array): string | undefined => {
   const at = (offset: number, ...sig: number[]) =>
@@ -185,6 +186,7 @@ export const sniffMimeType = (bytes: Uint8Array): string | undefined => {
     if (brand === 'M4A ') return 'audio/mp4'
     return 'video/mp4'
   }
+  if (at(0, 0x00, 0x00, 0x01, 0x00)) return 'image/x-icon'
   return undefined
 }
 
