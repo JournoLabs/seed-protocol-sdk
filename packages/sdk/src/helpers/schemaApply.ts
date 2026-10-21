@@ -27,6 +27,7 @@ import {
   readSchemaFile,
 } from '@/helpers/schema'
 import { warnOnInvalidNameMatch } from '@/db/read/nameMatchLevels'
+import { inDefinitionsTransaction, upsertSchemaRow } from '@/db/write/definitions'
 import { schemas as schemasTable, type SchemaType } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
@@ -327,7 +328,7 @@ export async function applySchemaFile(
   if (!schemaRecord) {
     warnOnEasNameCollisions(file)
     warnOnInvalidNameMatch(file)
-    const { addSchemaToDb, addModelsToDb } = await import('./db')
+    const { addModelsToDb, broadcastSchemasInvalidate } = await import('./db')
     const modelFileIds = new Map(Object.entries(file.models).map(([name, model]) => [name, model.id!]))
     const propertyDefinitions = schemaFilePropertyDefinitions(file)
     const propertyFileIds = new Map(
@@ -342,20 +343,19 @@ export async function applySchemaFile(
     )
 
     let updatedPropertyFileIds: string[] = []
-    schemaRecord = await BaseDb.transaction(async (tx: Db) => {
-      const record = await addSchemaToDb(
-        {
-          name: file.metadata.name,
-          version: file.version,
-          createdAt: new Date(file.metadata.createdAt).getTime(),
-          updatedAt: new Date(file.metadata.updatedAt).getTime(),
-        },
-        file.id,
-        JSON.stringify(file, null, 2),
-        false,
-        undefined,
-        { db: tx, contentHash },
-      )
+    let inserted = false
+    schemaRecord = await inDefinitionsTransaction(async (tx: Db) => {
+      const { inserted: isNew, ...record } = await upsertSchemaRow(tx, {
+        name: file.metadata.name,
+        version: file.version,
+        createdAt: new Date(file.metadata.createdAt).getTime(),
+        updatedAt: new Date(file.metadata.updatedAt).getTime(),
+        schemaFileId: file.id,
+        schemaData: JSON.stringify(file, null, 2),
+        isDraft: false,
+        contentHash,
+      })
+      inserted = isNew
       updatedPropertyFileIds = await addModelsToDb(
         {},
         record,
@@ -372,6 +372,7 @@ export async function applySchemaFile(
       if (dropped.length > 0) await unlinkModelsFromSchema(tx, record.id, dropped)
       return record
     })
+    if (inserted) broadcastSchemasInvalidate()
     // A cached instance is otherwise never re-read from its row (createById returns it as is)
     await refreshCachedProperties(updatedPropertyFileIds)
     logger(`Applied schema ${file.metadata.name} v${file.version} (${file.id})`)

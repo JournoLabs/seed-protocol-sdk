@@ -1,23 +1,23 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
-import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { mergeSchemaFiles, writeNextSchemaVersion } from '@/helpers/schemaApply'
 import { Model } from '@/Model/Model'
-import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
+import { getDraftSaveError, queueDraftSave, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { getClient } from '@/client/ClientManager'
 import { ClientManagerState } from '@/client/constants'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { addSchemaToDb } from '@/helpers/db'
+import { addSchemaToDb, broadcastSchemasInvalidate } from '@/helpers/db'
+import { inDefinitionsTransaction, upsertSchemaRow } from '@/db/write/definitions'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '@/helpers/constants'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
@@ -103,8 +103,6 @@ export class Schema {
   > = new Map()
   // Deduplicate concurrent Schema.create(schemaName) calls - prevents many parallel loads for same schema
   private static pendingSchemaByName: Map<string, Promise<Schema>> = new Map()
-  // Track which schemas are currently being saved to prevent concurrent saves
-  protected static savingSchemas: Set<string> = new Set()
   protected readonly _service: SchemaService
 
   $schema?: string
@@ -1182,31 +1180,19 @@ export class Schema {
         changes: [{ type: 'full_schema_write' as const }],
       },
     )
-    await db
-      .update(schemasTable)
-      .set({ isEdited: false })
-      .where(eq(schemasTable.schemaFileId, publishedSchema.id!))
-
-    // Clear draft flags on Schema and update conflict detection metadata
-    this._service.send({ 
-      type: 'clearDraft',
-      _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
-      _dbVersion: publishedSchema.version,
-      savedSchema: publishedSchema,
-    } as any)
-
-    // Clear edited flags on all ModelProperty instances and in database
+    // Clear edited flags on the cached ModelProperty instances of the edited keys, then on the rows
+    // (schema, those properties, the schema's models) in one transaction.
     const modelPropertyMod = await import('../ModelProperty/ModelProperty')
     const { ModelProperty } = modelPropertyMod
+    const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
+      instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
+    }
+    const thisSchemaName = this.schemaName
+    const clearedKeys: Array<{ modelName: string; propertyName: string }> = []
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
-      
-      const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-        instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
-      }
-      
+      if (!modelName || !propertyName) continue
       // Model names are only unique per schema: pick this schema's instance, which may be keyed by id.
-      const thisSchemaName = this.schemaName
       const cachedInstance = [...ModelPropertyClass.instanceCache.values()].find(({ instance }) => {
         const ctx = instance.getService().getSnapshot().context
         return (
@@ -1215,74 +1201,41 @@ export class Schema {
           (!ctx._schemaName || ctx._schemaName === thisSchemaName)
         )
       })
-      
-      if (cachedInstance) {
-        const modelProperty = cachedInstance.instance
-        
-        // Update original values to current values and clear edited flag
-        modelProperty.getService().send({
-          type: 'clearEdited',
-        })
-        
-        // Clear isEdited flag in database
-        try {
-          if (db && modelName && propertyName) {
-            // Find this schema's model by name
-            const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
-            const modelRecord = await resolveModelRecord(modelName, { schemaName: thisSchemaName }, db)
-            const modelRecords = modelRecord ? [modelRecord] : []
-            
-            if (modelRecords.length > 0) {
-              // Find property by name and modelId
-              const propertyRecords = await db
-                .select({ id: propertiesTable.id })
-                .from(propertiesTable)
-                .where(
-                  and(
-                    eq(propertiesTable.name, propertyName),
-                    eq(propertiesTable.modelId, modelRecords[0].id)
-                  )
-                )
-                .limit(1)
-              
-              if (propertyRecords.length > 0) {
-                // Clear isEdited flag in database
-                await db
-                  .update(propertiesTable)
-                  .set({ isEdited: false })
-                  .where(eq(propertiesTable.id, propertyRecords[0].id!))
-              }
-            }
-          }
-        } catch (error) {
-          logger(`Error clearing isEdited flag in database for property ${propertyKey}: ${error}`)
-        }
-      }
+      if (!cachedInstance) continue
+      cachedInstance.instance.getService().send({ type: 'clearEdited' })
+      clearedKeys.push({ modelName, propertyName })
     }
-    
-    // Clear isEdited flags for all models in this schema
-    try {
-      if (db && context._dbId) {
-        // Get all models for this schema
-        const modelRecords = await db
-          .select({ id: modelsTable.id })
+
+    const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+    await inDefinitionsTransaction(async (tx) => {
+      await tx
+        .update(schemasTable)
+        .set({ isEdited: false })
+        .where(eq(schemasTable.schemaFileId, publishedSchema.id!))
+      for (const { modelName, propertyName } of clearedKeys) {
+        const modelRecord = await resolveModelRecord(modelName, { schemaName: thisSchemaName }, tx)
+        if (!modelRecord) continue
+        await tx
+          .update(propertiesTable)
+          .set({ isEdited: false })
+          .where(and(eq(propertiesTable.name, propertyName), eq(propertiesTable.modelId, modelRecord.id)))
+      }
+      if (context._dbId) {
+        const linked = tx
+          .select({ id: modelSchemas.modelId })
           .from(modelSchemas)
-          .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
           .where(eq(modelSchemas.schemaId, context._dbId))
-        
-        // Clear isEdited flag for all models
-        for (const modelRecord of modelRecords) {
-          if (modelRecord.id) {
-            await db
-              .update(modelsTable)
-              .set({ isEdited: false })
-              .where(eq(modelsTable.id, modelRecord.id))
-          }
-        }
+        await tx.update(modelsTable).set({ isEdited: false }).where(inArray(modelsTable.id, linked))
       }
-    } catch (error) {
-      logger(`Error clearing isEdited flags for models: ${error}`)
-    }
+    })
+
+    // Clear draft flags on Schema and update conflict detection metadata
+    this._service.send({ 
+      type: 'clearDraft',
+      _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
+      _dbVersion: publishedSchema.version,
+      savedSchema: publishedSchema,
+    } as any)
 
     logger(`Successfully saved new version for schema ${this.schemaName} and published to file`)
     return newFilePath
@@ -1426,37 +1379,24 @@ export class Schema {
     
     saveDraftLogger(`Client is initialized, proceeding with save (oldName: "${oldName}", newName: "${newName}")`)
     
-    // Check for conflicts before saving
-    const conflictCheck = await this._checkForConflicts()
-    if (conflictCheck.hasConflict) {
-      const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the schema and try again.'
-      saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
-      throw new ConflictError(errorMessage, conflictCheck)
-    }
-    
-    const context = this._getSnapshotContext()
-    const schemaName = newName || context.schemaName || oldName || ''
-    const schemaFileId = context.id || '' // id is now the schemaFileId (string)
-    
-    // Use schemaFileId as the key if available, otherwise use schemaName
-    const saveKey = schemaFileId || schemaName
-    
-    // Prevent concurrent saves for the same schema
-    if (Schema.savingSchemas.has(saveKey)) {
-      saveDraftLogger(`Schema ${schemaName} (key: ${saveKey}) is already being saved, skipping concurrent save`)
-      return
-    }
-    
-    Schema.savingSchemas.add(saveKey)
-    saveDraftLogger(`Starting save for schema ${schemaName} (key: ${saveKey}, schemaFileId: ${schemaFileId})`)
-    
-    try {
-      // Get context - if service is stopped, use the last known context or build from metadata
+    const initialContext = this._getSnapshotContext()
+    // schemaFileId when known, else the name
+    const saveKey = initialContext.id || newName || initialContext.schemaName || oldName || ''
+
+    // A save started while another for this schema runs waits for it, so renames land in order.
+    await queueDraftSave(saveKey, async () => {
+      const conflictCheck = await this._checkForConflicts()
+      if (conflictCheck.hasConflict) {
+        const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the schema and try again.'
+        saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
+        throw new ConflictError(errorMessage, conflictCheck)
+      }
+
+      // Get context - if service is stopped, build it from what we know
       let context: SchemaMachineContext
       try {
         context = this._getSnapshotContext()
       } catch {
-        // Service might be stopped, build context from what we know
         logger(`Service stopped, building context from available data`)
         context = {
           schemaName: newName || oldName || '',
@@ -1476,92 +1416,37 @@ export class Schema {
         throw new Error('Database not found')
       }
 
-      // Use provided newName or fall back to context schemaName (avoid getter which might be stale)
       const finalNewName = newName || context.schemaName || this.schemaName
-      // CRITICAL: If name changed, we MUST look up by old name to find the existing record
-      // Don't use finalNewName if oldName is provided - that would look up by the new name and not find the old record
-      const lookupName = oldName && oldName !== finalNewName ? oldName : finalNewName
+      const isRename = !!oldName && oldName !== finalNewName
 
-      // Try to get existing schema ID from database to preserve it
-      // PRIMARY: Look up by schemaFileId (most reliable, independent of name changes)
-      // FALLBACK: Look up by old name if name changed, otherwise by current name
-      let existingSchemaId: string | undefined
+      // The row: by schemaFileId, else by name (the old name for a rename, preferring a draft).
       let existingSchemaRecord: typeof schemasTable.$inferSelect | undefined
-      
-      // PRIMARY: Look up by schemaFileId if we have it (this is the most reliable way)
       if (context.id) {
-        logger(`Looking up schema by schemaFileId: ${context.id}`)
-        const schemasById = await db
+        ;[existingSchemaRecord] = await db
           .select()
           .from(schemasTable)
-          .where(eq(schemasTable.schemaFileId, context.id)) // id is now the schemaFileId (string)
+          .where(eq(schemasTable.schemaFileId, context.id))
           .limit(1)
-        
-        if (schemasById.length > 0) {
-          const foundRecord = schemasById[0]
-          existingSchemaRecord = foundRecord
-          existingSchemaId = foundRecord.schemaFileId || context.id
-          logger(`Found schema by schemaFileId: ${context.id} (id: ${foundRecord.id}, name: ${foundRecord.name})`)
-        } else {
-          logger(`No schema found by schemaFileId: ${context.id}`)
-        }
-      } else {
-        logger(`No id (schemaFileId) in context, will look up by name`)
       }
-      
-      // FALLBACK: If not found by schemaFileId, try by name (for newly created schemas that don't have schemaFileId yet)
       if (!existingSchemaRecord) {
-        logger(`Looking up schema by name "${lookupName}" (oldName: ${oldName}, finalNewName: ${finalNewName})`)
-        const existingSchemas = await db
+        const byName = await db
           .select()
           .from(schemasTable)
-          .where(eq(schemasTable.name, lookupName))
-          .limit(10) // Get multiple to find drafts
-        
-        logger(`Found ${existingSchemas.length} records with name "${lookupName}"`)
-        
-        // If name changed, prefer draft records; otherwise prefer any record
-        if (existingSchemas.length > 0) {
-          if (oldName && oldName !== finalNewName) {
-            // When name changes, prefer draft records
-            const draftRecord = existingSchemas.find((s: typeof schemasTable.$inferSelect) => s.isDraft === true)
-            const selectedRecord = draftRecord || existingSchemas[0]
-            existingSchemaRecord = selectedRecord
-            logger(`Selected ${draftRecord ? 'draft' : 'first'} record (id: ${selectedRecord.id}, isDraft: ${selectedRecord.isDraft})`)
-          } else {
-            const selectedRecord = existingSchemas[0]
-            existingSchemaRecord = selectedRecord
-            logger(`Selected first record (id: ${selectedRecord.id}, isDraft: ${selectedRecord.isDraft})`)
-          }
-          
-          if (existingSchemaRecord?.schemaFileId) {
-            existingSchemaId = existingSchemaRecord.schemaFileId
-          }
-        } else {
-          logger(`No records found with name "${lookupName}"`)
-        }
-      }
-      
-      if (existingSchemaRecord) {
-        logger(`Using existing record (id: ${existingSchemaRecord.id}, name: ${existingSchemaRecord.name}, isDraft: ${existingSchemaRecord.isDraft}, schemaFileId: ${existingSchemaRecord.schemaFileId || 'none'})`)
-      } else {
-        logger(`No existing record found`)
+          .where(eq(schemasTable.name, isRename ? oldName! : finalNewName))
+          .limit(10)
+        existingSchemaRecord =
+          (isRename ? byName.find((row: typeof schemasTable.$inferSelect) => row.isDraft === true) : undefined) ?? byName[0]
       }
 
       // A published schema's rename is its next version file, under the new name (ADR 0016).
       // A row-only rename was undone at the next init, which matched the files by their old name.
-      if (
-        oldName &&
-        oldName !== finalNewName &&
-        existingSchemaRecord?.schemaFileId &&
-        existingSchemaRecord.isDraft !== true
-      ) {
+      if (isRename && existingSchemaRecord?.schemaFileId && existingSchemaRecord.isDraft !== true) {
         const { schemaFile } = await writeNextSchemaVersion(
           existingSchemaRecord.schemaFileId,
           (previous) => ({ ...previous, metadata: { ...previous.metadata, name: finalNewName } }),
           {
             description: `Renamed schema ${oldName} to ${finalNewName}`,
-            changes: [{ type: 'schema_rename', oldName, newName: finalNewName }],
+            changes: [{ type: 'schema_rename', oldName: oldName!, newName: finalNewName }],
           },
         )
         const savedAt = new Date(schemaFile.metadata.updatedAt).getTime()
@@ -1586,226 +1471,52 @@ export class Schema {
           .limit(1)
       }
 
-      // Build current schema state from context
-      // Use existing schemaFileId if we found one, otherwise use the one from context, or generate new
-      const schemaFileId = existingSchemaId || context.id || generateId() // id is now the schemaFileId (string)
-      
-      // Build metadata - if name changed, use newName, otherwise use context metadata
-      // Always ensure metadata.name matches finalNewName to prevent inconsistencies
-      const currentMetadata = context.metadata ? {
-        ...context.metadata,
-        name: finalNewName, // Always use the final name (from newName parameter or context)
-        updatedAt: new Date().toISOString(), // Always update timestamp when saving
-      } : {
-        name: finalNewName,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      if (isRename && !existingSchemaRecord) {
+        throw new Error(`Cannot update schema name: existing schema with name "${oldName}" not found in database`)
       }
-      
-      // CRITICAL: Ensure schema.id always matches schemaFileId (database is source of truth)
-      // Use existingSchemaRecord.schemaFileId if available, otherwise use the calculated schemaFileId
-      const finalSchemaFileId = existingSchemaRecord?.schemaFileId || schemaFileId
-      
-      // CRITICAL: Read models from Model instances, not from Schema context
+
+      // The database's schemaFileId is the schema's id
+      const finalSchemaFileId = existingSchemaRecord?.schemaFileId || context.id || generateId()
+      const currentMetadata = context.metadata
+        ? { ...context.metadata, name: finalNewName, updatedAt: new Date().toISOString() }
+        : { name: finalNewName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+
       // Model instances are the source of truth for model data
       const modelsFromInstances = await this._buildModelsFromInstances()
-      
       const currentSchema: SchemaFileFormat = {
         $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
         version: context.version || 1,
-        id: finalSchemaFileId, // Always use schemaFileId from database as source of truth
+        id: finalSchemaFileId,
         metadata: currentMetadata,
-        models: modelsFromInstances, // Read from Model instances, not context.models
+        models: modelsFromInstances,
         enums: context.enums || {},
         migrations: context.migrations || [],
         ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
       }
-      
-      // Log if there was a mismatch that we're fixing
-      if (existingSchemaRecord?.schemaFileId && context.id && context.id !== finalSchemaFileId) {
-        saveDraftLogger(`Fixed schema ID mismatch: context.id="${context.id}" does not match DB schemaFileId="${finalSchemaFileId}". Using DB value.`)
-      }
-      
-      saveDraftLogger(`Building schema with metadata.name="${currentMetadata.name}", finalNewName="${finalNewName}"`)
 
-      // If name changed, we MUST update the existing record (don't create a new one)
-      if (oldName && oldName !== finalNewName) {
-        if (existingSchemaRecord && existingSchemaRecord.id) {
-          logger(`Updating existing schema record (id: ${existingSchemaRecord.id}) from "${oldName}" to "${finalNewName}"`)
-          
-          // Update the existing record with the new name
-          const schemaDataString = JSON.stringify(currentSchema, null, 2)
-          saveDraftLogger(`Saving schemaData with metadata.name="${currentSchema.metadata.name}", schemaData length=${schemaDataString.length}`)
-          
-          // CRITICAL: Ensure schemaFileId column matches schema.id (schema.id is now guaranteed to match finalSchemaFileId)
-          // Always update schemaFileId to match the id in the schema JSON to maintain consistency
-          clearNameMatchLevels() // the stored schema file changes (ADR 0009)
-          const updateData: any = {
+      // A rename writes the row it found under the old name; other saves find the row by id or name.
+      const { inserted } = await inDefinitionsTransaction((tx) =>
+        upsertSchemaRow(
+          tx,
+          {
             name: finalNewName,
-            schemaData: schemaDataString,
-            schemaFileId: finalSchemaFileId, // Always set to match schema.id
             version: currentSchema.version,
+            createdAt: new Date(currentSchema.metadata.createdAt).getTime(),
             updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-            isDraft: true, // Ensure it's marked as a draft when saving via _saveDraftToDb
-          }
-          
-          // Log if we're fixing a mismatch
-          if (existingSchemaRecord.schemaFileId && existingSchemaRecord.schemaFileId !== finalSchemaFileId) {
-            saveDraftLogger(`Fixing schemaFileId mismatch: DB had "${existingSchemaRecord.schemaFileId}", schema.id is "${finalSchemaFileId}". Updating DB to match schema.id.`)
-          } else if (!existingSchemaRecord.schemaFileId && finalSchemaFileId) {
-            saveDraftLogger(`Setting schemaFileId to ${finalSchemaFileId} (was null)`)
-          }
-          
-          await db
-            .update(schemasTable)
-            .set(updateData)
-            .where(eq(schemasTable.id, existingSchemaRecord.id))
-          
-          // Verify what was saved by reading it back
-          const verifyRecord = await db
-            .select()
-            .from(schemasTable)
-            .where(eq(schemasTable.id, existingSchemaRecord.id))
-            .limit(1)
-          
-          if (verifyRecord.length > 0 && verifyRecord[0].schemaData) {
-            try {
-              const savedSchema = JSON.parse(verifyRecord[0].schemaData) as SchemaFileFormat
-              saveDraftLogger(`Verified saved schemaData: metadata.name="${savedSchema.metadata?.name}", name column="${verifyRecord[0].name}", isDraft=${verifyRecord[0].isDraft}, schemaFileId="${verifyRecord[0].schemaFileId}"`)
-              
-              if (verifyRecord[0].isDraft !== true) {
-                saveDraftLogger(`ERROR: isDraft is not true after save! Expected true, got ${verifyRecord[0].isDraft}. This will cause the schema to load from file instead of database!`)
-                // Try to fix it immediately
-                await db
-                  .update(schemasTable)
-                  .set({ isDraft: true })
-                  .where(eq(schemasTable.id, existingSchemaRecord.id))
-                saveDraftLogger(`Attempted to fix isDraft by setting it to true again`)
-                
-                // Verify the fix
-                const fixedRecord = await db
-                  .select()
-                  .from(schemasTable)
-                  .where(eq(schemasTable.id, existingSchemaRecord.id))
-                  .limit(1)
-                if (fixedRecord.length > 0) {
-                  saveDraftLogger(`After fix attempt: isDraft=${fixedRecord[0].isDraft}`)
-                }
-              }
-            } catch (error) {
-              saveDraftLogger(`Error parsing saved schemaData for verification: ${error}`)
-            }
-          } else {
-            saveDraftLogger(`WARNING: Could not verify saved record - record not found or has no schemaData`)
-          }
-          
-          // Update the context's id (schemaFileId) and conflict detection metadata
-          try {
-            const snapshot = this._service.getSnapshot()
-            if (snapshot.status !== 'stopped') {
-              // Use finalSchemaFileId which matches the schema.id
-              // Also update conflict detection metadata after successful save
-              this._service.send({
-                type: 'updateContext',
-                id: finalSchemaFileId, // id is now the schemaFileId (string)
-                _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-                _dbVersion: currentSchema.version,
-              })
-            }
-          } catch (error) {
-            // Service might be stopped, ignore
-            logger(`Could not update id (schemaFileId) in context: ${error instanceof Error ? error.message : String(error)}`)
-          }
-          
-          logger(`Successfully updated schema name from "${oldName}" to "${finalNewName}" in database`)
-          Schema.savingSchemas.delete(saveKey)
-          return
-        } else {
-          // Name changed but we didn't find the existing record - try harder to find it
-          logger(`WARNING: Name changed from "${oldName}" to "${finalNewName}" but existing record not found. Trying additional lookups...`)
-          
-          // Try to find by looking for ANY draft with the old name (even if it doesn't match exactly)
-          const allDrafts = await db
-            .select()
-            .from(schemasTable)
-            .where(eq(schemasTable.name, oldName))
-            .limit(1)
-          
-          if (allDrafts.length > 0 && allDrafts[0].id) {
-            const foundRecord = allDrafts[0]
-            logger(`Found existing record by old name "${oldName}" (id: ${foundRecord.id}), updating to new name "${finalNewName}"`)
-            
-            // Update the existing record with the new name
-              // CRITICAL: Ensure schemaFileId matches schema.id
-              clearNameMatchLevels() // the stored schema file changes (ADR 0009)
-              await db
-              .update(schemasTable)
-              .set({
-                name: finalNewName,
-                schemaData: JSON.stringify(currentSchema, null, 2),
-                schemaFileId: finalSchemaFileId, // Always set to match schema.id
-                version: currentSchema.version,
-                updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-                isDraft: true, // Ensure it's marked as a draft when saving via _saveDraftToDb
-              })
-              .where(eq(schemasTable.id, foundRecord.id))
-            
-            // Update context with id (schemaFileId) and conflict detection metadata
-            try {
-              const snapshot = this._service.getSnapshot()
-              if (snapshot.status !== 'stopped' && finalSchemaFileId) {
-                this._service.send({
-                  type: 'updateContext',
-                  id: finalSchemaFileId, // id is now the schemaFileId (string)
-                  _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-                  _dbVersion: currentSchema.version,
-                })
-              }
-            } catch {
-              // Service might be stopped, ignore
-            }
-            
-            logger(`Successfully updated schema name from "${oldName}" to "${finalNewName}" in database (found by old name)`)
-            Schema.savingSchemas.delete(saveKey)
-            return
-          }
-          
-          // If we still can't find it, this is an error - don't create a duplicate
-          logger(`ERROR: Could not find existing schema record with name "${oldName}". Cannot update name to "${finalNewName}" without creating a duplicate.`)
-          Schema.savingSchemas.delete(saveKey)
-          throw new Error(`Cannot update schema name: existing schema with name "${oldName}" not found in database`)
-        }
-      }
-
-      // If name changed, we should have already updated the record above and returned
-      // Only call addSchemaToDb if name didn't change (normal save scenario)
-      if (oldName && oldName !== finalNewName) {
-        // This should never happen - we should have updated above and returned
-        // But if we get here, it means the update path didn't work, so we need to handle it
-        logger(`ERROR: Name changed from "${oldName}" to "${finalNewName}" but update path didn't complete. This should not occur.`)
-        Schema.savingSchemas.delete(saveKey)
-        throw new Error(`Failed to update schema name: existing record not found or update failed`)
-      }
-
-      // Otherwise, use addSchemaToDb which will handle create/update logic (for normal saves, not name changes)
-      await addSchemaToDb(
-        {
-          name: finalNewName,
-          version: currentSchema.version,
-          createdAt: new Date(currentSchema.metadata.createdAt).getTime(),
-          updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-        },
-        currentSchema.id, // schemaFileId
-        JSON.stringify(currentSchema, null, 2), // schemaData
-        true, // isDraft = true
+            schemaFileId: finalSchemaFileId,
+            schemaData: JSON.stringify(currentSchema, null, 2),
+            isDraft: true,
+          },
+          isRename ? { rowId: existingSchemaRecord!.id } : {},
+        ),
       )
+      if (inserted) broadcastSchemasInvalidate()
 
-      // Update conflict detection metadata after successful save
       try {
-        const snapshot = this._service.getSnapshot()
-        if (snapshot.status !== 'stopped') {
+        if (this._service.getSnapshot().status !== 'stopped') {
           this._service.send({
             type: 'updateContext',
+            ...(isRename && { id: finalSchemaFileId }),
             _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
             _dbVersion: currentSchema.version,
           })
@@ -1813,18 +1524,8 @@ export class Schema {
       } catch {
         // Service might be stopped, ignore
       }
-      
-      saveDraftLogger(`Successfully saved draft schema "${finalNewName}" to database (key: ${saveKey})`)
-      logger(`Saved draft schema ${finalNewName} to database`)
-    } catch (error) {
-      saveDraftLogger(`ERROR: Failed to save draft to database for schema "${schemaName}" (key: ${saveKey}): ${error instanceof Error ? error.message : String(error)}`)
-      logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-      throw error
-    } finally {
-      // Always remove from saving set, even if there was an error
-      Schema.savingSchemas.delete(saveKey)
-      saveDraftLogger(`Removed schema from saving set (key: ${saveKey})`)
-    }
+      saveDraftLogger(`Saved draft schema "${finalNewName}" (key: ${saveKey})`)
+    })
   }
 
 
@@ -1965,44 +1666,47 @@ export class Schema {
         const db = BaseDb.getAppDb()
         if (!db || !schemaFileId) return
 
-        const schemaRecords = await db
-          .select({ id: schemasTable.id })
-          .from(schemasTable)
-          .where(eq(schemasTable.schemaFileId, schemaFileId))
-
-        if (schemaRecords.length === 0) return
-
-        const schemaIds = schemaRecords
-          .map((r: { id: number | null }) => r.id)
-          .filter((id: number | null): id is number => id != null)
-        if (schemaIds.length === 0) return
-
-        const drizzleMod = await import('drizzle-orm')
-        const { inArray } = drizzleMod
-        const joinRows = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(inArray(modelSchemas.schemaId, schemaIds))
-        const modelIds = [
-          ...new Set(
-            joinRows
-              .map((r: { modelId: number | null }) => r.modelId)
-              .filter((id: number | null): id is number => id != null),
-          ),
-        ] as number[]
-
         const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
-        await detachModelRows(db, modelIds)
+        // The schema's rows go together or not at all
+        const deleted = await inDefinitionsTransaction(async (tx) => {
+          const schemaRecords = await tx
+            .select({ id: schemasTable.id })
+            .from(schemasTable)
+            .where(eq(schemasTable.schemaFileId, schemaFileId))
 
-        await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
+          if (schemaRecords.length === 0) return false
 
-        for (const modelId of modelIds) {
-          await db.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
-        }
-        for (const modelId of modelIds) {
-          await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
-        }
-        await db.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+          const schemaIds = schemaRecords
+            .map((r: { id: number | null }) => r.id)
+            .filter((id: number | null): id is number => id != null)
+          if (schemaIds.length === 0) return false
+
+          const joinRows = await tx
+            .select({ modelId: modelSchemas.modelId })
+            .from(modelSchemas)
+            .where(inArray(modelSchemas.schemaId, schemaIds))
+          const modelIds = [
+            ...new Set(
+              joinRows
+                .map((r: { modelId: number | null }) => r.modelId)
+                .filter((id: number | null): id is number => id != null),
+            ),
+          ] as number[]
+
+          await detachModelRows(tx, modelIds)
+
+          await tx.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
+
+          for (const modelId of modelIds) {
+            await tx.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
+          }
+          for (const modelId of modelIds) {
+            await tx.delete(modelsTable).where(eq(modelsTable.id, modelId))
+          }
+          await tx.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+          return true
+        })
+        if (!deleted) return
 
         // Delete the SDK's own copies of this schema's files (all versions) in the working dir.
         // loadAllSchemasFromDb imports any schema file without a DB row, so leaving them brought
