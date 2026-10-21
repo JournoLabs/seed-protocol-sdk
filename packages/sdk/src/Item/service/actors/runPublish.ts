@@ -33,14 +33,19 @@ export const runPublish = fromCallback<
     }
     try {
       // item.publish() sends its own instance; look it up only if startPublish came without one.
-      const item =
-        itemFromEvent ??
-        ((await (await import('../../../Item/Item')).Item.find({ seedLocalId })) as Item<any> | undefined)
+      const loaded = itemFromEvent
+        ? undefined
+        : ((await (await import('../../../Item/Item')).Item.find({ seedLocalId })) as Item<any> | undefined)
+      const item = itemFromEvent ?? loaded
       if (!item) {
         sendBack({ type: 'publishError', error: new Error(`Item not found: ${seedLocalId}`) })
         return
       }
-      await executor(item, options)
+      try {
+        await executor(item, options)
+      } finally {
+        loaded?.unload()
+      }
       sendBack({ type: 'publishSuccess' })
     } catch (error) {
       logger('runPublish error:', error)

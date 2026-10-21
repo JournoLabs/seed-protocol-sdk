@@ -5,10 +5,11 @@ import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { getArweaveUrlForTransaction } from '@/helpers'
+import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
 import { getContentHash } from '@/helpers/crypto'
 import type { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
+import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
 import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@/helpers/relationSeedRef'
@@ -295,12 +296,13 @@ async function resolveSeedPropertyRefTxId(
   item: IItem<any>,
   propertyName: string,
   txBySeedLocalId: Map<string, string>,
+  loads: ItemLoads,
 ): Promise<string> {
   const { seedLocalId, seedUid } = resolveSeedPropertyRefTarget(item, propertyName)
   const uploaded = seedLocalId ? txBySeedLocalId.get(seedLocalId) : undefined
   if (uploaded) return uploaded
 
-  const storageItem = await Item.find({ seedLocalId, seedUid })
+  const storageItem = await loads.find({ seedLocalId, seedUid })
   const st =
     storageItem?.internalProperties['storageTransactionId'] ??
     storageItem?.allProperties['storageTransactionId']
@@ -364,7 +366,10 @@ export async function createImageItemFromBytes(
     const fs = await BaseFileManager.getFs()
     fs.writeFileSync(filePath, bytes)
   }
-  return { seedLocalId: imageItem.seedLocalId }
+  const { seedLocalId } = imageItem
+  // Publish loads the image again when it uploads and attests it
+  imageItem.unload()
+  return { seedLocalId }
 }
 
 /**
@@ -383,9 +388,11 @@ export async function prepareHtmlEmbeddedImagesForPublish(
   const deferred = new Set<string>()
   // The item's own Html, and the Html of the draft items published with it: each gets its embedded
   // images materialized and co-published (rows keyed by the item owning the Html property).
-  for (const parent of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
-    await prepareHtmlEmbeddedImagesOfItem(appDb, parent, publishPolicy, deferred)
-  }
+  await withItemLoads(undefined, async (loads) => {
+    for (const parent of [item, ...(await getRelatedDraftsCoPublishedWith(item, loads))]) {
+      await prepareHtmlEmbeddedImagesOfItem(appDb, parent, publishPolicy, deferred)
+    }
+  })
 
   return { deferredHtmlSeedLocalIds: [...deferred] }
 }
@@ -395,9 +402,9 @@ export async function prepareHtmlEmbeddedImagesForPublish(
  * through relation and list properties, as getPublishPayload and getPublishUploads walk them
  * (publishDraftGraph.ts). Html-embedded images of these items are co-published with `item` like its own.
  */
-export async function getRelatedDraftsCoPublishedWith(item: IItem<any>): Promise<IItem<any>[]> {
+export async function getRelatedDraftsCoPublishedWith(item: IItem<any>, loads: ItemLoads): Promise<IItem<any>[]> {
   const { getPublishDraftGraph } = await import('@/db/read/publishDraftGraph')
-  const { drafts } = await getPublishDraftGraph(item)
+  const { drafts } = await getPublishDraftGraph(item, { loads })
   return drafts.map((d) => d.item)
 }
 
@@ -493,9 +500,20 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
 
-  const parentItem = await Item.find({ seedLocalId: parentSeedLocalId })
-  if (!parentItem) return
+  await withItemLoads(undefined, async (loads) => {
+    const parentItem = await loads.find({ seedLocalId: parentSeedLocalId })
+    if (!parentItem) return
+    await rewriteHtmlEmbeddedImagesOfItemAndDrafts(appDb, parentItem, uploadedTransactions, deferredHtmlSeedLocalIds, loads)
+  })
+}
 
+async function rewriteHtmlEmbeddedImagesOfItemAndDrafts(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  parentItem: IItem<any>,
+  uploadedTransactions: UploadedTx[],
+  deferredHtmlSeedLocalIds: string[] | undefined,
+  loads: ItemLoads,
+): Promise<void> {
   const txBySeedLocalId = new Map<string, string>()
   for (const u of uploadedTransactions) {
     if (u.seedLocalId && u.txId) {
@@ -507,8 +525,8 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
     : undefined
 
   // The parent's Html and that of the draft items published with it (see prepareHtmlEmbeddedImagesForPublish).
-  for (const item of [parentItem, ...(await getRelatedDraftsCoPublishedWith(parentItem))]) {
-    await rewriteHtmlEmbeddedImagesOfItem(appDb, item, txBySeedLocalId, deferred)
+  for (const item of [parentItem, ...(await getRelatedDraftsCoPublishedWith(parentItem, loads))]) {
+    await rewriteHtmlEmbeddedImagesOfItem(appDb, item, txBySeedLocalId, deferred, loads)
   }
 }
 
@@ -517,6 +535,7 @@ async function rewriteHtmlEmbeddedImagesOfItem(
   parentItem: IItem<any>,
   txBySeedLocalId: Map<string, string>,
   deferred: Set<string> | undefined,
+  loads: ItemLoads,
 ): Promise<void> {
   const rows = await appDb
     .select()
@@ -544,13 +563,13 @@ async function rewriteHtmlEmbeddedImagesOfItem(
       const txId = txBySeedLocalId.get(r.imageSeedLocalId.trim())
       if (!txId) continue
       const dataUri = await findDataUriForStableKey(html, r.stableKey)
-      if (dataUri) replacements.set(dataUri, getArweaveUrlForTransaction(txId))
+      if (dataUri) replacements.set(dataUri, getPublicArweaveRawUrl(txId))
     }
 
     const urlByPropertyName = new Map<string, string>()
     for (const name of findSeedPropertyRefsInHtml(html)) {
-      const txId = await resolveSeedPropertyRefTxId(parentItem, name, txBySeedLocalId)
-      urlByPropertyName.set(name, getArweaveUrlForTransaction(txId))
+      const txId = await resolveSeedPropertyRefTxId(parentItem, name, txBySeedLocalId, loads)
+      urlByPropertyName.set(name, getPublicArweaveRawUrl(txId))
     }
 
     const newHtml = replaceSeedPropertyRefsInHtml(replaceDataUrisInParsedHtml(html, replacements), urlByPropertyName)

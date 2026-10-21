@@ -1,11 +1,12 @@
 import { versions } from '@/seedSchema'
-import { and, count, eq, max } from 'drizzle-orm'
+import { and, count, eq, max, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versionNotRevoked } from './liveVersion'
+import { LATEST_VERSION_ORDER_SQL } from './latestVersion'
 
 /**
- * Per-seed version aggregates plus the latest version row by (created_at DESC, local_id DESC) via
- * max(created_at) then max(local_id) tie-break.
+ * Per-seed version aggregates plus the latest version row: the first live version by
+ * `LATEST_VERSION_ORDER_SQL`.
  *
  * Revoked versions (`revoked_at` set) are never the latest version and don't count toward
  * `lastVersionPublishedAt`. `versionsCount` and `lastLocalUpdateAt` still cover every version row,
@@ -36,52 +37,51 @@ export const getVersionData = () => {
         lastVersionPublishedAt: max(versions.attestationCreatedAt).as(
           'lastVersionPublishedAt',
         ),
-        maxCreatedAt: max(versions.createdAt).as('maxCreatedAt'),
       })
       .from(versions)
       .where(versionNotRevoked())
       .groupBy(versions.seedLocalId),
   )
 
-  const latestVersionIds = appDb.$with('latest_version_ids').as(
+  const rankedLiveVersions = appDb.$with('ranked_live_versions').as(
     appDb
-      .with(liveVersionStats)
       .select({
         seedLocalId: versions.seedLocalId,
-        latestVersionLocalId: max(versions.localId).as('latestVersionLocalId'),
+        latestVersionLocalId: sql<string>`${versions.localId}`.as('latestVersionLocalId'),
+        rowNum: sql
+          .raw(`ROW_NUMBER() OVER (PARTITION BY seed_local_id ORDER BY ${LATEST_VERSION_ORDER_SQL})`)
+          .as('rowNum'),
       })
       .from(versions)
-      .innerJoin(
-        liveVersionStats,
-        and(
-          eq(versions.seedLocalId, liveVersionStats.seedLocalId),
-          eq(versions.createdAt, liveVersionStats.maxCreatedAt),
-        ),
-      )
-      .where(versionNotRevoked())
-      .groupBy(versions.seedLocalId),
+      .where(versionNotRevoked()),
   )
 
   return appDb.$with('versionData').as(
     appDb
-      .with(versionStats, liveVersionStats, latestVersionIds)
+      .with(versionStats, liveVersionStats, rankedLiveVersions)
       .select({
         seedLocalId: versionStats.seedLocalId,
         seedUid: versions.seedUid,
         latestVersionUid: versions.uid,
-        latestVersionLocalId: latestVersionIds.latestVersionLocalId,
+        latestVersionLocalId: rankedLiveVersions.latestVersionLocalId,
         versionsCount: versionStats.versionsCount,
         lastVersionPublishedAt: liveVersionStats.lastVersionPublishedAt,
         lastLocalUpdateAt: versionStats.lastLocalUpdateAt,
       })
       .from(versionStats)
       .leftJoin(liveVersionStats, eq(versionStats.seedLocalId, liveVersionStats.seedLocalId))
-      .leftJoin(latestVersionIds, eq(versionStats.seedLocalId, latestVersionIds.seedLocalId))
+      .leftJoin(
+        rankedLiveVersions,
+        and(
+          eq(versionStats.seedLocalId, rankedLiveVersions.seedLocalId),
+          eq(rankedLiveVersions.rowNum, 1),
+        ),
+      )
       .leftJoin(
         versions,
         and(
-          eq(versions.seedLocalId, latestVersionIds.seedLocalId),
-          eq(versions.localId, latestVersionIds.latestVersionLocalId),
+          eq(versions.seedLocalId, rankedLiveVersions.seedLocalId),
+          eq(versions.localId, rankedLiveVersions.latestVersionLocalId),
         ),
       ),
   )

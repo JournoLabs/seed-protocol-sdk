@@ -37,10 +37,13 @@ const resolveItem = async (seedLocalId: string): Promise<IItem<any>> => {
  * and can throw (e.g. gateway unreachable) even when uploads are required.
  */
 export async function itemNeedsArweaveUpload(item: IItem<any>): Promise<boolean> {
-  const usedPassedItem = typeof item.getPublishUploads === 'function'
-  const resolved = usedPassedItem
-    ? item
-    : await resolveItem(item.seedLocalId)
-  const needs = await itemHasPublishUploadCandidates(resolved)
-  return needs
+  if (typeof item.getPublishUploads === 'function') {
+    return itemHasPublishUploadCandidates(item)
+  }
+  const resolved = await resolveItem(item.seedLocalId)
+  try {
+    return await itemHasPublishUploadCandidates(resolved)
+  } finally {
+    resolved.unload()
+  }
 }

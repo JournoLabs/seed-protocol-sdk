@@ -9,6 +9,7 @@ import {
 import type { IItem, IItemProperty } from '@/interfaces'
 import { findRelatedSeedRow } from '@/db/read/resolveRelatedSeedRef'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import { ItemLoads } from '@/db/read/itemLoads'
 
 /**
  * The draft items a publish of an item carries along, and how it walks to them.
@@ -111,6 +112,12 @@ export type GetPublishDraftGraphOptions = {
    * with no local item. Otherwise such refs are skipped (getPublishPayload reports them).
    */
   strict?: boolean
+  /**
+   * Takes the walk's item loads, holds included, for the caller to release. Without it, each
+   * returned draft's item carries one cache hold the caller releases with `unload()`, and the walk
+   * releases the rest.
+   */
+  loads?: ItemLoads
 }
 
 /** Would the publish attest this property (so walk its refs)? Same rule as getPublishPayload. */
@@ -121,10 +128,9 @@ function walksProperty(prop: IItemProperty<any>, forceFullSnapshot: boolean): bo
   return value != null && value !== '' && !(Array.isArray(value) && value.length === 0)
 }
 
-async function loadItem(seedLocalId: string): Promise<IItem<any> | undefined> {
-  const { getItem } = await import('./getItem')
+async function loadItem(seedLocalId: string, loads: ItemLoads): Promise<IItem<any> | undefined> {
   try {
-    return (await getItem({ seedLocalId })) ?? undefined
+    return await loads.getItem({ seedLocalId })
   } catch {
     return undefined
   }
@@ -136,6 +142,7 @@ export async function getPublishDraftGraph(
 ): Promise<PublishDraftGraph> {
   const forceFullSnapshot = options?.forceFullSnapshot === true
   const strict = options?.strict === true
+  const loads = options?.loads ?? new ItemLoads()
   const drafts: PublishDraftGraphNode[] = []
   const deferredProperties = new Set<IItemProperty<any>>()
   const backReferences = new Map<IItemProperty<any>, Set<string>>()
@@ -165,7 +172,7 @@ export async function getPublishDraftGraph(
     // Published (live or revoked): referenced by uid / reported, never walked into.
     if (row && !isZeroUid(row.seedUid)) return undefined
     if (visited.has(targetLocalId)) return { seedLocalId: targetLocalId }
-    const item = await loadItem(targetLocalId)
+    const item = await loadItem(targetLocalId, loads)
     if (!item) {
       if (strict && !isList && !isPublishedSeedRef(ref)) {
         throw new Error(`No relatedItem found for ${prop.propertyName}`)
@@ -204,6 +211,12 @@ export async function getPublishDraftGraph(
     for (const prop of listProperties) await walk(prop, true)
   }
 
-  await visit(root)
+  try {
+    await visit(root)
+  } catch (err) {
+    if (!options?.loads) loads.release()
+    throw err
+  }
+  if (!options?.loads) loads.release(drafts.map((d) => d.item))
   return { drafts, deferredProperties, backReferences }
 }

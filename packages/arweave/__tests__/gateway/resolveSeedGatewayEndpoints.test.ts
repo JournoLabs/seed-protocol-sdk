@@ -47,6 +47,25 @@ describe('resolveSeedGatewayEndpoints', () => {
     const resolved = await resolveSeedGatewayEndpoints({})
     expect(resolved.mode).toBe('http-gateway')
     expect(resolved.arweaveHost).toBe(DEFAULT_ARWEAVE_HOST)
+    expect(resolved.publicArweaveBaseUrl).toBe(`https://${DEFAULT_ARWEAVE_HOST}`)
+  })
+
+  it('keeps the public gateway from arweaveDomain when reads go through a sidecar or proxy', async () => {
+    const hyper = await resolveSeedGatewayEndpoints({
+      transport: 'hyper',
+      hyper: { localSidecarPort: 4321, probeSidecar: false },
+    })
+    expect(hyper.arweaveBaseUrl).toBe('http://127.0.0.1:4321')
+    expect(hyper.publicArweaveBaseUrl).toBe(`https://${DEFAULT_ARWEAVE_HOST}`)
+
+    const proxy = await resolveSeedGatewayEndpoints({
+      transport: 'http-gateway',
+      arweaveDomain: 'custom.ar.example',
+      proxyBaseUrl: 'https://app.example/api/seed-gateway',
+      hyper: { probeSidecar: false },
+    })
+    expect(proxy.arweaveBaseUrl).toBe('https://app.example/api/seed-gateway')
+    expect(proxy.publicArweaveBaseUrl).toBe('https://custom.ar.example')
   })
 
   describe('proxy and sidecar', () => {

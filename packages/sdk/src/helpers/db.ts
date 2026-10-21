@@ -1997,7 +1997,8 @@ export async function writeModelToDb(
  * Write property to database
  * @param propertyFileId - The property file ID (schema_file_id)
  * @param data - Property data including modelId, name, dataType, and other property fields
- * @param isEdited - Optional flag indicating if property has been edited locally (default: false)
+ * @param isEdited - Optional flag indicating if property has been edited locally. Left unset, an update
+ *   keeps the row's flag (a load or creation write must not clear an unsaved edit) and an insert stores false.
  */
 export async function writePropertyToDb(
   propertyFileId: string,
@@ -2014,7 +2015,7 @@ export async function writePropertyToDb(
     filenameSuffix?: string
     [key: string]: any
   },
-  isEdited: boolean = false
+  isEdited?: boolean
 ): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
@@ -2046,7 +2047,7 @@ export async function writePropertyToDb(
     modelId: data.modelId,
     dataType: normalizeDataType(data.dataType),
     schemaFileId: propertyFileId,
-    isEdited: isEdited, // Persist isEdited flag
+    ...(isEdited !== undefined && { isEdited }),
   }
   
   // Handle ref property - create ref model if needed
@@ -2113,7 +2114,7 @@ export async function writePropertyToDb(
       // insert is logged by sqlite-wasm even when caught.
       const inserted = await db
         .insert(properties)
-        .values({ required: false, ...propertyData })
+        .values({ required: false, isEdited: false, ...propertyData })
         .onConflictDoNothing()
         .returning({ id: properties.id })
       if (inserted.length > 0) {

@@ -14,7 +14,7 @@ import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
-import { Item } from '@/Item/Item'
+import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
 import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
 import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -187,6 +187,7 @@ const getStorageSeedUploadData = async (
 async function appendCoPublishedImageUploadData(
   item: IItem<any>,
   uploads: PublishUploadData[],
+  loads: ItemLoads,
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUploadData[]> {
   const appDb = BaseDb.getAppDb()
@@ -201,7 +202,7 @@ async function appendCoPublishedImageUploadData(
 
   for (const row of rows) {
     if (seen.has(row.imageSeedLocalId)) continue
-    const imageItem = await Item.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
+    const imageItem = await loads.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
     if (!imageItem) continue
     const st =
       imageItem.internalProperties['storageTransactionId'] ??
@@ -391,6 +392,7 @@ async function itemOwnUploadCandidates(
   item: IItem<any>,
   relatedItemProperty: IItemProperty<any> | undefined,
   recurseStorageRelations: boolean,
+  loads: ItemLoads,
 ): Promise<boolean> {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -429,7 +431,7 @@ async function itemOwnUploadCandidates(
       )
     }
 
-    const relatedItem = await Item.find({
+    const relatedItem = await loads.find({
       seedLocalId,
       seedUid,
     })
@@ -442,7 +444,7 @@ async function itemOwnUploadCandidates(
       )
     }
 
-    if (await itemOwnUploadCandidates(relatedItem, relationProperty, false)) {
+    if (await itemOwnUploadCandidates(relatedItem, relationProperty, false, loads)) {
       return true
     }
   }
@@ -455,12 +457,14 @@ export async function itemHasPublishUploadCandidates(
   item: IItem<any>,
   relatedItemProperty?: IItemProperty<any>,
 ): Promise<boolean> {
-  if (await itemOwnUploadCandidates(item, relatedItemProperty, true)) return true
-  const { drafts } = await getPublishDraftGraph(item, { strict: true })
-  for (const { item: draft, via, viaList } of drafts) {
-    if (await itemOwnUploadCandidates(draft, viaList ? undefined : via, true)) return true
-  }
-  return false
+  return withItemLoads(undefined, async (loads) => {
+    if (await itemOwnUploadCandidates(item, relatedItemProperty, true, loads)) return true
+    const { drafts } = await getPublishDraftGraph(item, { strict: true, loads })
+    for (const { item: draft, via, viaList } of drafts) {
+      if (await itemOwnUploadCandidates(draft, viaList ? undefined : via, true, loads)) return true
+    }
+    return false
+  })
 }
 
 const processUploadPropertyData = async (
@@ -594,6 +598,7 @@ const getItemOwnPublishUploadData = async (
   uploads: PublishUploadData[],
   relatedItemProperty: IItemProperty<any> | undefined,
   options: GetPublishUploadsOptions | undefined,
+  loads: ItemLoads,
 ): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -619,7 +624,7 @@ const getItemOwnPublishUploadData = async (
 
     // Images embedded in this item's Html: the published item's, and a related draft's published with it.
     if (!relatedItemProperty || isDraftItem(item)) {
-      uploads = await appendCoPublishedImageUploadData(item, uploads, options)
+      uploads = await appendCoPublishedImageUploadData(item, uploads, loads, options)
     }
   }
 
@@ -651,7 +656,7 @@ const getItemOwnPublishUploadData = async (
       )
     }
 
-    const relatedItem = await Item.find({
+    const relatedItem = await loads.find({
       seedLocalId,
       seedUid,
     })
@@ -664,10 +669,13 @@ const getItemOwnPublishUploadData = async (
       )
     }
 
-    uploads = await getItemOwnPublishUploadData(relatedItem, uploads, relationProperty, {
-      ...options,
-      skipRelationRecursion: true,
-    })
+    uploads = await getItemOwnPublishUploadData(
+      relatedItem,
+      uploads,
+      relationProperty,
+      { ...options, skipRelationRecursion: true },
+      loads,
+    )
   }
 
   return uploads
@@ -686,18 +694,20 @@ export const getPublishUploadData = async (
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUploadData[]> => {
-  uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options)
+  return withItemLoads(undefined, async (loads) => {
+    uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options, loads)
 
-  if (options?.skipRelationRecursion) {
+    if (options?.skipRelationRecursion) {
+      return uploads
+    }
+
+    const { drafts } = await getPublishDraftGraph(item, { strict: true, loads })
+    for (const { item: draft, via, viaList } of drafts) {
+      uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options, loads)
+    }
+
     return uploads
-  }
-
-  const { drafts } = await getPublishDraftGraph(item, { strict: true })
-  for (const { item: draft, via, viaList } of drafts) {
-    uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options)
-  }
-
-  return uploads
+  })
 }
 
 /**
