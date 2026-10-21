@@ -340,11 +340,100 @@ describe('queryBySchema / getSeed caching', () => {
     // The seed list is fetched every time; unchanged seeds are not assembled again.
     expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
     expect(mockGetAttestationChangesSince).toHaveBeenCalledTimes(1)
+    // The listed seed's own revocation shows in the list, so its uid isn't in `ids`.
     expect(mockGetAttestationChangesSince.mock.calls[0]![0]).toMatchObject({
       refUIDs: expect.arrayContaining(['0xseed1', '0xver1']),
-      ids: ['0xseed1'],
+      ids: [],
     })
     expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
+  })
+
+  it('a warm read sends the change check alongside the seed list', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'Cached', 100)
+    await queryBySchema('post', uncachedOpts)
+
+    let releaseList!: () => void
+    const listed = mockGetSeedsBySchemaName.mock.results[0]!.value as Promise<unknown>
+    mockGetSeedsBySchemaName.mockImplementationOnce(
+      () => new Promise((resolve) => (releaseList = () => resolve(listed))),
+    )
+    const read = queryBySchema('post', uncachedOpts)
+    await vi.waitFor(() => expect(mockGetAttestationChangesSince).toHaveBeenCalledTimes(1))
+    releaseList()
+    expect((await read).items[0]!.data.title).toBe('Cached')
+  })
+
+  it('a revoked related seed still marks the listed seed changed', async () => {
+    const seed = { decodedDataJson: '', refUID: '0x0', schemaId: '0xschema', attester: '0xattester' }
+    mockGetSeedsBySchemaName.mockResolvedValue([
+      { ...seed, id: '0xseed1', timeCreated: 100, schema: { schemaNames: [{ name: 'post' }] } },
+    ])
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        { ...seed, id: '0xauthor1', timeCreated: 50, schema: { schemaNames: [{ name: 'identity' }] } },
+      ],
+    })
+    const versions = [
+      { id: '0xver1', decodedDataJson: '', refUID: '0xseed1', schemaId: '0xversion', timeCreated: 110 },
+      { id: '0xaver1', decodedDataJson: '', refUID: '0xauthor1', schemaId: '0xversion', timeCreated: 60 },
+    ]
+    mockGetItemVersionsFromEas.mockImplementation(async ({ seedUids }: { seedUids: string[] }) =>
+      versions.filter((v) => seedUids.includes(v.refUID)),
+    )
+    const properties = [
+      {
+        id: '0xprop1',
+        decodedDataJson: propDecoded('author_id', '0xauthor1', 'bytes32'),
+        refUID: '0xver1',
+        schemaId: '0xauthorSchema',
+        timeCreated: 120,
+      },
+      {
+        id: '0xprop2',
+        decodedDataJson: propDecoded('display_name', 'Ada'),
+        refUID: '0xaver1',
+        schemaId: '0xnameSchema',
+        timeCreated: 70,
+      },
+    ]
+    mockGetItemPropertiesFromEas.mockImplementation(
+      async ({ versionUids }: { versionUids: string[] }) =>
+        properties.filter((p) => versionUids.includes(p.refUID)),
+    )
+    await queryBySchema('post', uncachedOpts)
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(2)
+
+    mockRequest.mockResolvedValue({ itemSeeds: [] })
+    mockGetAttestationChangesSince.mockResolvedValue([
+      { id: '0xauthor1', refUID: '0x0', timeCreated: 50, revocationTime: 9_999_999_999 },
+    ])
+    await queryBySchema('post', uncachedOpts)
+    expect(mockGetAttestationChangesSince.mock.calls[0]![0].ids).toEqual(['0xauthor1'])
+    // Assembled again; the revoked author no longer comes back, so it adds no properties request.
+    expect(mockGetItemVersionsFromEas).toHaveBeenCalledWith(
+      expect.objectContaining({ seedUids: ['0xseed1'] }),
+    )
+    expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(3)
+    mockGetItemVersionsFromEas.mockReset()
+    mockGetItemPropertiesFromEas.mockReset()
+  })
+
+  it('checks cached seeds that are no longer listed, and ignores their changes', async () => {
+    mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+    await queryBySchema('post', uncachedOpts)
+
+    mockAssembledPost('0xseed2', '0xver2', 'Two', 200)
+    mockGetAttestationChangesSince.mockResolvedValue([
+      { id: '0xprop9', refUID: '0xver1', timeCreated: 9_999_999_999, revocationTime: 0 },
+    ])
+    const second = await queryBySchema('post', uncachedOpts)
+    expect(mockGetAttestationChangesSince.mock.calls[0]![0].refUIDs).toEqual(
+      expect.arrayContaining(['0xseed1', '0xver1']),
+    )
+    expect(second.items.map((r) => r.seedUid)).toEqual(['0xseed2'])
+    expect(mockGetItemVersionsFromEas).toHaveBeenLastCalledWith(
+      expect.objectContaining({ seedUids: ['0xseed2'] }),
+    )
   })
 
   it('a patch edit on the same version reaches the cached collection and item', async () => {

@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A warm `queryBySchema` read is one round of indexer requests instead of two: the change check on the cached collection goes out alongside the seed list rather than after it. It checks every cached seed, listed or not, and no longer asks whether the listed seeds themselves were revoked, since the seed list already leaves revoked seeds out. Related seeds are still checked for revocation.
+
 ## 0.7.6 (2026-10-17)
 
 - `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.
