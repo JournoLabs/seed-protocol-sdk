@@ -21,8 +21,8 @@ describe('ensureModelStubs', () => {
     const appDb = BaseDb.getAppDb()!
     // Two tabs initializing together: both check before either inserts unless they take turns.
     await Promise.all([
-      ensureModelStubs(appDb, names, '/stub-test'),
-      ensureModelStubs(appDb, names, '/stub-test'),
+      ensureModelStubs(names, '/stub-test'),
+      ensureModelStubs(names, '/stub-test'),
     ])
 
     const rows = await appDb.select({ name: models.name }).from(models).where(inArray(models.name, names))

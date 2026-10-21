@@ -23,3 +23,20 @@ export function trackDraftSave(service: object, save: Promise<void>, label: stri
     },
   )
 }
+
+const draftSaveQueues = new Map<string, Promise<unknown>>()
+
+/**
+ * Runs `save` once the previous draft save with the same key has settled. Two quick renames then
+ * reach the database in order, instead of the second being skipped while the first runs.
+ */
+export function queueDraftSave<T>(key: string, save: () => Promise<T>): Promise<T> {
+  const previous = draftSaveQueues.get(key) ?? Promise.resolve()
+  const current = previous.catch(() => {}).then(save)
+  draftSaveQueues.set(key, current)
+  const cleanup = () => {
+    if (draftSaveQueues.get(key) === current) draftSaveQueues.delete(key)
+  }
+  current.then(cleanup, cleanup)
+  return current
+}

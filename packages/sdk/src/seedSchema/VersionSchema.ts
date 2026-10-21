@@ -1,4 +1,5 @@
-import { index, int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, int, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { attestedUidSql } from './attestedUid'
 import { InferSelectModel } from 'drizzle-orm'
 
 export const versions = sqliteTable('versions', {
@@ -23,6 +24,10 @@ export const versions = sqliteTable('versions', {
    * unpublish time until sync confirms it). Null while live or unpublished.
    */
   revokedAt: int('revoked_at'),
-}, (table) => [index('versions_seed_local_id_idx').on(table.seedLocalId)])
+}, (table) => [
+  index('versions_seed_local_id_idx').on(table.seedLocalId),
+  // One row per attested version uid (migration 0029). Drafts hold a placeholder uid and are left out.
+  uniqueIndex('versions_attested_uid_unique').on(table.uid).where(attestedUidSql(table.uid)),
+])
 
 export type VersionsType = InferSelectModel<typeof versions>

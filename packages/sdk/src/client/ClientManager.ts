@@ -11,8 +11,7 @@ import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
 import { ClientManagerState } from '@/client/constants'
 import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
-import { models } from '@/seedSchema'
-import { eq }               from 'drizzle-orm'
+import { inDefinitionsTransaction, insertModelStubs } from '@/db/write/definitions'
 import {
   getOwnedAddressesFromDb,
   getWatchedAddressesFromDb,
@@ -331,14 +330,8 @@ const clientInstance = {
     }
   },
   addModel: async (modelDef: ModelDefObj) => {
-    const db = await BaseDb.getAppDb();
-    const existingModels = await db.select().from(models).where(eq(models.name, modelDef.name));
-    if (existingModels.length > 0) {
-      return;
-    }
-    await db.insert(models).values({
-      name: modelDef.name
-    })
+    if (!BaseDb.getAppDb()) throw new Error('Database not found');
+    await inDefinitionsTransaction((tx) => insertModelStubs(tx, [modelDef.name]));
     // Global service removed - model registration is now handled by ClientManager
     // Models are added to DB during the ADD_MODELS_TO_DB state
   },

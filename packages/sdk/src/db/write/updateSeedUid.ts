@@ -3,6 +3,7 @@ import { metadata, seeds, versions } from '@/seedSchema'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { normalizePublisher } from '@/helpers/addresses'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
+import { mergeSeedRowInto, otherSeedRowsWithUid } from '@/db/write/mergeChainRows'
 
 type UpdateSeedUidProps = {
   seedLocalId: string
@@ -13,8 +14,10 @@ type UpdateSeedUidProps = {
 }
 
 /**
- * Updates seedUid and optionally publisher. Publisher is immutable once set:
- * we never overwrite an existing publisher (set at creation or from attestation).
+ * Updates seedUid and optionally publisher, in one transaction. Publisher is immutable once set:
+ * we never overwrite an existing publisher (set at creation or from attestation). A seed row
+ * another writer inserted for the same uid (a sync that ran while this was published) is merged
+ * into this one first, since seeds.uid is unique.
  */
 export const updateSeedUid = async ({
   seedLocalId,
@@ -26,45 +29,49 @@ export const updateSeedUid = async ({
     return
   }
 
-  const appDb = BaseDb.getAppDb()
-
   const normalizedPublisher = normalizePublisher(publisher)
-  const [row] = await appDb
-    .select({ uid: seeds.uid, publisher: seeds.publisher })
-    .from(seeds)
-    .where(eq(seeds.localId, seedLocalId))
-    .limit(1)
-  const shouldSetPublisher =
-    normalizedPublisher != null && (row?.publisher == null || row.publisher === '')
-  // A different uid is a new seed attestation (a republish after unpublish): the revocation and
-  // the stored attestation belonged to the old one.
-  const replacesSeedAttestation =
-    isValidEasAttestationUid(row?.uid) && row!.uid!.toLowerCase() !== seedUid.toLowerCase()
+  await BaseDb.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ uid: seeds.uid, publisher: seeds.publisher })
+      .from(seeds)
+      .where(eq(seeds.localId, seedLocalId))
+      .limit(1)
+    if (!row) return
+    for (const duplicate of await otherSeedRowsWithUid(tx, seedUid, seedLocalId)) {
+      await mergeSeedRowInto(tx, duplicate, seedLocalId)
+    }
+    const shouldSetPublisher =
+      normalizedPublisher != null && (row.publisher == null || row.publisher === '')
+    // A different uid is a new seed attestation (a republish after unpublish): the revocation and
+    // the stored attestation belonged to the old one.
+    const replacesSeedAttestation =
+      isValidEasAttestationUid(row.uid) && row.uid!.toLowerCase() !== seedUid.toLowerCase()
 
-  await appDb
-    .update(seeds)
-    .set({
-      uid: seedUid,
-      ...(replacesSeedAttestation && { revokedAt: null, attestationRaw: null }),
-      ...(shouldSetPublisher && { publisher: normalizedPublisher }),
-      ...(attestationCreatedAt != null && { attestationCreatedAt }),
-    })
-    .where(eq(seeds.localId, seedLocalId))
+    await tx
+      .update(seeds)
+      .set({
+        uid: seedUid,
+        ...(replacesSeedAttestation && { revokedAt: null, attestationRaw: null }),
+        ...(shouldSetPublisher && { publisher: normalizedPublisher }),
+        ...(attestationCreatedAt != null && { attestationCreatedAt }),
+      })
+      .where(eq(seeds.localId, seedLocalId))
 
-  // Attested version and property rows recorded before the seed uid was known (a republish records
-  // its new version and property attestations first) belong to this seed attestation.
-  if (isValidEasAttestationUid(seedUid)) {
-    await appDb
-      .update(versions)
-      .set({ seedUid })
-      .where(
-        and(eq(versions.seedLocalId, seedLocalId), isNotNull(versions.uid), isNull(versions.seedUid)),
-      )
-    await appDb
-      .update(metadata)
-      .set({ seedUid })
-      .where(
-        and(eq(metadata.seedLocalId, seedLocalId), isNotNull(metadata.uid), isNull(metadata.seedUid)),
-      )
-  }
+    // Attested version and property rows recorded before the seed uid was known (a republish records
+    // its new version and property attestations first) belong to this seed attestation.
+    if (isValidEasAttestationUid(seedUid)) {
+      await tx
+        .update(versions)
+        .set({ seedUid })
+        .where(
+          and(eq(versions.seedLocalId, seedLocalId), isNotNull(versions.uid), isNull(versions.seedUid)),
+        )
+      await tx
+        .update(metadata)
+        .set({ seedUid })
+        .where(
+          and(eq(metadata.seedLocalId, seedLocalId), isNotNull(metadata.uid), isNull(metadata.seedUid)),
+        )
+    }
+  })
 }
