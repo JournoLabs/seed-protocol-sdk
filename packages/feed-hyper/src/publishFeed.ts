@@ -1,7 +1,7 @@
 import {
   createFeed,
   getFeedItemsBySchemaName,
-  type GraphQLItem,
+  type FeedItem,
 } from '@seedprotocol/feed'
 import {
   REGISTRY_PATH,
@@ -72,7 +72,7 @@ async function writeFeedsToDrive(
       const items = (await getFeedItemsBySchemaName(schema, {
         limit: pageSize,
         skip: 0,
-      })) as GraphQLItem[]
+      })) as FeedItem[]
       const hasNext = items.length === pageSize
 
       for (const format of options.formats) {

@@ -1,17 +1,3 @@
-import type { Request, Response } from 'express';
-
-/**
- * Express Request/Response types for API routes
- * Use these types in your route handlers
- */
-export type { Request, Response } from 'express';
-
-/**
- * Express route handler function type
- */
-export type ApiHandler = (req: Request, res: Response) => void | Promise<void>;
-
-
 export type FeedFormat = 'rss' | 'atom' | 'json'
 
 export interface TransformOptions {
@@ -42,7 +28,8 @@ export interface FeedConfig {
   }
 }
 
-export interface GraphQLItem {
+/** A feed entry: an assembled seed record's `data` with feed defaults applied. */
+export interface FeedItem {
   id: string
   title: string
   summary?: string
@@ -74,12 +61,8 @@ export interface GraphQLItem {
   [key: string]: unknown
 }
 
-export interface GraphQLResponse<T> {
-  data: {
-    [key: string]: T[]
-  }
-  errors?: Array<{ message: string }>
-}
+/** @deprecated Use {@link FeedItem}. Items come from `@seedprotocol/query`, not GraphQL. */
+export type GraphQLItem = FeedItem
 
 /**
  * Image metadata extracted from Arweave transaction
