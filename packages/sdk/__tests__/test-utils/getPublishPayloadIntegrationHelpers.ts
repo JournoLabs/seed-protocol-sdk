@@ -144,9 +144,12 @@ export async function ensureModelUidsForGetPublishPayloadTest(
   for (let i = 0; i < modelNames.length; i++) {
     const modelId = await getTestModelId(modelNames[i], schemaName)
     if (modelId == null) continue
-    const existing = await db.select().from(modelUids).where(eq(modelUids.modelId, modelId)).limit(1)
-    if (existing.length > 0) continue
-    await db.insert(modelUids).values({ modelId, uid: testModelPlaceholderUid(i) })
+    // One statement: test files running in parallel share the Seed Protocol models (Image, File,
+    // Html), and a check-then-insert lost the race to another file's insert (model_id is unique).
+    await db
+      .insert(modelUids)
+      .values({ modelId, uid: testModelPlaceholderUid(i) })
+      .onConflictDoNothing({ target: modelUids.modelId })
   }
 }
 
