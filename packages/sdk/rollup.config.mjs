@@ -157,7 +157,7 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
-    // A Node built-in whose bindings are all tree-shaken away (markdown.ts's readFileSync) would
+    // A Node built-in whose bindings are all tree-shaken away would
     // otherwise stay as a bare `import 'fs'` in main.js, which webpack and Turbopack can't
     // resolve for the browser and Vite warns about.
     treeshake: { moduleSideEffects: (id, external) => !(external && isBuiltin(id)) },
