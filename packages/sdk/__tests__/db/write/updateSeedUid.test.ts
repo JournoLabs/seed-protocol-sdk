@@ -81,7 +81,7 @@ testDescribe('updateSeedUid and persistSeedUid', () => {
     // Try to overwrite with different publisher via updateSeedUid
     await updateSeedUid({
       seedLocalId,
-      seedUid: TEST_SEED_UID,
+      seedUid: '0x' + '9'.repeat(64),
       publisher: '0xDifferentPublisher1234567890abcdef12345678',
     })
 

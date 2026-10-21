@@ -21,20 +21,6 @@ describe.sequential('deleteItem', () => {
   const markOf = async (localId: string) =>
     (await db().select({ m: seeds._markedForDeletion }).from(seeds).where(eq(seeds.localId, localId)))[0]?.m
 
-  it('soft-deletes only the row with the given localId when another row shares its uid', async () => {
-    const t = Date.now()
-    const shared = uid('d')
-    await db().insert(seeds).values([
-      { localId: `del-a-${t}`, type: 'post', uid: shared, createdAt: t },
-      { localId: `del-b-${t}`, type: 'post', uid: shared, createdAt: t },
-    ])
-
-    await deleteItem({ seedLocalId: `del-a-${t}`, seedUid: shared })
-
-    expect(await markOf(`del-a-${t}`)).toBe(1)
-    expect(await markOf(`del-b-${t}`)).toBeNull()
-  })
-
   it('falls back to uid when no localId is given', async () => {
     const t = Date.now()
     const only = uid('e')

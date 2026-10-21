@@ -384,7 +384,15 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
     })
   }
 
-  await createSeeds(newSeedsData)
+  const inserted = await createSeeds(newSeedsData)
+  // A row another writer stored for the uid since the lookup above (publish recording it) is the seed.
+  const raced = newSeedsData.filter((row) => !inserted.has(row.localId!)).map((row) => row.uid!)
+  if (raced.length > 0) {
+    for (const [uid, row] of await findSeedRowsByUid(raced)) {
+      if (row.localId) seedUidToLocalId.set(uid, row.localId)
+      if (row.type) seedUidToModelType.set(uid, row.type)
+    }
+  }
 
   // All fetched seeds, not only the new ones: existing seeds can have new versions on EAS.
   return { seedUids }
@@ -482,8 +490,27 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
   }
 
   // Bound parameters: keep each statement well under SQLite's host-parameter limit.
+  // A uid another writer stored since the lookup above is not inserted again (versions.uid is
+  // unique): its row is the version.
+  const insertedLocalIds = new Set<string>()
   for (let i = 0; i < rows.length; i += VERSION_INSERT_BATCH) {
-    await appDb.insert(versions).values(rows.slice(i, i + VERSION_INSERT_BATCH))
+    const inserted = await appDb
+      .insert(versions)
+      .values(rows.slice(i, i + VERSION_INSERT_BATCH))
+      .onConflictDoNothing()
+      .returning({ localId: versions.localId })
+    for (const row of inserted) if (row.localId) insertedLocalIds.add(row.localId)
+  }
+  const raced = rows.filter((row) => !insertedLocalIds.has(row.localId!)).map((row) => row.uid!)
+  if (raced.length > 0) {
+    const stored: VersionsType[] = await selectInBatches(raced, (chunk) =>
+      appDb.select().from(versions).where(inArray(versions.uid, chunk)),
+    )
+    for (const row of stored) {
+      if (!row.uid) continue
+      if (row.localId) versionUidToLocalId.set(row.uid, row.localId)
+      if (row.seedUid) versionUidToSeedUid.set(row.uid, row.seedUid)
+    }
   }
 
   // Only versions that are stored locally: properties of a skipped version would have no version row.

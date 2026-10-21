@@ -38,7 +38,7 @@ import { localNamesInBestMatchTier } from '@seedprotocol/eas'
 import { currentNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
-import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
+import { getDraftSaveError, queueDraftSave, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -112,9 +112,6 @@ export class Model {
     status: 'pending' | 'writing' | 'success' | 'error'
     timestamp: number
   }>()
-  
-  // Track which models are currently being saved to prevent concurrent saves
-  protected static savingModels: Set<string> = new Set()
   
   // Cache client initialization state globally to avoid repeated checks
   private static cachedClientInitialized: boolean | null = null
@@ -1713,64 +1710,37 @@ export class Model {
     }
     
     saveDraftLogger(`Client is initialized, proceeding with save (oldName: "${oldName}", newName: "${newName}")`)
-    
-    // Check for conflicts before saving
-    const conflictCheck = await this._checkForConflicts()
-    if (conflictCheck.hasConflict) {
-      const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the model and try again.'
-      saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
-      throw new ConflictError(errorMessage, conflictCheck)
-    }
-    
+
     const context = this._getSnapshotContext()
     const modelFileId = context.id || '' // id is now the schemaFileId (string)
     const modelName = newName || context.modelName || oldName || ''
-    
     // Use modelFileId as the key if available, otherwise use schemaName:modelName
     const saveKey = modelFileId || `${context.schemaName}:${modelName}`
-    
-    // Prevent concurrent saves for the same model
-    if (Model.savingModels.has(saveKey)) {
-      saveDraftLogger(`Model ${modelName} (key: ${saveKey}) is already being saved, skipping concurrent save`)
-      return
-    }
-    
-    Model.savingModels.add(saveKey)
-    saveDraftLogger(`Starting save for model ${modelName} (key: ${saveKey}, id: ${modelFileId})`)
-    
-    try {
-      const db = BaseDb.getAppDb()
-      if (!db) {
-        throw new Error('Database not found')
+
+    // A save started while another for this model runs waits for it, so renames land in order.
+    // Errors reach the caller (trackDraftSave records them for lastSaveError).
+    await queueDraftSave(saveKey, async () => {
+      const conflictCheck = await this._checkForConflicts()
+      if (conflictCheck.hasConflict) {
+        const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the model and try again.'
+        saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
+        throw new ConflictError(errorMessage, conflictCheck)
       }
 
-      // If name changed, use renameModelInDb
       if (oldName && newName && oldName !== newName) {
         saveDraftLogger(`Renaming model from "${oldName}" to "${newName}"`)
         await renameModelInDb(oldName, newName, context.schemaName)
-        saveDraftLogger(`Successfully renamed model from "${oldName}" to "${newName}"`)
       } else {
-        // For other tracked properties, we would save here
-        // Currently only modelName is saved immediately, so this is a no-op
+        // Only modelName is saved immediately
         saveDraftLogger(`No name change detected, skipping save (modelName: "${modelName}")`)
       }
-      
-      // Update conflict detection metadata after successful save
-      // Note: models table doesn't have updatedAt, so we use current timestamp
-      const now = Date.now()
+
+      // Conflict detection metadata (models has no updatedAt column)
       this._service.send({
         type: 'updateContext',
-        _dbUpdatedAt: now,
+        _dbUpdatedAt: Date.now(),
       })
-      
-    } catch (error) {
-      logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-      // Don't throw - allow operation to continue
-    } finally {
-      // Always remove from saving set
-      Model.savingModels.delete(saveKey)
-      saveDraftLogger(`Finished save for model ${modelName} (key: ${saveKey})`)
-    }
+    })
   }
 
   get status() {
@@ -2073,14 +2043,16 @@ export class Model {
             .limit(1)
 
           if (modelRecords.length > 0) {
-            const modelId = modelRecords[0].id
+            const modelId: number = modelRecords[0].id
             const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
-            await detachModelRows(db, [typeof modelId === 'string' ? parseInt(modelId, 10) : modelId])
-            await db.delete(modelSchemas).where(eq(modelSchemas.modelId, modelId))
-            await db
-              .delete(propertiesTable)
-              .where(eq(propertiesTable.modelId, typeof modelId === 'string' ? parseInt(modelId, 10) : modelId))
-            await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
+            const { inDefinitionsTransaction } = await import('@/db/write/definitions')
+            // The model's rows go together or not at all
+            await inDefinitionsTransaction(async (tx) => {
+              await detachModelRows(tx, [modelId])
+              await tx.delete(modelSchemas).where(eq(modelSchemas.modelId, modelId))
+              await tx.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
+              await tx.delete(modelsTable).where(eq(modelsTable.id, modelId))
+            })
           }
         }
 

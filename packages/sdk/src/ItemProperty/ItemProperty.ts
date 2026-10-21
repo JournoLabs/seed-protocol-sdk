@@ -28,8 +28,6 @@ import {
   listRelationEasPropertyName,
   metadataRowPropertyKey,
   metadataStoredNameForms,
-  propertyKeyFromStoredName,
-  type PropertySchemaEntry,
 } from '@/helpers/metadataPropertyNames'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -48,6 +46,8 @@ import { eventEmitter } from '@/eventBus'
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
+import { propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
+import type { PropertyType as PropertyRowType } from '@/seedSchema'
 import {
   ModelPropertyDataTypes,
   isDataType,
@@ -59,112 +59,46 @@ import {
 const HTML_PROP_SEED_UID_RE = /^0x[a-fA-F0-9]{64}$/
 
 /**
- * Fallback: resolve propertyRecordSchema from schema JSON in DB when Model is not in cache/DB.
- * Used when syncSchemaFromSource failed (e.g. validation error) but schema exists in DB from a previous run.
+ * A property's definition from its row (getPropertyDefinition): by property_id when known, else by
+ * the owning model (resolved from the item's hints, the model name or its modelType) and the
+ * property name or a stored form of it. A model created in this session whose rows aren't written
+ * yet gives its in-memory definition.
  */
-const resolvePropertyRecordSchemaFromSchemaData = async (
-  modelName: string,
-  propertyName: string,
-  modelType?: string,
-  schemaName?: string,
-): Promise<SchemaPropertyType | undefined> => {
-  try {
-    const { loadAllSchemasFromDb } = await import('@/helpers/schema')
-    const allSchemas = await loadAllSchemasFromDb()
-    const modelNameAlt = (await modelTypeToModelName(modelType)) ?? ''
-    for (const { schema } of allSchemas) {
-      // Model names are only unique per schema: when the owning schema is known, only look there.
-      if (schemaName && schema.metadata?.name !== schemaName) continue
-      const models = schema.models as Record<string, { properties?: Record<string, any> }> | undefined
-      if (!models) continue
-      const model = models[modelName] ?? (modelNameAlt ? models[modelNameAlt] : undefined)
-      if (!model?.properties) continue
-      let prop = model.properties[propertyName]
-      if (!prop) {
-        const resolvedKey = propertyKeyFromStoredName(
-          model.properties as Record<string, PropertySchemaEntry>,
-          propertyName,
-        )
-        if (resolvedKey) prop = model.properties[resolvedKey]
-      }
-      if (!prop) continue
-      const p = prop as Record<string, unknown>
-      const dataType = (p.dataType ?? p.type) as string
-      if (!dataType) continue
-      return {
-        dataType,
-        ref: (p.ref ?? p.model ?? p.refModelName) as string | undefined,
-        refValueType: (p.refValueType ?? p.refvaluetype) as string | undefined,
-        storageType: p.storageType as string | undefined,
-        localStorageDir: p.localStorageDir as string | undefined,
-        filenameSuffix: p.filenameSuffix as string | undefined,
-        required: p.required as boolean | undefined,
-      } as SchemaPropertyType
-    }
-  } catch {
-    // Ignore - fallback failed
-  }
-  return undefined
-}
-
-/**
- * Resolve propertyRecordSchema from in-memory Model (Fix 6: enables value persistence when useItemProperty path doesn't go through loadOrCreateItem).
- * Tries getByName(pascalCase) first; if that fails (e.g. "New model" vs "NewModel"), falls back to findByModelType(modelType).
- */
-const resolvePropertyRecordSchemaFromModel = async (
+const resolvePropertyDefinition = async (
   modelName: string,
   propertyName: string,
   modelType?: string,
   /** Hints identifying the owning item's model (model names are only unique per schema). */
   hints: { modelFileId?: string | null; seedLocalId?: string | null; seedUid?: string | null; propertyId?: number | null } = {},
 ): Promise<SchemaPropertyType | undefined> => {
-  if (!modelName && !modelType) {
+  if (!modelName && !modelType && hints.propertyId == null) {
     return undefined
   }
   try {
+    if (hints.propertyId != null) {
+      const { getPropertyDefinition } = await import('@/helpers/propertyDefinition')
+      const definition = await getPropertyDefinition(hints.propertyId)
+      if (definition) return definition as unknown as SchemaPropertyType
+    }
+    const { resolveItemModelFileId } = await import('@/db/read/resolveModelRecord')
+    const { getModelPropertyDefinitions, resolvePropertyKey } = await import('@/helpers/property')
+    const modelFileId = (await resolveItemModelFileId(hints)) ?? undefined
+    const name = modelName || ((await modelTypeToModelName(modelType)) ?? '')
+    // An ambiguous bare name reads nothing here; the in-memory model below may still know it
+    const definitions = Object.fromEntries(
+      name || modelFileId ? await getModelPropertyDefinitions(name || undefined, { modelFileId }).catch(() => []) : [],
+    )
+    const key = resolvePropertyKey(definitions, propertyName)
+    if (key) return definitions[key] as unknown as SchemaPropertyType
+
     const { Model } = await import('@/Model/Model')
     const { modelPropertiesToObject } = await import('@/helpers/model')
-    const { resolveItemModelFileId } = await import('@/db/read/resolveModelRecord')
-    const modelFileId = await resolveItemModelFileId(hints)
-    let model = modelFileId
-      ? await Model.resolveAsync(modelName || ((await modelTypeToModelName(modelType)) ?? ''), { modelFileId })
-      : undefined
-    if (!model?.properties?.length && modelName) {
-      model = Model.peekByName(modelName)
-    }
-    if (!model?.properties?.length && modelType) {
-      model = Model.findByModelType(modelType)
-    }
-    // Fallback: load from DB when not in cache (fixes external app persistence when Model not yet loaded)
-    if (!model?.properties?.length && modelName) {
-      model = await Model.getByNameAsync(modelName, undefined, { hold: false })
-    }
-    if (!model?.properties?.length && modelType) {
-      const typeModelName = await modelTypeToModelName(modelType)
-      if (typeModelName) model = await Model.getByNameAsync(typeModelName, undefined, { hold: false })
-    }
-    if (!model?.properties?.length) {
-      // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
-      const schemaProp = await resolvePropertyRecordSchemaFromSchemaData(
-        modelName,
-        propertyName,
-        modelType,
-        model?.schemaName,
-      )
-      if (schemaProp) {
-        // Schema JSON uses file shape ({ type: 'Html' }); callers read dataType.
-        return normalizePropertyRecordSchema(schemaProp)
-      }
-      return undefined
-    }
-    const schemas = modelPropertiesToObject(model.properties)
-    let schemaKey = propertyName
-    if (!schemas[schemaKey]) {
-      const resolved = propertyKeyFromStoredName(schemas, propertyName)
-      if (resolved) schemaKey = resolved
-    }
-    const schema = schemas[schemaKey]
-    return schema as SchemaPropertyType | undefined
+    let model = modelName ? Model.peekByName(modelName) : undefined
+    if (!model?.properties?.length && modelType) model = Model.findByModelType(modelType)
+    if (!model?.properties?.length) return undefined
+    const unwritten = modelPropertiesToObject(model.properties)
+    const unwrittenKey = resolvePropertyKey(unwritten, propertyName)
+    return unwrittenKey ? (unwritten[unwrittenKey] as SchemaPropertyType) : undefined
   } catch {
     return undefined
   }
@@ -751,6 +685,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
         // In the browser the feed watch below reads the same row at once, so only Node (no change
         // feed) reads it here.
+        // A value whose outbox op hasn't applied yet wins over the stored row (ADR 0019); read
+        // before it, as loadOrCreateProperty does
+        const contextBeforeRead = this._service.getSnapshot().context
+        const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
+        const pending = isBrowser || !seedLocalId ? undefined : await getPendingPropertyRow(seedLocalId, propertyName)
         const initialMetadata = isBrowser
           ? []
           : await db
@@ -760,10 +699,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
               .limit(15)
 
-        if (initialMetadata.length > 0) {
+        // The load or an assignment changed the context while this read ran: theirs is newer
+        if (initialMetadata.length > 0 && this._service.getSnapshot().context === contextBeforeRead) {
           const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
           const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-          const metaRow = resolveMetadataRecord(
+          const stored = resolveMetadataRecord(
             initialMetadata as (import('@/seedSchema').MetadataType & {
               refResolvedValue?: string | null
               refSeedType?: string
@@ -772,6 +712,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             normalizedDataType,
             normalizedRefValueType,
           )
+          const metaRow = pending ? applyPendingRow({ ...stored }, pending) : stored
           logger(`[ItemProperty._setupLiveQuerySubscription] Initial query returned metadata record`)
           
           // Update context with initial metadata
@@ -986,25 +927,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           return
         }
 
-        const schema$ = BaseDb.liveQuery<{
-          dataType: string
-          refValueType: string | null
-          refModelName: string | null
-          storageType: string | null
-          localStorageDir: string | null
-          filenameSuffix: string | null
-        }>(
+        // The row by property_id when known; else by name, which for a List of relations is the
+        // property's key, not the instance's stored name
+        const propertyId = ctx.propertyId ?? null
+        const schema$ = BaseDb.liveQuery<PropertyRowType & { refModelName: string | null }>(
           (sql: any) => sql`
-            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName,
+            SELECT p.id as id, p.name as name, p.data_type as dataType, p.model_id as modelId,
+              p.ref_model_id as refModelId, p.ref_value_type as refValueType,
+              p.schema_file_id as schemaFileId, p.is_edited as isEdited, p.required as required,
               p.storage_type as storageType, p.local_storage_dir as localStorageDir,
-              p.filename_suffix as filenameSuffix
+              p.filename_suffix as filenameSuffix, p.definition as definition, ref.name as refModelName
             FROM properties p
             INNER JOIN models m ON p.model_id = m.id
             LEFT JOIN models ref ON p.ref_model_id = ref.id
-            WHERE p.name = ${propertyName}
-              AND (CASE WHEN ${modelFileId ?? null} IS NOT NULL
-                THEN m.schema_file_id = ${modelFileId ?? null}
-                ELSE m.name = ${modelName} END)
+            WHERE (CASE WHEN ${propertyId} IS NOT NULL THEN p.id = ${propertyId}
+              ELSE p.name IN (${propertyName}, ${this.propertyName || propertyName})
+                AND (CASE WHEN ${modelFileId ?? null} IS NOT NULL
+                  THEN m.schema_file_id = ${modelFileId ?? null}
+                  ELSE m.name = ${modelName} END) END)
             ORDER BY m.id DESC
             LIMIT 1
           `
@@ -1023,15 +963,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           next: (rows) => {
             if (rows.length === 0) return
 
-            const row = rows[0]
-            const propertyRecordSchema = {
-              dataType: row.dataType,
-              ref: row.refModelName || undefined,
-              refValueType: row.refValueType || undefined,
-              storageType: row.storageType || undefined,
-              localStorageDir: row.localStorageDir || undefined,
-              filenameSuffix: row.filenameSuffix || undefined,
-            }
+            const { refModelName, ...row } = rows[0]
+            const required = row.required as unknown
+            const propertyRecordSchema = propertyDefinitionFromRow(
+              { ...row, required: required == null ? null : !!required },
+              refModelName,
+            )
 
             logger(`[ItemProperty._setupPropertySchemaLiveQuery] Schema updated for ${propertyName}: dataType=${row.dataType}`)
 
@@ -1343,9 +1280,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const data = propertyData as { modelName?: string; modelType?: string }
       const modelName =
         data.modelName ?? ((await modelTypeToModelName(data.modelType)) || modelNameOption || '')
-      // Fix 6: resolve propertyRecordSchema from Model so value setter can persist (useItemProperty path)
-      // Pass modelType for fallback: "New model" -> "new_model" can't be reversed to exact name; findByModelType handles it
-      const propertyRecordSchema = await resolvePropertyRecordSchemaFromModel(
+      // The definition, so the value setter can persist (useItemProperty path)
+      const propertyRecordSchema = await resolvePropertyDefinition(
         modelName,
         propertyName,
         data.modelType,
@@ -1403,6 +1339,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const itemModelFileId = await resolveItemModelFileId({ seedLocalId, seedUid })
     // One lookup per model type, not per property
     const modelNameByType = new Map<string, Promise<string | undefined>>()
+    const definitionsByModel = new Map<string, Promise<Record<string, any>>>()
     const modelNameOfType = (modelType: string | undefined): Promise<string | undefined> => {
       if (!modelType) return Promise.resolve(undefined)
       if (!modelNameByType.has(modelType)) modelNameByType.set(modelType, modelTypeToModelName(modelType))
@@ -1422,23 +1359,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         itemModelFileId ?? (await resolveItemModelFileId({ propertyId: d.propertyId }))
       // The property's key: through property_id when the row has one, else from its stored name
       // (`textId` → `text`, `authorIdentityIds` → `authors`)
-      let schemas: Record<string, any> = {}
-      if (modelName) {
-        try {
-          const { Model } = await import('../Model/Model')
-          const { modelPropertiesToObject } = await import('../helpers/model')
-          const model = await Model.resolveAsync(modelName, { modelFileId })
-          if (model?.properties?.length) schemas = modelPropertiesToObject(model.properties)
-        } catch {
-          // Model not loaded: the stored name decides
-        }
+      const definitionsKey = JSON.stringify([modelName, modelFileId ?? null])
+      if (modelName && !definitionsByModel.has(definitionsKey)) {
+        const { getModelPropertyDefinitions } = await import('../helpers/property')
+        definitionsByModel.set(
+          definitionsKey,
+          // No model row: the stored name decides
+          getModelPropertyDefinitions(modelName, { modelFileId }).then(Object.fromEntries, () => ({})),
+        )
       }
+      const schemas: Record<string, any> = modelName ? await definitionsByModel.get(definitionsKey)! : {}
       const propertyName = metadataRowPropertyKey(d, schemas) ?? ''
       if (seenNormalized.has(propertyName)) continue
       seenNormalized.add(propertyName)
-      // Fix 6: resolve propertyRecordSchema from Model so value setter can persist
       const propertyRecordSchema = propertyName
-        ? await resolvePropertyRecordSchemaFromModel(modelName, propertyName, d.modelType, { modelFileId })
+        ? (schemas[propertyName] ??
+          (await resolvePropertyDefinition(modelName, propertyName, d.modelType, { modelFileId, propertyId: d.propertyId })))
         : undefined
       const createProps = {
         ...data,
@@ -1751,10 +1687,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     })
     const saveEvent = { type: 'save' as const, newValue: value, before, ...(clear && { clear }) }
 
-    // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)
+    // No definition yet: read it before persisting
     if (!context.propertyRecordSchema) {
       const { modelName, propertyName, modelType, modelFileId, seedLocalId, seedUid, propertyId } = context
-      const pending = resolvePropertyRecordSchemaFromModel(modelName ?? '', propertyName ?? '', modelType ?? undefined, {
+      const pending = resolvePropertyDefinition(modelName ?? '', propertyName ?? '', modelType ?? undefined, {
         modelFileId,
         seedLocalId,
         seedUid,

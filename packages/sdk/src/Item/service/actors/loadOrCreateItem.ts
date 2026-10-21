@@ -80,105 +80,25 @@ const createItemPropertyInstances = async (
   modelScope: { modelFileId?: string; schemaName?: string } = {},
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
-  const schemaName = modelScope.schemaName
 
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
     const { ItemProperty } = itemPropertyMod
-    const { modelPropertiesToObject } = await import('../../../helpers/model')
-    const { Model } = await import('../../../Model/Model')
-
-    // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
-    let propertySchemas: Record<string, any> = {}
-    let model = Model.resolve(modelName, modelScope)
-    if (!model?.properties?.length) {
-      model = await Model.resolveAsync(modelName, modelScope) ?? undefined
-    }
-    if (model?.properties?.length) {
-      propertySchemas = modelPropertiesToObject(model.properties)
-    }
-    // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
-    // This fixes persistence when useItem returns items with empty propertyInstances.
-    if (Object.keys(propertySchemas).length === 0) {
-      const schemaNameToTry = schemaName ?? model?.schemaName
-      if (schemaNameToTry) {
-        try {
-          const { Schema } = await import('../../../Schema/Schema')
-          const schemaInstance = await Schema.find({ schemaName: schemaNameToTry, waitForReady: false, hold: false })
-          const schemaContext = schemaInstance?.getService().getSnapshot().context
-          if (schemaContext?.models?.[modelName]?.properties) {
-            propertySchemas = schemaContext.models[modelName].properties as Record<string, any>
-            logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from Schema context for ${modelName}`)
-          }
-        } catch (err) {
-          logger(`Fallback Schema context failed for ${modelName}: ${err}`)
-        }
-      }
-      if (Object.keys(propertySchemas).length === 0) {
-        try {
-          const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
-          const allSchemas = await loadAllSchemasFromDb()
-          for (const { schema: schemaFile } of allSchemas) {
-            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
-            const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
-            if (models?.[modelName]?.properties) {
-              propertySchemas = models[modelName].properties as Record<string, any>
-              logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from loadAllSchemasFromDb for ${modelName}`)
-              break
-            }
-          }
-        } catch (err) {
-          logger(`Fallback loadAllSchemasFromDb failed for ${modelName}: ${err}`)
-        }
-      }
-      if (Object.keys(propertySchemas).length === 0) {
-        try {
-          const { listCompleteSchemaFiles } = await import('../../../helpers/schema')
-          const { BaseFileManager } = await import('../../../helpers/FileManager/BaseFileManager')
-          const schemaFiles = await listCompleteSchemaFiles()
-          for (const { filePath } of schemaFiles) {
-            const content = await BaseFileManager.readFileAsString(filePath)
-            const schemaFile = JSON.parse(content) as {
-              metadata?: { name?: string }
-              models?: Record<string, { properties?: Record<string, any> }>
-            }
-            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
-            if (schemaFile.models?.[modelName]?.properties) {
-              propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
-              logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)
-              break
-            }
-          }
-        } catch (err) {
-          logger(`Fallback schema file scan failed for ${modelName}: ${err}`)
-        }
-      }
-      if (Object.keys(propertySchemas).length === 0) {
-        const schemaMod = await import('../../../Schema')
-        const { ModelPropertyDataTypes } = schemaMod
-        const KNOWN_MODEL_FALLBACKS: Record<
-          string,
-          Record<string, { dataType: string; ref?: string }>
-        > = {
-          Post: {
-            html: { dataType: ModelPropertyDataTypes.Html },
-            summary: { dataType: ModelPropertyDataTypes.Text },
-            title: { dataType: ModelPropertyDataTypes.Text },
-            authors: { dataType: ModelPropertyDataTypes.List, ref: 'Identity' },
-          },
-        }
-        if (KNOWN_MODEL_FALLBACKS[modelName]) {
-          propertySchemas = KNOWN_MODEL_FALLBACKS[modelName] as Record<string, any>
-          logger(`Fallback: using known model schema for ${modelName} (${Object.keys(propertySchemas).length} properties)`)
-        }
-      }
-    }
-
-    // Fallbacks above may return schema-file shape ({ type, model, items }); normalize to dataType/ref/refValueType.
-    const { normalizePropertyRecordSchema } = await import('../../../helpers/property')
-    propertySchemas = Object.fromEntries(
-      Object.entries(propertySchemas).map(([name, def]) => [name, normalizePropertyRecordSchema(def)]),
+    // The model's property definitions from their rows; a model created in this session whose
+    // rows aren't written yet gives its in-memory ones
+    const { getModelPropertyDefinitions } = await import('../../../helpers/property')
+    let propertySchemas: Record<string, any> = Object.fromEntries(
+      await getModelPropertyDefinitions(modelName, modelScope).catch((err) => {
+        logger(`No property definitions for ${modelName}: ${err}`)
+        return []
+      }),
     )
+    if (Object.keys(propertySchemas).length === 0) {
+      const { modelPropertiesToObject } = await import('../../../helpers/model')
+      const { Model } = await import('../../../Model/Model')
+      const model = Model.resolve(modelName, modelScope)
+      if (model?.properties?.length) propertySchemas = modelPropertiesToObject(model.properties)
+    }
 
     // Collapse rows that map to the same instance key (e.g. authorIdentityIds + authors -> authors).
     // ItemProperty.create cache does not sync propertyValue on hit; processing order would otherwise

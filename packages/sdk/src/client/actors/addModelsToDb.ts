@@ -1,9 +1,8 @@
 import { EventObject, fromCallback } from 'xstate'
-import { models as modelsTable } from '@/seedSchema'
+import { inDefinitionsTransaction, insertModelStubs } from '@/db/write/definitions'
 import { writeModelUids } from '@/db/write/writeModelUids'
 import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
 import { matchEasModelSchemas } from '@seedprotocol/eas'
-import { inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { loadNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { isTestOrSeedDev } from '@/helpers/environment'
@@ -19,37 +18,14 @@ type ModelRow = { id: number; name: string; schemaFileId: string | null }
 
 /**
  * Returns every `models` row named in `modelNames`, inserting a null-schemaFileId stub for each name
- * with no row yet (the schema import adopts stubs via findOrCreateModelRecord). Check-then-insert:
+ * with no row yet (the schema import adopts stubs via findOrCreateModelRow). Check-then-insert:
  * another tab initializing at the same time would insert the same stubs, so tabs take turns
- * (docs/MULTI_TAB.md).
+ * (docs/MULTI_TAB.md), and the check and insert are one transaction.
  */
-export async function ensureModelStubs(
-  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  modelNames: string[],
-  filesDir: string | undefined,
-): Promise<ModelRow[]> {
-  return withSeedDbLock('init', filesDir, async () => {
-    // One query for all names. Model names are only unique per schema, so callers match each
-    // Model by its id (schemaFileId) first.
-    const rows = (await appDb
-      .select({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
-      .from(modelsTable)
-      .where(inArray(modelsTable.name, modelNames))) as ModelRow[]
-
-    const modelsToInsert = modelNames.filter((name) => !rows.some((m) => m.name === name))
-    if (modelsToInsert.length > 0) {
-      const newlyInserted = (await appDb
-        .insert(modelsTable)
-        .values(modelsToInsert.map((name) => ({ name })))
-        .returning({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })) as ModelRow[]
-
-      rows.push(...newlyInserted)
-      for (const name of modelsToInsert) {
-        logger('[client/actors] [addModelsToDb] inserted model:', name)
-      }
-    }
-    return rows
-  })
+export async function ensureModelStubs(modelNames: string[], filesDir: string | undefined): Promise<ModelRow[]> {
+  return withSeedDbLock('init', filesDir, () =>
+    inDefinitionsTransaction((tx) => insertModelStubs(tx, modelNames)),
+  )
 }
 
 /** Retries the latest init's EAS schema lookup (see retryWhenOnline). */
@@ -86,7 +62,7 @@ export const addModelsToDb = fromCallback<
     const modelNamesWithRows = new Set<string>()
 
     // Model names are only unique per schema, so match each Model by its id (schemaFileId) first.
-    const existingModels = await ensureModelStubs(appDb, modelNames, context.filesDir)
+    const existingModels = await ensureModelStubs(modelNames, context.filesDir)
 
     const rowFor = (modelName: string): ModelRow | undefined => {
       const modelFileId = (allModels[modelName] as { id?: string } | undefined)?.id
