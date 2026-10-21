@@ -2,11 +2,10 @@ export type FeedFormat = 'rss' | 'atom' | 'json'
 
 export interface TransformOptions {
   schemaName: string
-  siteUrl: string
-  /** When set, item URLs use {itemUrlBase}/{itemUrlPath}/{uid} (e.g. EASScan attestation links) */
-  itemUrlBase?: string
-  /** Path for attestation links when itemUrlBase is set (default: attestation/view) */
-  itemUrlPath?: string
+  /** Items without a link of their own link to {itemUrlBase}/{itemUrlPath}/{uid} (an EAS explorer). */
+  itemUrlBase: string
+  /** e.g. `attestation/view` */
+  itemUrlPath: string
   /**
    * `omit_items` (default): drop feed entries whose rich-text fields contain `data:image/` URIs (large RSS payloads).
    * `include_items`: keep those entries (opt-in).

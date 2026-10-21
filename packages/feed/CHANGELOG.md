@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Breaking: `FEED_SITE_URL` is removed. It had no effect: item links always use `FEED_ITEM_URL_BASE` or its default (the chain's EAS explorer, else `https://easscan.org`). `loadFeedConfig()` no longer returns `siteUrl`, and `TransformOptions` drops `siteUrl` and requires `itemUrlBase` and `itemUrlPath`. The site config's `siteUrl` (channel links) is unchanged.
 - `initializeFeedPlatform` keeps EAS and Arweave clients a host app or the SDK already registered, and goes through `initializeQueryPlatform` (which checks for duplicate package copies). Before, it replaced them with Node clients on every first call. Breaking: `initializeSeedClient`, `getClient` and `teardownSeedClient` are removed; `teardownFeedPlatform` replaces the last.
 - Breaking: `FEED_EXPAND_RELATIONS` is removed and feeds always assemble with `relations: 'expand'`. Setting it to `false` fetched the same related seeds but left Image and author relations as seed UIDs, so items lost their image enclosures and author names. `loadFeedConfig()` no longer returns `expandRelations`.
 - A feed body read back from the disk cache keeps its ETag and expiry. Before, loading it into memory gave it a new ETag (so the next `If-None-Match` missed) and a full `CACHE_TTL`, including page 2+ and archive entries that should expire after `CACHE_PAGE_TTL` / `CACHE_ARCHIVE_TTL`.

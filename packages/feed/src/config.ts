@@ -89,9 +89,6 @@ export function resetSiteConfig(): void {
  *   chain (`EAS_CHAIN_ID`, or the SDK / publish chain in-process), else 'https://easscan.org'.
  * - FEED_ITEM_URL_PATH: Path segment for attestation links (default: 'attestation/view'), with
  *   FEED_ITEM_URL_BASE or its default.
- * - FEED_SITE_URL: Site URL for item links without an item URL base (default:
- *   'https://seedprotocol.io'). Item links currently always have a base (see FEED_ITEM_URL_BASE),
- *   so this has no effect.
  * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25; a value that isn't a positive
  *   integer gives the default).
  * - FEED_INCLUDE_DATA_URI_HTML_ITEMS: When 'true', include items whose body/html contain embedded data-URI images.
@@ -100,7 +97,6 @@ export function resetSiteConfig(): void {
 export function loadFeedConfig(): {
   itemUrlBase: string;
   itemUrlPath: string;
-  siteUrl: string;
   pageSize: number;
   richTextDataUriImages: 'omit_items' | 'include_items';
 } {
@@ -110,13 +106,11 @@ export function loadFeedConfig(): {
     'https://easscan.org';
   const itemUrlPath =
     process.env.FEED_ITEM_URL_PATH?.trim() || 'attestation/view';
-  const siteUrl =
-    process.env.FEED_SITE_URL?.trim() || 'https://seedprotocol.io';
   const pageSize = Math.max(1, parseInt(process.env.FEED_PAGE_SIZE || '25', 10) || 25);
   const richTextDataUriImages =
     process.env.FEED_INCLUDE_DATA_URI_HTML_ITEMS?.toLowerCase() === 'true'
       ? 'include_items'
       : 'omit_items';
 
-  return { itemUrlBase, itemUrlPath, siteUrl, pageSize, richTextDataUriImages };
+  return { itemUrlBase, itemUrlPath, pageSize, richTextDataUriImages };
 }

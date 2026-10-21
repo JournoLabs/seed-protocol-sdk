@@ -77,7 +77,6 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 - `EAS_CHAIN_ID` - Chain the feed reads attestations from (e.g. `8453` for Base). Sets both the EAS indexer and the default explorer for item links. Default: `11155420` (Optimism Sepolia).
 - `FEED_ITEM_URL_BASE` - Base URL for attestation links. Item URLs use `{base}/attestation/view/{uid}`. Default: the EAS explorer of `EAS_CHAIN_ID` (e.g. `https://base.easscan.org`), or `https://easscan.org` for chains without a known explorer.
 - `FEED_ITEM_URL_PATH` - Path segment (default: `attestation/view`), used with `FEED_ITEM_URL_BASE` or its default.
-- `FEED_SITE_URL` - Site URL for item links without an item URL base (default: `https://seedprotocol.io`). Item links always have a base today, so this has no effect.
 
 ### Items and pages
 

@@ -358,7 +358,7 @@ function transformToFeedItems(
   items: FeedItem[],
   options: TransformOptions
 ): any[] {
-  const { schemaName, siteUrl, itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
+  const { itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
 
   const filtered = filterItemsByRichTextDataUriImagePolicy(
     items as Record<string, unknown>[],
@@ -370,10 +370,7 @@ function transformToFeedItems(
     const itemId = item.id || item.seedUid || item.SeedUid || item.storageTransactionId || item.storage_transaction_id
 
     // Determine item URL - prefer link/Link, then import_url/importUrl, fallback to constructed URL
-    const fallbackUrl =
-      itemUrlBase != null
-        ? `${itemUrlBase.replace(/\/$/, '')}/${(itemUrlPath ?? 'attestation/view').replace(/^\//, '')}/${itemId}`
-        : `${siteUrl}/${pluralize(schemaName)}/${itemId}`
+    const fallbackUrl = `${itemUrlBase.replace(/\/$/, '')}/${itemUrlPath.replace(/^\//, '')}/${itemId}`
     const itemUrl = item.link || item.Link || item.import_url || item.importUrl || fallbackUrl
     
     // Determine publication date - try multiple sources
@@ -506,7 +503,6 @@ export const createFeed = (
   // Transform items to preserve all dynamic properties
   const transformedItems = transformToFeedItems(items, {
     schemaName,
-    siteUrl: siteConfig.siteUrl,
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
     richTextDataUriImages:
