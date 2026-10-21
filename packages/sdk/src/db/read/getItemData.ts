@@ -12,6 +12,7 @@ import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
 import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
 import { isVersionRevoked } from "./subqueries/liveVersion"
+import { latestVersionOrder } from "./subqueries/latestVersion"
 import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -137,6 +138,7 @@ export const getItemData: GetItemData = async ({
       })
       .from(versions)
       .where(eq(versions.seedLocalId, resolvedSeedLocalId))
+      .orderBy(latestVersionOrder())
 
     if (allVersions.length > 0) {
       // Revoked versions are never the latest one and don't count as published (same as the
@@ -144,13 +146,7 @@ export const getItemData: GetItemData = async ({
       const liveVersions = allVersions.filter(
         (v: { revokedAt: number | null }) => !isVersionRevoked(v.revokedAt),
       )
-      const sorted = [...liveVersions].sort((a, b) => {
-        const ca = a.createdAt ?? 0
-        const cb = b.createdAt ?? 0
-        if (cb !== ca) return cb - ca
-        return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
-      })
-      const latest = sorted[0]
+      const latest = liveVersions[0]
       let lastPub: number | null = null
       for (const v of liveVersions) {
         const t = v.attestationCreatedAt

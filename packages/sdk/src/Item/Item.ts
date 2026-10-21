@@ -42,6 +42,7 @@ import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
+import { LATEST_VERSION_ORDER_SQL } from '@/db/read/subqueries/latestVersion'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
@@ -2063,12 +2064,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             seedLocalId: string
             revokedAt: number | null
           }
-          const versionsQuery = (sql: any) => sql`
-              SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
+          // The tag binds every interpolation as a parameter, so the order goes in the strings.
+          const versionsQueryText = [
+            `SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
               FROM versions
-              WHERE seed_local_id = ${watchedSeedLocalId}
-              ORDER BY COALESCE(attestation_created_at, created_at) DESC
-            `
+              WHERE seed_local_id = `,
+            ` ORDER BY ${LATEST_VERSION_ORDER_SQL}`,
+          ]
+          const versionsQuery = (sql: any) =>
+            sql(Object.assign([...versionsQueryText], { raw: versionsQueryText }), watchedSeedLocalId)
 
           const instanceState = itemInstanceState.get(this)
           if (!instanceState) {
