@@ -5,6 +5,8 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - `relations: 'expand' | 'urls' | 'uids'` on every assemble option set (default `'expand'`) replaces `expandRelations`, which still works: `true` is `'expand'`, `false` is `'urls'`, and `relations` wins when both are given. `'uids'` is new: relation values stay seed UIDs under their stored keys and no related seeds, versions or properties are fetched, so a cold `queryBySchema` makes three indexer requests instead of up to seven. A `'uids'` record's cache entry depends only on its seed and head version, so a change to a related seed doesn't invalidate it. Its cache key is `e2-…`; `'expand'` and `'urls'` keep `e1-…` and `e0-…`.
+- A warm `queryBySchema` read is one round of indexer requests instead of two: the change check on the cached collection goes out alongside the seed list rather than after it. It checks every cached seed, listed or not, and no longer asks whether the listed seeds themselves were revoked, since the seed list already leaves revoked seeds out. Related seeds are still checked for revocation.
+- `queryBySchema(schemaName, { maxAge })` returns a collection checked less than `maxAge` seconds ago in this process without any request. Off by default; `CACHE_MAX_AGE` sets a default for every call. New, changed and revoked seeds show up to `maxAge` seconds late. Applies where the collection cache does (remote, `skip` 0, no `uidPrefix`).
 
 ## 0.7.6 (2026-10-17)
 

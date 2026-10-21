@@ -130,6 +130,13 @@ export type QueryBySchemaOptions = AssembleOptions & {
    * cache is written through as usual. An invalid prefix returns no items.
    */
   uidPrefix?: string
+  /**
+   * Seconds after this collection was last checked against the indexer during which it is
+   * returned from the collection cache with no request at all. New, changed and revoked seeds
+   * show up to this many seconds late. Applies only where the collection cache does (remote,
+   * `skip` 0, no `uidPrefix`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
+   */
+  maxAge?: number
 }
 
 export type QueryBySchemaResult = {

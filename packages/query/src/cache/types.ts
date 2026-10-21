@@ -58,6 +58,11 @@ export type QueryCacheConfig = {
   backgroundRefresh: boolean
   refreshInterval: number
   /**
+   * Seconds after a collection was last checked during which `queryBySchema` returns it without
+   * any request (see QueryBySchemaOptions.maxAge). 0 (the default) checks on every read.
+   */
+  maxAge?: number
+  /**
    * Deep-freeze records as they enter the memory cache (set, or loaded from the persistent layer).
    * Default: on unless NODE_ENV=production.
    */
