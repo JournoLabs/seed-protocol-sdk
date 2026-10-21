@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
-import { invalidateReadGatewayCache } from '@/helpers/ArweaveClient/selectReadGateway'
+import { BaseArweaveClient, invalidateReadGatewayCache } from '@seedprotocol/arweave'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { MockArweaveClient } from '../../test-utils/MockArweaveClient'
 

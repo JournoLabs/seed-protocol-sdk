@@ -1,5 +1,5 @@
 import { ArweaveTransaction } from "@/node"
-import type { TransactionTag } from '@/types/arweave'
+import type { TransactionTag } from '@seedprotocol/arweave'
 
 export type PublishUpload = {
   itemPropertyName: string

@@ -7,10 +7,7 @@ import { getStorageDirForDataType } from '@/helpers/storageDir'
 import { INTERNAL_PROPERTY_NAMES, ZERO_BYTES32 } from '@/helpers/constants'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
-import {
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@/helpers/relationSeedRef'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { findEmbeddedImageFilePath, getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'

@@ -308,6 +308,15 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
       expect(await savedPaths(BINARY)).toEqual([`/files/files/${TX}`])
     })
 
+    // The worker used its own image-signature check; it now uses helpers/mimeTypes.ts sniffMimeType.
+    it('generic Content-Type: ICO is an image, a 3-byte "BM" file is not', async () => {
+      const ICO = new Uint8Array([0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x10, 0x10, 0, 0, 1, 0, 32, 0, 0x68, 0x04])
+      expect(await savedPaths(ICO, { 'content-type': 'application/octet-stream' })).toEqual([`/files/images/${TX}`])
+      expect(await savedPaths(new Uint8Array([0x42, 0x4d, 0xff]), { 'content-type': 'application/octet-stream' })).toEqual([
+        `/files/files/${TX}`,
+      ])
+    })
+
     it('generic Content-Type: plain text goes to files/, not images/', async () => {
       // Matches the bare-base64 pattern; it used to be base64-decoded into images/.
       // (A string body gets `text/plain;charset=UTF-8`, hence .txt.)

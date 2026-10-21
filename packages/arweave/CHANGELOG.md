@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `DefaultArweaveClient`, exported from the root entry: the fetch-based client for Node and browsers. `getTransactionData` reads `/raw` from the preferred read gateways (`setPreferredArweaveReadBaseUrls`) before the configured host, unless the caller asks for undecoded data. arweave-js is loaded on first use (the data fallback and `createTransaction`), so the root entry does not import it. `NodeArweaveClient` extends it, so Node reads try the preferred gateways too.
+
 ## 0.7.6 (2026-10-17)
 
 ### Commits

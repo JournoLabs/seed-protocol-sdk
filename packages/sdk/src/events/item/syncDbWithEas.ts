@@ -50,8 +50,7 @@ import { findSeedRowsByUid } from '@/db/read/findSeedRowsByUid'
 import { rowsPerInsert, selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
-import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
-import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
+import { BaseEasClient, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import {
   getItemPropertiesFromEas,
   getItemVersionsFromEas,

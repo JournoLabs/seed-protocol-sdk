@@ -3,7 +3,7 @@ import { versions } from '@/seedSchema'
 import { inArray } from 'drizzle-orm'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import { selectInBatches } from '@/db/sqlParamBatches'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 
 export type PublishedVersionSummary = { uid: string; localId: string | null }

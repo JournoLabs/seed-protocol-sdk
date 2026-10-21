@@ -3,7 +3,7 @@ import {
   normalizeUploadApiBaseUrl,
   getUploadApiArweaveDataUrl,
   getUploadPipelineTransactionStatus,
-} from '@/helpers/ArweaveClient/uploadApiVerification'
+} from '@seedprotocol/arweave'
 
 describe('uploadApiVerification', () => {
   describe('normalizeUploadApiBaseUrl()', () => {

@@ -1,6 +1,11 @@
-import { easName, getEasModelSchemasForNames } from '@seedprotocol/eas'
+import {
+  easName,
+  getEasModelSchemasForNames,
+  cachedSchemaLookup,
+  getSchemaUidForModelFromCache,
+  setSchemaUidForModel,
+} from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { cachedSchemaLookup, getSchemaUidForModelFromCache, setSchemaUidForModel } from '@/stores/eas'
 import { eq } from 'drizzle-orm'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import debug from 'debug'

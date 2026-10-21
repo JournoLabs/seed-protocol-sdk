@@ -90,29 +90,26 @@ export { Schema } from './Schema/Schema'
 export { Model } from './Model/Model'
 
 export { BaseFileManager as FileManager } from './helpers'
-export { BaseEasClient as EasClient } from './helpers'
+export { BaseEasClient as EasClient } from '@seedprotocol/eas'
 export {
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
   getEasSchemaUidForExactDefinition,
-} from './stores/eas'
+} from '@seedprotocol/eas'
 export { listRelationEasPropertyName, easPropertyNameForPublish } from './helpers/metadataPropertyNames'
 
+export { getModelSchemasFromEas } from './eas'
 export {
-  getModelSchemasFromEas,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   getCanonicalItemPropertiesFromEas,
   getSeedsFromSchemaUids,
   getSeedsBySchemaName,
-} from './eas'
+} from '@seedprotocol/eas'
 
 export { getCorrectId, generateId } from './helpers'
-export {
-  isPublishedSeedRef,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from './helpers/relationSeedRef'
+export { isPublishedSeedRef } from './helpers/relationSeedRef'
+export { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 export { withExcludeRevokedFilter } from '@seedprotocol/eas'
 export {
   EAS_CHAIN_DEPLOYMENTS,
@@ -125,12 +122,12 @@ export {
   assertLocalDbChain,
   EAS_CHAIN_ID_APP_STATE_KEY,
 } from './helpers/localDbChain'
+export { resolveMediaRef } from './helpers/mediaRef'
 export {
   classifyMediaRef,
-  resolveMediaRef,
   normalizeFeedItemFields,
   getFeedItemStringField,
-} from './helpers/mediaRef'
+} from '@seedprotocol/arweave'
 export type {
   FeedFieldRole,
   FeedFieldDescriptor,
@@ -143,7 +140,7 @@ export type {
   NormalizedHtmlField,
   NormalizedTextField,
   NormalizedFeedFieldValue,
-} from './helpers/mediaRef'
+} from '@seedprotocol/arweave'
 export {
   ensureImageLocal,
   closestImageSize,
@@ -282,7 +279,7 @@ export type {
   SeedGatewayHyperConfig,
   SeedGatewayConfig,
   ResolvedSeedGatewayEndpoints,
-} from './types/gateway'
+} from '@seedprotocol/arweave'
 export type {
   ResolveSeedGatewayEndpointsOptions,
   ArweaveUploadStatusResponse,

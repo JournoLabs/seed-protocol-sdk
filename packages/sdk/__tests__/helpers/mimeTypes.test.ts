@@ -72,7 +72,13 @@ describe('mimeTypes', () => {
     expect(resolveUploadMimeType({ fileName: 'seed-local-id', bytes: new Uint8Array([1, 2, 3]) })).toBeUndefined()
   })
 
-  it('the download worker carries the same MIME -> extension map', () => {
+  it('the download worker carries the same MIME -> extension map and sniffer', () => {
     expect(filesDownload.startsWith(`const SEED_MIME_TO_EXTENSION = ${JSON.stringify(MIME_TO_EXTENSION)};`)).toBe(true)
+    expect(filesDownload).toContain(`const seedSniffMimeType = ${sniffMimeType.toString()};`)
+  })
+
+  it('sniffs ICO, and a BMP header needs more than its two signature bytes', () => {
+    expect(sniffMimeType(new Uint8Array([0x00, 0x00, 0x01, 0x00, 0x01, 0x00]))).toBe('image/x-icon')
+    expect(sniffMimeType(new Uint8Array([...ascii('BM'), 0xff]))).toBeUndefined()
   })
 })

@@ -1,22 +1,8 @@
+// Sync reads EAS through this module so tests can replace these with one `vi.mock('@/eas')`.
 export {
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
-  getCanonicalItemPropertiesFromEas,
   getSeedsFromSchemaUids,
-  getSeedsBySchemaName,
-  getSeedUidsBySchemaName,
-  getPublishedByFromEas,
-  decodePublishedByData,
-  hashPublishedByBatch,
-  verifyPublishedByBatch,
-  PUBLISHED_BY_SCHEMA_DEF,
-  PUBLISHED_BY_SCHEMA_NAME,
-} from '@seedprotocol/eas'
-export type {
-  Attestation,
-  EASSchema,
-  PublishedByDecoded,
-  GetPublishedByFromEasParams,
 } from '@seedprotocol/eas'
 
 import { fetchEasModelSchemas } from '@seedprotocol/eas'

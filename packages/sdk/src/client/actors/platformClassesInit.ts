@@ -9,9 +9,9 @@ import {
   ensureReadGatewaySelected,
   resolveSeedGatewayEndpoints,
   seedGatewayConfigFromSeedConfig,
+  setPreferredArweaveReadBaseUrls,
   setResolvedSeedGatewayEndpoints,
-} from "@/helpers";
-import { setPreferredArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
+} from '@seedprotocol/arweave'
 import { configureEasReadChain } from '@seedprotocol/eas'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 import { applySeedConfigDefaults } from '../seedConfigDefaults'

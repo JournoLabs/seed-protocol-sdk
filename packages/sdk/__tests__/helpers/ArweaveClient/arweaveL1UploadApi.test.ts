@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isArweaveL1AnchoringComplete } from '@/helpers/ArweaveClient/arweaveL1UploadApi'
+import { isArweaveL1AnchoringComplete } from '@seedprotocol/arweave'
 
 describe('isArweaveL1AnchoringComplete', () => {
   it('returns true when meetsMinConfirmations is true', () => {

@@ -42,6 +42,16 @@ describe.skipIf(typeof window !== 'undefined')('imageResize worker MIME sniffing
     expect(await inferredType([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])).toBe('image/png')
   })
 
+  // The worker had its own sniffer (only the 'heic' brand); it now uses helpers/mimeTypes.ts.
+  it('labels every HEIF brand image/heic', async () => {
+    expect(await inferredType([0, 0, 0, 0x18, ...ascii('ftypmif1')])).toBe('image/heic')
+    expect(await inferredType([0, 0, 0, 0x18, ...ascii('ftypheix')])).toBe('image/heic')
+  })
+
+  it('falls back to image/jpeg for bytes that sniff as a non-image type', async () => {
+    expect(await inferredType([...ascii('%PDF-1.7')])).toBe('image/jpeg')
+  })
+
   it('a RIFF file that is not WebP is not labelled image/webp', async () => {
     expect(await inferredType([...ascii('RIFF'), 0x24, 0, 0, 0, ...ascii('WAVEfmt ')])).toBe('image/jpeg')
   })

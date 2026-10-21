@@ -9,12 +9,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { setPreferredArweaveReadBaseUrls, BaseArweaveClient } from '@seedprotocol/arweave'
 
 // Import the node ArweaveClient to set up the platform class
 // This import sets up BaseArweaveClient.PlatformClass automatically
-import '@/node/helpers/ArweaveClient'
+import '@seedprotocol/arweave/node'
 
 // Known stable transaction IDs from Arweave mainnet for integration testing
 // These are permanent, immutable transactions that should always exist

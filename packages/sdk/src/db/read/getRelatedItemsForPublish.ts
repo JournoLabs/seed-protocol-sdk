@@ -1,8 +1,5 @@
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
-import {
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@/helpers/relationSeedRef'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItem } from '@/interfaces'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
