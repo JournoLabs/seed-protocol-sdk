@@ -26,16 +26,21 @@ export const validateEntity = fromPromise<
   // Convert through unknown to avoid type overlap error
   const entityInput = input as unknown as ValidateEntityInput
   // Validation awaits imports before looking up the schema; the entity can be evicted with its
-  // schema meanwhile (Schema.destroy, test cleanup). Schema.create would then load the evicted
-  // schema again, and its load re-creates the schema's models from rows being deleted.
+  // schema meanwhile (Schema.destroy, test cleanup). Loading the evicted schema again would
+  // re-create the schema's models from rows being deleted.
   const evictionEpoch = currentEvictionEpoch()
-  /** The schema to validate against; throws (validation then skips the schema check) once it was evicted. */
+  /**
+   * The schema to validate against; throws (validation then skips the schema check) once it was
+   * evicted or when no schema has the name.
+   */
   const schemaForValidation = async (schemaName: string) => {
     const { Schema } = await import('../../../Schema/Schema')
     if (schemaEvictedSince(schemaName, evictionEpoch)) {
       throw new Error(`Schema "${schemaName}" was evicted during validation`)
     }
-    return Schema.create(schemaName, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
+    const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+    if (!schema) throw new Error(`No schema named "${schemaName}"`)
+    return schema
   }
   
   const _validate = async (): Promise<ValidateEntityOutput> => {

@@ -1,7 +1,4 @@
-import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
-import { findSeedRowsByUid } from './findSeedRowsByUid'
+import { findSeedRow } from './findSeedRow'
 import { ZERO_BYTES32 } from '@/helpers/constants'
 import { isVersionRevoked } from './subqueries/liveVersion'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -15,16 +12,9 @@ export type RelatedSeedRow = {
   type: string | null
 }
 
-const selectSeed = {
-  seedLocalId: seeds.localId,
-  seedUid: seeds.uid,
-  revokedAt: seeds.revokedAt,
-  type: seeds.type,
-}
-
 /**
  * The local seed row a relation/list/image ref points at, by local id or uid. A uid resolves as
- * {@link findSeedRowsByUid} resolves it (the order EAS sync matches seeds in): the old uid of a seed
+ * {@link findSeedRow} resolves it (the order EAS sync matches seeds in): the old uid of a seed
  * that was unpublished and published again resolves to that seed, through its old version rows.
  * Null when nothing local matches (e.g. a published uid with no local copy).
  */
@@ -35,17 +25,8 @@ export const findRelatedSeedRow = async ({
   seedLocalId?: string
   seedUid?: string
 }): Promise<RelatedSeedRow | null> => {
-  const appDb = BaseDb.getAppDb()
-  if (!appDb) return null
-  if (seedLocalId) {
-    const [row] = await appDb.select(selectSeed).from(seeds).where(eq(seeds.localId, seedLocalId)).limit(1)
-    if (row?.seedLocalId) return row as RelatedSeedRow
-  }
-  if (!seedUid || seedUid === ZERO_BYTES32) return null
-  const row = (await findSeedRowsByUid([seedUid])).get(seedUid)
-  return row?.localId
-    ? { seedLocalId: row.localId, seedUid: row.uid, revokedAt: row.revokedAt, type: row.type }
-    : null
+  const row = await findSeedRow({ localId: seedLocalId, uid: seedUid })
+  return row ? { seedLocalId: row.localId, seedUid: row.uid, revokedAt: row.revokedAt, type: row.type } : null
 }
 
 /** The seed is attested and its attestation is live. */

@@ -3,7 +3,8 @@ import { FromCallbackInput } from '@/types'
 import { ItemMachineContext } from '@/types/item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { eq, and, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { getVersionData } from '@/db/read/subqueries/versionData'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
@@ -94,9 +95,9 @@ const createItemPropertyInstances = async (
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
-          const schemaInstance = Schema.create(schemaNameToTry, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
-          const schemaContext = schemaInstance.getService().getSnapshot().context
-          if (schemaContext.models?.[modelName]?.properties) {
+          const schemaInstance = await Schema.find({ schemaName: schemaNameToTry, waitForReady: false, hold: false })
+          const schemaContext = schemaInstance?.getService().getSnapshot().context
+          if (schemaContext?.models?.[modelName]?.properties) {
             propertySchemas = schemaContext.models[modelName].properties as Record<string, any>
             logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from Schema context for ${modelName}`)
           }
@@ -297,30 +298,11 @@ export const loadOrCreateItem = fromCallback<
       throw new Error('Database not available')
     }
 
-    // Step 1: Query seeds table FIRST by seedLocalId or seedUid
-    // When both are provided, use OR so local seeds (uid=null) are still found
-    const whereClauses = []
-    if (seedLocalId && seedUid) {
-      whereClauses.push(
-        or(
-          eq(seeds.localId, seedLocalId),
-          eq(seeds.uid, seedUid),
-        ),
-      )
-    } else if (seedLocalId) {
-      whereClauses.push(eq(seeds.localId, seedLocalId))
-    } else if (seedUid) {
-      whereClauses.push(eq(seeds.uid, seedUid))
-    }
-
+    // Step 1: the seed row (local id first, then the uid, following a republished seed's old uid)
     const timingStart = timingNow()
-    const seedRecords = await db
-      .select()
-      .from(seeds)
-      .where(and(...whereClauses))
-      .limit(1)
+    const seedRecord = await findSeedRow({ localId: seedLocalId, uid: seedUid }, db)
 
-    if (seedRecords.length === 0) {
+    if (!seedRecord) {
       // Seed not found - this is a new item, will be created elsewhere
       logger(`Seed not found in database for seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
       sendBack({
@@ -343,7 +325,6 @@ export const loadOrCreateItem = fromCallback<
       return
     }
 
-    const seedRecord = seedRecords[0]
     const resolvedSeedLocalId = seedRecord.localId
     const resolvedSeedUid = seedRecord.uid || undefined
     const schemaUid = seedRecord.schemaUid || undefined

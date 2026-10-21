@@ -180,8 +180,15 @@
     {
       "idx": 25,
       "version": "6",
-      "when": 1792583414756,
-      "tag": "0025_link_metadata_property_ids",
+      "when": 1792582614256,
+      "tag": "0025_add_content_hash_to_schemas",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792587176763,
+      "tag": "0026_link_metadata_property_ids",
       "breakpoints": true
     }
   ]

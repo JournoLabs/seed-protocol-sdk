@@ -15,6 +15,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { easName } from '@seedprotocol/eas'
 import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/sqlite-core'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -34,7 +35,7 @@ import {
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
-import { linkModelToSchema } from '@/db/write/linkModelToSchema'
+import { insertModelSchemaLink, linkModelToSchema } from '@/db/write/linkModelToSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 
 const logger = debug('seedSdk:helpers:db')
@@ -342,23 +343,31 @@ const findOrCreateRefModelRecord = async (
   return findOrCreateModelRecord(db, refModelName, undefined, ownerLink?.schemaId ?? undefined)
 }
 
+type AppDb = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
+
 /**
- * Searches the database for an existing schema by schemaFileId (preferred) or name and creates it if it doesn't exist
- * @param schema - The schema to add to the database
+ * Finds the schema row by schemaFileId, else by name, updates the fields given, or inserts one.
+ *
+ * By name: a draft write takes a draft of that name; a published write takes a published row,
+ * else a draft (which it publishes). A published row keeps its schemaFileId against another id of
+ * the same version, and keeps its newer version against an older version's file.
  * @param schemaFileId - Optional schemaFileId from JSON file for change tracking
  * @param schemaData - Optional full schema content as JSON string (SchemaFileFormat)
  * @param isDraft - Optional flag indicating if schema is in draft state (default: false)
  * @param isEdited - Optional flag indicating if schema has been edited locally (default: false)
+ * @param options.db - Run on this database (a transaction) instead of the app database
+ * @param options.contentHash - The applied file's hash (applySchemaFile); written with schemaData
  * @returns The schema record (either existing or newly created)
  */
 export const addSchemaToDb = async (
-  schema: Omit<SchemaType, 'id' | 'schemaFileId' | 'schemaData' | 'isDraft' | 'isEdited'>,
+  schema: Omit<SchemaType, 'id' | 'schemaFileId' | 'schemaData' | 'isDraft' | 'isEdited' | 'contentHash'>,
   schemaFileId?: string,
   schemaData?: string,
   isDraft?: boolean,
   isEdited?: boolean,
+  options: { db?: AppDb; contentHash?: string | null } = {},
 ): Promise<typeof schemas.$inferSelect> => {
-  const db = BaseDb.getAppDb()
+  const db = options.db ?? BaseDb.getAppDb()
 
   if (!db) {
     throw new Error('Database not found')
@@ -367,241 +376,91 @@ export const addSchemaToDb = async (
   // The stored schema file may change its nameMatch levels (ADR 0009).
   clearNameMatchLevels()
 
-  // First, try to find existing schema by schemaFileId (preferred for change tracking)
-  if (schemaFileId) {
-    const existingByFileId = await db
-      .select()
-      .from(schemas)
-      .where(eq(schemas.schemaFileId, schemaFileId))
-      .limit(1)
-
-    if (existingByFileId.length > 0) {
-      // Update fields if provided
-      const updates: Partial<typeof schemas.$inferInsert> = {}
-      if (schemaFileId && !existingByFileId[0].schemaFileId) {
-        updates.schemaFileId = schemaFileId
-      }
-      // Always update name if it's different (handles name changes)
-      if (schema.name && existingByFileId[0].name !== schema.name) {
-        updates.name = schema.name
-      }
-      if (schemaData !== undefined) {
-        updates.schemaData = schemaData
-      }
-      if (schema.version !== undefined && existingByFileId[0].version !== schema.version) {
-        updates.version = schema.version
-      }
-      if (isDraft !== undefined && existingByFileId[0].isDraft !== isDraft) {
-        updates.isDraft = isDraft
-      }
-      if (isEdited !== undefined && existingByFileId[0].isEdited !== isEdited) {
-        updates.isEdited = isEdited
-      }
-      if (schema.updatedAt && existingByFileId[0].updatedAt !== schema.updatedAt) {
-        updates.updatedAt = schema.updatedAt
-      }
-      if (Object.keys(updates).length > 0) {
-        await db
-          .update(schemas)
-          .set(updates)
-          .where(eq(schemas.id, existingByFileId[0].id!))
-        return { ...existingByFileId[0], ...updates }
-      }
-      return existingByFileId[0]
+  type SchemaRow = typeof schemas.$inferSelect
+  const update = async (existing: SchemaRow, updates: Partial<typeof schemas.$inferInsert>): Promise<SchemaRow> => {
+    if (schema.name && existing.name !== schema.name) updates.name = schema.name
+    if (schemaData !== undefined) updates.schemaData = schemaData
+    if (options.contentHash !== undefined && existing.contentHash !== options.contentHash) {
+      updates.contentHash = options.contentHash
     }
+    if (schema.version !== undefined && existing.version !== schema.version) updates.version = schema.version
+    if (isDraft !== undefined && existing.isDraft !== isDraft) updates.isDraft = isDraft
+    if (isEdited !== undefined && existing.isEdited !== isEdited) updates.isEdited = isEdited
+    if (schema.updatedAt && existing.updatedAt !== schema.updatedAt) updates.updatedAt = schema.updatedAt
+    if (Object.keys(updates).length === 0) return existing
+    await db.update(schemas).set(updates).where(eq(schemas.id, existing.id!))
+    return { ...existing, ...updates }
   }
 
-  // For drafts, check if there's an existing draft by name (not by schemaFileId)
+  if (schemaFileId) {
+    const [byFileId] = await db.select().from(schemas).where(eq(schemas.schemaFileId, schemaFileId)).limit(1)
+    if (byFileId) return update(byFileId, {})
+  }
+
   if (isDraft === true) {
-    const existingDrafts = await db
-      .select()
-      .from(schemas)
-      .where(eq(schemas.name, schema.name))
-      .limit(1)
-
-    if (existingDrafts.length > 0 && existingDrafts[0].isDraft === true) {
-      // Update existing draft
-      const updates: Partial<typeof schemas.$inferInsert> = {}
-      // Update schemaFileId if provided and different from existing
-      if (schemaFileId && existingDrafts[0].schemaFileId !== schemaFileId) {
-        updates.schemaFileId = schemaFileId
+    const [byName] = await db.select().from(schemas).where(eq(schemas.name, schema.name)).limit(1)
+    if (byName?.isDraft === true) {
+      const updates: Partial<typeof schemas.$inferInsert> = {
+        updatedAt: schema.updatedAt || Date.now(),
       }
-      if (schemaData !== undefined) {
-        updates.schemaData = schemaData
-      }
-      if (schema.version !== undefined) {
-        updates.version = schema.version
-      }
-      updates.updatedAt = schema.updatedAt || Date.now()
-      
-      if (Object.keys(updates).length > 0) {
-        await db
-          .update(schemas)
-          .set(updates)
-          .where(eq(schemas.id, existingDrafts[0].id!))
-        return { ...existingDrafts[0], ...updates }
-      }
-      return existingDrafts[0]
+      if (schemaFileId && byName.schemaFileId !== schemaFileId) updates.schemaFileId = schemaFileId
+      return update(byName, updates)
     }
   }
 
-  // Fallback: Search for existing schema by name
-  // BUT: If we have a schemaFileId, also check if any record with that schemaFileId exists
-  // (in case the name changed but we're looking up by the new name)
-  if (schemaFileId) {
-    // Double-check by schemaFileId - maybe the name changed and we're looking up by new name
-    const doubleCheckByFileId = await db
-      .select()
-      .from(schemas)
-      .where(eq(schemas.schemaFileId, schemaFileId))
-      .limit(1)
-    
-    if (doubleCheckByFileId.length > 0) {
-      // Found by schemaFileId - update it (name might have changed)
-      const updates: Partial<typeof schemas.$inferInsert> = {}
-      // Always update name if it's different (handles name changes)
-      if (schema.name && doubleCheckByFileId[0].name !== schema.name) {
-        updates.name = schema.name
-      }
-      if (schemaData !== undefined) {
-        updates.schemaData = schemaData
-      }
-      if (schema.version !== undefined && doubleCheckByFileId[0].version !== schema.version) {
-        updates.version = schema.version
-      }
-      if (isDraft !== undefined && doubleCheckByFileId[0].isDraft !== isDraft) {
-        updates.isDraft = isDraft
-      }
-      if (isEdited !== undefined && doubleCheckByFileId[0].isEdited !== isEdited) {
-        updates.isEdited = isEdited
-      }
-      if (schema.updatedAt && doubleCheckByFileId[0].updatedAt !== schema.updatedAt) {
-        updates.updatedAt = schema.updatedAt
-      }
-      if (Object.keys(updates).length > 0) {
-        await db
-          .update(schemas)
-          .set(updates)
-          .where(eq(schemas.id, doubleCheckByFileId[0].id!))
-        return { ...doubleCheckByFileId[0], ...updates }
-      }
-      return doubleCheckByFileId[0]
-    }
-  }
-  
-  // Final fallback: Search by name (only if no schemaFileId or schemaFileId lookup failed)
-  // If isDraft is explicitly false, first try to find non-draft, but also check for drafts
-  // to handle the case where a draft exists and we're loading a non-draft version
-  let existingSchemas = await db
+  // By name: a published write prefers a published row, then takes a draft of that name.
+  let [existing] = await db
     .select()
     .from(schemas)
     .where(
       isDraft === false
         ? and(eq(schemas.name, schema.name), eq(schemas.isDraft, false))
-        : eq(schemas.name, schema.name)
+        : eq(schemas.name, schema.name),
     )
     .limit(1)
-
-  // If isDraft is false and we didn't find a non-draft, check for a draft with the same name
-  // This handles the case where a draft was created first and we're now loading the non-draft version
-  if (isDraft === false && existingSchemas.length === 0) {
-    const draftSchemas = await db
+  if (!existing && isDraft === false) {
+    ;[existing] = await db
       .select()
       .from(schemas)
       .where(and(eq(schemas.name, schema.name), eq(schemas.isDraft, true)))
       .limit(1)
-    
-    if (draftSchemas.length > 0) {
-      // Found a draft - we'll update it to non-draft below
-      logger(`Found draft schema "${schema.name}" with schemaFileId "${draftSchemas[0].schemaFileId}", will update to non-draft with schemaFileId "${schemaFileId}"`)
-      existingSchemas = draftSchemas
-    }
   }
 
-  if (existingSchemas.length > 0) {
-    // The row is per schema name and holds its latest version. A complete schema file can bring
-    // a version under its own id (SDK version bumps keep the id; imported files may not).
+  if (existing) {
+    // A complete schema file can bring a version under its own id (imported files may not keep it).
     const isOtherVersionFile =
       !!schemaFileId &&
-      !!existingSchemas[0].schemaFileId &&
-      existingSchemas[0].schemaFileId !== schemaFileId &&
-      existingSchemas[0].isDraft !== true &&
+      !!existing.schemaFileId &&
+      existing.schemaFileId !== schemaFileId &&
+      existing.isDraft !== true &&
       schema.version !== undefined &&
-      schema.version !== existingSchemas[0].version
-    if (isOtherVersionFile && schema.version! < existingSchemas[0].version) {
+      schema.version !== existing.version
+    if (isOtherVersionFile && schema.version! < existing.version) {
       // An older version's file: rolling the row back to it would leave the newer version's id
       // pointing at the older version's data.
-      logger(`Keeping schema "${schema.name}" at v${existingSchemas[0].version}; not replacing it with older v${schema.version}`)
-      return existingSchemas[0]
+      logger(`Keeping schema "${schema.name}" at v${existing.version}; not replacing it with older v${schema.version}`)
+      return existing
     }
-
-    // Update fields if provided
     const updates: Partial<typeof schemas.$inferInsert> = {}
-    // Update schemaFileId if provided and different from existing (or if existing doesn't have one or is null)
-    // This is important for preserving IDs from schema files when drafts exist
-    // BUT: Don't overwrite a non-draft schema's schemaFileId with a new generated one
-    // This prevents loadOrCreateSchema from overwriting correct IDs from fixture files
-    if (schemaFileId && existingSchemas[0].schemaFileId !== schemaFileId) {
-      // Only update if:
-      // 1. Existing schema is a draft (can be updated)
-      // 2. Existing schema has no schemaFileId (should be set)
-      // 3. We're explicitly setting isDraft to false (updating from draft to non-draft)
-      // 4. It's a newer version's file: the row takes that version's data, so it takes its id too
-      const shouldUpdate = existingSchemas[0].isDraft === true ||
-                          !existingSchemas[0].schemaFileId ||
-                          (isDraft === false && existingSchemas[0].isDraft === true) ||
-                          isOtherVersionFile
-      
-      if (shouldUpdate) {
-        logger(`Updating schemaFileId from "${existingSchemas[0].schemaFileId}" to "${schemaFileId}" for schema "${schema.name}"`)
-        updates.schemaFileId = schemaFileId
-      } else {
-        logger(`Preserving existing schemaFileId "${existingSchemas[0].schemaFileId}" for non-draft schema "${schema.name}" (new schemaFileId "${schemaFileId}" would overwrite it)`)
-      }
+    // A published row keeps its id unless this is a newer version's file; a draft or id-less row
+    // takes the new one.
+    if (
+      schemaFileId &&
+      existing.schemaFileId !== schemaFileId &&
+      (existing.isDraft === true || !existing.schemaFileId || isOtherVersionFile)
+    ) {
+      updates.schemaFileId = schemaFileId
     }
-    // Always update name if it's different (handles name changes)
-    if (schema.name && existingSchemas[0].name !== schema.name) {
-      updates.name = schema.name
-    }
-    if (schemaData !== undefined) {
-      updates.schemaData = schemaData
-    }
-    if (schema.version !== undefined && existingSchemas[0].version !== schema.version) {
-      updates.version = schema.version
-    }
-    // If isDraft is explicitly false and we found a draft, update it to non-draft
-    if (isDraft === false && existingSchemas[0].isDraft === true) {
-      updates.isDraft = false
-    } else if (isDraft !== undefined && existingSchemas[0].isDraft !== isDraft) {
-      updates.isDraft = isDraft
-    }
-    if (isEdited !== undefined && existingSchemas[0].isEdited !== isEdited) {
-      updates.isEdited = isEdited
-    }
-    if (schema.updatedAt && existingSchemas[0].updatedAt !== schema.updatedAt) {
-      updates.updatedAt = schema.updatedAt
-    }
-    if (Object.keys(updates).length > 0) {
-      logger(`Applying updates to schema "${schema.name}" (id: ${existingSchemas[0].id}):`, Object.keys(updates))
-      await db
-        .update(schemas)
-        .set(updates)
-        .where(eq(schemas.id, existingSchemas[0].id!))
-      const updated = { ...existingSchemas[0], ...updates }
-      logger(`Schema "${schema.name}" updated. New schemaFileId: "${updated.schemaFileId}", isDraft: ${updated.isDraft}`)
-      return updated
-    }
-    logger(`No updates needed for schema "${schema.name}" (id: ${existingSchemas[0].id})`)
-    return existingSchemas[0]
+    return update(existing, updates)
   }
 
-  // Create schema if it doesn't exist
   type NewSchemaRecord = InferInsertModel<typeof schemas>
   const newSchema = await db.insert(schemas).values({
     name: schema.name,
     version: schema.version,
     schemaFileId: schemaFileId || null,
     schemaData: schemaData || null,
+    contentHash: options.contentHash ?? null,
     isDraft: isDraft ?? false,
     isEdited: isEdited ?? false,
     createdAt: schema.createdAt,
@@ -631,75 +490,24 @@ export const renameModelInDb = async (
   oldName: string,
   newName: string,
   schemaNameOrId?: string | number,
+  db: AppDb | undefined = BaseDb.getAppDb(),
 ): Promise<NewModelRecord> => {
-  const db = BaseDb.getAppDb()
 
   if (!db) {
     throw new Error('Database not found')
   }
 
-  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+  // Scoped: only that schema's model (no name-only fallback). Unscoped: the name alone, which
+  // throws AmbiguousModelError when several schemas define it.
+  const scope =
+    schemaNameOrId === undefined
+      ? {}
+      : typeof schemaNameOrId === 'number'
+        ? { schemaId: schemaNameOrId, strict: true }
+        : { schemaName: schemaNameOrId, strict: true }
 
-  // Find the model by old name, optionally scoped by schema
-  let existingModels: { id: number; name: string | null; schemaFileId: string | null; isEdited: boolean | null }[]
-  if (schemaNameOrId !== undefined) {
-    if (typeof schemaNameOrId === 'number') {
-      const rows = await db
-        .select({
-          id: modelsTable.id,
-          name: modelsTable.name,
-          schemaFileId: modelsTable.schemaFileId,
-          isEdited: modelsTable.isEdited,
-        })
-        .from(modelsTable)
-        .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-        .where(
-          and(
-            eq(modelsTable.name, oldName),
-            eq(modelSchemas.schemaId, schemaNameOrId),
-          ),
-        )
-        .limit(1)
-      existingModels = rows
-    } else {
-      const rows = await db
-        .select({
-          id: modelsTable.id,
-          name: modelsTable.name,
-          schemaFileId: modelsTable.schemaFileId,
-          isEdited: modelsTable.isEdited,
-        })
-        .from(modelsTable)
-        .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-        .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(
-          and(
-            eq(modelsTable.name, oldName),
-            eq(schemasTable.name, schemaNameOrId),
-          ),
-        )
-        .limit(1)
-      existingModels = rows
-    }
-  } else {
-    existingModels = await db
-      .select({
-        id: modelsTable.id,
-        name: modelsTable.name,
-        schemaFileId: modelsTable.schemaFileId,
-        isEdited: modelsTable.isEdited,
-      })
-      .from(modelsTable)
-      .where(eq(modelsTable.name, oldName))
-    // Model names are only unique per schema: an unscoped rename must not pick one arbitrarily.
-    if (existingModels.length > 1) {
-      throw new Error(
-        `Model "${oldName}" exists in more than one schema; pass the schema name or id to rename it`,
-      )
-    }
-  }
-
-  if (existingModels.length === 0) {
+  const modelToRename = await resolveModelRecord(oldName, scope, db)
+  if (!modelToRename) {
     if (schemaNameOrId !== undefined) {
       throw new Error(
         `Model "${oldName}" not found in schema "${schemaNameOrId}"`,
@@ -710,63 +518,10 @@ export const renameModelInDb = async (
     return newModel[0] as NewModelRecord
   }
 
-  const modelToRename = existingModels[0]
-
-  // Check if a model with the new name already exists in the same schema
-  let existingWithNewName: { id: number; name: string | null; schemaFileId: string | null; isEdited: boolean | null }[]
-  if (schemaNameOrId !== undefined) {
-    if (typeof schemaNameOrId === 'number') {
-      existingWithNewName = await db
-        .select({
-          id: modelsTable.id,
-          name: modelsTable.name,
-          schemaFileId: modelsTable.schemaFileId,
-          isEdited: modelsTable.isEdited,
-        })
-        .from(modelsTable)
-        .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-        .where(
-          and(
-            eq(modelsTable.name, newName),
-            eq(modelSchemas.schemaId, schemaNameOrId),
-          ),
-        )
-        .limit(1)
-    } else {
-      existingWithNewName = await db
-        .select({
-          id: modelsTable.id,
-          name: modelsTable.name,
-          schemaFileId: modelsTable.schemaFileId,
-          isEdited: modelsTable.isEdited,
-        })
-        .from(modelsTable)
-        .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-        .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(
-          and(
-            eq(modelsTable.name, newName),
-            eq(schemasTable.name, schemaNameOrId),
-          ),
-        )
-        .limit(1)
-    }
-  } else {
-    existingWithNewName = await db
-      .select({
-        id: modelsTable.id,
-        name: modelsTable.name,
-        schemaFileId: modelsTable.schemaFileId,
-        isEdited: modelsTable.isEdited,
-      })
-      .from(modelsTable)
-      .where(eq(modelsTable.name, newName))
-      .limit(1)
-  }
-
-  if (existingWithNewName.length > 0) {
-    // New name already exists in this schema, return it
-    return existingWithNewName[0] as NewModelRecord
+  // A model with the new name already exists in the same schema: return it
+  const existingWithNewName = await resolveModelRecord(newName, scope, db)
+  if (existingWithNewName) {
+    return existingWithNewName as NewModelRecord
   }
 
   // Update the model name
@@ -781,10 +536,13 @@ export const renameModelInDb = async (
 /**
  * Adds models and their properties to the database.
  * Optionally connects models to a schema via join records.
- * @param models - The model definitions to add
+ * @param models - The model definitions to add (with schemaFileData.propertyDefinitions, its models are added too)
  * @param schema - Optional schema to connect models to
  * @param modelRenames - Optional map of old model names to new model names for handling renames
  * @param schemaFileData - Optional object containing schemaFileId mappings from JSON file: { schemaFileId, modelFileIds: Map<modelName, id>, propertyFileIds: Map<modelName, Map<propertyName, id>> }
+ * @param options.db - Run on this database (a transaction). The caller then refreshes cached
+ *   ModelProperty instances with the returned ids once it has committed.
+ * @returns The schemaFileIds of the property rows this call changed
  */
 export const addModelsToDb = async (
   models: ModelDefinitions,
@@ -796,8 +554,9 @@ export const addModelsToDb = async (
     propertyFileIds?: Map<string, Map<string, string>>
     propertyDefinitions?: Map<string, { [propertyName: string]: any }>
   },
-) => {
-  const db = BaseDb.getAppDb()
+  options: { db?: AppDb } = {},
+): Promise<string[]> => {
+  const db = options.db ?? BaseDb.getAppDb()
 
   if (!db) {
     throw new Error('Database not found')
@@ -816,7 +575,7 @@ export const addModelsToDb = async (
       schemaRecord = schema
       logger(`Using existing schema record with id: ${schemaRecord.id}`)
     } else {
-      schemaRecord = await addSchemaToDb(schema, schemaFileData?.schemaFileId)
+      schemaRecord = await addSchemaToDb(schema, schemaFileData?.schemaFileId, undefined, undefined, undefined, { db })
       logger(`Created/found schema record with id: ${schemaRecord.id}`)
     }
   }
@@ -825,7 +584,7 @@ export const addModelsToDb = async (
   if (modelRenames && schemaRecord) {
     const schemaNameOrId = schemaRecord.name ?? schemaRecord.id
     for (const [oldName, newName] of modelRenames.entries()) {
-      await renameModelInDb(oldName, newName, schemaNameOrId)
+      await renameModelInDb(oldName, newName, schemaNameOrId, db)
     }
   }
 
@@ -836,7 +595,9 @@ export const addModelsToDb = async (
   // Property rows this call changed, so cached ModelProperty instances can be given the new values
   const updatedPropertyFileIds: string[] = []
 
-  for (const [modelName, modelClass] of Object.entries(models)) {
+  const modelNames = [...new Set([...Object.keys(models), ...(schemaFileData?.propertyDefinitions?.keys() ?? [])])]
+  for (const modelName of modelNames) {
+    const modelClass = models[modelName]
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
 
@@ -877,7 +638,7 @@ export const addModelsToDb = async (
     // Get properties from Model context (where they're stored as an object when Model is created)
     // modelClass.properties returns ModelProperty instances from DB, but we need the context properties
     // which are stored as an object when Model.create() is called with properties
-    const modelContext = (modelClass as any)._getSnapshotContext?.() || {}
+    const modelContext = (modelClass as any)?._getSnapshotContext?.() || {}
     const contextProperties = modelContext.properties || {}
     // When models are created from JSON, properties are stored as _pendingPropertyDefinitions
     const pendingProperties = modelContext._pendingPropertyDefinitions || {}
@@ -898,7 +659,7 @@ export const addModelsToDb = async (
     } else {
       const modelHelpersMod = await import('./model')
       const { modelPropertiesToObject } = modelHelpersMod
-      const modelProperties = modelClass.properties || []
+      const modelProperties = modelClass?.properties || []
       schema = modelPropertiesToObject(modelProperties)
     }
 
@@ -1097,7 +858,8 @@ export const addModelsToDb = async (
       const toInsert = modelIds.filter(({ modelId }) => !existingSet.has(modelId))
       if (toInsert.length > 0) {
         for (const { modelName, modelId } of toInsert) {
-          if (!(await linkModelToSchema(db, modelId, schemaRecord.id))) continue
+          const link = options.db ? insertModelSchemaLink : linkModelToSchema
+          if (!(await link(db, modelId, schemaRecord.id))) continue
           logger(`Created join table entry for model ${modelName} (id: ${modelId}) to schema (id: ${schemaRecord.id})`)
         }
       }
@@ -1107,97 +869,61 @@ export const addModelsToDb = async (
   }
 
   // A cached instance is otherwise never re-read from its row (createById returns it as is)
-  await refreshCachedProperties(updatedPropertyFileIds)
+  if (!options.db) await refreshCachedProperties(updatedPropertyFileIds)
+  return updatedPropertyFileIds
 }
 
 /**
- * Loads models from the database for a given schema by querying the model_schemas join table.
- * This ensures that models added to the database (via model_schemas) are included even if
- * they're not in the schemaData JSON.
+ * The models linked to a schema row (model_schemas) with their property rows, in schema-file
+ * shape: `{ [modelName]: { id, properties: { [name]: { dataType, schemaFileId, ref, ... } } } }`.
+ * Fields only a schema file holds (validation, description, ...) aren't here; see
+ * {@link mergeDbModelsIntoSchemaModels}.
  * @param schemaId - The ID of the schema record in the database
- * @returns A map of model names to model data (compatible with SchemaFileFormat.models)
  */
 export const loadModelsFromDbForSchema = async (
   schemaId: number,
+  db: AppDb | undefined = BaseDb.getAppDb(),
 ): Promise<{ [modelName: string]: any }> => {
-  const db = BaseDb.getAppDb()
   if (!db) {
     logger('Database not found, cannot load models from DB')
     return {}
   }
 
   try {
-    // Query model_schemas join table to find all models linked to this schema
-    const modelSchemaRecords = await db
-      .select({
-        modelId: modelSchemas.modelId,
-        modelName: modelsTable.name,
-        schemaFileId: modelsTable.schemaFileId,
-      })
+    const linked = await db
+      .select({ modelId: modelSchemas.modelId, modelName: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
       .from(modelSchemas)
       .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
       .where(eq(modelSchemas.schemaId, schemaId))
+    const modelIds = linked.map((row: { modelId: number | null }) => row.modelId).filter((id: number | null): id is number => id != null)
+    if (modelIds.length === 0) return {}
+
+    const refModels = alias(modelsTable, 'ref_models')
+    const propertyRows = await db
+      .select({ property: properties, refName: refModels.name })
+      .from(properties)
+      .leftJoin(refModels, eq(properties.refModelId, refModels.id))
+      .where(inArray(properties.modelId, modelIds))
 
     const models: { [modelName: string]: any } = {}
-
-    // For each model, load its properties
-    for (const { modelId, modelName, schemaFileId } of modelSchemaRecords) {
+    const nameById = new Map<number, string>()
+    for (const { modelId, modelName, schemaFileId } of linked) {
       if (!modelId || !modelName) continue
-
-      // Get all properties for this model
-      const propertyRecords = await db
-        .select()
-        .from(properties)
-        .where(eq(properties.modelId, modelId))
-
-      // Reconstruct properties object
-      const modelProperties: { [propertyName: string]: any } = {}
-      
-      for (const prop of propertyRecords) {
-        // Build a basic property structure from database fields
-        // Note: This is a simplified reconstruction - full property schemas
-        // (like Relation details, List configs, etc.) should come from schemaData
-        const propertyData: any = {
-          dataType: normalizeDataType(prop.dataType ?? undefined),
-        }
-
-        if (prop.schemaFileId) {
-          propertyData.schemaFileId = prop.schemaFileId
-        }
-
-        // Add ref information if it's a relation
-        if (prop.refModelId) {
-          // Get the referenced model name
-          const refModelRecords = await db
-            .select({ name: modelsTable.name })
-            .from(modelsTable)
-            .where(eq(modelsTable.id, prop.refModelId))
-            .limit(1)
-          
-          if (refModelRecords.length > 0) {
-            propertyData.ref = refModelRecords[0].name
-          }
-        }
-
-        if (prop.refValueType) {
-          propertyData.refValueType = normalizeDataType(prop.refValueType ?? undefined)
-        }
-
-        if (prop.storageType) propertyData.storageType = prop.storageType
-        if (prop.localStorageDir) propertyData.localStorageDir = prop.localStorageDir
-        if (prop.filenameSuffix) propertyData.filenameSuffix = prop.filenameSuffix
-
-        modelProperties[prop.name] = propertyData
-      }
-
-      // Create model structure. Include id (schemaFileId) so processSchemaFiles can populate
-      // modelFileIds and Model.create can skip duplicate-name logic, preventing model
-      // duplication on reload (Post 1 1, Post 2 1, etc.).
-      models[modelName] = {
-        properties: modelProperties,
-        ...(schemaFileId ? { id: schemaFileId } : {}),
-        // Note: description would need to be stored separately
-        // or reconstructed from schemaData if available
+      nameById.set(modelId, modelName)
+      // The id (schemaFileId) lets Model.create find the existing row instead of adding a "Post 1".
+      models[modelName] = { properties: {}, ...(schemaFileId ? { id: schemaFileId } : {}) }
+    }
+    for (const { property: prop, refName } of propertyRows as { property: PropertyType; refName: string | null }[]) {
+      const modelName = nameById.get(prop.modelId!)
+      if (!modelName) continue
+      models[modelName].properties[prop.name] = {
+        dataType: normalizeDataType(prop.dataType ?? undefined),
+        ...(prop.schemaFileId ? { schemaFileId: prop.schemaFileId } : {}),
+        ...(refName ? { ref: refName } : {}),
+        ...(prop.refValueType ? { refValueType: normalizeDataType(prop.refValueType) } : {}),
+        ...(prop.storageType ? { storageType: prop.storageType } : {}),
+        ...(prop.localStorageDir ? { localStorageDir: prop.localStorageDir } : {}),
+        ...(prop.filenameSuffix ? { filenameSuffix: prop.filenameSuffix } : {}),
       }
     }
 
@@ -1261,58 +987,6 @@ export const mergeDbModelsIntoSchemaModels = (
 }
 
 /**
- * Returns model name by database model ID.
- */
-export async function getModelNameByModelId(modelId: number): Promise<string | undefined> {
-  const db = BaseDb.getAppDb()
-  if (!db) return undefined
-  try {
-    const rows = await db
-      .select({ name: modelsTable.name })
-      .from(modelsTable)
-      .where(eq(modelsTable.id, modelId))
-      .limit(1)
-    return rows.length > 0 ? rows[0].name : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Resolves modelName and dataType for a property by its schemaFileId (e.g. context.id).
- * Used when machine context lacks these (e.g. just-created property renamed before full context is set).
- */
-export async function getPropertyModelNameAndDataType(
-  schemaFileId: string,
-): Promise<{ modelName: string; dataType: string } | undefined> {
-  const db = BaseDb.getAppDb()
-  if (!db || !schemaFileId) return undefined
-  try {
-    const rows = await db
-      .select({
-        dataType: properties.dataType,
-        modelId: properties.modelId,
-      })
-      .from(properties)
-      .where(eq(properties.schemaFileId, schemaFileId))
-      .limit(1)
-    if (rows.length === 0) return undefined
-    const modelRows = await db
-      .select({ name: modelsTable.name })
-      .from(modelsTable)
-      .where(eq(modelsTable.id, rows[0].modelId))
-      .limit(1)
-    if (modelRows.length === 0) return undefined
-    return {
-      modelName: modelRows[0].name,
-      dataType: rows[0].dataType ?? '',
-    }
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * Saves a property's changes to the database without updating the JSON schema file.
  * This is used when properties are edited but the schema hasn't been saved as a new version yet.
  * @param property - The ModelPropertyMachineContext with updated values
@@ -1330,50 +1004,19 @@ export const savePropertyToDb = async (
     throw new Error('Property name is required')
   }
 
-  // Find the model: prefer modelId (reliable), then modelName as name, then modelName as schemaFileId
-  // (context.modelName can be a model schemaFileId when schema uses that as identifier)
-  let modelRecord: { id: number; name: string; schemaFileId: string | null } | undefined
-  if (property.modelId != null && typeof property.modelId === 'number') {
-    const byId = await db
-      .select()
-      .from(modelsTable)
-      .where(eq(modelsTable.id, property.modelId))
-      .limit(1)
-    modelRecord = byId[0]
-  }
-  if (!modelRecord && property.modelName) {
-    // Model names are only unique per schema: scope by the property's schema when known
-    modelRecord = await resolveModelRecord(
-      property.modelName,
-      { schemaName: (property as { _schemaName?: string })._schemaName },
-      db,
-    )
-  }
-  if (!modelRecord && property.modelName) {
-    const bySchemaFileId = await db
-      .select()
-      .from(modelsTable)
-      .where(eq(modelsTable.schemaFileId, property.modelName))
-      .limit(1)
-    modelRecord = bySchemaFileId[0]
-  }
-  // Fallback: resolve model from existing property row (by schemaFileId) when modelName is wrong
+  // modelId, then the model of the property row (by its schemaFileId), then modelName in the
+  // property's schema. context.modelName can also hold the model's schemaFileId.
   const schemaFileId = property._propertyFileId || (typeof property.id === 'string' ? property.id : undefined)
-  if (!modelRecord && schemaFileId) {
-    const propRows = await db
-      .select({ modelId: properties.modelId })
-      .from(properties)
-      .where(eq(properties.schemaFileId, schemaFileId))
-      .limit(1)
-    if (propRows.length > 0 && propRows[0].modelId) {
-      const byPropModelId = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.id, propRows[0].modelId))
-        .limit(1)
-      modelRecord = byPropModelId[0]
-    }
-  }
+  const modelRecord = await resolveModelRecord(
+    property.modelName,
+    {
+      modelId: typeof property.modelId === 'number' ? property.modelId : undefined,
+      propertyFileId: schemaFileId,
+      modelFileId: property.modelName,
+      schemaName: (property as { _schemaName?: string })._schemaName,
+    },
+    db,
+  )
   if (!modelRecord) {
     throw new Error(
       `Model not found in database (modelId=${property.modelId}, modelName=${property.modelName})`
@@ -1929,115 +1572,4 @@ export async function writePropertyToDb(
       }
     }
   }
-}
-
-/**
- * Get model database ID from model name or modelFileId
- * @param modelNameOrFileId - Model name (string) or modelFileId (string)
- * @param schemaNameOrId - Optional schema name or ID to narrow search
- * @returns Model database ID
- * @throws Error if model not found
- */
-export async function getModelId(
-  modelNameOrFileId: string,
-  schemaNameOrId?: string | number
-): Promise<number> {
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not available')
-  }
-
-  const modelSchemaMod = await import('../seedSchema/ModelSchema')
-  const { models: modelsTable } = modelSchemaMod
-  const drizzleMod = await import('drizzle-orm')
-  const { eq, and } = drizzleMod
-
-  // Try to find by modelFileId first (more reliable)
-  let records = await db
-    .select()
-    .from(modelsTable)
-    .where(eq(modelsTable.schemaFileId, modelNameOrFileId))
-    .limit(1)
-
-  // If not found by modelFileId, try by name
-  if (records.length === 0) {
-    
-    // If schema is provided, narrow the search
-    if (schemaNameOrId !== undefined) {
-      const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
-      const { modelSchemas } = modelSchemaSchemaMod
-      const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-      const { schemas: schemasTable } = schemaSchemaMod
-      
-      if (typeof schemaNameOrId === 'number') {
-        // schemaNameOrId is schemaId
-        records = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-          .where(
-            and(
-              eq(modelsTable.name, modelNameOrFileId),
-              eq(modelSchemas.schemaId, schemaNameOrId)
-            )
-          )
-          .limit(1)
-      } else {
-        // schemaNameOrId is schemaName
-        records = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(
-            and(
-              eq(modelsTable.name, modelNameOrFileId),
-              eq(schemasTable.name, schemaNameOrId)
-            )
-          )
-          .limit(1)
-      }
-    } else {
-      // No schema filter: name-only (newest row, warns when the name is ambiguous)
-      const byName = await resolveModelRecord(modelNameOrFileId, {}, db)
-      records = byName ? [byName] : []
-    }
-  }
-
-  if (records.length === 0) {
-    const schemaInfo = schemaNameOrId ? ` in schema "${schemaNameOrId}"` : ''
-    throw new Error(`Model "${modelNameOrFileId}"${schemaInfo} not found in database`)
-  }
-
-  return records[0].id
-}
-
-/**
- * Get model database ID from modelFileId
- * @param modelFileId - The model file ID (schema_file_id)
- * @returns Model database ID
- * @throws Error if model not found
- */
-export async function getModelIdByFileId(modelFileId: string): Promise<number> {
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not available')
-  }
-
-  const modelSchemaMod = await import('../seedSchema/ModelSchema')
-  const { models: modelsTable } = modelSchemaMod
-  const drizzleMod = await import('drizzle-orm')
-  const { eq } = drizzleMod
-
-  const records = await db
-    .select()
-    .from(modelsTable)
-    .where(eq(modelsTable.schemaFileId, modelFileId))
-    .limit(1)
-
-  if (records.length === 0) {
-    throw new Error(`Model with file ID "${modelFileId}" not found in database`)
-  }
-
-  return records[0].id
 }

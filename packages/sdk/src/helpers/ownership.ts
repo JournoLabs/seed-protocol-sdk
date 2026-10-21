@@ -1,10 +1,10 @@
 import type { IItem } from '@/interfaces/IItem'
-import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
 import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
-import { isPlaceholderUid } from '@/helpers/easUid'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { ZERO_BYTES32 } from '@/helpers/constants'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
 
 const READ_ONLY_ERROR = 'Item is read-only: you do not own this item'
@@ -30,30 +30,7 @@ export type SeedOwnershipRow = {
 }
 
 async function getSeedRowForItem(item: ItemLike): Promise<SeedOwnershipRow | null> {
-  const appDb = BaseDb.getAppDb()
-  if (!appDb) return null
-
-  const selectRow = async (condition: SQL): Promise<SeedOwnershipRow | null> => {
-    const seedRows = await appDb
-      .select({
-        publisher: seeds.publisher,
-        attestationRaw: seeds.attestationRaw,
-        uid: seeds.uid,
-      })
-      .from(seeds)
-      .where(condition)
-      .limit(1)
-    return seedRows?.[0] ?? null
-  }
-
-  // localId identifies the item's own row; uid may be shared by other local rows
-  // (e.g. duplicate syncs), so only fall back to it when there is no localId match.
-  if (item.seedLocalId) {
-    const row = await selectRow(eq(seeds.localId, item.seedLocalId))
-    if (row) return row
-  }
-  if (item.seedUid) return selectRow(eq(seeds.uid, item.seedUid))
-  return null
+  return (await findSeedRow({ localId: item.seedLocalId, uid: item.seedUid })) ?? null
 }
 
 /** Resolve publisher from seed row: `publisher` column, else `attestationRaw.attester`. */

@@ -15,14 +15,12 @@ import {
   getSeedsBySchemaName,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
-  getEasSchemaUidBySchemaName,
-} from '@/eas'
-import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { IQueryClient } from '@/interfaces/IQueryClient'
+  BaseQueryClient,
+  type IQueryClient,
+} from '@seedprotocol/eas'
 
-// Import node platform classes - sets up real EasClient and QueryClient
-import '@/node/helpers/EasClient'
-import { QueryClient as NodeQueryClient } from '@/node/helpers/QueryClient'
+// Registers the real EAS and query clients
+import { NodeQueryClient } from '@seedprotocol/eas/node'
 
 const isNodeEnv = typeof window === 'undefined'
 const NETWORK_TIMEOUT = 15000
@@ -127,17 +125,6 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
         const metadata = parsed[0]?.value
         expect(metadata).toHaveProperty('name', 'text')
         expect(metadata).toHaveProperty('value')
-      }
-    }, NETWORK_TIMEOUT)
-  })
-
-  describe('getEasSchemaUidBySchemaName', () => {
-    it('returns schema UID for known schema name', async () => {
-      const schemaUid = await getEasSchemaUidBySchemaName({ schemaName: TWEET_SCHEMA_NAME })
-
-      if (schemaUid) {
-        expect(typeof schemaUid).toBe('string')
-        expect(schemaUid).toMatch(/^0x[a-fA-F0-9]{64}$/)
       }
     }, NETWORK_TIMEOUT)
   })

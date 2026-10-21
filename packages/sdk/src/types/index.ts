@@ -7,10 +7,24 @@ export * from './model'
 export * from './item'
 export * from './property'
 export * from './machines'
-export * from './arweave'
+export type {
+  TransactionStatus,
+  TransactionTag,
+  GetDataOptions,
+  DownloadFilesParams,
+  DownloadResult,
+  ArweaveTransaction,
+  CreateTransactionOptions,
+} from '@seedprotocol/arweave'
 export * from './publish'
 
-export * from './gateway'
+export type {
+  SeedGatewayTransportMode,
+  SeedGatewayActivePath,
+  SeedGatewayHyperConfig,
+  SeedGatewayConfig,
+  ResolvedSeedGatewayEndpoints,
+} from '@seedprotocol/arweave'
 
 export type Endpoints = {
   filePaths: string
@@ -38,7 +52,7 @@ export interface SeedConfig {
   /** Upload API origin (HTTP / hybrid fallback). */
   uploadApiBaseUrl?: string
   /** Gateway + upload transport (`http-gateway` default). */
-  gateway?: import('./gateway').SeedGatewayConfig
+  gateway?: import('@seedprotocol/arweave').SeedGatewayConfig
   /**
    * EAS chain the SDK reads from (sync, schema lookups). Defaults to Optimism Sepolia, or to
    * `PublishConfig.chain` when `@seedprotocol/publish` is initialized. Must match the publish chain.

@@ -197,11 +197,10 @@ describe.sequential('runSyncFromEas: nameMatch levels (ADR 0009)', () => {
       [seed.norm]: 'nm_norm_page',
       [seed.fuzzy]: 'nm_fuzzy_page',
     })
-    // Refused schemas aren't recorded as the model's either.
+    // model_uids holds only a model's exact schema (bytes32 <easName>, what publish writes seeds
+    // under), as init records it: seeds found under older names don't make their schema the model's.
     const uidRows = await appDb.select().from(modelUids).where(inArray(modelUids.uid, Object.values(schemaUid)))
-    expect(uidRows.map((r: { uid: string }) => r.uid).sort()).toEqual(
-      [schemaUid.exact, schemaUid.norm, schemaUid.fuzzyPlural].sort(),
-    )
+    expect(uidRows.map((r: { uid: string }) => r.uid).sort()).toEqual([schemaUid.exact])
   })
 
   it("stores properties whose name matches at the property's level, and drops the rest", async () => {

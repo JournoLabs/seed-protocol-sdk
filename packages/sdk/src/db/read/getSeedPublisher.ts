@@ -1,6 +1,5 @@
-import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds } from '@/seedSchema'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { normalizePublisher } from '@/helpers/addresses'
 import { resolvePublisherFromSeedRow } from '@/helpers/ownership'
 
@@ -15,13 +14,7 @@ export async function getSeedPublisher(
   db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
 ): Promise<string | undefined> {
   if (!seedLocalId) return undefined
-  const appDb = db
-  if (!appDb) return undefined
-  const [row] = await appDb
-    .select({ publisher: seeds.publisher, attestationRaw: seeds.attestationRaw, uid: seeds.uid })
-    .from(seeds)
-    .where(eq(seeds.localId, seedLocalId))
-    .limit(1)
+  const row = await findSeedRow({ localId: seedLocalId }, db)
   if (!row) return undefined
   return normalizePublisher(resolvePublisherFromSeedRow(row))
 }

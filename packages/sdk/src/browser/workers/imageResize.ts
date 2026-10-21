@@ -1,3 +1,5 @@
+import { sniffMimeType } from '@/helpers/mimeTypes'
+
 type BrowserImageResizerConfigBase = {
 	/**
 	 * Algorithm used for downscaling
@@ -54,7 +56,11 @@ type WorkerSouceData = {
   height: number;
 }
 
-export default `(
+/** The upload side's byte sniffer (`helpers/mimeTypes.ts`), injected as source: the worker cannot import. */
+declare const seedSniffMimeType: typeof sniffMimeType
+
+export default `const seedSniffMimeType = ${sniffMimeType.toString()};
+(
   ${
     function () {
 
@@ -116,17 +122,10 @@ async function getFileFromOPFS(path: string): Promise<File> {
 /** Infer MIME from magic bytes. OPFS File may have empty type, causing createImageBitmap to fail. */
 async function getBlobWithInferredMime(file: File): Promise<Blob> {
   const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
   let mime = file.type;
   if (!mime || mime === '') {
-    if (bytes[0] === 0xff && bytes[1] === 0xd8) mime = 'image/jpeg';
-    else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) mime = 'image/png';
-    else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mime = 'image/webp';
-    else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) mime = 'image/gif';
-    else if (bytes[0] === 0x42 && bytes[1] === 0x4d) mime = 'image/bmp';
-    else if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 && bytes[8] === 0x61 && bytes[9] === 0x76 && bytes[10] === 0x69 && bytes[11] === 0x66) mime = 'image/avif';
-    else if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 && bytes[8] === 0x68 && bytes[9] === 0x65 && bytes[10] === 0x69 && bytes[11] === 0x63) mime = 'image/heic';
-    else mime = 'image/jpeg';
+    const sniffed = seedSniffMimeType(new Uint8Array(buf));
+    mime = sniffed && sniffed.startsWith('image/') ? sniffed : 'image/jpeg';
   }
   return new Blob([buf], { type: mime });
 }

@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { sha3_256 } from '@noble/hashes/sha3'
 import { bytesToHex } from '@noble/hashes/utils'
-import type { TransactionTag } from '@/types/arweave'
+import type { TransactionTag } from '@seedprotocol/arweave'
 
 /**
  * Tag every Seed upload carries with the hex digest of its data. Producers: the SDK's

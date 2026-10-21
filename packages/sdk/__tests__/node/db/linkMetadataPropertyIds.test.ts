@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Migration 0025: links metadata rows written without property_id to their property through the
+ * Migration 0026: links metadata rows written without property_id to their property through the
  * seed's model (decision D4), so readers can match them by id.
  */
 import { describe, expect, it } from 'vitest'
@@ -12,7 +12,7 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import { resolveSdkDrizzleMigrationsDir } from '@/node/db/Db'
 
-const MIGRATIONS_BEFORE_0025 = 25
+const MIGRATIONS_BEFORE_0026 = 26
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'seed-property-ids-'))
 
@@ -30,11 +30,11 @@ const migrationsFolder = (count: number): string => {
   return target
 }
 
-describe('migration 0025_link_metadata_property_ids', () => {
+describe('migration 0026_link_metadata_property_ids', () => {
   it('links rows by key and stored forms through seeds.model_file_id, leaving the rest NULL', async () => {
     const client = createClient({ url: `file:${path.join(tempDir(), 'seed.db')}` })
     const db = drizzle(client)
-    await migrate(db, { migrationsFolder: migrationsFolder(MIGRATIONS_BEFORE_0025) })
+    await migrate(db, { migrationsFolder: migrationsFolder(MIGRATIONS_BEFORE_0026) })
 
     const now = Date.now()
     const run = (sql: string, args: (string | number | null)[]) => client.execute({ sql, args })

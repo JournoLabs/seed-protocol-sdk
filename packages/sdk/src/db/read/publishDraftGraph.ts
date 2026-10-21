@@ -1,11 +1,8 @@
 import { ZERO_BYTES32 } from '@/helpers/constants'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import {
-  isPublishedSeedRef,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@/helpers/relationSeedRef'
+import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import type { IItem, IItemProperty } from '@/interfaces'
 import { findRelatedSeedRow } from '@/db/read/resolveRelatedSeedRef'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'

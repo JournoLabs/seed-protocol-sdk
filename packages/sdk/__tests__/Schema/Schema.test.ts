@@ -1217,9 +1217,7 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Status should be 'loading' or a nested loading state initially
-      // Possible nested states: checkingExisting, writingSchema, verifyingSchema,
-      // writingModels, verifyingModels, creatingModelInstances, verifyingModelInstances,
-      // writingProperties, verifyingProperties, creatingPropertyInstances, verifyingPropertyInstances
+      // Possible nested states: checkingExisting, writingSchema
       const initialStatus = schema.status
       const isInitialLoadingState = 
         (typeof initialStatus === 'object' && initialStatus !== null && 'loading' in initialStatus) ||

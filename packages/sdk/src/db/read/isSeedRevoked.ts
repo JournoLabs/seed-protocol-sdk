@@ -1,6 +1,4 @@
-import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { isVersionRevoked } from './subqueries/liveVersion'
 
 /**
@@ -10,12 +8,6 @@ import { isVersionRevoked } from './subqueries/liveVersion'
  */
 export const isSeedRevoked = async (seedLocalId: string | undefined): Promise<boolean> => {
   if (!seedLocalId) return false
-  const appDb = BaseDb.getAppDb()
-  if (!appDb) return false
-  const [row] = await appDb
-    .select({ revokedAt: seeds.revokedAt })
-    .from(seeds)
-    .where(eq(seeds.localId, seedLocalId))
-    .limit(1)
+  const row = await findSeedRow({ localId: seedLocalId })
   return isVersionRevoked(row?.revokedAt)
 }

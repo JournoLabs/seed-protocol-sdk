@@ -1,14 +1,15 @@
 import { EventObject, fromCallback } from 'xstate'
-import { models as modelsTable, modelUids } from '@/seedSchema'
+import { models as modelsTable } from '@/seedSchema'
+import { writeModelUids } from '@/db/write/writeModelUids'
+import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
+import { matchEasModelSchemas } from '@seedprotocol/eas'
 import { inArray } from 'drizzle-orm'
-import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { loadNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { isTestOrSeedDev } from '@/helpers/environment'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
-import { GET_SCHEMAS } from '@seedprotocol/eas'
 import { withSeedDbLock } from '@/helpers/tabLocks'
 import { createRetryWhenOnline } from '@/helpers/retryWhenOnline'
 
@@ -81,13 +82,8 @@ export const addModelsToDb = fromCallback<
       return
     }
 
-    const schemaDefsByModelName = new Map<
-      string,
-      {
-        dbIds: number[]
-        schemaDef: string
-      }
-    >()
+    // Models with a row, whose EAS schema uids are looked up below
+    const modelNamesWithRows = new Set<string>()
 
     // Model names are only unique per schema, so match each Model by its id (schemaFileId) first.
     const existingModels = await ensureModelStubs(appDb, modelNames, context.filesDir)
@@ -109,73 +105,36 @@ export const addModelsToDb = fromCallback<
         hasModelsInDb = false
         continue
       }
-      // The EAS schema string depends only on the model name, so every same-name row shares its uid.
-      schemaDefsByModelName.set(modelName, {
-        dbIds: existingModels.filter((m) => m.name === modelName).map((m) => m.id),
-        schemaDef: `bytes32 ${easName(modelName)}`,
-      })
+      modelNamesWithRows.add(modelName)
     }
 
     // If we have no models to process, still send success (empty models is valid)
-    if (schemaDefsByModelName.size === 0) {
+    if (modelNamesWithRows.size === 0) {
       logger('[client/actors] [addModelsToDb] No models to process, but continuing')
       return
     }
-
-    const schemaDefs = Array.from(schemaDefsByModelName.values()).map(
-      ({ schemaDef }) => schemaDef,
-    )
 
     // Fetch schemas from EAS in background - do not block init. EAS can be slow (10s+);
     // modelUids will be populated async and EAS sync orchestrator runs when done.
     const fetchEasAndPopulateModelUids = async () => {
       try {
-        const queryClient = BaseQueryClient.getQueryClient()
-        const easClient = BaseEasClient.getEasClient()
-
-        const queryPromise = queryClient.fetchQuery({
-          queryKey: [`getSchemasVersion`, [...schemaDefs].sort()],
-          queryFn: async () =>
-            easClient.request(GET_SCHEMAS, {
-              where: {
-                schema: {
-                  in: schemaDefs,
-                },
-              },
-            }),
-        })
-
         let timeout: ReturnType<typeof setTimeout> | undefined
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeout = setTimeout(() => reject(new Error('EAS query timeout after 10 seconds')), 10000)
         })
 
+        // The lookup and the model_uids rule sync uses too (each name at its nameMatch level).
+        const { getModelSchemasFromEas } = await import('@/eas')
+        const lookups = await localModelSchemaLookups([...modelNamesWithRows])
         // Cleared, so a finished lookup doesn't keep a Node process alive for 10 s.
-        const { schemas } = await Promise.race([queryPromise, timeoutPromise]).finally(() =>
+        const schemas = await Promise.race([getModelSchemasFromEas(lookups), timeoutPromise]).finally(() =>
           clearTimeout(timeout),
         )
+        const matches = matchEasModelSchemas(schemas, lookups)
         modelUidsRetry.succeeded()
 
-        if (schemas && schemas.length > 0) {
-          const db = BaseDb.getAppDb()
-          if (db) {
-            for (const schema of schemas) {
-              const modelIds =
-                Array.from(schemaDefsByModelName.values()).find(
-                  ({ schemaDef }) => schemaDef === schema.schema,
-                )?.dbIds ?? []
-
-              for (const modelId of modelIds) {
-                await db
-                  .insert(modelUids)
-                  .values({
-                    modelId,
-                    uid: schema.id,
-                  })
-                  .onConflictDoNothing()
-              }
-            }
-          }
+        if (matches.length > 0) {
+          await writeModelUids(matches)
           const { requestEasSyncFromModelsInit } = await import(
             '@/events/item/easSyncManager'
           )

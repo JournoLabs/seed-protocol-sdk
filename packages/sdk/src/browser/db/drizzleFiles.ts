@@ -473,7 +473,9 @@ DELETE FROM \`seeds\` WHERE \`local_id\` IN (
 );
 `
 
-export const migrationSql_0025_link_metadata_property_ids = `-- Links metadata rows written without property_id to their property (decision D4: readers match
+export const migrationSql_0025_add_content_hash_to_schemas = `ALTER TABLE \`schemas\` ADD \`content_hash\` text;`
+
+export const migrationSql_0026_link_metadata_property_ids = `-- Links metadata rows written without property_id to their property (decision D4: readers match
 -- rows by property_id). Only rows whose seed records its model (seeds.model_file_id) are linked,
 -- and only to one of that model's properties. Rows that match no property, or several, keep NULL
 -- and are read by name.
@@ -732,8 +734,15 @@ export const journalJson = `{
     {
       "idx": 25,
       "version": "6",
-      "when": 1792583414756,
-      "tag": "0025_link_metadata_property_ids",
+      "when": 1792582614256,
+      "tag": "0025_add_content_hash_to_schemas",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792587176763,
+      "tag": "0026_link_metadata_property_ids",
       "breakpoints": true
     }
   ]
@@ -742,8 +751,8 @@ export const journalJson = `{
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
 export const snapshotJson = `{
-  "id": "9efd6c7b-4f4d-4dad-b5c8-599e802739e5",
-  "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
+  "id": "7bfe4bb0-e334-45ef-a640-18d7ae42002e",
+  "prevId": "2b9514b2-20c5-4340-8a19-68f4d0926e43",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -2057,6 +2066,13 @@ export const snapshotJson = `{
         "is_edited": {
           "name": "is_edited",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

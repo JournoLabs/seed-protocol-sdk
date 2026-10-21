@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { easPropertyNameForPublish, easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'
-import { warnOnEasNameCollisions } from '@/imports/json'
+import { warnOnEasNameCollisions } from '@/helpers/schemaApply'
 
 describe('easPropertyNameForPublish (ADR 0008)', () => {
   it.each([

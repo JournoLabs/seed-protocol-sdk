@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import {
+  BaseArweaveClient,
   ensureReadGatewaySelected,
   invalidateReadGatewayCache,
   isReadGatewayKnownHealthy,
@@ -9,7 +9,7 @@ import {
   resetArweaveReadGatewayForTests,
   selectFirstHealthyReadGateway,
   isGatewayHostCircuitOpen,
-} from '@/helpers/ArweaveClient/selectReadGateway'
+} from '@seedprotocol/arweave'
 import {
   DEFAULT_ARWEAVE_HOST,
   getDefaultArweaveReadGatewayHostsOrdered,

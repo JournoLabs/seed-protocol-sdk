@@ -1,19 +1,12 @@
 import { EventObject, fromCallback } from "xstate"
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
 import { ClientManagerEvents } from "@/client/constants"
-import { isInternalSchema, INTERNAL_SCHEMA_IDS, SEED_PROTOCOL_SCHEMA_NAME } from "@/helpers/constants"
-import { listSchemaFiles, loadAllSchemasFromDb, type LoadedSchema } from "@/helpers/schema"
+import { isInternalSchema } from "@/helpers/constants"
+import { listLatestSchemaFiles, loadAllSchemasFromDb, readSchemaFile } from "@/helpers/schema"
+import { applySchemaFile, createModelsForSchemaFile } from "@/helpers/schemaApply"
 import { BaseDb } from "@/db/Db/BaseDb"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
-import { countDistinct, eq } from "drizzle-orm"
-import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
-import {
-  createModelsFromJson,
-  createModelsFromJsonFile,
-  importJsonSchema,
-  loadSchemaFromFile,
-  syncSchemaFromSource,
-} from "@/imports/json"
+import { importJsonSchema, syncSchemaFromSource } from "@/imports/json"
 import { SchemaFileFormat } from "@/types/import"
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager"
 import { isNode } from "@/helpers/environment"
@@ -37,33 +30,75 @@ function resolveSchemaFilePath(schemaFile: string): string {
   return path.join(workingDir, schemaFile)
 }
 
-/** Resolve schema display name from an inlined object or on-disk JSON path. */
-async function resolveSchemaNameFromSource(
-  source: string | SchemaFileFormat,
-): Promise<string | null> {
-  if (typeof source === 'object' && source?.metadata?.name) {
-    return String(source.metadata.name)
-  }
-  if (typeof source === 'string') {
-    try {
-      const resolvedPath = resolveSchemaFilePath(source)
-      const content = await BaseFileManager.readFileAsString(resolvedPath)
-      const parsed = JSON.parse(content) as SchemaFileFormat
-      if (parsed?.metadata?.name) {
-        return String(parsed.metadata.name)
-      }
-    } catch (error) {
-      logger('Could not resolve schema name from path:', source, error)
-    }
-  }
-  return null
-}
-
 /** Error for a schema the app passed in config, so init fails with what went wrong and where. */
 function userSchemaLoadError(option: 'schema' | 'schemaFile', source: unknown, error: unknown): Error {
   const where = typeof source === 'string' ? ` from "${source}"` : ''
   const reason = error instanceof Error ? error.message : String(error)
   return new Error(`Could not load config.${option}${where}: ${reason}`, { cause: error })
+}
+
+/**
+ * The schema step of init: applies the internal schema, the app's `config.schema` (or
+ * `config.schemaFile`) and any version file not yet applied, then returns Model instances for every
+ * schema in the database. An input whose file id, version and content the rows already record is
+ * not written again.
+ */
+export async function processSchemaFilesOnce(
+  context: Pick<ClientManagerContext, 'schema' | 'schemaFile' | 'models'>,
+): Promise<{ [modelName: string]: any }> {
+  const appliedNames = new Set<string>()
+
+  try {
+    const applied = await applySchemaFile(internalSchema as SchemaFileFormat, { store: false })
+    appliedNames.add(applied.schemaFile.metadata.name)
+  } catch (error) {
+    logger('Error loading internal seed-protocol schema:', error)
+  }
+
+  // The app's schema (canonical) takes precedence over schemaFile
+  if (context.schema) {
+    const schemaName = typeof context.schema === 'object' ? String(context.schema?.metadata?.name ?? '') : ''
+    const schemaId = typeof context.schema === 'object' && context.schema?.id ? String(context.schema.id) : undefined
+    if (!isInternalSchema(schemaName, schemaId)) {
+      try {
+        await syncSchemaFromSource(context.schema)
+        if (schemaName) appliedNames.add(schemaName)
+      } catch (error: any) {
+        // A schema the app passed in failed (missing file, bad JSON, DB write). Re-running an
+        // unchanged schema does not throw, so this is not the already-loaded case: fail init.
+        throw userSchemaLoadError('schema', context.schema, error)
+      }
+    }
+  } else if (context.schemaFile) {
+    try {
+      const content = await BaseFileManager.readFileAsString(resolveSchemaFilePath(context.schemaFile))
+      await importJsonSchema({ contents: content })
+      const name = (JSON.parse(content) as SchemaFileFormat)?.metadata?.name
+      if (name) appliedNames.add(String(name))
+    } catch (error: any) {
+      throw userSchemaLoadError('schemaFile', context.schemaFile, error)
+    }
+  }
+
+  await applyPendingSchemaFiles(appliedNames)
+
+  // Model instances for every schema; their rows are written, so they adopt them
+  const allModels: { [key: string]: any } = { ...(context.models || {}) }
+  let loaded: Awaited<ReturnType<typeof loadAllSchemasFromDb>> = []
+  try {
+    loaded = await loadAllSchemasFromDb()
+  } catch (error) {
+    logger('Error loading schemas from database (continuing anyway):', error)
+  }
+  for (const { schema } of loaded) {
+    try {
+      Object.assign(allModels, await createModelsForSchemaFile(schema))
+    } catch (error) {
+      logger(`Error creating models for schema ${schema.metadata?.name}:`, error)
+    }
+  }
+
+  return allModels
 }
 
 // Timeout for the entire schema processing operation (120 seconds)
@@ -112,299 +147,8 @@ export const processSchemaFiles = fromCallback<
   }, PROCESS_SCHEMA_FILES_TIMEOUT_MS)
 
   const _processSchemaFiles = async () => {
-    // Schemas written (or confirmed present) this run — skip redundant loadSchemaFromFile later
-    const schemasWrittenThisRun = new Set<string>()
-
-    // First, load the internal seed-protocol schema
-    logger('Loading internal seed-protocol schema')
-    const internalSchemaData = internalSchema as SchemaFileFormat
-    const db = BaseDb.getAppDb()
-    const internalSchemaExists = db
-      ? (await db.select().from(schemasTable).where(eq(schemasTable.schemaFileId, INTERNAL_SCHEMA_IDS[0])).limit(1)).length > 0
-      : false
-    // Always mark internal schema as written so the DB/file loop does not re-apply it
-    schemasWrittenThisRun.add(SEED_PROTOCOL_SCHEMA_NAME)
-    if (internalSchemaExists) {
-      logger('Internal seed-protocol schema already in DB, skipping import')
-    } else {
-      try {
-        // Import the internal schema to database (will create models and add to store)
-        await importJsonSchema({ contents: JSON.stringify(internalSchemaData) }, internalSchemaData.version)
-        logger(`Loaded internal seed-protocol schema v${internalSchemaData.version}`)
-      } catch (error: any) {
-        // If schema already exists, that's fine - it means it was already loaded
-        if (error?.message?.includes('already exists')) {
-          logger('Internal seed-protocol schema already loaded')
-        } else {
-          logger('Error loading internal seed-protocol schema:', error)
-          // Don't fail if internal schema can't be loaded - it might already be in DB
-        }
-      }
-    }
-
-    // If schema (canonical) is provided, sync it - takes precedence over schemaFile
-    if (context.schema) {
-      // Skip sync when schema is internal (already loaded above)
-      const schemaName = typeof context.schema === 'object' && context.schema?.metadata?.name
-        ? String(context.schema.metadata.name)
-        : ''
-      const schemaId = typeof context.schema === 'object' && context.schema?.id ? String(context.schema.id) : undefined
-      if (isInternalSchema(schemaName, schemaId)) {
-        logger('Schema is internal (Seed Protocol), already loaded - skipping syncSchemaFromSource')
-      } else {
-        try {
-          const syncedName = await resolveSchemaNameFromSource(context.schema)
-          await syncSchemaFromSource(context.schema)
-          if (syncedName) {
-            schemasWrittenThisRun.add(syncedName)
-          }
-          logger(`Synced canonical schema from ${typeof context.schema === 'string' ? context.schema : 'object'}`)
-        } catch (error: any) {
-          // A schema the app passed in failed (missing file, bad JSON, DB write). Re-running an
-          // unchanged schema does not throw, so this is not the already-loaded case: fail init.
-          throw userSchemaLoadError('schema', context.schema, error)
-        }
-      }
-    } else if (context.schemaFile) {
-      // Legacy: schemaFile - load via importJsonSchema
-      try {
-        const resolvedPath = resolveSchemaFilePath(context.schemaFile)
-        const content = await BaseFileManager.readFileAsString(resolvedPath)
-        const parsed = JSON.parse(content) as SchemaFileFormat
-        await importJsonSchema({ contents: content })
-        if (parsed?.metadata?.name) {
-          schemasWrittenThisRun.add(String(parsed.metadata.name))
-        }
-        logger(`Loaded schema from ${resolvedPath}`)
-      } catch (error: any) {
-        throw userSchemaLoadError('schemaFile', context.schemaFile, error)
-      }
-    }
-
-    // Process minimal import files (files without $schema) - skip when canonical schema is set
-    if (!context.schema) {
-      logger('Listing schema files')
-      let schemaFiles: Array<{ name: string; version: number; filePath: string }> = []
-      try {
-        schemaFiles = await listSchemaFiles()
-        logger(`Found ${schemaFiles.length} schema files to process`)
-      } catch (error) {
-        logger('Error listing schema files (continuing anyway):', error)
-        schemaFiles = []
-      }
-
-      for (const schemaFile of schemaFiles) {
-        try {
-          await importJsonSchema(schemaFile.filePath)
-          if (schemaFile.name) {
-            schemasWrittenThisRun.add(schemaFile.name)
-          }
-        } catch (error) {
-          logger(`Error importing schema file ${schemaFile.filePath}:`, error)
-        }
-      }
-    }
-
-    // Then, load all schemas using the unified database-first approach
-    logger('Loading schemas from database and files')
-    let allSchemasData: LoadedSchema[] = []
-    try {
-      allSchemasData = await loadAllSchemasFromDb()
-      logger(`Loaded ${allSchemasData.length} schemas (${allSchemasData.filter(s => s.isDraft).length} drafts, ${allSchemasData.filter(s => !s.isDraft).length} published)`)
-    } catch (error) {
-      logger('Error loading schemas from database (continuing anyway):', error)
-      // Continue with empty array - this is not critical for initialization
-      // Schemas can be loaded on-demand later
-      allSchemasData = []
-    }
-    // Collect models to add to context (schemas are now loaded on-demand via database queries)
-    const allModels: { [key: string]: any } = { ...(context.models || {}) }
-    // The models built below describe rows that loadSchemaFromFile or an earlier init already wrote:
-    // they adopt those rows, and only a model with no row writes one. Without it every init rewrote
-    // each property row and cleared is_edited.
-    const rowsWritten = Promise.resolve()
-
-    // Linked model count per schema row, to tell whether an earlier load already applied a file's models
-    const linkedModelCounts = new Map<number, number>()
-    if (db) {
-      try {
-        const rows = await db
-          .select({ schemaId: modelSchemas.schemaId, count: countDistinct(modelSchemas.modelId) })
-          .from(modelSchemas)
-          .groupBy(modelSchemas.schemaId)
-        for (const row of rows as Array<{ schemaId: number | null; count: number }>) {
-          if (row.schemaId != null) linkedModelCounts.set(row.schemaId, Number(row.count))
-        }
-      } catch (error) {
-        logger('Error counting linked models (re-applying all schema files):', error)
-      }
-    }
-    
-    for (const schemaData of allSchemasData) {
-      const schema = schemaData.schema
-      const schemaName = schema.metadata?.name || 'unknown'
-      
-      logger(`Processing schema: ${schemaName} v${schema.version} (${schemaData.isDraft ? 'draft' : 'published'}, source: ${schemaData.source})`)
-      
-      // For published schemas (not drafts), load models from file if available
-      if (!schemaData.isDraft && schema.id) {
-        // loadAllSchemasFromDb already picked the latest file for this schema (and read it)
-        const latestFilePath = schemaData.filePath
-        if (latestFilePath) {
-          try {
-            // Skip loadSchemaFromFile when this schema was already written this run (or is
-            // internal) — re-applying creates UNIQUE constraint races on properties.
-            // Use createModelsFromJsonFile only to get model definitions for context.
-            const alreadyWritten =
-              schemasWrittenThisRun.has(schemaName) ||
-              isInternalSchema(schemaName, schema.id)
-            // Also skip when an earlier init already applied this file: the DB row matches it and
-            // all its models are linked. Re-applying every published schema on every init made
-            // init time grow with the number of schema files.
-            const expectedModelCount = Object.keys(schema.models || {}).length
-            const alreadyApplied =
-              schemaData.dbMatchesFile === true &&
-              schemaData.schemaRecordId != null &&
-              (linkedModelCounts.get(schemaData.schemaRecordId) ?? 0) >= expectedModelCount
-            if (alreadyWritten || alreadyApplied) {
-              const modelDefinitions = await createModelsFromJsonFile(latestFilePath, rowsWritten)
-              Object.assign(allModels, modelDefinitions)
-            } else {
-              await loadSchemaFromFile(latestFilePath)
-              const modelDefinitions = await createModelsFromJsonFile(latestFilePath, rowsWritten)
-              Object.assign(allModels, modelDefinitions)
-            }
-          } catch (error) {
-            logger(`Error loading schema file for ${schemaName}:`, error)
-          }
-        } else {
-          // File doesn't exist (e.g. schema passed via config.schema) - use schema data from loadAllSchemasFromDb
-          try {
-            const schemaModels = schema.models as Record<string, { properties?: Record<string, any> }>
-            if (schemaModels && Object.keys(schemaModels).length > 0) {
-              const modelFileIds = new Map<string, string>()
-              const propertyFileIds = new Map<string, Map<string, string>>()
-              for (const [modelName, model] of Object.entries(schemaModels)) {
-                const modelId = (model as any).id
-                if (modelId) modelFileIds.set(modelName, modelId)
-                if (model.properties) {
-                  const propIds = new Map<string, string>()
-                  for (const [propName, prop] of Object.entries(model.properties)) {
-                    const propId = (prop as any).id
-                    if (propId) propIds.set(propName, propId)
-                  }
-                  if (propIds.size > 0) propertyFileIds.set(modelName, propIds)
-                }
-              }
-              const importData = {
-                name: schemaName,
-                models: Object.fromEntries(
-                  Object.entries(schemaModels).map(([modelName, model]) => [
-                    modelName,
-                    {
-                      description: (model as any).description,
-                      properties: Object.fromEntries(
-                        Object.entries(model.properties || {}).map(([propName, prop]) => {
-                          const p = prop as any
-                          return [
-                            propName,
-                            {
-                              type: p.dataType || p.type,
-                              model: p.refModelName || p.ref,
-                              refValueType: p.refValueType,
-                              ref: p.ref,
-                              ...p,
-                            },
-                          ]
-                        }),
-                      ),
-                    },
-                  ]),
-                ),
-              }
-              const modelDefinitions = await createModelsFromJson(
-                importData as any,
-                modelFileIds,
-                propertyFileIds,
-                rowsWritten,
-              )
-              Object.assign(allModels, modelDefinitions)
-              logger(`Loaded ${Object.keys(modelDefinitions).length} models from schema data for ${schemaName}`)
-            }
-          } catch (error) {
-            logger(`Error creating models from schema data for ${schemaName}:`, error)
-          }
-        }
-      } else if (schemaData.isDraft) {
-        // For drafts, create models from the schema data
-        try {
-          const schemaModels = schema.models as Record<string, { properties?: Record<string, any> }>
-          if (schemaModels && Object.keys(schemaModels).length > 0) {
-            const modelFileIds = new Map<string, string>()
-            const propertyFileIds = new Map<string, Map<string, string>>()
-            for (const [modelName, model] of Object.entries(schemaModels)) {
-              const modelId = (model as any).id
-              if (modelId) modelFileIds.set(modelName, modelId)
-              if (model.properties) {
-                const propIds = new Map<string, string>()
-                for (const [propName, prop] of Object.entries(model.properties)) {
-                  const propId = (prop as any).id
-                  if (propId) propIds.set(propName, propId)
-                }
-                if (propIds.size > 0) propertyFileIds.set(modelName, propIds)
-              }
-            }
-            const importData = {
-              name: schemaName,
-              models: Object.fromEntries(
-                Object.entries(schemaModels).map(([modelName, model]) => [
-                  modelName,
-                  {
-                    description: (model as any).description,
-                    properties: Object.fromEntries(
-                      Object.entries(model.properties || {}).map(([propName, prop]) => {
-                        const p = prop as any
-                        return [
-                          propName,
-                          {
-                            type: p.dataType || p.type,
-                            model: p.refModelName || p.ref,
-                            refValueType: p.refValueType,
-                            ref: p.ref,
-                            ...p,
-                          },
-                        ]
-                      }),
-                    ),
-                  },
-                ]),
-              ),
-            }
-            const modelDefinitions = await createModelsFromJson(
-              importData as any,
-              modelFileIds,
-              propertyFileIds,
-              rowsWritten,
-            )
-            Object.assign(allModels, modelDefinitions)
-            logger(`Loaded ${Object.keys(modelDefinitions).length} models from draft schema ${schemaName}`)
-          }
-        } catch (error) {
-          logger(`Error creating models from draft schema ${schemaName}:`, error)
-        }
-      }
-      
-      // Schemas are now loaded on-demand via database queries (useSchemas hook uses loadAllSchemasFromDb)
-      // No need to populate context.schemas
-    }
-
-    // Update context with models only (schemas are loaded on-demand via database queries)
-    sendBack({
-      type: ClientManagerEvents.UPDATE_CONTEXT,
-      context: {
-        models: allModels,
-      }
-    })
+    const models = await processSchemaFilesOnce(context)
+    sendBack({ type: ClientManagerEvents.UPDATE_CONTEXT, context: { models } })
   }
 
   const run = processSchemaFilesChain
@@ -424,3 +168,34 @@ export const processSchemaFiles = fromCallback<
     }
   }
 })
+/**
+ * Applies each schema's newest version file that its row hasn't applied: no row with the file's
+ * id, or a published row at an older version. Drafts keep their edits. A file named like a schema
+ * this init applied under another id is skipped (an earlier id's leftover).
+ */
+async function applyPendingSchemaFiles(appliedNames: Set<string>): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  let files: Awaited<ReturnType<typeof listLatestSchemaFiles>> = []
+  try {
+    files = await listLatestSchemaFiles()
+  } catch (error) {
+    logger('Error listing schema files (continuing anyway):', error)
+    return
+  }
+  const rows = await db
+    .select({ schemaFileId: schemasTable.schemaFileId, version: schemasTable.version, isDraft: schemasTable.isDraft })
+    .from(schemasTable)
+  const rowById = new Map(rows.map((row: { schemaFileId: string | null }) => [row.schemaFileId, row]))
+  for (const info of files) {
+    if (isInternalSchema(info.name, info.schemaFileId)) continue
+    const row = rowById.get(info.schemaFileId ?? null) as { version: number; isDraft: boolean | null } | undefined
+    if (row ? row.isDraft || row.version >= info.version : appliedNames.has(info.name)) continue
+    try {
+      const file = await readSchemaFile(info.filePath)
+      if (file) await applySchemaFile({ ...file, id: file.id ?? info.schemaFileId }, { store: false })
+    } catch (error) {
+      logger(`Error applying schema file ${info.filePath}:`, error)
+    }
+  }
+}

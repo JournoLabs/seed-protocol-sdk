@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
-import { seeds } from '@/seedSchema/SeedSchema'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { AmbiguousModelError } from '@/Model/errors'
@@ -19,6 +19,13 @@ export type ModelScope = {
   modelId?: number | null
   schemaName?: string | null
   schemaId?: number | null
+  /** A property's schemaFileId: the model that property row belongs to (properties.model_id). */
+  propertyFileId?: string | null
+  /**
+   * With schemaName/schemaId: a name that the schema doesn't have resolves to nothing, instead of
+   * falling back to the name alone (which can find the same-named model of another schema).
+   */
+  strict?: boolean
 }
 
 export type ResolvedModelRecord = {
@@ -38,8 +45,9 @@ const columns = {
 
 /**
  * Resolve a models row from a model name plus whatever scope is known, most specific first:
- * modelFileId, modelId, then schemaId/schemaName + name, then the name alone. The name alone is
- * only accepted when it is unambiguous; otherwise this throws AmbiguousModelError.
+ * modelFileId, modelId, propertyFileId, then schemaId/schemaName + name, then the name alone (not
+ * with `strict` and a schema scope). The name alone is only accepted when it is unambiguous;
+ * otherwise this throws AmbiguousModelError.
  */
 export const resolveModelRecord = async (
   modelName: string | undefined | null,
@@ -62,6 +70,16 @@ export const resolveModelRecord = async (
     if (rows.length > 0) return rows[0] as ResolvedModelRecord
   }
 
+  if (scope.propertyFileId) {
+    const rows = await db
+      .select(columns)
+      .from(properties)
+      .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+      .where(eq(properties.schemaFileId, scope.propertyFileId))
+      .limit(1)
+    if (rows.length > 0) return rows[0] as ResolvedModelRecord
+  }
+
   if (!modelName) return undefined
 
   if (scope.schemaId || scope.schemaName) {
@@ -78,9 +96,45 @@ export const resolveModelRecord = async (
       )
       .limit(1)
     if (rows.length > 0) return rows[0] as ResolvedModelRecord
+    if (scope.strict) return undefined
   }
 
   return resolveModelRecordByNameOnly(modelName, db)
+}
+
+/**
+ * Name of the schema a models row is linked to (the newest version's when several are), or
+ * undefined for an unlinked stub.
+ */
+export const getModelSchemaName = async (
+  modelId: number,
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<string | undefined> => {
+  if (!db) return undefined
+  const rows = await db
+    .select({ schemaName: schemasTable.name })
+    .from(modelSchemas)
+    .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+    .where(eq(modelSchemas.modelId, modelId))
+    .orderBy(desc(schemasTable.version))
+    .limit(1)
+  return rows[0]?.schemaName ?? undefined
+}
+
+/** The model a property row (by its schemaFileId) belongs to, and the property's data type. */
+export const resolvePropertyModelRecord = async (
+  propertyFileId: string | undefined | null,
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<(ResolvedModelRecord & { dataType: string }) | undefined> => {
+  if (!db || !propertyFileId) return undefined
+  const rows = await db
+    .select({ ...columns, dataType: properties.dataType })
+    .from(properties)
+    .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+    .where(eq(properties.schemaFileId, propertyFileId))
+    .limit(1)
+  const row = rows[0]
+  return row ? { id: row.id, name: row.name, schemaFileId: row.schemaFileId, dataType: row.dataType ?? '' } : undefined
 }
 
 /**
@@ -140,7 +194,7 @@ export const resolveModelRecordByNameOrType = async (
   db: Db | undefined = BaseDb.getAppDb(),
 ): Promise<ResolvedModelRecord | undefined> => {
   if (!db) return undefined
-  if (scope.modelFileId || scope.modelId) {
+  if (scope.modelFileId || scope.modelId || scope.propertyFileId) {
     const byId = await resolveModelRecord(undefined, scope, db)
     if (byId) return byId
   }
@@ -148,7 +202,13 @@ export const resolveModelRecordByNameOrType = async (
 
   const names = await modelNamesForNameOrType(nameOrType, db)
   if (names.length === 0) return undefined
-  if (names.length === 1) return resolveModelRecord(names[0], { ...scope, modelFileId: undefined, modelId: undefined }, db)
+  if (names.length === 1) {
+    return resolveModelRecord(
+      names[0],
+      { ...scope, modelFileId: undefined, modelId: undefined, propertyFileId: undefined },
+      db,
+    )
+  }
 
   // Several model names map to this type (e.g. "New model" and "NewModel" in different schemas).
   if (scope.schemaId || scope.schemaName) {
@@ -164,9 +224,22 @@ export const resolveModelRecordByNameOrType = async (
         ),
       )) as ResolvedModelRecord[]
     if (new Set(rows.map((r) => r.id)).size === 1) return rows[0]
+    if (scope.strict && rows.length === 0) return undefined
   }
   return resolveModelRecordByNameOnly(names, db, nameOrType)
 }
+
+/**
+ * The model name that a model name or EAS model type (`seeds.type`, `metadata.model_type`) refers
+ * to, resolved as {@link resolveModelRecordByNameOrType} resolves it: `blog_post` → "Blog Post"
+ * through the model's easName at its nameMatch level, never by re-casing the type. Undefined when
+ * no model matches; throws AmbiguousModelError when models in several schemas do.
+ */
+export const modelNameForType = async (
+  nameOrType: string | undefined | null,
+  scope: ModelScope = {},
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<string | undefined> => (await resolveModelRecordByNameOrType(nameOrType, scope, db))?.name
 
 /**
  * Work out which model (schemaFileId) an item belongs to from whatever is at hand: an explicit
@@ -184,12 +257,8 @@ export const resolveItemModelFileId = async (
   if (hints.modelFileId) return hints.modelFileId
   if (!db) return undefined
   if (hints.seedLocalId || hints.seedUid) {
-    const rows = await db
-      .select({ modelFileId: seeds.modelFileId })
-      .from(seeds)
-      .where(hints.seedLocalId ? eq(seeds.localId, hints.seedLocalId) : eq(seeds.uid, hints.seedUid!))
-      .limit(1)
-    if (rows[0]?.modelFileId) return rows[0].modelFileId
+    const seed = await findSeedRow({ localId: hints.seedLocalId, uid: hints.seedUid }, db)
+    if (seed?.modelFileId) return seed.modelFileId
   }
   if (hints.propertyId) {
     const rows = await db

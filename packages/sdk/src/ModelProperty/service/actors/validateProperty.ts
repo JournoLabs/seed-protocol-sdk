@@ -28,31 +28,30 @@ export const validateProperty = fromCallback<
       // Brief wait so trackPendingWrite from ModelProperty.create() has time to run (it's in setTimeout(0))
       await new Promise((r) => setTimeout(r, 60))
       try {
-        const dbMod = await import('../../../helpers/db')
-        const { getPropertyModelNameAndDataType, getModelNameByModelId } = dbMod
+        const { resolveModelRecord, resolvePropertyModelRecord } = await import('../../../db/read/resolveModelRecord')
         // Try pending write first (property row may not exist yet)
         if (fullContext.modelName === undefined && schemaFileId) {
           const mod = await import('../../../ModelProperty/ModelProperty')
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileId)
           if (pendingModelId != null) {
-            const modelName = await getModelNameByModelId(pendingModelId)
+            const modelName = (await resolveModelRecord(undefined, { modelId: pendingModelId }))?.name
             if (modelName) {
               fullContext = { ...fullContext, modelName }
             }
           }
         }
         // Then DB property lookup with retry (catches row after initial write)
-        let fromDb: { modelName: string; dataType: string } | undefined
+        let fromDb: { name: string; dataType: string } | undefined
         for (let attempt = 0; attempt < 6; attempt++) {
-          fromDb = await getPropertyModelNameAndDataType(schemaFileId)
+          fromDb = await resolvePropertyModelRecord(schemaFileId)
           if (fromDb) break
           if (attempt < 5) await new Promise((r) => setTimeout(r, 40))
         }
         if (fromDb) {
           fullContext = {
             ...fullContext,
-            modelName: fullContext.modelName ?? fromDb.modelName,
+            modelName: fullContext.modelName ?? fromDb.name,
             dataType: fullContext.dataType ?? fromDb.dataType,
           }
         }
@@ -62,7 +61,7 @@ export const validateProperty = fromCallback<
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileId)
           if (pendingModelId != null) {
-            const modelName = await getModelNameByModelId(pendingModelId)
+            const modelName = (await resolveModelRecord(undefined, { modelId: pendingModelId }))?.name
             if (modelName) {
               fullContext = { ...fullContext, modelName }
             }
@@ -96,7 +95,8 @@ export const validateProperty = fromCallback<
     if (isActorStopped(self)) return
     if (fullContext._schemaName && fullContext.modelName) {
       try {
-        const schema = Schema.create(fullContext._schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+        const schema = await Schema.find({ schemaName: fullContext._schemaName, waitForReady: false, hold: false })
+        if (!schema) throw new Error(`No schema named "${fullContext._schemaName}"`)
         const schemaSnapshot = schema.getService().getSnapshot()
         const schemaStatus = schemaSnapshot.value
         

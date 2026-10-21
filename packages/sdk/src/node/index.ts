@@ -26,11 +26,8 @@ export { models, versions, seeds, metadata, appState, config, modelUids } from '
 
 // Helper exports
 export { getCorrectId } from '../helpers'
-export {
-  isPublishedSeedRef,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '../helpers/relationSeedRef'
+export { isPublishedSeedRef } from '../helpers/relationSeedRef'
+export { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 
 // Import exports
 export * from '../imports'

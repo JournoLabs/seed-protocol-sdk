@@ -36,7 +36,7 @@ import {
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
 import { currentNameMatchLevels } from '@/db/read/nameMatchLevels'
-import { and, eq, or } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { Subscription } from 'rxjs'
@@ -1167,22 +1167,15 @@ export class Model {
       if (db) {
         const evictionEpoch = currentEvictionEpoch()
         try {
-          const rows = await db
-            .select({
-              modelFileId: modelsTable.schemaFileId,
-              modelName: modelsTable.name,
-              schemaName: schemasTable.name,
-            })
-            .from(modelsTable)
-            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-            .where(
-              scope.modelFileId
-                ? eq(modelsTable.schemaFileId, scope.modelFileId)
-                : and(eq(modelsTable.name, modelName ?? ''), eq(schemasTable.name, scope.schemaName!)),
-            )
-            .limit(1)
-          const record = rows[0]
+          const { resolveModelRecord, getModelSchemaName } = await import('../db/read/resolveModelRecord')
+          const resolved = scope.modelFileId
+            ? await resolveModelRecord(undefined, { modelFileId: scope.modelFileId }, db)
+            : await resolveModelRecord(modelName, { schemaName: scope.schemaName, strict: true }, db)
+          const record = resolved && {
+            modelFileId: resolved.schemaFileId,
+            modelName: resolved.name,
+            schemaName: await getModelSchemaName(resolved.id, db),
+          }
           if (record?.modelName && record.schemaName && record.modelFileId) {
             // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
             if (schemaEvictedSince(record.schemaName, evictionEpoch)) return undefined
@@ -1225,63 +1218,41 @@ export class Model {
       return cached
     }
 
-    // If not in cache and schemaName not provided, query database
-    if (!schemaName) {
-      const db = BaseDb.getAppDb()
-      if (!db) {
-        return undefined
-      }
-      const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
-
-      try {
-
-        // Query model by name (throws AmbiguousModelError when several schemas define it)
-        const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
-        const resolved = await resolveModelRecord(modelName, {}, db)
-        if (!resolved?.schemaFileId) {
-          return undefined
-        }
-        const modelRecords = await db
-          .select({
-            modelFileId: modelsTable.schemaFileId,
-            modelName: modelsTable.name,
-            schemaName: schemasTable.name,
-          })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(modelsTable.id, resolved.id))
-          .limit(1)
-
-        if (modelRecords.length === 0) {
-          return undefined
-        }
-
-        const record = modelRecords[0]
-        if (!record.modelName || !record.schemaName || !record.modelFileId) {
-          return undefined
-        }
-        // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
-        if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
-          return undefined
-        }
-        if (modelDestroyedSince(record.modelFileId, evictionEpoch)) {
-          return undefined
-        }
-
-        // Create model instance (will be cached)
-        return this.create(record.modelName, record.schemaName, {
-          id: record.modelFileId, // id is now the schemaFileId (string)
-          ...(options?.hold === false && { hold: false as const }),
-        })
-      } catch (error) {
-        if (error instanceof AmbiguousModelError) throw error
-        logger(`Model.getByNameAsync: Error looking up model by name "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
-        return undefined
-      }
+    // Not cached: the DB row for this name in that schema, or for the name alone (which throws
+    // AmbiguousModelError when several schemas define it)
+    const db = BaseDb.getAppDb()
+    if (!db) {
+      return undefined
     }
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
+    try {
+      const { resolveModelRecord, getModelSchemaName } = await import('../db/read/resolveModelRecord')
+      const resolved = await resolveModelRecord(modelName, schemaName ? { schemaName, strict: true } : {}, db)
+      if (!resolved?.schemaFileId) {
+        return undefined
+      }
+      const recordSchemaName = schemaName ?? (await getModelSchemaName(resolved.id, db))
+      if (!resolved.name || !recordSchemaName) {
+        return undefined
+      }
+      // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
+      if (schemaEvictedSince(recordSchemaName, evictionEpoch)) {
+        return undefined
+      }
+      if (modelDestroyedSince(resolved.schemaFileId, evictionEpoch)) {
+        return undefined
+      }
 
-    return undefined
+      // Create model instance (will be cached)
+      return this.create(resolved.name, recordSchemaName, {
+        id: resolved.schemaFileId, // id is now the schemaFileId (string)
+        ...(options?.hold === false && { hold: false as const }),
+      })
+    } catch (error) {
+      if (error instanceof AmbiguousModelError) throw error
+      logger(`Model.getByNameAsync: Error looking up model by name "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    }
   }
 
   /**
@@ -2116,9 +2087,9 @@ export class Model {
         if (schemaName && modelName) {
           // Imported here, not at module load: Model and Schema import each other.
           const { Schema } = await import('@/Schema/Schema')
-          const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-          const schemaContext = schema.getService().getSnapshot().context
-          if (schemaContext.models?.[modelName]) {
+          const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+          const schemaContext = schema?.getService().getSnapshot().context
+          if (schema && schemaContext?.models?.[modelName]) {
             const updatedModels = { ...schemaContext.models }
             delete updatedModels[modelName]
             schema.getService().send({ type: 'updateContext', models: updatedModels })

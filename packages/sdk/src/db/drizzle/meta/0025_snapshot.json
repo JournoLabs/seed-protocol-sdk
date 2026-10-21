@@ -1,8 +1,8 @@
 {
-  "id": "9efd6c7b-4f4d-4dad-b5c8-599e802739e5",
-  "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
   "version": "6",
   "dialect": "sqlite",
+  "id": "2b9514b2-20c5-4340-8a19-68f4d0926e43",
+  "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
   "tables": {
     "appState": {
       "name": "appState",
@@ -613,15 +613,15 @@
         "metadata_property_id_properties_id_fk": {
           "name": "metadata_property_id_properties_id_fk",
           "tableFrom": "metadata",
+          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
-          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -783,28 +783,28 @@
         "properties_model_id_models_id_fk": {
           "name": "properties_model_id_models_id_fk",
           "tableFrom": "properties",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "properties_ref_model_id_models_id_fk": {
           "name": "properties_ref_model_id_models_id_fk",
           "tableFrom": "properties",
+          "tableTo": "models",
           "columnsFrom": [
             "ref_model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -841,28 +841,28 @@
         "model_schemas_model_id_models_id_fk": {
           "name": "model_schemas_model_id_models_id_fk",
           "tableFrom": "model_schemas",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "model_schemas_schema_id_schemas_id_fk": {
           "name": "model_schemas_schema_id_schemas_id_fk",
           "tableFrom": "model_schemas",
+          "tableTo": "schemas",
           "columnsFrom": [
             "schema_id"
           ],
-          "tableTo": "schemas",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -907,15 +907,15 @@
         "model_uids_model_id_models_id_fk": {
           "name": "model_uids_model_id_models_id_fk",
           "tableFrom": "model_uids",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1129,15 +1129,15 @@
         "property_uids_property_id_properties_id_fk": {
           "name": "property_uids_property_id_properties_id_fk",
           "tableFrom": "property_uids",
+          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
-          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1314,6 +1314,13 @@
         "is_edited": {
           "name": "is_edited",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1635,9 +1642,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

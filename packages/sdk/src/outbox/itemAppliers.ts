@@ -18,7 +18,7 @@ import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/it
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'

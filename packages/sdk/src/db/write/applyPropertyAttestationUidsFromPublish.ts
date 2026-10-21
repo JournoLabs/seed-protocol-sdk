@@ -15,7 +15,7 @@ import {
   isPlaceholderUid,
   isValidEasAttestationUid,
   normalizeBytes32Hex,
-} from '@/helpers/easUid'
+} from '@seedprotocol/eas'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 
 export type PropertyAttestationApplyPair = {

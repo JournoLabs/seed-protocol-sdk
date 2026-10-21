@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishUploadData, getPublishUploads } from '@/db/read/getPublishUploads'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {

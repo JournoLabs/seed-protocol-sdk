@@ -1,4 +1,4 @@
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 
 /**
  * A metadata row holds published content when it has a valid EAS attestation uid, or when sync
