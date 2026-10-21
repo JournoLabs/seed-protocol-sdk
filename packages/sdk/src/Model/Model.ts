@@ -695,10 +695,15 @@ export class Model {
     // If schema provided, trigger write process instead of registration
     // When schemaName is passed as string (e.g. useCreateModel), we must trigger write so runtime-created
     // models get persisted to DB and show up in useModels (which queries the database).
+    const hasProperties = !!options?.properties && Object.keys(options.properties).length > 0
     const shouldTriggerWrite =
       (registerWithSchema && schemaInstance) ||
-      (options?.properties && Object.keys(options.properties).length > 0) ||
+      hasProperties ||
       typeof schemaNameOrSchema === 'string'
+    // Every DB load (createById, getByNameAsync, ...) also passes a string schema and no properties.
+    // Such a model adopts its existing row: writing it again rewrote each property row and cleared is_edited.
+    const adoptExistingRow =
+      !!options?.persistedBy || (typeof schemaNameOrSchema === 'string' && !hasProperties)
     if (shouldTriggerWrite) {
       queueMicrotask(async () => {
         try {
@@ -728,7 +733,7 @@ export class Model {
             failPropertyCreation('the model was unloaded')
             return
           }
-          if (options?.persistedBy && (await Model.adoptPersistedRow(proxiedInstance))) {
+          if (adoptExistingRow && (await Model.adoptPersistedRow(proxiedInstance))) {
             return
           }
           // Only write if validation passed (model is in idle state, not error)
