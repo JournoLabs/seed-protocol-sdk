@@ -8,6 +8,7 @@ import { compareMetadataRowsLatestFirst, metadataPropertyGroupKeys } from '@/hel
 import { readMetadataPropertiesById } from '@/db/read/metadataProperty'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { getPropertyClear } from '@/db/read/getPropertyClear'
+import { currentPropertyRows } from '@/db/read/currentPropertyRow'
 
 export type PublishPendingPropertyDiff = {
   propertyName: string
@@ -44,8 +45,8 @@ function resolveSeedIds(
 }
 
 /**
- * Per property: the **latest** metadata row (by `attestationCreatedAt` / `createdAt`) lacks a valid
- * EAS attestation `uid` — local edit or missing post-publish UID backfill. Rows sync derived for
+ * Per property: its current row (currentPropertyRows, with a pending outbox value over the stored
+ * row) lacks a valid EAS attestation `uid` — local edit or missing post-publish UID backfill. Rows sync derived for
  * ItemStorage properties (`derivedFromUid` set) count as published. **Not** equivalent to
  * draft vs onchain for the whole seed; use `getSeedPublishState` for that.
  */
@@ -70,7 +71,10 @@ export async function getPublishPendingDiff(
         ? eq(metadata.seedLocalId, seedLocalId)
         : eq(metadata.seedUid, seedUid!)
 
+  // Every row, for each property's last published value; the current one is currentPropertyRows',
+  // with a pending outbox value counting as an unpublished edit (ADR 0019)
   const rows = (await appDb.select().from(metadata).where(whereClause)) as MetadataType[]
+  const current = await currentPropertyRows({ seedLocalId, seedUid })
 
   // One group per property: by property_id (decision D4), rows without one by stored name. A
   // property is reported under its storage name, the name its new rows are written under.
@@ -83,43 +87,40 @@ export async function getPublishPendingDiff(
     list.push(row)
     byProp.set(key, list)
   }
-
   for (const list of byProp.values()) {
     list.sort(compareMetadataRowsLatestFirst)
   }
 
   const propertiesById = await readMetadataPropertiesById(
     appDb,
-    rows.map((row) => row.propertyId),
+    [...rows, ...current].map((row) => row.propertyId),
   )
   const pendingProperties: PublishPendingPropertyDiff[] = []
-  for (const list of byProp.values()) {
-    const latest = list[0]
-    if (!latest) continue
-    if (!isPublished(latest)) {
-      const prevWithUid = list.find(isPublished)
-      const groupId = list.find((row) => row.propertyId != null)?.propertyId
-      const property = groupId != null ? propertiesById.get(groupId) : undefined
-      const isEmpty = latest.propertyValue == null || latest.propertyValue === ''
-      // An empty value changes nothing on chain unless it has an attestation to remove or retract
-      // (ADR 0021): one never published, or already retracted, isn't pending.
-      if (isEmpty) {
-        const clear = await getPropertyClear({
-          seedLocalId,
-          seedUid,
-          propertyId: groupId,
-          propertyName: latest.propertyName!,
-        })
-        if (!clear || (clear.retract && clear.retractScope.length === 0)) continue
-      }
-      pendingProperties.push({
-        propertyName: property?.storageName ?? latest.propertyName!,
-        currentValue: latest.propertyValue ?? null,
-        previousPublishedValue: prevWithUid?.propertyValue ?? null,
-        pending: true,
-        change: !isEmpty ? 'set' : latest.retract ? 'retracted' : 'removed',
+  for (const latest of current) {
+    if (!latest.propertyName || isPublished(latest)) continue
+    const list = byProp.get(groupKey(latest as MetadataType)) ?? []
+    const prevWithUid = list.find(isPublished)
+    const groupId = latest.propertyId ?? list.find((row) => row.propertyId != null)?.propertyId
+    const property = groupId != null ? propertiesById.get(groupId) : undefined
+    const isEmpty = latest.propertyValue == null || latest.propertyValue === ''
+    // An empty value changes nothing on chain unless it has an attestation to remove or retract
+    // (ADR 0021): one never published, or already retracted, isn't pending.
+    if (isEmpty) {
+      const clear = await getPropertyClear({
+        seedLocalId,
+        seedUid,
+        propertyId: groupId,
+        propertyName: latest.propertyName,
       })
+      if (!clear || (clear.retract && clear.retractScope.length === 0)) continue
     }
+    pendingProperties.push({
+      propertyName: property?.storageName ?? latest.propertyName,
+      currentValue: latest.propertyValue ?? null,
+      previousPublishedValue: prevWithUid?.propertyValue ?? null,
+      pending: true,
+      change: !isEmpty ? 'set' : latest.retract ? 'retracted' : 'removed',
+    })
   }
 
   pendingProperties.sort((a, b) => a.propertyName.localeCompare(b.propertyName))

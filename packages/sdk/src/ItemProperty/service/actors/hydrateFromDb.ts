@@ -1,376 +1,92 @@
-import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { EventObject, fromCallback } from 'xstate'
-import { and, eq, or, sql } from 'drizzle-orm'
 import debug from 'debug'
-import { metadata } from '@/seedSchema'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { BaseFileManager } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
-import { ensureImageLocal } from '@/helpers/ensureImageLocal'
-import { ImageSize } from '@/helpers/constants'
-import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
-import { downloadTransactionIdWithDedupe } from '@/events/files/download'
-import {
-  readHtmlBodyForStorageSeedPropertyValue,
-  resolveHtmlStorageSeedLocalId,
-} from '@/helpers/readHtmlBodyForStorageSeed'
-
-// Dynamic import to break circular dependency: schema/index -> ... -> hydrateFromDb -> schema/index
-// import { ModelPropertyDataTypes } from '@/schema'
+import { currentPropertyRow } from '@/db/read/currentPropertyRow'
+import { resolveStorageDisplay, storedValueKind } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:property:actors:hydrateFromDb')
 
+/**
+ * Re-reads a loaded property (the `rehydrateFromDb` event): its current row with the pending
+ * outbox value over it (currentPropertyRow), its recorded conflict, and an Image, File or Html
+ * file's display, fetched when it isn't on disk. An ItemStorage value's content is read by the
+ * display subscriber.
+ */
 export const hydrateFromDb = fromCallback<
   EventObject,
   FromCallbackInput<PropertyMachineContext, EventObject>
 >(({ sendBack, input: { context } }) => {
-  const {
-    seedUid,
-    seedLocalId,
-    propertyName: propertyNameRaw,
-    propertyRecordSchema,
-    modelName,
-  } = context
+  const { seedUid, seedLocalId, propertyName, propertyRecordSchema, modelName } = context
 
-  if (!propertyNameRaw) {
+  if (!propertyName) {
     throw new Error('propertyName is required')
   }
-  const propertyName = propertyNameRaw
-
-  // Note: isRelation, isImage, isFile checks moved inside async function
-  // to use dynamically imported ModelPropertyDataTypes
 
   const _hydrateFromDb = async () => {
-    // Use dynamic import to break circular dependency
-    const schemaMod = await import('../../../Schema')
-    const { ModelPropertyDataTypes } = schemaMod
-    
-    const appDb = BaseDb.getAppDb()
-
-    const whereClauses = []
-
-    // Re-check types with dynamically imported ModelPropertyDataTypes
-    // Use normalizeDataType for case-insensitive comparison (schema may use "image" vs "Image")
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
-    const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-
-
-    const isImageDynamic =
-      propertyRecordSchema &&
-      (normalizedDataType === ModelPropertyDataTypes.Image ||
-        normalizedRefValueType === ModelPropertyDataTypes.Image)
-
-    const isFileDynamic =
-      propertyRecordSchema &&
-      normalizedDataType === ModelPropertyDataTypes.File
-
-    const isHtmlDynamic =
-      propertyRecordSchema &&
-      normalizedDataType === ModelPropertyDataTypes.Html
-
-    // The property's rows: linked by property_id (decision D4), else stored under one of its names
-    // (Html/Image/File/Relation rows are `htmlId` and the like)
-    const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
-    const property = await matchMetadataProperty(
+    const row = await currentPropertyRow(
+      { seedLocalId, seedUid },
       {
         propertyId: context.propertyId,
         propertyName,
         modelName,
         modelFileId: context.modelFileId,
-        seedLocalId,
-        seedUid,
         dataType: normalizedDataType,
-        refValueType: normalizedRefValueType,
+        refValueType: normalizeDataType(propertyRecordSchema?.refValueType),
       },
-      appDb,
     )
-    whereClauses.push(metadataRowsOfProperty(property))
+    if (!row) return
 
-    // Draft rows often have only seed_local_id populated; on-chain rows may have uid.
-    // Requiring both with AND misses valid metadata when only one column is set.
-    if (seedUid && seedLocalId) {
-      whereClauses.push(
-        or(
-          eq(metadata.seedLocalId, seedLocalId),
-          eq(metadata.seedUid, seedUid),
-        ) as any,
-      )
-    } else if (seedUid) {
-      whereClauses.push(eq(metadata.seedUid, seedUid))
-    } else if (seedLocalId) {
-      whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
-    }
-
-    // An assigned value whose outbox op hasn't applied yet wins over the stored row (ADR 0019). Its
-    // op is read first: one that applies between the two reads is then in one of them.
-    const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
-    const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
-
-    const rows = await appDb
-      .select()
-      .from(metadata)
-      .where(and(...whereClauses))
-      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
-
-    const pending = seedLocalId
-      ? pendingFirst
-      : await getPendingPropertyRow(rows?.[0]?.seedLocalId, propertyName)
-
-    if ((!rows || !rows.length) && !pending) {
-      return
-    }
-
-    const stored = rows?.[0] ?? ({ seedLocalId, seedUid, propertyName } as (typeof rows)[number])
-    const firstRow = pending ? applyPendingRow({ ...stored }, pending) : { ...stored }
     const { getPropertyConflict } = await import('@/outbox/conflicts')
-    const conflict = await getPropertyConflict(firstRow.seedLocalId ?? seedLocalId, propertyName)
+    const conflict = await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
 
-    const {
-      localId,
-      uid,
-      propertyValue: propertyValueFromDb,
-      seedLocalId: seedLocalIdFromDb,
-      seedUid: seedUidFromDb,
-      schemaUid: schemaUidFromDb,
-      versionLocalId: versionLocalIdFromDb,
-      versionUid: versionUidFromDb,
-      refValueType,
-    } = firstRow
-
-    let { refResolvedDisplayValue, refResolvedValue, localStorageDir } = firstRow
-    // File/Image display values are minted below from the file; a stored one is a stale session URL.
-    if (isImageDynamic || isFileDynamic) {
-      refResolvedDisplayValue = null
-    }
-
-    let propertyValueProcessed: string | string[] | undefined | null =
-      propertyValueFromDb
+    // Only with a definition: without one, a row's refSeedType alone doesn't decide the display here
+    const kind = propertyRecordSchema ? storedValueKind(propertyRecordSchema) : undefined
+    let { refResolvedValue, localStorageDir } = row
+    // A stored display value is a stale session URL for Image, File and Html (see resolveStorageDisplay)
+    let refResolvedDisplayValue = kind ? undefined : row.refResolvedDisplayValue
     let renderValue: string | string[] | undefined = refResolvedDisplayValue ?? undefined
-
-
-    // Image: always resolve display value from file (blob URLs in DB are invalid after reload)
-    if (isImageDynamic) {
-      let dir = localStorageDir
-      if (!dir && isImageDynamic) {
-        dir = 'images'
-      }
-      dir = dir!.replace(/^\//, '')
-
-      if (
-        propertyValueFromDb &&
-        propertyValueFromDb.length === 66
-      ) {
-        // Here the storageTransactionId is stored on a different record and
-        // we want to add it as the refResolvedValue
-        const storageTransactionQuery = await appDb
-          .select({
-            propertyValue: metadata.propertyValue,
-          })
-          .from(metadata)
-          .where(
-            and(
-              eq(metadata.seedUid, propertyValueFromDb),
-              or(
-                eq(metadata.propertyName, 'storageTransactionId'),
-                eq(metadata.propertyName, 'transactionId'),
-              ),
-            ),
-          )
-
-        if (storageTransactionQuery && storageTransactionQuery.length > 0) {
-          const row = storageTransactionQuery[0]
-          refResolvedValue = row.propertyValue
-          await updateMetadata({
-            localId,
-            refResolvedValue,
-            localStorageDir: '/images',
-          })
-        }
-      }
-
-      const resolveMatchingFilePath = async (dir: string, needle: string): Promise<string | undefined> => {
-        const dirPath = BaseFileManager.getFilesPath(dir)
-        const dirExists = await BaseFileManager.pathExists(dirPath)
-        if (!dirExists) return undefined
-        const fs = await BaseFileManager.getFs()
-        const path = BaseFileManager.getPathModule()
-        const files = await fs.promises.readdir(dirPath)
-        const matchingFiles = files.filter((file: string) => {
-          return path.basename(file).includes(needle)
-        })
-        if (!matchingFiles?.length) return undefined
-        return BaseFileManager.getFilesPath(dir, matchingFiles[0])
-      }
-
-      if (refResolvedValue) {
-        try {
-          await ensureImageLocal({
-            transactionId: refResolvedValue,
-            fileName: refResolvedValue,
-            widths: [ImageSize.EXTRA_SMALL],
-          })
-          const filePath = await resolveMatchingFilePath(dir, refResolvedValue)
-
-          localStorageDir = `/${dir}`
-          if (filePath) {
-            const file = await BaseFileManager.readFile(filePath)
-            refResolvedDisplayValue = createSessionObjectUrl(file)
-            renderValue = refResolvedDisplayValue
-            // Do not persist blob URL - it is session-scoped
-          }
-        } catch (e) {
-          logger('[hydrateFromDb] Image file resolution error', e)
-        }
-      }
-    }
-
-    if (isFileDynamic && refResolvedValue) {
+    if (kind && kind !== 'itemStorage') {
       try {
-        const dir = (localStorageDir ?? '/files').replace(/^\//, '')
-        const resolveMatchingFilePath = async (needle: string): Promise<string | undefined> => {
-          const dirPath = BaseFileManager.getFilesPath(dir)
-          const dirExists = await BaseFileManager.pathExists(dirPath)
-          if (!dirExists) return undefined
-          const fs = await BaseFileManager.getFs()
-          const path = BaseFileManager.getPathModule()
-          const files = await fs.promises.readdir(dirPath)
-          const matchingFiles = files.filter((file: string) =>
-            path.basename(file).includes(needle)
-          )
-          if (!matchingFiles?.length) return undefined
-          return BaseFileManager.getFilesPath(dir, matchingFiles[0])
-        }
-
-        let filePath = await resolveMatchingFilePath(refResolvedValue)
-        if (!filePath) {
-          await downloadTransactionIdWithDedupe(refResolvedValue)
-          filePath = await resolveMatchingFilePath(refResolvedValue)
-        }
-        if (filePath) {
-          localStorageDir = `/${dir}`
-          // The same content URL saveFile sets, so the value reads the same before and after a reload.
-          refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
-          renderValue = refResolvedDisplayValue
+        const display = await resolveStorageDisplay(kind, row, { fetch: true })
+        refResolvedValue = display.ref.refResolvedValue
+        localStorageDir = display.ref.localStorageDir
+        if (display.renderValue !== undefined) {
+          renderValue = display.renderValue
+          if (kind !== 'html') refResolvedDisplayValue = display.renderValue
         }
       } catch (e) {
-        logger('[hydrateFromDb] File resolution error', e)
+        logger(`[hydrateFromDb] ${kind} file resolution error`, e)
       }
     }
 
-    if (
-      propertyRecordSchema &&
-      normalizedDataType === ModelPropertyDataTypes.List &&
-      typeof propertyValueFromDb === 'string'
-    ) {
-      propertyValueProcessed = parseListPropertyValueFromStorage(propertyValueFromDb)
-    }
+    const propertyValue =
+      propertyRecordSchema && normalizedDataType === 'List' && typeof row.propertyValue === 'string'
+        ? parseListPropertyValueFromStorage(row.propertyValue)
+        : row.propertyValue
 
     sendBack({
       type: 'updateContext',
-      localId,
-      uid,
-      propertyValue: propertyValueProcessed,
-      seedLocalId: seedLocalIdFromDb,
-      seedUid: seedUidFromDb,
-      versionLocalId: versionLocalIdFromDb,
-      versionUid: versionUidFromDb,
-      schemaUid: schemaUidFromDb,
-      refValueType,
+      localId: row.localId,
+      uid: row.uid,
+      propertyValue,
+      seedLocalId: row.seedLocalId,
+      seedUid: row.seedUid,
+      versionLocalId: row.versionLocalId,
+      versionUid: row.versionUid,
+      schemaUid: row.schemaUid,
+      refValueType: row.refValueType,
       localStorageDir,
       refResolvedValue,
       refResolvedDisplayValue,
-      renderValue,
+      // Html shows its text; with no file found the context keeps what it showed
+      ...(kind === 'html' && renderValue === undefined ? {} : { renderValue }),
       conflict,
       populatedFromDb: true,
     })
-
-    if (
-      propertyRecordSchema &&
-      propertyRecordSchema.storageType &&
-      propertyRecordSchema.storageType === 'ItemStorage'
-    ) {
-      const itemMod = await import(`@/Item/Item`)
-      const { Item } = itemMod
-      const item = await Item.find({
-        seedLocalId: seedLocalId ?? undefined,
-        modelName,
-      })
-      if (item) {
-        const dir = localStorageDir?.replace(/^\//, '') || 'files'
-        // A pending value's content is in its staged file until the op moves it into place
-        const staged = pending?.stagedPath
-        const filePath =
-          staged && (await BaseFileManager.pathExists(staged))
-            ? staged
-            : BaseFileManager.getFilesPath(dir, refResolvedValue)
-        const exists = await BaseFileManager.pathExists(filePath)
-
-        if (!exists) {
-          return
-        }
-
-        const renderValue = await BaseFileManager.readFileAsString(filePath)
-        const property = item.properties.find(p => p.propertyName === propertyName)
-        if (property) {
-          property.getService().send({ type: 'updateContext', renderValue })
-        }
-        return
-      }
-    }
-
-    // Html: read file content for renderValue (blob URLs from DB are invalid after reload).
-    // When propertyValue is the Html storage seed uid, resolve localId and read `html/{localId}.html`.
-    if (isHtmlDynamic) {
-      const htmlLocalStorageDir =
-        refResolvedValue && !localStorageDir ? '/html' : localStorageDir ?? '/html'
-      let htmlContent: string | undefined
-      let outRef = refResolvedValue
-      let outDir = htmlLocalStorageDir
-      if (refResolvedValue && htmlLocalStorageDir) {
-        const dir = htmlLocalStorageDir.replace(/^\//, '')
-        const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
-        let exists = await BaseFileManager.pathExists(filePath)
-        if (!exists) {
-          await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
-          exists = await BaseFileManager.pathExists(filePath)
-        }
-        if (exists) {
-          htmlContent = await BaseFileManager.readFileAsString(filePath)
-        }
-      }
-      if (!htmlContent && propertyValueFromDb) {
-        htmlContent = await readHtmlBodyForStorageSeedPropertyValue(propertyValueFromDb)
-        const lid = await resolveHtmlStorageSeedLocalId(String(propertyValueFromDb))
-        if (lid) {
-          outRef = `${lid}.html`
-          outDir = '/html'
-        }
-      }
-      if (htmlContent) {
-        sendBack({
-          type: 'updateContext',
-          localId,
-          uid,
-          propertyValue: propertyValueProcessed,
-          seedLocalId: seedLocalIdFromDb,
-          seedUid: seedUidFromDb,
-          versionLocalId: versionLocalIdFromDb,
-          versionUid: versionUidFromDb,
-          schemaUid: schemaUidFromDb,
-          refValueType,
-          localStorageDir: outDir,
-          refResolvedValue: outRef ?? refResolvedValue,
-          refResolvedDisplayValue,
-          renderValue: htmlContent,
-          populatedFromDb: true,
-        })
-        return
-      }
-    }
   }
 
   _hydrateFromDb().then(() => {

@@ -45,40 +45,23 @@ export async function resolveHtmlStorageSeedLocalId(
 
 /**
  * When the local draft file is gone (new device, OPFS cleared, etc.), load HTML from the
- * Html storage seed's published Arweave transaction id on that child seed.
+ * Html storage seed's published Arweave transaction id: a read gateway's `/raw`, then the Arweave
+ * client, then a download into `html/` (named after the seed or the transaction).
  */
-async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise<{
-  body?: string
-  txIdLen: number
-  gatewayStringLen: number
-}> {
-  const { getPropertyData } = await import('../db/read/getPropertyData')
-  const pickTx = async (name: string): Promise<string | undefined> => {
-    const row = await getPropertyData({ propertyName: name, seedLocalId })
-    const v = row?.propertyValue != null ? String(row.propertyValue).trim() : ''
-    return v || undefined
-  }
-  const txId =
-    (await pickTx('storageTransactionId')) ??
-    (await pickTx('transactionId')) ??
-    (await pickTx('storage_transaction_id'))
-  if (!txId || SEED_UID_HEX_RE.test(txId)) {
-    return { txIdLen: 0, gatewayStringLen: 0 }
-  }
+async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise<string | undefined> {
+  const { storageSeedTransactionId } = await import('@/storageValue/resolve')
+  const txId = await storageSeedTransactionId({ seedLocalId })
+  if (!txId || SEED_UID_HEX_RE.test(txId)) return undefined
 
   const rawHtml = await fetchHtmlViaRawAcrossGateways(txId)
-  if (rawHtml && rawHtml.length > 0) {
-    return { body: rawHtml, txIdLen: txId.length, gatewayStringLen: rawHtml.length }
-  }
+  if (rawHtml) return rawHtml
 
   try {
     const { BaseArweaveClient } = await import('@seedprotocol/arweave')
     const data = await BaseArweaveClient.getTransactionData(extractArweaveTransactionId(txId), {
       string: true,
     })
-    if (typeof data === 'string' && data.length > 0) {
-      return { body: data, txIdLen: txId.length, gatewayStringLen: data.length }
-    }
+    if (typeof data === 'string' && data.length > 0) return data
   } catch {
     /* offline / bad tx id */
   }
@@ -86,31 +69,13 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
   try {
     const { downloadTransactionIdWithDedupe } = await import('../events/files/download')
     await downloadTransactionIdWithDedupe(txId)
-    const retryFp = BaseFileManager.getFilesPath('html', `${seedLocalId}.html`)
-    if (await BaseFileManager.pathExists(retryFp)) {
-      const s = await BaseFileManager.readFileAsString(retryFp)
-      return { body: s, txIdLen: txId.length, gatewayStringLen: 0 }
-    }
-    const dirPath = BaseFileManager.getFilesPath('html')
-    if (await BaseFileManager.pathExists(dirPath)) {
-      const fs = await BaseFileManager.getFs()
-      const pathMod = BaseFileManager.getPathModule()
-      const files = await fs.promises.readdir(dirPath)
-      const needle = txId.replace(/\.[^/.]+$/, '')
-      const match = files.find(
-        (f: string) =>
-          f.includes(seedLocalId) || f.includes(needle) || (needle.length >= 20 && f.includes(needle.slice(0, 20))),
-      )
-      if (match) {
-        const s = await BaseFileManager.readFileAsString(pathMod.join(dirPath, match))
-        return { body: s, txIdLen: txId.length, gatewayStringLen: 0 }
-      }
-    }
+    const { findFileInDir } = await import('@/storageValue/findFile')
+    const filePath = await findFileInDir('html', [`${seedLocalId}.html`, extractArweaveTransactionId(txId)])
+    if (filePath) return BaseFileManager.readFileAsString(filePath)
   } catch {
     /* OPFS unsupported or download failed */
   }
-
-  return { txIdLen: txId.length, gatewayStringLen: 0 }
+  return undefined
 }
 
 /** Read saved HTML body for a parent Html property whose `propertyValue` points at the Html storage seed. */
@@ -130,8 +95,7 @@ export async function readHtmlBodyForStorageSeedPropertyValue(
   let body = fileExists && fp ? await BaseFileManager.readFileAsString(fp) : undefined
 
   if (!body && localId) {
-    const ar = await readHtmlBodyFromChildStorageArweave(localId)
-    body = ar.body
+    body = await readHtmlBodyFromChildStorageArweave(localId)
   }
 
   return body

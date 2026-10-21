@@ -3,6 +3,7 @@ import { downloadTransactionIdWithDedupe } from '@/events/files/download'
 import { ImageSize } from '@/helpers/constants'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { findFileInDir } from '@/storageValue/findFile'
 
 const logger = debug('seedSdk:helpers:ensureImageLocal')
 
@@ -88,47 +89,6 @@ const getBasenameWithoutExtension = (fileName: string): string => {
   return match?.[2] ?? fileName
 }
 
-const resolveMatchingImagePath = async (
-  needle: string,
-): Promise<string | undefined> => {
-  const dirPath = BaseFileManager.getFilesPath('images')
-  const dirExists = await BaseFileManager.pathExists(dirPath)
-  if (!dirExists) return undefined
-
-  const fs = await BaseFileManager.getFs()
-  const path = BaseFileManager.getPathModule()
-  const files: string[] = await fs.promises.readdir(dirPath)
-
-  // Prefer exact basename match (files only); skip size dirs.
-  const exact = files.find((file: string) => path.basename(file) === needle)
-  if (exact) {
-    const candidate = BaseFileManager.getFilesPath('images', exact)
-    try {
-      const zenfs = await BaseFileManager.getFs()
-      const stat = await zenfs.promises.stat(candidate)
-      if (stat.isFile()) return candidate
-    } catch {
-      // fall through
-    }
-  }
-
-  const matchingFiles = files.filter((file: string) => {
-    const base = path.basename(file)
-    return base.includes(needle)
-  })
-  for (const file of matchingFiles) {
-    const candidate = BaseFileManager.getFilesPath('images', file)
-    try {
-      const zenfs = await BaseFileManager.getFs()
-      const stat = await zenfs.promises.stat(candidate)
-      if (stat.isFile()) return candidate
-    } catch {
-      continue
-    }
-  }
-  return undefined
-}
-
 const sizedVariantPath = (originalFilePath: string, size: ImageSize): string => {
   const path = BaseFileManager.getPathModule()
   const dir = path.dirname(originalFilePath)
@@ -167,25 +127,10 @@ const runEnsureImageLocal = async (
   )
 
   try {
-    let filePath: string | undefined
-    for (const needle of needles) {
-      filePath = await resolveMatchingImagePath(needle)
-      if (filePath) break
-    }
-
+    let filePath = await findFileInDir('images', needles)
     if (!filePath && txId) {
       await downloadTransactionIdWithDedupe(txId)
-      for (const needle of needles) {
-        filePath = await resolveMatchingImagePath(needle)
-        if (filePath) break
-      }
-      // Downloads store as bare tx id
-      if (!filePath) {
-        const direct = BaseFileManager.getFilesPath('images', txId)
-        if (await BaseFileManager.pathExists(direct)) {
-          filePath = direct
-        }
-      }
+      filePath = await findFileInDir('images', needles)
     }
 
     if (!filePath) {

@@ -5,7 +5,6 @@ import {
   getMetadataPropertyNamesForQuery,
   toSchemaPropertyName,
   getAlternatePropertyNameForInstanceLookup,
-  resolveMetadataRecord,
   listRelationEasPropertyName,
   metadataStorageName,
   metadataStoredNameForms,
@@ -200,53 +199,6 @@ describe('metadataPropertyNames', () => {
       expect(listRelationEasPropertyName('tags', { dataType: 'List' })).toBeUndefined()
       expect(listRelationEasPropertyName('title', { dataType: 'Text' })).toBeUndefined()
       expect(listRelationEasPropertyName('staff', undefined)).toBeUndefined()
-    })
-  })
-
-  describe('resolveMetadataRecord', () => {
-    it('returns single record when only one exists', () => {
-      const records = [{ propertyName: 'avatarImageId', refResolvedValue: 'file.png' }]
-      expect(resolveMetadataRecord(records, 'avatarImage', 'Image')).toEqual(records[0])
-    })
-
-    it('throws when no records', () => {
-      expect(() => resolveMetadataRecord([], 'avatarImage')).toThrow('No records to resolve')
-    })
-
-    it('prefers record with refResolvedValue for metadata types', () => {
-      const base = { propertyName: 'avatarImage', refResolvedValue: null }
-      const idVariant = { propertyName: 'avatarImageId', refResolvedValue: 'avatar.png' }
-      expect(resolveMetadataRecord([base, idVariant], 'avatarImage', 'Image')).toEqual(idVariant)
-    })
-
-    it('prefers record with refSeedType image/file/html', () => {
-      const base = { propertyName: 'avatarImage', refSeedType: 'text' }
-      const idVariant = { propertyName: 'avatarImageId', refSeedType: 'image' }
-      expect(resolveMetadataRecord([base, idVariant], 'avatarImage', 'Image')).toEqual(idVariant)
-    })
-
-    it('prefers exact propertyName match as fallback', () => {
-      const base = { propertyName: 'avatarImage' }
-      const idVariant = { propertyName: 'avatarImageId' }
-      expect(resolveMetadataRecord([idVariant, base], 'avatarImage', 'Image')).toEqual(base)
-    })
-
-    it('prefers a cleared Id record over the base variant (ADR 0021)', () => {
-      const base = { propertyName: 'avatarImage', propertyValue: 'old-seed-id', refSeedType: 'image' }
-      const cleared = { propertyName: 'avatarImageId', propertyValue: null, refResolvedValue: null }
-      expect(resolveMetadataRecord([base, cleared], 'avatarImage', 'Image')).toEqual(cleared)
-    })
-
-    it("counts only each name's newest record", () => {
-      const cleared = { propertyName: 'avatarImageId', propertyValue: null, refResolvedValue: null }
-      const before = { propertyName: 'avatarImageId', propertyValue: 'old-seed-id', refResolvedValue: 'old.png' }
-      expect(resolveMetadataRecord([cleared, before], 'avatarImage', 'Image')).toEqual(cleared)
-    })
-
-    it('returns first record when no preference applies', () => {
-      const a = { propertyName: 'avatarImage' }
-      const b = { propertyName: 'avatarImageId' }
-      expect(resolveMetadataRecord([a, b], 'other')).toEqual(a)
     })
   })
 })

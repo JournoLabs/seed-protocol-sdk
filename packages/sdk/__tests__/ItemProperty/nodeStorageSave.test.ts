@@ -56,7 +56,14 @@ testDescribe('Html property saves in Node', () => {
     const ctx = (html.getService().getSnapshot() as any).context
     expect(ctx._saveError).toBeFalsy()
     expect(ctx.refSeedType).toBe('html')
-    expect(ctx.refResolvedDisplayValue).toMatch(/^file:\/\//)
+    // An Html value shows its text; its session URL is neither stored nor kept (G10-3)
+    expect(ctx.refResolvedDisplayValue).toBeUndefined()
+    expect(ctx.renderValue).toBe('<p>Hello from Node</p>')
+    const [row] = await BaseDb.getAppDb()!
+      .select({ refResolvedDisplayValue: metadata.refResolvedDisplayValue })
+      .from(metadata)
+      .where(eq(metadata.localId, ctx.localId))
+    expect(row.refResolvedDisplayValue).toBeNull()
     expect(typeof ctx.propertyValue).toBe('string')
     expect(ctx.propertyValue).not.toContain('<p>')
 
@@ -66,9 +73,7 @@ testDescribe('Html property saves in Node', () => {
 
   it('save() rejects when the html save pipeline fails', async () => {
     const { html } = await createPost()
-    vi.spyOn(BaseFileManager, 'getContentUrlFromPath').mockRejectedValueOnce(
-      new Error('Not implemented'),
-    )
+    vi.spyOn(BaseFileManager, 'saveFile').mockRejectedValueOnce(new Error('Not implemented'))
     html.value = '<p>Will fail</p>'
     // save() rethrows the pipeline's own error.
     await expect(html.save()).rejects.toThrow(/^Not implemented$/)
@@ -136,7 +141,7 @@ testDescribe('Html property saves in Node', () => {
   }, 30000)
 
   it('Item.create rejects when an html value fails to save', async () => {
-    vi.spyOn(BaseFileManager, 'getContentUrlFromPath').mockRejectedValueOnce(new Error('disk gone'))
+    vi.spyOn(BaseFileManager, 'saveFile').mockRejectedValueOnce(new Error('disk gone'))
     await expect(
       Item.create({ modelName: 'Post', title: 'Will fail', bodyHtml: '<p>x</p>' } as any),
     ).rejects.toThrow(/Item\.create: failed to save Post\.bodyHtml .*disk gone/)
