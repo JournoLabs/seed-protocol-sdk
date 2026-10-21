@@ -11,6 +11,7 @@ export * from './ArweaveClient/transactionTagsByIds.js'
 export * from './ArweaveClient/BaseArweaveClient.js'
 export { BaseArweaveClient as ArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
 export type { IArweaveClient } from './ArweaveClient/IArweaveClient.js'
+export { DefaultArweaveClient } from './default/ArweaveClient.js'
 export {
   assertSingleArweaveModule,
   DuplicateArweaveModuleError,
