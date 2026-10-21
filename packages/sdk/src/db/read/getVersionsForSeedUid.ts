@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 
 type VersionRow = {
   uid: string | null
@@ -19,6 +20,6 @@ export const getVersionsForSeedUid = async (
     .where(eq(versions.seedUid, seedUid))) as VersionRow[]
 
   return rows
-    .filter((r) => r.uid && r.uid !== '0x' + '0'.repeat(64))
+    .filter((r) => !isPlaceholderUid(r.uid))
     .map((r) => ({ uid: r.uid! }))
 }

@@ -1,8 +1,9 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, seeds } from '@/seedSchema'
+import { metadata } from '@/seedSchema'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
 export type SeedPublishState = {
@@ -65,15 +66,7 @@ export async function getSeedPublishState(
     return empty
   }
 
-  const seedWhere =
-    seedLocalId && seedUid
-      ? or(eq(seeds.localId, seedLocalId), eq(seeds.uid, seedUid))
-      : seedLocalId
-        ? eq(seeds.localId, seedLocalId)
-        : eq(seeds.uid, seedUid!)
-
-  const seedRows = await appDb.select().from(seeds).where(seedWhere).limit(1)
-  const seedRow = seedRows[0]
+  const seedRow = await findSeedRow({ localId: seedLocalId, uid: seedUid }, appDb)
 
   const seedAttestationUid =
     seedRow?.uid && isValidEasAttestationUid(seedRow.uid) ? seedRow.uid : null

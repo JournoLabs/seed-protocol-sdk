@@ -56,7 +56,7 @@ getEasChainDeployment(8453)   // { name: 'Base', easContractAddress, indexerUrl,
 | Entry | Main exports |
 |-------|--------------|
 | `@seedprotocol/eas` | Seeds / Versions / properties: `getSeedsBySchemaName`, `getSeedsByUidsFromEas`, `getSeedsFromSchemaUids`, `getSeedUidsBySchemaName`, `getItemVersionsFromEas`, `getItemPropertiesFromEas`, `getCanonicalItemPropertiesFromEas`, `getAttestationChangesSince` |
-| | Schemas: `getEasSchemaUidBySchemaName`, `fetchEasSchemaUidBySchemaName`, `getSchemaNamesBySchemaUids`, schema UID cache (`cachedSchemaLookup`, `getEasSchemaUidForSchemaDefinition`, `setSchemaUidForModel`, …) |
+| | Schemas: `getEasModelSchemasForNames`, `getSchemaNamesBySchemaUids`, schema UID cache (`cachedSchemaLookup`, `getEasSchemaUidForSchemaDefinition`, `setSchemaUidForModel`, …) |
 | | Chain config: `configureEasReadChain`, `getEasReadChainId`, `getEasEndpoint`, `whenEasReadChainSettled`, `EAS_CHAIN_DEPLOYMENTS`, `DEFAULT_EAS_CHAIN_ID`, `getEasChainDeployment`, `resolveEasChainDeployment`, `getEasAttestationExplorerUrl` |
 | | Canonicalization / filters: `pickLatestPropertyAttestationsByRefAndSchema`, `withExcludeRevokedFilter`, `isValidEasAttestationUid`, `normalizeBytes32Hex` |
 | | Sidecars: `getPublishedByFromEas`, `decodePublishedByData`, `verifyPublishedByBatch`; `getPublishAuthorizationFromEas`, `assessPublishAuthorization`; `getDomainOwnershipFromEas`, `assessDomainOwnership`, plus their `*_SCHEMA_NAME` / `*_SCHEMA_DEF` constants |

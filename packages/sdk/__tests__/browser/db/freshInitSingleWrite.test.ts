@@ -4,8 +4,7 @@ import { Model } from '@/Model/Model'
 import { SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 import { createTestConfig, initializeTestClient, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
-
-type Driver = (sql: string, params: unknown[], method: string) => Promise<unknown>
+import { wrapDbDriver } from '../../test-utils/wrapDbDriver'
 
 // A fresh init imports the Seed Protocol schema: addModelsToDb writes its models and properties, and the
 // Model instances the import creates adopt those rows. Each row is inserted once and not rewritten by a
@@ -14,6 +13,7 @@ describe('fresh init writes each Seed Protocol model and property row once', () 
   const filesDir = `/fresh-init-${Math.random().toString(36).slice(2, 10)}`
   const writes: { sql: string; params: unknown[] }[] = []
   const originalPrepareDb = BaseDb.prepareDb
+  let restoreDriver: (() => void) | undefined
 
   beforeAll(async () => {
     // The database stays open until the page goes away, so remove earlier runs' directories here
@@ -26,12 +26,10 @@ describe('fresh init writes each Seed Protocol model and property row once', () 
     // Wrap the driver as soon as the database exists, before init imports the schema
     BaseDb.prepareDb = async (...args: Parameters<typeof BaseDb.prepareDb>) => {
       const result = await originalPrepareDb.apply(BaseDb, args)
-      const session = (BaseDb.getAppDb() as any).session as { client: Driver }
-      const client = session.client
-      session.client = async (sql, params, method) => {
+      restoreDriver = wrapDbDriver((client) => async (sql, params, method) => {
         if (/^(insert into|update) /.test(sql)) writes.push({ sql, params })
         return client(sql, params, method)
-      }
+      })
       return result
     }
     await initializeTestClient({
@@ -44,6 +42,7 @@ describe('fresh init writes each Seed Protocol model and property row once', () 
 
   afterAll(async () => {
     BaseDb.prepareDb = originalPrepareDb
+    restoreDriver?.()
   })
 
   const writesTo = (table: string, fileId: string) =>

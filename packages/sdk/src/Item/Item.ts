@@ -8,10 +8,11 @@ import {
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import {
   getAlternatePropertyNameForInstanceLookup,
-  resolveStorageNameToSchemaName,
+  metadataRowPropertyKey,
   toItemPropertyKey,
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
+import { metadataPropertyKeyColumn } from '@/db/read/metadataProperty'
 import { VersionsType } from '@/seedSchema'
 // Dynamic import to break circular dependency: Model -> Item -> Model
 // import { Model } from '@/Model/Model'
@@ -38,7 +39,7 @@ import {
   SnapshotFrom,
   waitFor,
 } from 'xstate'
-import { orderBy, startCase } from 'lodash-es'
+import { orderBy } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
@@ -65,7 +66,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { deleteItem } from '@/db/write/deleteItem'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
-import { eq } from 'drizzle-orm'
+import { eq, getTableColumns } from 'drizzle-orm'
 import debug from 'debug'
 
 const itemLogger = debug('seedSdk:Item')
@@ -694,7 +695,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     if (!props.modelName && props.type) {
-      props.modelName = startCase(props.type)
+      // The model the seed's type names (its easName, at the model's nameMatch level): `blog_post`
+      // finds "Blog Post". No match leaves the type, which then fails as an unknown model.
+      const { resolveModelRecordByNameOrType } = await import('../db/read/resolveModelRecord')
+      const model = await resolveModelRecordByNameOrType(props.type, {
+        modelFileId: (props as any).modelFileId,
+        schemaName: (props as any).schemaName,
+      })
+      props.modelName = model?.name ?? props.type
     }
     if (props.seedUid || props.seedLocalId) {
       cacheReuse: {
@@ -810,16 +818,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Scope the constructor's Model lookup to this model's schema (as getItemData does on reload),
       // so a same-named model cached from another schema can't supply the property set.
       if (modelRecord && !(props as any).schemaName) {
-        const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
-        const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
-        const schemaRows = await db
-          .select({ schemaName: schemasTable.name })
-          .from(modelSchemas)
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(modelSchemas.modelId, modelRecord.id))
-          .limit(1)
-        if (schemaRows[0]?.schemaName) {
-          ;(props as any).schemaName = schemaRows[0].schemaName
+        const { getModelSchemaName } = await import('../db/read/resolveModelRecord')
+        const modelSchemaName = await getModelSchemaName(modelRecord.id, db)
+        if (modelSchemaName) {
+          ;(props as any).schemaName = modelSchemaName
         }
       }
       
@@ -1243,7 +1245,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
 
           const metadataRows = await appDb
-            .select()
+            .select({ ...getTableColumns(metadata), propertyKey: metadataPropertyKeyColumn() })
             .from(metadata)
             .where(
               and(
@@ -1276,25 +1278,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
           for (const metaRow of metadataRows) {
             try {
-              let propertyName = metaRow.propertyName as string | undefined
-              const listSchemaKey =
-                propertyName &&
-                Object.keys(propertySchemas).length > 0 &&
-                resolveStorageNameToSchemaName(propertySchemas, propertyName)
-              if (listSchemaKey) {
-                propertyName = listSchemaKey
-              } else {
-                const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-                const refSeedType = metaRow.refSeedType as string | undefined
-                const isRefTypeFromMeta =
-                  refSeedType === 'file' ||
-                  refSeedType === 'image' ||
-                  refSeedType === 'relation' ||
-                  refSeedType === 'html'
-                if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-                  propertyName = baseName
-                }
-              }
+              const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
               if (!propertyName) {
                 continue
               }
@@ -1947,6 +1931,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
 
         // Query initial seed and version data
+        const { findSeedRow } = await import('../db/read/findSeedRow')
+        const seed = await findSeedRow({ localId: seedLocalId, uid: seedUid }, db)
+        if (!seed) {
+          logger(`[Item._setupLiveQuerySubscription] Seed not found for seedLocalId: ${seedLocalId}`)
+          return
+        }
         const versionData = getVersionData()
         const seedRecords = await db
           .with(versionData)
@@ -1960,9 +1950,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           })
           .from(seeds)
           .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
-          .where(
-            seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId)
-          )
+          .where(eq(seeds.localId, seed.localId))
           .limit(1)
 
         if (seedRecords.length === 0) {
@@ -2176,7 +2164,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               
               // Query metadata for the latest version
               const metadataRows = await db
-                .select()
+                .select({ ...getTableColumns(metadata), propertyKey: metadataPropertyKeyColumn() })
                 .from(metadata)
                 .where(
                   and(
@@ -2210,21 +2198,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   }
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {
-                      let propertyName = metaRow.propertyName
-                      const listSchemaKey =
-                        propertyName &&
-                        Object.keys(propertySchemas).length > 0 &&
-                        resolveStorageNameToSchemaName(propertySchemas, propertyName)
-                      if (listSchemaKey) {
-                        propertyName = listSchemaKey
-                      } else {
-                        const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-                        const refSeedType = metaRow.refSeedType as string | undefined
-                        const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
-                        if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-                          propertyName = baseName
-                        }
-                      }
+                      const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
+                      if (!propertyName) return
                       const property = await ItemProperty.find({
                         propertyName,
                         seedLocalId: watchedSeedLocalId,

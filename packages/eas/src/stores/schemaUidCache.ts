@@ -1,4 +1,3 @@
-import { fetchEasSchemaUidBySchemaName } from '../api.js'
 import { BaseEasClient } from '../EasClient/BaseEasClient.js'
 import { getEasEndpoint } from '../easEndpoint.js'
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
@@ -101,13 +100,8 @@ const forgetMisses = (answers: (key: string) => boolean): void => {
   if (forgotInFlight) missGeneration++
 }
 
-/** Lookups a schema with this definition answers: by exact definition, or by a name it ends with. */
-const definitionAnswers = (definition: string) => {
-  const snake = toSnakeCase(definition)
-  return (key: string) =>
-    key === `definition:${definition}` ||
-    (key.startsWith('schemaName:') && snake.endsWith(key.slice('schemaName:'.length)))
-}
+/** Lookups a schema with this definition answers: the one for that exact definition. */
+const definitionAnswers = (definition: string) => (key: string) => key === `definition:${definition}`
 
 /** Clears every schema UID cache in this module (found UIDs and misses). For tests. */
 export const resetSchemaUidCaches = (): void => {
@@ -125,7 +119,7 @@ export const setSchemaUidForSchemaDefinition = ({
   schemaUid: string
 }): void => {
   schemaUidForSchemaDefinition.set(toSnakeCase(text), schemaUid)
-  // A miss for this definition, or for a name it ends with, may now be found.
+  // A miss for this definition may now be found.
   forgetMisses(definitionAnswers(text))
 }
 
@@ -149,29 +143,31 @@ export const getSchemaUidForModelFromCache = (modelName: string): string | undef
 export const getSchemaUidForSchemaDefinitionFromCache = (text: string): string | undefined =>
   schemaUidForSchemaDefinition.get(toSnakeCase(text))
 
+/**
+ * UID for a property schema definition (`string title`): the one {@link setSchemaUidForSchemaDefinition}
+ * cached, else {@link getEasSchemaUidForExactDefinition}'s. Undefined when EAS has none or the
+ * request fails.
+ */
 export const getEasSchemaUidForSchemaDefinition = async ({
   schemaText,
 }: {
   schemaText: string
 }): Promise<string | undefined> => {
   const textSnakeCase = toSnakeCase(schemaText)
-  if (!schemaUidForSchemaDefinition.has(textSnakeCase)) {
-    let schemaUid: string | undefined
-    try {
-      schemaUid = await cachedSchemaLookup(`schemaName:${textSnakeCase}`, () =>
-        fetchEasSchemaUidBySchemaName({ schemaName: textSnakeCase }),
-      )
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Failed to fetch schema for schema name ${textSnakeCase}:`, error)
-      }
-      return undefined
+  const cached = schemaUidForSchemaDefinition.get(textSnakeCase)
+  if (cached) return cached
+  let schemaUid: string | undefined
+  try {
+    schemaUid = await getEasSchemaUidForExactDefinition(schemaText)
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`Failed to fetch schema for definition ${schemaText}:`, error)
     }
-    // Found on EAS, not newly registered: no cached misses to clear.
-    if (schemaUid) schemaUidForSchemaDefinition.set(textSnakeCase, schemaUid)
-    return schemaUid
+    return undefined
   }
-  return schemaUidForSchemaDefinition.get(textSnakeCase)
+  // Found on EAS, not newly registered: no cached misses to clear.
+  if (schemaUid) schemaUidForSchemaDefinition.set(textSnakeCase, schemaUid)
+  return schemaUid
 }
 
 /**

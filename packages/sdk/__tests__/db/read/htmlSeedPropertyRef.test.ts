@@ -9,10 +9,10 @@ import {
   resolveSeedGatewayEndpoints,
   setResolvedSeedGatewayEndpoints,
   type SeedGatewayConfig,
+  BaseArweaveClient,
 } from '@seedprotocol/arweave'
 import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import {
   HtmlSeedPropertyRefError,

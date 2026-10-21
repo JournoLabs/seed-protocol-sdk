@@ -11,7 +11,10 @@ import { generateId } from '@/helpers'
 import { createLocalQueryDataSource } from '@/query/createLocalQueryDataSource'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
-const uid = (byte: string) => '0x' + byte.repeat(32)
+// Browser test files share one database, and other files insert seeds with uids like 0xa1a1…:
+// a per-run prefix keeps these apart.
+const RUN = Math.random().toString(16).slice(2, 10).padEnd(8, '0')
+const uid = (byte: string) => '0x' + RUN + byte.repeat(28)
 const SEED_WITH_MODEL_FILE_ID = uid('a1')
 const SEED_WITHOUT_MODEL_FILE_ID = uid('b1')
 const SEED_WITHOUT_RAW = uid('c1')
@@ -54,7 +57,7 @@ describe.sequential('local query source schema name', () => {
       { seedUid: SEED_WITHOUT_RAW, modelFileId: postModelId, attestationRaw: null },
     ]
     for (const [i, { seedUid, modelFileId, attestationRaw }] of rows.entries()) {
-      const seedLocalId = `lqsn-seed-${i}`
+      const seedLocalId = `lqsn-seed-${RUN}-${i}`
       await db.insert(seeds).values({
         localId: seedLocalId,
         uid: seedUid,
@@ -67,7 +70,7 @@ describe.sequential('local query source schema name', () => {
         createdAt: 1_700_000_000_000 + i,
       })
       await db.insert(versions).values({
-        localId: `lqsn-version-${i}`,
+        localId: `lqsn-version-${RUN}-${i}`,
         uid: uid(`d${i}`),
         seedLocalId,
         seedUid,

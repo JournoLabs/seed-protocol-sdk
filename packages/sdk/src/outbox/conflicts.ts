@@ -6,14 +6,14 @@
  */
 import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import { generateId } from '@/helpers/generateId'
-import { isPlaceholderUid } from '@/helpers/easUid'
+import { isPlaceholderUid } from '@seedprotocol/eas'
 import { selectInBatches } from '@/db/sqlParamBatches'
 import { eventEmitter } from '@/eventBus'
 import { propertyNameVariants } from './pendingValues'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
-import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
+import { matchMetadataProperty, metadataRowsOfProperty, sameMetadataProperty } from '@/db/read/metadataProperty'
 import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import type { OutboxOp } from './outbox'
 
@@ -44,11 +44,20 @@ type Db = ReturnType<typeof BaseDb.getAppDb>
  */
 export async function findSetConflict(
   op: Pick<OutboxOp, 'opId' | 'seedLocalId' | 'propertyName' | 'baseRowId' | 'createdAt'>,
-  value: { newValue: string | null; dataType?: string; refValueType?: string },
+  value: { newValue: string | null; dataType?: string; refValueType?: string; modelName?: string | null },
   db: Db,
 ): Promise<PropertyConflict | null> {
   if (!op.propertyName) return null
-  const names = getMetadataPropertyNamesForQuery(op.propertyName, value.dataType, value.refValueType)
+  const property = await matchMetadataProperty(
+    {
+      propertyName: op.propertyName,
+      seedLocalId: op.seedLocalId,
+      modelName: value.modelName,
+      dataType: value.dataType,
+      refValueType: value.refValueType,
+    },
+    db,
+  )
   const [newest] = await db
     .select({
       localId: metadata.localId,
@@ -57,7 +66,7 @@ export async function findSetConflict(
       createdAt: metadata.createdAt,
     })
     .from(metadata)
-    .where(and(eq(metadata.seedLocalId, op.seedLocalId), inArray(metadata.propertyName, names)))
+    .where(and(eq(metadata.seedLocalId, op.seedLocalId), metadataRowsOfProperty(property)))
     .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
     .limit(1)
   if (!newest?.uid || newest.localId === op.baseRowId) return null
@@ -178,6 +187,7 @@ export async function markPropertyConflictsResolved(seedLocalId: string, propert
 
 type SyncedRow = {
   localId?: string | null
+  propertyId?: number | null
   uid?: string | null
   seedLocalId?: string | null
   propertyName?: string | null
@@ -210,8 +220,10 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
 
   const syncedIds = new Set(live.map((row) => row.localId ?? ''))
   for (const draft of drafts) {
-    const key = (row: { seedLocalId?: string | null; propertyName?: string | null }) =>
-      row.seedLocalId === draft.seedLocalId && row.propertyName === draft.propertyName
+    // Paired by property_id (decision D4): a draft stored as `author` and a synced `authorId` row
+    // of the same property are one property. Rows without one pair by name.
+    const key = (row: { seedLocalId?: string | null; propertyId?: number | null; propertyName?: string | null }) =>
+      row.seedLocalId === draft.seedLocalId && sameMetadataProperty(row, draft)
     const remote = live
       .filter(key)
       .sort((a, b) => (b.attestationCreatedAt ?? 0) - (a.attestationCreatedAt ?? 0))[0]
@@ -223,7 +235,7 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
       .where(
         and(
           eq(pendingWrites.seedLocalId, draft.seedLocalId),
-          eq(pendingWrites.propertyName, draft.propertyName),
+          inArray(pendingWrites.propertyName, propertyNameVariants(draft.propertyName)),
           eq(pendingWrites.status, 'pending'),
         ),
       )

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, seeds, versions } from '@/seedSchema'
+import { metadata, properties, seeds, versions } from '@/seedSchema'
 import { and, eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
@@ -209,8 +209,10 @@ testDescribe('republish after unpublish', () => {
     for (const { propertyName, attestationUid } of attested) {
       const row = rows.find((r: any) => r.uid === attestationUid)
       expect(row, `row for ${propertyName}`).toBeDefined()
+      // The property's row whatever name it is stored under (`author` is stored as `authorId`)
+      const [property] = await db.select({ name: properties.name }).from(properties).where(eq(properties.id, row!.propertyId!))
+      expect(property?.name, `property of the ${propertyName} row`).toBe(propertyName)
       expect(row).toMatchObject({
-        propertyName,
         versionUid: newVersionUid,
         versionLocalId: newVersion!.localId,
         seedUid,

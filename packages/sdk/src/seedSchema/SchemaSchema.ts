@@ -12,6 +12,9 @@ export const schemas = sqliteTable(
     schemaData: text('schema_data'), // Full JSON schema content (SchemaFileFormat as JSON string)
     isDraft: integer('is_draft', { mode: 'boolean' }), // true if schema is in draft/editing state, false if published to file
     isEdited: integer('is_edited', { mode: 'boolean' }), // true if schema has been edited locally, false if matches schema file
+    // Hash of the schema file applySchemaFile last wrote to the rows (with schema_file_id and
+    // version): a file with the same three is not applied again.
+    contentHash: text('content_hash'),
     createdAt: int('created_at'),
     updatedAt: int('updated_at'),
   },

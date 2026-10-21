@@ -7,7 +7,8 @@ import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { importJsonSchema } from '@/imports/json'
 import { AmbiguousModelError } from '@/Model/errors'
 import { generateId } from '@/helpers'
-import { getItemStoragePropertiesForModel, getPropertyIdForModelAndName } from '@/helpers/db'
+import { getItemStoragePropertiesForModel } from '@/helpers/db'
+import { resolveMetadataPropertyId } from '@/db/read/metadataProperty'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
@@ -75,10 +76,10 @@ testDescribe('model lookups by EAS model type for names with spaces', () => {
     await teardownTestEnvironment()
   })
 
-  it('getPropertyIdForModelAndName resolves the model from its type (and still from its name)', async () => {
+  it('resolveMetadataPropertyId resolves the model from its type (and still from its name)', async () => {
     const titleId = await propertyIdIn(schemaA.metadata.name, 'title')
-    expect(await getPropertyIdForModelAndName(MODEL_TYPE, 'title')).toBe(titleId)
-    expect(await getPropertyIdForModelAndName(MODEL_NAME, 'title')).toBe(titleId)
+    expect(await resolveMetadataPropertyId({ modelName: MODEL_TYPE, propertyName: 'title' })).toBe(titleId)
+    expect(await resolveMetadataPropertyId({ modelName: MODEL_NAME, propertyName: 'title' })).toBe(titleId)
   })
 
   it('getItemStoragePropertiesForModel resolves the model from its type', async () => {
@@ -90,16 +91,16 @@ testDescribe('model lookups by EAS model type for names with spaces', () => {
   it('a type defined by models in two schemas is ambiguous by type alone, like by name', async () => {
     await importJsonSchema({ contents: JSON.stringify(schemaB) }, schemaB.version)
 
-    await expect(getPropertyIdForModelAndName(MODEL_TYPE, 'title')).rejects.toBeInstanceOf(AmbiguousModelError)
-    await expect(getPropertyIdForModelAndName(MODEL_NAME, 'title')).rejects.toBeInstanceOf(AmbiguousModelError)
+    await expect(resolveMetadataPropertyId({ modelName: MODEL_TYPE, propertyName: 'title' })).rejects.toBeInstanceOf(AmbiguousModelError)
+    await expect(resolveMetadataPropertyId({ modelName: MODEL_NAME, propertyName: 'title' })).rejects.toBeInstanceOf(AmbiguousModelError)
     await expect(getItemStoragePropertiesForModel(MODEL_TYPE)).rejects.toBeInstanceOf(AmbiguousModelError)
 
     // A scope picks one.
     expect(
-      await getPropertyIdForModelAndName(MODEL_TYPE, 'title', { schemaName: schemaB.metadata.name }),
+      await resolveMetadataPropertyId({ modelName: MODEL_TYPE, propertyName: 'title', schemaName: schemaB.metadata.name }),
     ).toBe(await propertyIdIn(schemaB.metadata.name, 'title'))
     expect(
-      await getPropertyIdForModelAndName(MODEL_TYPE, 'title', { modelFileId: schemaA.models[MODEL_NAME].id }),
+      await resolveMetadataPropertyId({ modelName: MODEL_TYPE, propertyName: 'title', modelFileId: schemaA.models[MODEL_NAME].id }),
     ).toBe(await propertyIdIn(schemaA.metadata.name, 'title'))
   })
 })

@@ -1,19 +1,17 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, desc, eq, getTableColumns, SQL } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { easName } from '@seedprotocol/eas'
-import { startCase } from "lodash-es"
 import { getItemProperties } from "./getItemProperties"
-import { seeds, versions } from "@/seedSchema"
-import { models } from "@/seedSchema/ModelSchema"
-import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
-import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
-import { getSeedData } from "./getSeedData"
+import { versions } from "@/seedSchema"
+import { findSeedRow } from "./findSeedRow"
+import { getModelSchemaName, resolveModelRecordByNameOrType } from "./resolveModelRecord"
 import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
 import { isVersionRevoked } from "./subqueries/liveVersion"
 import { latestVersionOrder } from "./subqueries/latestVersion"
-import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
+import { metadataRowPropertyKey } from "@/helpers/metadataPropertyNames"
+import { metadataPropertyNameForms, readMetadataPropertiesById } from "@/db/read/metadataProperty"
 
 const logger = debug('seedSdk:db:read:getItemData')
 
@@ -34,78 +32,32 @@ export const getItemData: GetItemData = async ({
     throw new Error('[db/queries] [getItem] no seedLocalId or seedUid')
   }
 
-  if (seedUid && !seedLocalId) {
-    const seedData = await getSeedData({ seedUid })
-    if (!seedData) {
-      logger('[db/queries] [getItem] no seedData seedUid', seedUid)
-      return
-    }
-    seedLocalId = seedData.localId || undefined
-  }
-
   const appDb = BaseDb.getAppDb()
 
-  const { localId, uid, ...rest } = getTableColumns(seeds)
-
-  const whereClauses: SQL[] = []
-
-  if (modelName) {
-    whereClauses.push(eq(seeds.type, easName(modelName)))
-  }
-
-  if (seedUid) {
-    whereClauses.push(eq(seeds.uid, seedUid))
-  }
-
-  if (seedLocalId && !seedUid) {
-    whereClauses.push(eq(seeds.localId, seedLocalId))
-  }
-
-  // First, query the seeds table directly to find the item
-  const seedRows = await appDb
-    .select({
-      ...rest,
-      seedLocalId: seeds.localId,
-      seedUid: seeds.uid,
-    })
-    .from(seeds)
-    .where(and(...whereClauses))
-    .limit(1)
-
-  logger('[getItemData] Seed query result', { rowsCount: seedRows?.length || 0, firstRow: seedRows?.[0] })
-
-  if (!seedRows || seedRows.length === 0) {
+  const seed = await findSeedRow({ localId: seedLocalId, uid: seedUid }, appDb)
+  logger('[getItemData] Seed lookup result', { found: !!seed })
+  if (!seed || (modelName && seed.type !== easName(modelName))) {
     logger('[db/queries] [getItemDataFromDb] no seedRows found', { modelName, seedLocalId, seedUid })
     return
   }
-
-  const seedRow = seedRows[0]
+  seedLocalId = seed.localId
+  const { localId: _localId, uid: _uid, ...rest } = seed
+  const seedRow = { ...rest, seedLocalId: seed.localId, seedUid: seed.uid }
   const resolvedSeedLocalId = seedRow.seedLocalId
 
-  // Fix 5: Derive schemaName for multi-schema Model resolution (models -> model_schemas -> schemas)
+  // The seed's model (its model_file_id, else the model its type names at nameMatch level) and that
+  // model's schema, for multi-schema Model resolution. Several schemas defining the type's model
+  // leave both unset; Item.create then raises AmbiguousModelError.
   let schemaName: string | undefined
-  const normalizedModelName = modelName ? startCase(modelName) : (seedRow.type ? startCase(seedRow.type) : undefined)
-  if (appDb && (seedRow.modelFileId || normalizedModelName)) {
-    try {
-      // Prefer the seed's own model row; model names are only unique within a schema.
-      const schemaRows = await appDb
-        .select({ schemaName: schemasTable.name })
-        .from(models)
-        .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
-        .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(
-          seedRow.modelFileId
-            ? eq(models.schemaFileId, seedRow.modelFileId)
-            : eq(models.name, normalizedModelName!),
-        )
-        .orderBy(desc(models.id))
-        .limit(1)
-      if (schemaRows.length > 0 && schemaRows[0].schemaName) {
-        schemaName = schemaRows[0].schemaName
-      }
-    } catch (error) {
-      logger('[getItemData] Error deriving schemaName:', error)
+  let resolvedModelName: string | undefined
+  try {
+    const model = await resolveModelRecordByNameOrType(modelName ?? seedRow.type, { modelFileId: seedRow.modelFileId }, appDb)
+    if (model) {
+      resolvedModelName = model.name
+      schemaName = await getModelSchemaName(model.id, appDb)
     }
+  } catch (error) {
+    logger('[getItemData] Error resolving the model:', error)
   }
 
   // Now get version data if it exists - query versions table directly
@@ -176,6 +128,7 @@ export const getItemData: GetItemData = async ({
   const itemData = {
     ...seedRow,
     ...versionRow,
+    ...(resolvedModelName && !modelName && { modelName: resolvedModelName }),
     schemaName,
   } as ItemData & { [key: string]: any }
 
@@ -188,16 +141,29 @@ export const getItemData: GetItemData = async ({
     return itemData
   }
 
+  // Rows linked by property_id are their property's (decision D4): read under its key, and under
+  // the stored name only when that is one of the key's stored forms (`textId`, `authorIdentityIds`).
+  // A renamed property's rows keep the old name, which is no longer the property's.
+  const propertiesById = await readMetadataPropertiesById(
+    appDb,
+    propertiesData.map((data) => (data as { propertyId?: number | null }).propertyId),
+  )
   for (const propertyData of propertiesData) {
     const propertyName = propertyData.propertyName
-
     const propertyValue = propertyData.propertyValue
-
-    const schemaBaseName = toSchemaPropertyName(propertyName)
-    if (schemaBaseName && propertyData.refSeedType) {
-      itemData[schemaBaseName] = propertyValue
+    const propertyId = (propertyData as { propertyId?: number | null }).propertyId
+    const property = propertyId != null ? propertiesById.get(propertyId) : undefined
+    if (property) {
+      itemData[property.name] = propertyValue
+      if (metadataPropertyNameForms(property).includes(propertyName)) itemData[propertyName] = propertyValue
+      continue
     }
 
+    // No property_id: the stored name, and for a ref row its `<key>Id` stripped
+    const key = metadataRowPropertyKey(propertyData)
+    if (key && key !== propertyName && propertyData.refSeedType) {
+      itemData[key] = propertyValue
+    }
     itemData[propertyName] = propertyValue
   }
 

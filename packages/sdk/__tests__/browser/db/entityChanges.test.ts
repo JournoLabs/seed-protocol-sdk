@@ -11,7 +11,6 @@ import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
 import { deleteItem } from '@/db/write/deleteItem'
 import { hardDeleteLocalSeedsByLocalIds } from '@/db/write/removeLocalCopiesForAddresses'
-import { moveMetadataToRenamedProperty } from '@/helpers/db'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
@@ -150,19 +149,14 @@ describe.sequential('entity_changes triggers', () => {
     ])
   })
 
-  it('logs a rename under both property names', async () => {
+  it('logs a property_name change under both names', async () => {
     const [row] = await db()
-      .select({ propertyId: metadata.propertyId, modelType: metadata.modelType })
+      .select({ localId: metadata.localId })
       .from(metadata)
       .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, 'summary')))
-    expect(row?.propertyId).toBeTruthy()
+    expect(row?.localId).toBeTruthy()
     const changes = await changesOf(() =>
-      moveMetadataToRenamedProperty(db(), {
-        propertyId: row!.propertyId!,
-        modelType: row!.modelType!,
-        oldName: 'summary',
-        newName: 'abstract',
-      }),
+      db().update(metadata).set({ propertyName: 'abstract' }).where(eq(metadata.localId, row!.localId!)),
     )
     expect(changes.map((c) => c.propertyName)).toEqual(['abstract', 'summary'])
     expect(changes.every((c) => c.tbl === 'metadata' && c.seedLocalId === seedLocalId)).toBe(true)

@@ -9,7 +9,7 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {

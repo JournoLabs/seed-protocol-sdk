@@ -1,3 +1,4 @@
+import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
@@ -46,8 +47,7 @@ function overlayOf(op: Pick<OutboxOp, 'kind' | 'value'>): PendingPropertyRow | u
 }
 
 /** Html, Image, File and Relation rows are stored as `<name>Id`; match either spelling. */
-export const propertyNameVariants = (name: string): string[] =>
-  name.endsWith('Id') ? [name, name.slice(0, -2)] : [name, `${name}Id`]
+export const propertyNameVariants = (name: string): string[] => getMetadataPropertyNamesForQuery(name)
 
 /**
  * The pending row of each of the seed's properties that has a pending value op, keyed by the op's

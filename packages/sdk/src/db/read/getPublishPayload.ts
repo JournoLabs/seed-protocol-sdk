@@ -1,4 +1,10 @@
-import { decodeEasNumber, easName } from '@seedprotocol/eas'
+import {
+  decodeEasNumber,
+  easName,
+  getEasSchemaUidForSchemaDefinition,
+  getSchemaUidForSchemaDefinitionFromCache,
+  isValidEasAttestationUid,
+} from '@seedprotocol/eas'
 import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
 import { ItemLoads } from '@/db/read/itemLoads'
 import {
@@ -15,18 +21,12 @@ import type {
 import { loadEasSdk } from '@/helpers/easSdk'
 
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
-import { getEasSchemaUidForSchemaDefinition, getSchemaUidForSchemaDefinitionFromCache } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'
 import { emptyEasValue, getPropertyClear } from '@/db/read/getPropertyClear'
-import {
-  isStorageSeedRef,
-  isPublishedSeedRef,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@/helpers/relationSeedRef'
+import { isStorageSeedRef, isPublishedSeedRef } from '@/helpers/relationSeedRef'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { draftWalkProperties } from '@/db/read/publishDraftGraph'
@@ -505,6 +505,8 @@ const processBasicProperties = async (
       const clear = await getPropertyClear({
         seedLocalId: (context as any).seedLocalId,
         seedUid: (context as any).seedUid,
+        propertyId: (context as any).propertyId,
+        modelName: (context as any).modelName,
         propertyName: basicProperty.propertyName,
         dataType: propertyDef?.dataType,
         refValueType: propertyDef?.refValueType,

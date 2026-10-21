@@ -475,6 +475,84 @@ DELETE FROM \`seeds\` WHERE \`local_id\` IN (
 
 export const migrationSql_0025_add_metadata_retract = `ALTER TABLE \`metadata\` ADD \`retract\` integer;`
 
+export const migrationSql_0026_add_content_hash_to_schemas = `ALTER TABLE \`schemas\` ADD \`content_hash\` text;`
+
+export const migrationSql_0027_link_metadata_property_ids = `-- Links metadata rows written without property_id to their property (decision D4: readers match
+-- rows by property_id). Only rows whose seed records its model (seeds.model_file_id) are linked,
+-- and only to one of that model's properties. Rows that match no property, or several, keep NULL
+-- and are read by name.
+--
+-- First the rows whose stored name is a property's key (unique per model).
+UPDATE \`metadata\` SET \`property_id\` = (
+  SELECT \`p\`.\`id\` FROM \`seeds\` \`s\`
+  JOIN \`models\` \`m\` ON \`m\`.\`schema_file_id\` = \`s\`.\`model_file_id\`
+  JOIN \`properties\` \`p\` ON \`p\`.\`model_id\` = \`m\`.\`id\`
+  WHERE \`s\`.\`local_id\` = \`metadata\`.\`seed_local_id\` AND \`p\`.\`name\` = \`metadata\`.\`property_name\`
+)
+WHERE \`property_id\` IS NULL AND EXISTS (
+  SELECT 1 FROM \`seeds\` \`s\`
+  JOIN \`models\` \`m\` ON \`m\`.\`schema_file_id\` = \`s\`.\`model_file_id\`
+  JOIN \`properties\` \`p\` ON \`p\`.\`model_id\` = \`m\`.\`id\`
+  WHERE \`s\`.\`local_id\` = \`metadata\`.\`seed_local_id\` AND \`p\`.\`name\` = \`metadata\`.\`property_name\`
+);
+--> statement-breakpoint
+-- Then the other stored forms, when exactly one property matches: \`<key>Id\` for an Image, File,
+-- Html or Relation, and a List of Relation's \`<singular key><Ref>Ids\` (singular as \`key\` minus a
+-- trailing \`s\` or \`es\`, or \`ies\` → \`y\`; other plurals stay NULL).
+UPDATE \`metadata\` SET \`property_id\` = (
+  SELECT \`p\`.\`id\` FROM \`seeds\` \`s\`
+  JOIN \`models\` \`m\` ON \`m\`.\`schema_file_id\` = \`s\`.\`model_file_id\`
+  JOIN \`properties\` \`p\` ON \`p\`.\`model_id\` = \`m\`.\`id\`
+  LEFT JOIN \`models\` \`r\` ON \`r\`.\`id\` = \`p\`.\`ref_model_id\`
+  WHERE \`s\`.\`local_id\` = \`metadata\`.\`seed_local_id\` AND (
+    (
+      (\`p\`.\`data_type\` IN ('Image', 'File', 'Html', 'Relation') OR \`p\`.\`ref_value_type\` IN ('Image', 'File', 'Html', 'Relation'))
+      AND \`p\`.\`name\` || 'Id' = \`metadata\`.\`property_name\`
+    ) OR (
+      \`p\`.\`data_type\` = 'List' AND \`r\`.\`name\` IS NOT NULL
+      AND length(\`metadata\`.\`property_name\`) > length(\`r\`.\`name\`) + 3
+      AND substr(\`metadata\`.\`property_name\`, -(length(\`r\`.\`name\`) + 3)) = \`r\`.\`name\` || 'Ids'
+      AND (
+        \`p\`.\`name\` IN (
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3),
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3) || 's',
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3) || 'es'
+        ) OR (
+          substr(\`metadata\`.\`property_name\`, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3, 1) = 'y'
+          AND \`p\`.\`name\` = substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 4) || 'ies'
+        )
+      )
+    )
+  )
+)
+WHERE \`property_id\` IS NULL AND (
+  SELECT COUNT(*) FROM \`seeds\` \`s\`
+  JOIN \`models\` \`m\` ON \`m\`.\`schema_file_id\` = \`s\`.\`model_file_id\`
+  JOIN \`properties\` \`p\` ON \`p\`.\`model_id\` = \`m\`.\`id\`
+  LEFT JOIN \`models\` \`r\` ON \`r\`.\`id\` = \`p\`.\`ref_model_id\`
+  WHERE \`s\`.\`local_id\` = \`metadata\`.\`seed_local_id\` AND (
+    (
+      (\`p\`.\`data_type\` IN ('Image', 'File', 'Html', 'Relation') OR \`p\`.\`ref_value_type\` IN ('Image', 'File', 'Html', 'Relation'))
+      AND \`p\`.\`name\` || 'Id' = \`metadata\`.\`property_name\`
+    ) OR (
+      \`p\`.\`data_type\` = 'List' AND \`r\`.\`name\` IS NOT NULL
+      AND length(\`metadata\`.\`property_name\`) > length(\`r\`.\`name\`) + 3
+      AND substr(\`metadata\`.\`property_name\`, -(length(\`r\`.\`name\`) + 3)) = \`r\`.\`name\` || 'Ids'
+      AND (
+        \`p\`.\`name\` IN (
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3),
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3) || 's',
+          substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3) || 'es'
+        ) OR (
+          substr(\`metadata\`.\`property_name\`, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 3, 1) = 'y'
+          AND \`p\`.\`name\` = substr(\`metadata\`.\`property_name\`, 1, length(\`metadata\`.\`property_name\`) - length(\`r\`.\`name\`) - 4) || 'ies'
+        )
+      )
+    )
+  )
+) = 1;
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -661,6 +739,20 @@ export const journalJson = `{
       "when": 1792585560172,
       "tag": "0025_add_metadata_retract",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792587787468,
+      "tag": "0026_add_content_hash_to_schemas",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1792587787964,
+      "tag": "0027_link_metadata_property_ids",
+      "breakpoints": true
     }
   ]
 }`
@@ -668,10 +760,10 @@ export const journalJson = `{
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
 export const snapshotJson = `{
+  "id": "c7851baa-6148-4738-9db2-28c46948b66c",
+  "prevId": "dee41a34-bc54-4e42-b033-7b750051a382",
   "version": "6",
   "dialect": "sqlite",
-  "id": "932b9df0-151c-4c9c-83d4-516250bd7b31",
-  "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1289,15 +1381,15 @@ export const snapshotJson = `{
         "metadata_property_id_properties_id_fk": {
           "name": "metadata_property_id_properties_id_fk",
           "tableFrom": "metadata",
-          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
+          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1459,28 +1551,28 @@ export const snapshotJson = `{
         "properties_model_id_models_id_fk": {
           "name": "properties_model_id_models_id_fk",
           "tableFrom": "properties",
-          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
+          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "properties_ref_model_id_models_id_fk": {
           "name": "properties_ref_model_id_models_id_fk",
           "tableFrom": "properties",
-          "tableTo": "models",
           "columnsFrom": [
             "ref_model_id"
           ],
+          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1517,28 +1609,28 @@ export const snapshotJson = `{
         "model_schemas_model_id_models_id_fk": {
           "name": "model_schemas_model_id_models_id_fk",
           "tableFrom": "model_schemas",
-          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
+          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "model_schemas_schema_id_schemas_id_fk": {
           "name": "model_schemas_schema_id_schemas_id_fk",
           "tableFrom": "model_schemas",
-          "tableTo": "schemas",
           "columnsFrom": [
             "schema_id"
           ],
+          "tableTo": "schemas",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1583,15 +1675,15 @@ export const snapshotJson = `{
         "model_uids_model_id_models_id_fk": {
           "name": "model_uids_model_id_models_id_fk",
           "tableFrom": "model_uids",
-          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
+          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1805,15 +1897,15 @@ export const snapshotJson = `{
         "property_uids_property_id_properties_id_fk": {
           "name": "property_uids_property_id_properties_id_fk",
           "tableFrom": "property_uids",
-          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
+          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1990,6 +2082,13 @@ export const snapshotJson = `{
         "is_edited": {
           "name": "is_edited",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -2311,9 +2410,9 @@ export const snapshotJson = `{
   "views": {},
   "enums": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
+    "tables": {}
   },
   "internal": {
     "indexes": {}

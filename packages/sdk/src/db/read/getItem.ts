@@ -1,7 +1,6 @@
 import { getItemData } from './getItemData'
 import { GetItem } from '@/types'
 import { Item } from '@/Item/Item'
-import { startCase } from 'lodash-es'
 
 export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
   const itemInitObj = await getItemData({
@@ -22,10 +21,6 @@ export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
       `[db/queries] [getItem] no itemInitObj.seedLocalId modelName: ${modelName} seedLocalId: ${seedLocalId} seedUid: ${seedUid}`,
     )
     return
-  }
-
-  if (!itemInitObj.modelName && itemInitObj.type) {
-    itemInitObj.modelName = startCase(itemInitObj.type)
   }
 
   // DB + loadOrCreateItem + concurrent property saves (e.g. during publish) can exceed the default 5s idle wait.

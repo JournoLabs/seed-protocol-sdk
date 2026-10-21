@@ -1,16 +1,21 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, models, properties, seeds, versions, type MetadataType } from '@/seedSchema'
 import { and, eq, inArray } from 'drizzle-orm'
+import {
+  findMetadataPropertyByName,
+  metadataPropertyNameForms,
+  readModelMetadataProperties,
+  type MetadataProperty,
+} from '@/db/read/metadataProperty'
 import { generateId } from '@/helpers'
 import { normalizeDataType } from '@/helpers/property/index'
-import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import {
   isPlaceholderUid,
   isValidEasAttestationUid,
   normalizeBytes32Hex,
-} from '@/helpers/easUid'
+} from '@seedprotocol/eas'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 
 export type PropertyAttestationApplyPair = {
@@ -40,8 +45,9 @@ export type PropertyAttestationApplyPair = {
  *
  * Relations and lists of relations are recorded as attested, the way an EAS sync of the
  * attestation stores them:
- * - a List of Relation row lives under its storage name (`authors` → `authorIdentityIds`) while a
- *   publish names the attestation by schema key; either name matches.
+ * - a pair names its property by schema key or a stored name; the property's rows are the ones
+ *   linked to it by property_id, and rows with none match by any name it is stored under
+ *   (`authors`, `authorIdentityIds`; `author`, `authorId`).
  * - a value naming seeds by local id gets the seed uids the attestation encodes: the uid (Relation),
  *   a JSON array of uids in slot order (List). Each uid comes from `resolvedSeedUids` (seeds this
  *   publish created, not recorded on their seed rows yet), else the seed's recorded live uid.
@@ -89,14 +95,17 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
         : null)
   }
 
-  const refDefs = await loadRefPropertyDefs(appDb, seedLocalId, rows)
+  const props = await loadSeedProperties(appDb, seedLocalId, rows)
+  const propertyOfRow = (row: MetadataType): MetadataProperty | undefined =>
+    (row.propertyId != null ? props.find((p) => p.id === row.propertyId) : undefined) ??
+    (row.propertyName ? findMetadataPropertyByName(props, row.propertyName) : undefined)
   const attestedRefValue = async (
     row: MetadataType,
-    def: RefPropertyDef | undefined,
+    property: MetadataProperty | undefined,
   ): Promise<string | undefined> => {
-    const d = def ?? (row.propertyName ? refDefs.get(row.propertyName) : undefined)
-    if (!d || row.propertyValue == null) return undefined
-    return toAttestedRefValue(appDb, row.propertyValue, d.kind, resolvedSeedUids ?? {})
+    const kind = refKind(property ?? propertyOfRow(row))
+    if (!kind || row.propertyValue == null) return undefined
+    return toAttestedRefValue(appDb, row.propertyValue, kind, resolvedSeedUids ?? {})
   }
 
   for (const pair of pairs) {
@@ -107,11 +116,16 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
 
     const pairName =
       pair.propertyName != null && pair.propertyName !== '' ? pair.propertyName : undefined
-    const pairDef = pairName ? refDefs.get(pairName) : undefined
+    // The pair's property: rows linked to it by property_id (decision D4) are its rows, whatever
+    // name they are stored under; rows with no property_id match by any of its stored names.
+    const pairProperty = pairName ? findMetadataPropertyByName(props, pairName) : undefined
     const pairNames = new Set<string>(
-      pairName ? [pairName, ...(pairDef ? [pairDef.schemaKey, pairDef.storageName] : [])] : [],
+      pairName ? [pairName, ...(pairProperty ? metadataPropertyNameForms(pairProperty) : [])] : [],
     )
-
+    const isPairRow = (r: MetadataType): boolean =>
+      pairProperty && r.propertyId != null
+        ? r.propertyId === pairProperty.id
+        : !!r.propertyName && pairNames.has(r.propertyName)
     const attestedRow = pair.metadataLocalId
       ? working.find((r: MetadataType) => r.localId === pair.metadataLocalId)
       : undefined
@@ -122,7 +136,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
           // Rows sync derived for ItemStorage properties aren't placeholders for an attestation.
           if (r.derivedFromUid != null) return false
           if (pairName) {
-            if (!r.propertyName || !pairNames.has(r.propertyName)) return false
+            if (!isPairRow(r)) return false
             if (r.schemaUid) {
               return normalizeBytes32Hex(r.schemaUid) === wantSchema
             }
@@ -141,11 +155,12 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
       if (!source || !validVersion) continue
       if (working.some((r: MetadataType) => r.uid?.toLowerCase() === att!.toLowerCase())) continue
       const now = Date.now()
-      const attestedValue = await attestedRefValue(source, pairDef)
+      const attestedValue = await attestedRefValue(source, pairProperty)
       const row: MetadataType = {
         ...source,
         ...(attestedValue !== undefined && { propertyValue: attestedValue }),
         localId: generateId(),
+        propertyId: source.propertyId ?? propertyOfRow(source)?.id ?? null,
         uid: att!,
         schemaUid: normalizeBytes32Hex(source.schemaUid) ? source.schemaUid : wantSchema,
         seedUid: liveSeedUid,
@@ -165,7 +180,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
     }
 
     const writeSchemaUid = !normalizeBytes32Hex(target.schemaUid)
-    const attestedValue = await attestedRefValue(target, pairDef)
+    const attestedValue = await attestedRefValue(target, pairProperty)
 
     await appDb
       .update(metadata)
@@ -196,19 +211,29 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
 
 type AppDb = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
 
-type RefPropertyDef = { kind: 'relation' | 'list'; schemaKey: string; storageName: string }
+type RefKind = 'relation' | 'list'
+
+/** How a property's value names seeds: one seed (Relation) or a JSON list of them (List of Relation). */
+function refKind(property: MetadataProperty | undefined): RefKind | undefined {
+  if (!property) return undefined
+  const dataType = normalizeDataType(property.dataType)
+  if (dataType === 'Relation') return 'relation'
+  if (dataType === 'List' && normalizeDataType(property.refValueType ?? undefined) === 'Relation' && property.ref) {
+    return 'list'
+  }
+  return undefined
+}
 
 /**
- * The seed's Relation and List-of-Relation properties, keyed by schema key and (lists) by storage
- * name. The model comes from the seed's model_file_id, else a metadata row's property_id; an
- * unknown model gives no definitions (rows then match by the pair's name alone, values unchanged).
+ * The seed's model's properties. The model comes from the seed's model_file_id, else a metadata
+ * row's property_id; an unknown model gives none (rows then match by the pair's name alone,
+ * values unchanged).
  */
-async function loadRefPropertyDefs(
+async function loadSeedProperties(
   appDb: AppDb,
   seedLocalId: string,
   rows: MetadataType[],
-): Promise<Map<string, RefPropertyDef>> {
-  const out = new Map<string, RefPropertyDef>()
+): Promise<MetadataProperty[]> {
   try {
     let modelId: number | undefined
     const [seedRow] = await appDb
@@ -233,49 +258,12 @@ async function loadRefPropertyDefs(
         .limit(1)
       modelId = p?.modelId ?? undefined
     }
-    if (modelId == null) return out
-
-    const props: Array<{
-      name: string
-      dataType: string
-      refModelId: number | null
-      refValueType: string | null
-    }> = await appDb
-      .select({
-        name: properties.name,
-        dataType: properties.dataType,
-        refModelId: properties.refModelId,
-        refValueType: properties.refValueType,
-      })
-      .from(properties)
-      .where(eq(properties.modelId, modelId))
-    const refIds = [...new Set(props.map((p) => p.refModelId).filter((id): id is number => id != null))]
-    const refNames = new Map<number, string>()
-    if (refIds.length) {
-      const refs: Array<{ id: number; name: string }> = await appDb
-        .select({ id: models.id, name: models.name })
-        .from(models)
-        .where(inArray(models.id, refIds))
-      for (const r of refs) refNames.set(r.id, r.name)
-    }
-    for (const p of props) {
-      const dataType = normalizeDataType(p.dataType)
-      if (dataType === 'Relation') {
-        out.set(p.name, { kind: 'relation', schemaKey: p.name, storageName: p.name })
-        continue
-      }
-      if (dataType !== 'List' || normalizeDataType(p.refValueType ?? undefined) !== 'Relation') continue
-      const ref = p.refModelId != null ? refNames.get(p.refModelId) : undefined
-      const storageName = ref ? listRelationEasPropertyName(p.name, { dataType: 'List', ref }) : undefined
-      if (!storageName) continue
-      const def: RefPropertyDef = { kind: 'list', schemaKey: p.name, storageName }
-      out.set(p.name, def)
-      out.set(storageName, def)
-    }
+    if (modelId == null) return []
+    return await readModelMetadataProperties(appDb, modelId)
   } catch {
     // Unknown model: match by the pair's name alone.
+    return []
   }
-  return out
 }
 
 const isUid = (v: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(v)
@@ -288,7 +276,7 @@ const isUid = (v: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(v)
 async function toAttestedRefValue(
   appDb: AppDb,
   raw: string,
-  kind: RefPropertyDef['kind'],
+  kind: RefKind,
   resolvedSeedUids: Record<string, string>,
 ): Promise<string | undefined> {
   const refs = kind === 'list' ? parseListPropertyValueFromStorage(raw) : [raw.trim()]

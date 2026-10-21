@@ -1,17 +1,16 @@
 import { BrowserFileManager } from '@/browser/helpers/FileManager'
 import { BrowserDb } from '@/browser/db/Db'
-import { BrowserArweaveClient } from '@/browser/helpers/ArweaveClient'
-import { BrowserEasClient } from '@/browser/helpers/EasClient'
-import { BrowserQueryClient } from '@/browser/helpers/QueryClient'
+import { DefaultArweaveClient } from '@seedprotocol/arweave'
+import { DefaultEasClient, DefaultQueryClient } from '@seedprotocol/eas'
 import type { PlatformServices } from './types'
 
 export function createPlatformServices(): PlatformServices {
   return {
     fileManager: new BrowserFileManager(),
     db: new BrowserDb(),
-    arweaveClient: new BrowserArweaveClient(),
-    easClient: new BrowserEasClient(),
-    queryClient: new BrowserQueryClient(),
+    arweaveClient: new DefaultArweaveClient(),
+    easClient: new DefaultEasClient(),
+    queryClient: new DefaultQueryClient(),
   }
 }
 

@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'

@@ -17,7 +17,11 @@ import {
 function withPendingRows(rows: any[], pending: Map<string, PendingPropertyRow>, seedLocalId: string | null | undefined): any[] {
   if (pending.size === 0) return rows
   const out = rows.map((row) => {
-    const name = propertyNameVariants(row.propertyName ?? '').find((variant) => pending.has(variant))
+    // An op names the property as its instance does: the row's stored name, or its key (property_id)
+    const name = [row.propertyName, row.propertyKey]
+      .filter(Boolean)
+      .flatMap((n: string) => propertyNameVariants(n))
+      .find((variant: string) => pending.has(variant))
     if (!name) return row
     const overlay = pending.get(name)!
     pending.delete(name)

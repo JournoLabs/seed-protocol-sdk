@@ -14,7 +14,6 @@ import {
 } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { camelCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -22,11 +21,16 @@ import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
 import {
   BaseFileManager,
   getCorrectId,
-  getMetadataPropertyNamesForQuery,
   resolveMetadataRecord,
-  resolveStorageNameToSchemaName,
 } from '@/helpers'
-import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
+import {
+  getMetadataPropertyNamesForQuery,
+  listRelationEasPropertyName,
+  metadataRowPropertyKey,
+  metadataStoredNameForms,
+  propertyKeyFromStoredName,
+  type PropertySchemaEntry,
+} from '@/helpers/metadataPropertyNames'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { ActorKeyedState } from '@/helpers/entity/entityState'
@@ -67,7 +71,7 @@ const resolvePropertyRecordSchemaFromSchemaData = async (
   try {
     const { loadAllSchemasFromDb } = await import('@/helpers/schema')
     const allSchemas = await loadAllSchemasFromDb()
-    const modelNameAlt = modelType ? upperFirst(camelCase(modelType)) : ''
+    const modelNameAlt = (await modelTypeToModelName(modelType)) ?? ''
     for (const { schema } of allSchemas) {
       // Model names are only unique per schema: when the owning schema is known, only look there.
       if (schemaName && schema.metadata?.name !== schemaName) continue
@@ -77,7 +81,7 @@ const resolvePropertyRecordSchemaFromSchemaData = async (
       if (!model?.properties) continue
       let prop = model.properties[propertyName]
       if (!prop) {
-        const resolvedKey = resolveStorageNameToSchemaName(
+        const resolvedKey = propertyKeyFromStoredName(
           model.properties as Record<string, PropertySchemaEntry>,
           propertyName,
         )
@@ -123,7 +127,7 @@ const resolvePropertyRecordSchemaFromModel = async (
     const { resolveItemModelFileId } = await import('@/db/read/resolveModelRecord')
     const modelFileId = await resolveItemModelFileId(hints)
     let model = modelFileId
-      ? await Model.resolveAsync(modelName || modelTypeToModelName(modelType ?? ''), { modelFileId })
+      ? await Model.resolveAsync(modelName || ((await modelTypeToModelName(modelType)) ?? ''), { modelFileId })
       : undefined
     if (!model?.properties?.length && modelName) {
       model = Model.peekByName(modelName)
@@ -136,7 +140,8 @@ const resolvePropertyRecordSchemaFromModel = async (
       model = await Model.getByNameAsync(modelName, undefined, { hold: false })
     }
     if (!model?.properties?.length && modelType) {
-      model = await Model.getByNameAsync(modelTypeToModelName(modelType), undefined, { hold: false })
+      const typeModelName = await modelTypeToModelName(modelType)
+      if (typeModelName) model = await Model.getByNameAsync(typeModelName, undefined, { hold: false })
     }
     if (!model?.properties?.length) {
       // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
@@ -155,7 +160,7 @@ const resolvePropertyRecordSchemaFromModel = async (
     const schemas = modelPropertiesToObject(model.properties)
     let schemaKey = propertyName
     if (!schemas[schemaKey]) {
-      const resolved = resolveStorageNameToSchemaName(schemas, propertyName)
+      const resolved = propertyKeyFromStoredName(schemas, propertyName)
       if (resolved) schemaKey = resolved
     }
     const schema = schemas[schemaKey]
@@ -165,9 +170,12 @@ const resolvePropertyRecordSchemaFromModel = async (
   }
 }
 
-/** Convert modelType (snake_case from DB) to Model name (PascalCase). startCase adds spaces ("Test Post"); Model names are "TestPost". */
-const modelTypeToModelName = (modelType: string): string =>
-  modelType ? upperFirst(camelCase(modelType)) : ''
+/** The model a modelType (`metadata.model_type`, an EAS name) refers to, or undefined (none, or ambiguous). */
+const modelTypeToModelName = async (modelType: string | undefined): Promise<string | undefined> => {
+  if (!modelType) return undefined
+  const { modelNameForType } = await import('@/db/read/resolveModelRecord')
+  return modelNameForType(modelType).catch(() => undefined)
+}
 
 const logger = debug('seedSdk:property:class')
 
@@ -669,11 +677,42 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       try {
         const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
         const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-        const propertyNames = getMetadataPropertyNamesForQuery(
-          propertyName,
-          normalizedDataType,
-          normalizedRefValueType
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          logger('[ItemProperty._setupLiveQuerySubscription] Database not available')
+          return
+        }
+
+        // The property's rows: linked by property_id (decision D4), else stored under one of its names
+        const { context: matchContext } = this._service.getSnapshot()
+        const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
+        const property = await matchMetadataProperty(
+          {
+            propertyId: matchContext.propertyId,
+            propertyName,
+            modelName: matchContext.modelName,
+            modelFileId: matchContext.modelFileId,
+            seedLocalId,
+            seedUid,
+            dataType: normalizedDataType,
+            refValueType: normalizedRefValueType,
+          },
+          db,
         )
+        const propertyId = property.propertyId
+        // The change feed reports writes by stored name: watch every name this property's rows have
+        const propertyNames = [...property.names]
+        if (propertyId != null) {
+          const { metadata } = await import('@/seedSchema')
+          const { eq: eqOp } = await import('drizzle-orm')
+          const stored: { propertyName: string | null }[] = await db
+            .selectDistinct({ propertyName: metadata.propertyName })
+            .from(metadata)
+            .where(eqOp(metadata.propertyId, propertyId))
+          for (const { propertyName: name } of stored) {
+            if (name && !propertyNames.includes(name)) propertyNames.push(name)
+          }
+        }
 
         // File and Image display values are session URLs minted from the file on disk; the column holds
         // nothing useful for them (older versions stored blob: URLs that die on reload). Keep the minted
@@ -703,23 +742,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           row.propertyValue == null && !row.refResolvedValue ? { storageTransactionId: undefined } : {}
 
         const drizzleMod = await import('drizzle-orm')
-        const { eq, and, or } = drizzleMod
+        const { eq, and } = drizzleMod
         const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
         const { getMetadataLatest } = metadataLatestMod
-        
-        const db = BaseDb.getAppDb()
-        if (!db) {
-          logger('[ItemProperty._setupLiveQuerySubscription] Database not available')
-          return
-        }
 
         // Query initial metadata using getMetadataLatest subquery pattern
-        // For File/Image/Relation, also check the Id variant (e.g. "textId") since metadata is stored with that
         const metadataLatest = getMetadataLatest({ seedLocalId, seedUid })
-        const propertyNameWhere =
-          propertyNames.length > 1
-            ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
-            : eq(metadataLatest.propertyName, propertyNames[0])
+        const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
         // In the browser the feed watch below reads the same row at once, so only Node (no change
         // feed) reads it here.
         const initialMetadata = isBrowser
@@ -768,74 +797,33 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const resolvedSeedUid = seedUid || null
           const resolvedSeedLocalId = seedLocalId || null
           
-          // For File/Image/Relation, query both propertyName and propertyNameId (metadata stores with Id suffix)
-          // Build query with primitive params only (SQLocal bind rejects SQL fragment objects)
-          // ORDER BY spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason
-          const [p0, p1, p2] = propertyNames
+          // The property's rows by property_id, or with none by name (one bound JSON list of names).
+          // Built with primitive params only (SQLocal bind rejects SQL fragment objects). ORDER BY
+          // spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason.
+          const namesJson = JSON.stringify(property.names)
           type MetadataRow = { localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }
           const metadataQuery = (sql: any) => {
             if (resolvedSeedUid) {
-              if (propertyNames.length === 1) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
-              if (propertyNames.length === 2) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
-              if (propertyNames.length >= 3) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
-            } else if (resolvedSeedLocalId) {
-              if (propertyNames.length === 1) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
-              if (propertyNames.length === 2) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
-              if (propertyNames.length >= 3) {
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                  ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-                `
-              }
+              return sql`
+                SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue,
+                       version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                       ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                FROM metadata
+                WHERE seed_uid = ${resolvedSeedUid} AND property_name IS NOT NULL
+                  AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
+                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+              `
+            }
+            if (resolvedSeedLocalId) {
+              return sql`
+                SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue,
+                       version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                       ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                FROM metadata
+                WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name IS NOT NULL
+                  AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
+                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+              `
             }
             return sql`SELECT 1 WHERE 1 = 0`
           }
@@ -1351,11 +1339,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         return undefined
       }
       // Ensure modelName for constructor: metadata may have modelType only, or neither (e.g. when Item passes it)
-      // Use modelTypeToModelName: modelType is snake_case ("test_post"); Model names are PascalCase ("TestPost")
+      // modelType is the EAS name ("test_post"); modelTypeToModelName finds the model it names
       const data = propertyData as { modelName?: string; modelType?: string }
       const modelName =
-        data.modelName ??
-        ((data.modelType ? modelTypeToModelName(data.modelType) : '') || modelNameOption || '')
+        data.modelName ?? ((await modelTypeToModelName(data.modelType)) || modelNameOption || '')
       // Fix 6: resolve propertyRecordSchema from Model so value setter can persist (useItemProperty path)
       // Pass modelType for fallback: "New model" -> "new_model" can't be reversed to exact name; findByModelType handles it
       const propertyRecordSchema = await resolvePropertyRecordSchemaFromModel(
@@ -1368,8 +1355,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           propertyId: (propertyData as { propertyId?: number }).propertyId,
         },
       )
+      // The row's stored name when it is a form of the name asked for (`avatarImageId` for
+      // `avatarImage`); else the row is the property's under an older name (a rename keeps rows'
+      // names, decision D4) and the instance takes the name asked for.
+      const storedName = (propertyData as { propertyName?: string }).propertyName
+      const keepsStoredName =
+        !!storedName &&
+        (metadataStoredNameForms(propertyName, propertyRecordSchema as never).includes(storedName) ||
+          getMetadataPropertyNamesForQuery(propertyName).includes(storedName))
       foundProperty = ItemProperty.create(
-        { ...propertyData, modelName, propertyRecordSchema },
+        { ...propertyData, propertyName: keepsStoredName ? storedName : propertyName, modelName, propertyRecordSchema },
         { waitForReady: false, hold },
       )
     }
@@ -1406,52 +1401,39 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     const { resolveItemModelFileId } = await import('../db/read/resolveModelRecord')
     const itemModelFileId = await resolveItemModelFileId({ seedLocalId, seedUid })
+    // One lookup per model type, not per property
+    const modelNameByType = new Map<string, Promise<string | undefined>>()
+    const modelNameOfType = (modelType: string | undefined): Promise<string | undefined> => {
+      if (!modelType) return Promise.resolve(undefined)
+      if (!modelNameByType.has(modelType)) modelNameByType.set(modelType, modelTypeToModelName(modelType))
+      return modelNameByType.get(modelType)!
+    }
     for (const data of propertiesData) {
       const d = data as {
         modelName?: string
         modelType?: string
         propertyName?: string
+        propertyKey?: string | null
         refSeedType?: string
         propertyId?: number
       }
-      const modelName =
-        d.modelName ?? (d.modelType ? modelTypeToModelName(d.modelType) : '') ?? ''
+      const modelName = d.modelName ?? (await modelNameOfType(d.modelType)) ?? ''
       const modelFileId =
         itemModelFileId ?? (await resolveItemModelFileId({ propertyId: d.propertyId }))
-      // Normalize Id-suffix for File/Image/Relation: metadata stores "textId" but schema defines "text"
-      let propertyName = d.propertyName ?? ''
-      const baseName = propertyName.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-      const refSeedType = d.refSeedType as string | undefined
-      const isRefType = refSeedType && ['file', 'image', 'relation', 'html'].includes(refSeedType)
-      if (baseName && isRefType) {
-        propertyName = baseName
-      } else if (baseName) {
+      // The property's key: through property_id when the row has one, else from its stored name
+      // (`textId` → `text`, `authorIdentityIds` → `authors`)
+      let schemas: Record<string, any> = {}
+      if (modelName) {
         try {
           const { Model } = await import('../Model/Model')
           const { modelPropertiesToObject } = await import('../helpers/model')
           const model = await Model.resolveAsync(modelName, { modelFileId })
-          if (model?.properties) {
-            const schemas = modelPropertiesToObject(model.properties)
-            if (schemas[baseName]) propertyName = baseName
-          }
+          if (model?.properties?.length) schemas = modelPropertiesToObject(model.properties)
         } catch {
-          // Model not loaded, keep original
+          // Model not loaded: the stored name decides
         }
       }
-      if (modelName && propertyName) {
-        try {
-          const { Model } = await import('../Model/Model')
-          const { modelPropertiesToObject } = await import('../helpers/model')
-          const model = await Model.resolveAsync(modelName, { modelFileId })
-          if (model?.properties?.length) {
-            const schemas = modelPropertiesToObject(model.properties)
-            const listKey = resolveStorageNameToSchemaName(schemas, propertyName)
-            if (listKey) propertyName = listKey
-          }
-        } catch {
-          // Model not loaded, keep original
-        }
-      }
+      const propertyName = metadataRowPropertyKey(d, schemas) ?? ''
       if (seenNormalized.has(propertyName)) continue
       seenNormalized.add(propertyName)
       // Fix 6: resolve propertyRecordSchema from Model so value setter can persist

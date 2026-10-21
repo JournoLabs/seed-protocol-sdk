@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { applyPropertyAttestationUidsFromPublish } from '@/db/write/applyPropertyAttestationUidsFromPublish'
@@ -143,7 +143,8 @@ const replayPublish = async (root: Item<any>, path: Path) => {
 
 const latestRow = async (seedLocalId: string, propertyName: string) => {
   const props = await getItemProperties({ seedLocalId })
-  return props.find((p: any) => p.propertyName === propertyName) as any
+  // By the property's key (property_id) or the stored name
+  return props.find((p: any) => p.propertyName === propertyName || p.propertyKey === propertyName) as any
 }
 
 testDescribe('publish records relation and list values as the attested seed uids', () => {

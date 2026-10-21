@@ -1,6 +1,6 @@
 import type { PropertyMachineContext } from '@/types/property'
 import type { ItemStorageValueOp, StorageValueOp, SetPropertyValueResult } from '@/outbox/itemAppliers'
-import { getSeedData } from '@/db/read/getSeedData'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { rowContext } from './rowContext'
 import type { PropertyWriteTicket } from '@/helpers/propertyWriteTickets'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -29,7 +29,7 @@ export async function writeStorageValue<Result extends SetPropertyValueResult = 
   ticket: PropertyWriteTicket | undefined,
 ): Promise<{ skipped: true } | { skipped: false; row: Partial<PropertyMachineContext>; result: Result | undefined }> {
   const seedLocalId =
-    item.seedLocalId || (item.seedUid ? (await getSeedData({ seedUid: item.seedUid }))?.localId : undefined)
+    item.seedLocalId || (item.seedUid ? (await findSeedRow({ uid: item.seedUid }))?.localId : undefined)
   if (!seedLocalId) {
     throw new Error(`No local seed for the item to save ${item.propertyName} to`)
   }

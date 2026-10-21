@@ -8,6 +8,7 @@ import {
   isNameMatchLevel,
   matchEasName,
   partitionByRefAttester,
+  matchEasModelSchemas,
 } from '@seedprotocol/eas'
 import { loadNameMatchLevels, nameMatchLevels } from '@/db/read/nameMatchLevels'
 import { normalizeDataType } from '@/helpers/property'
@@ -15,8 +16,9 @@ import { easTypeFitsProperty, syncedPropertyValue } from '@/helpers/easValueType
 import {
   easPropertyNameForPublish,
   listRelationEasPropertyName,
-  toMetadataPropertyName,
+  metadataStorageName,
 } from '@/helpers/metadataPropertyNames'
+import { resolveMetadataPropertyId } from '@/db/read/metadataProperty'
 import {
   parseEasPropertyMetadata,
   parseEasRelationPropertyName,
@@ -24,7 +26,6 @@ import {
 import {
   metadata,
   MetadataType,
-  modelUids,
   SeedType,
   versions,
   VersionsType,
@@ -38,20 +39,19 @@ import { GET_SEEDS } from '@seedprotocol/eas'
 import {
   getAllAddressesFromDb,
   getItemStoragePropertiesForModel,
-  getPropertyIdForModelAndName,
 } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { getModelSchemas } from '@/db/read/getModelSchemas'
+import { writeModelUids } from '@/db/write/writeModelUids'
+import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
 import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
 import { findSeedRowsByUid } from '@/db/read/findSeedRowsByUid'
 import { rowsPerInsert, selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
-import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
-import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
+import { BaseEasClient, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import {
   getItemPropertiesFromEas,
   getItemVersionsFromEas,
@@ -150,6 +150,8 @@ type SyncedPropertyName = {
   refSeedType?: string
   /** The matched local property's data type; undefined when no local property matched. */
   dataType?: string
+  /** The matched local property's schemaFileId, for property_id. */
+  definitionId?: string
 }
 
 const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
@@ -204,17 +206,16 @@ const resolveSyncedPropertyName = (
         )
         return undefined
       }
+      // Stored under the property's storage name, as local writers store it (decision D4)
+      const propertyName = metadataStorageName(key, def)
+      const definitionId = typeof def?.id === 'string' && def.id ? def.id : undefined
       if (isListRelation) {
-        return { propertyName: key, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined }
+        return { propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
       }
       if (isSingleRef) {
-        return {
-          propertyName: toMetadataPropertyName(key, def?.dataType, def?.refValueType),
-          isRelation: true,
-          isList: false,
-        }
+        return { propertyName, isRelation: true, isList: false, definitionId }
       }
-      return { propertyName: key, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType) }
+      return { propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
     }
     // A name one of the model's properties would match at a looser level than its nameMatch
     // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
@@ -589,14 +590,15 @@ const createMetadataRecordsForStorageTransactionId = async (
     }
 
     const propertyId =
-      propertyDef.id ??
-      (modelType != null
-        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
-            getPropertyIdForModelAndName(modelType, _propertyName, {
-              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
-            }),
-          )) ?? null)
-        : null)
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
+        resolveMetadataPropertyId({
+          definitionId: propertyDef.id,
+          propertyName: _propertyName,
+          modelName: modelType,
+          seedLocalId,
+          seedUid,
+        }),
+      )) ?? null
 
     const propertyLocalId = generateId()
     await appDb.insert(metadata).values({
@@ -986,14 +988,16 @@ const insertSyncedProperties = async ({
     }
 
     const propertyId =
-      modelType != null
-        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
-            getPropertyIdForModelAndName(modelType, propertyName, {
-              // EAS identifies models by name only; a locally-created seed still knows its model.
-              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
-            }),
-          )) ?? null)
-        : null
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
+        resolveMetadataPropertyId({
+          definitionId: resolvedName.definitionId,
+          propertyName,
+          // EAS identifies models by name only; a locally-created seed still knows its model.
+          modelName: modelType,
+          seedLocalId,
+          seedUid,
+        }),
+      )) ?? null
     rows.push({
       localId: propertyLocalId,
       uid: property.id,
@@ -1157,45 +1161,13 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   // ADR 0009: this run matches names at the levels the stored schema files set now.
   await loadNameMatchLevels(appDb)
 
-  const { matchModelRecord } = await getModelSchemas()
-
-  const modelSchemas = await getModelSchemasFromEas()
-
-  const schemaUids: string[] = []
-
-  for (const modelSchema of modelSchemas) {
-    // ADR 0008: matched by name, so seeds published under an older SDK's name are found too.
-    const foundModel = matchModelRecord(modelSchema.schema)
-
-    if (!foundModel) {
-      // Skip schemas that don't have a corresponding model in the user's config
-      // This can happen with "bytes32 image" if there's no Image model defined
-      console.warn(
-        `[item/events] [syncDbWithEas] Model not found for schema ${modelSchema.schema}, skipping`
-      )
-      continue
-    }
-
-    try {
-      await appDb
-        .insert(modelUids)
-        .values({
-          modelId: foundModel.id,
-          uid: modelSchema.id,
-        })
-        .onConflictDoNothing()
-    } catch (err: unknown) {
-      // Model may have been deleted by test teardown or another process; skip to avoid unhandled rejection
-      const e = err as { code?: string; rawCode?: number; cause?: { code?: string; rawCode?: number } }
-      const code = e?.code ?? e?.rawCode ?? e?.cause?.code ?? e?.cause?.rawCode
-      if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 787) {
-        continue
-      }
-      throw err
-    }
-
-    schemaUids.push(modelSchema.id)
-  }
+  // ADR 0008: matched by name, so seeds published under an older SDK's name are found too. Schemas
+  // that match no local model (e.g. "bytes32 image" with no Image model) aren't fetched.
+  const modelSchemaLookups = await localModelSchemaLookups()
+  const modelSchemaMatches = matchEasModelSchemas(await getModelSchemasFromEas(modelSchemaLookups), modelSchemaLookups)
+  // The same rule as init: only each model's exact schema goes into model_uids.
+  await writeModelUids(modelSchemaMatches, appDb)
+  const schemaUids = [...new Set(modelSchemaMatches.map((match) => match.schema.id))]
 
   // If no schemas were found, skip the rest of the sync process
   // This can happen when models exist but don't have schemas registered in EAS yet

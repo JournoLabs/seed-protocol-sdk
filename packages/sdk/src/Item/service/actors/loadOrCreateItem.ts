@@ -3,47 +3,18 @@ import { FromCallbackInput } from '@/types'
 import { ItemMachineContext } from '@/types/item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { eq, and, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { getVersionData } from '@/db/read/subqueries/versionData'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import {
-  resolveStorageNameToSchemaName,
-  toSchemaPropertyName,
-} from '@/helpers/metadataPropertyNames'
+import { metadataRowPropertyKey } from '@/helpers/metadataPropertyNames'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { isDataType } from '@/helpers/property'
 import debug from 'debug'
 import { timingLogger, timingNow, timingSince } from '@/helpers/timing'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
-
-/**
- * Maps metadata.property_name to the ItemProperty Map key (same rules as the instance loop below).
- */
-function normalizeMetadataRowToInstanceKey(
-  metaRow: { propertyName?: string | null; refSeedType?: string | null },
-  propertySchemas: Record<string, any>,
-): string | undefined {
-  let propertyName = metaRow.propertyName
-  if (!propertyName) return undefined
-  const listSchemaKey = resolveStorageNameToSchemaName(propertySchemas, propertyName)
-  if (listSchemaKey) {
-    propertyName = listSchemaKey
-  } else {
-    const baseName = toSchemaPropertyName(propertyName)
-    const refSeedType = metaRow.refSeedType as string | undefined
-    const isRefTypeFromMeta =
-      refSeedType === 'file' ||
-      refSeedType === 'image' ||
-      refSeedType === 'relation' ||
-      refSeedType === 'html'
-    if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-      propertyName = baseName
-    }
-  }
-  return propertyName
-}
 
 function metadataValueStrength(row: any): number {
   const v = row?.propertyValue
@@ -77,7 +48,7 @@ function dedupeMetadataRowsByInstanceKey(
 ): any[] {
   const byKey = new Map<string, any>()
   for (const metaRow of metadataRows) {
-    const key = normalizeMetadataRowToInstanceKey(metaRow, propertySchemas)
+    const key = metadataRowPropertyKey(metaRow, propertySchemas)
     if (!key) continue
     const existing = byKey.get(key)
     byKey.set(key, existing ? pickBetterMetadataRowForSameInstance(existing, metaRow) : metaRow)
@@ -133,9 +104,9 @@ const createItemPropertyInstances = async (
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
-          const schemaInstance = Schema.create(schemaNameToTry, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
-          const schemaContext = schemaInstance.getService().getSnapshot().context
-          if (schemaContext.models?.[modelName]?.properties) {
+          const schemaInstance = await Schema.find({ schemaName: schemaNameToTry, waitForReady: false, hold: false })
+          const schemaContext = schemaInstance?.getService().getSnapshot().context
+          if (schemaContext?.models?.[modelName]?.properties) {
             propertySchemas = schemaContext.models[modelName].properties as Record<string, any>
             logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from Schema context for ${modelName}`)
           }
@@ -219,22 +190,12 @@ const createItemPropertyInstances = async (
     // Normalize to schema name so we don't create duplicate properties (text + textId).
     for (const metaRow of dedupedMetadataRows) {
       try {
-        let propertyName = metaRow.propertyName
+        // The property's key: through property_id (a renamed property's rows keep their stored
+        // name), else from the stored name (`textId` → `text`, `authorIdentityIds` → `authors`)
+        const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
         if (!propertyName) {
           logger(`Metadata row missing propertyName, skipping`)
           continue
-        }
-
-        const listSchemaKey = resolveStorageNameToSchemaName(propertySchemas, propertyName)
-        if (listSchemaKey) {
-          propertyName = listSchemaKey
-        } else {
-          const baseName = toSchemaPropertyName(propertyName)
-          const refSeedType = metaRow.refSeedType as string | undefined
-          const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
-          if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-            propertyName = baseName
-          }
         }
 
         const refSeedType = metaRow.refSeedType as string | undefined
@@ -346,30 +307,11 @@ export const loadOrCreateItem = fromCallback<
       throw new Error('Database not available')
     }
 
-    // Step 1: Query seeds table FIRST by seedLocalId or seedUid
-    // When both are provided, use OR so local seeds (uid=null) are still found
-    const whereClauses = []
-    if (seedLocalId && seedUid) {
-      whereClauses.push(
-        or(
-          eq(seeds.localId, seedLocalId),
-          eq(seeds.uid, seedUid),
-        ),
-      )
-    } else if (seedLocalId) {
-      whereClauses.push(eq(seeds.localId, seedLocalId))
-    } else if (seedUid) {
-      whereClauses.push(eq(seeds.uid, seedUid))
-    }
-
+    // Step 1: the seed row (local id first, then the uid, following a republished seed's old uid)
     const timingStart = timingNow()
-    const seedRecords = await db
-      .select()
-      .from(seeds)
-      .where(and(...whereClauses))
-      .limit(1)
+    const seedRecord = await findSeedRow({ localId: seedLocalId, uid: seedUid }, db)
 
-    if (seedRecords.length === 0) {
+    if (!seedRecord) {
       // Seed not found - this is a new item, will be created elsewhere
       logger(`Seed not found in database for seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
       sendBack({
@@ -392,7 +334,6 @@ export const loadOrCreateItem = fromCallback<
       return
     }
 
-    const seedRecord = seedRecords[0]
     const resolvedSeedLocalId = seedRecord.localId
     const resolvedSeedUid = seedRecord.uid || undefined
     const schemaUid = seedRecord.schemaUid || undefined
@@ -469,7 +410,7 @@ export const loadOrCreateItem = fromCallback<
       return
     }
 
-    // Step 3: Latest metadata row per property_name for this seed (matches loadOrCreateProperty /
+    // Step 3: Latest metadata row per property for this seed (matches loadOrCreateProperty /
     // getItemProperties). Strict version_local_id = latest would drop properties whose rows lag version bumps.
     const versionsMs = timingSince(timingStart) - seedMs
     const metadataLatest = getMetadataLatest({

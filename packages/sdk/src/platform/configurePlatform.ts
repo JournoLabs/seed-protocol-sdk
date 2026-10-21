@@ -1,8 +1,7 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseArweaveClient } from '@/helpers'
-import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
-import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
+import { BaseEasClient, BaseQueryClient } from '@seedprotocol/eas'
 import type { PlatformServices } from './types'
 
 /**

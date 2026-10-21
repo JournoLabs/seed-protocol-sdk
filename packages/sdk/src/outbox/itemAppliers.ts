@@ -2,7 +2,7 @@
  * The appliers for item ops (ADR 0019). Every tab registers them at init: the leader applies ops
  * that other tabs appended.
  */
-import { and, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { createSeed, type NewSeedFields } from '@/db/write/createSeed'
@@ -12,12 +12,13 @@ import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { metadata, seeds, type MetadataType } from '@/seedSchema'
 import type { PropertyType } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
+import { compareMetadataRowsLatestFirst, METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
+import { matchMetadataProperty, metadataRowsOfProperty } from '@/db/read/metadataProperty'
 import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
@@ -104,17 +105,21 @@ export async function applyStorageValue(
   )
   await createVersion({ seedLocalId: storageSeed.localId, seedType: storageSeed.type }, { db })
 
-  // Html and File store the property as e.g. htmlId; older rows may use the plain name
-  const baseName = propertyName.endsWith('Id') ? propertyName.slice(0, -2) : propertyName
+  // The property's newest row, by property_id (decision D4), else by name
+  const property = await matchMetadataProperty(
+    {
+      propertyName,
+      seedLocalId,
+      modelName: value.create.values.modelName ?? value.create.values.modelType,
+      definitionId: value.create.propertyRecordSchema?.id as string | number | undefined,
+    },
+    db,
+  )
   const [existing] = await db
     .select({ localId: metadata.localId })
     .from(metadata)
-    .where(
-      and(
-        eq(metadata.seedLocalId, seedLocalId),
-        or(eq(metadata.propertyName, propertyName), eq(metadata.propertyName, baseName)),
-      ),
-    )
+    .where(and(eq(metadata.seedLocalId, seedLocalId), metadataRowsOfProperty(property)))
+    .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
     .limit(1)
   if (existing?.localId) {
     const result = await updateItemPropertyValue(
@@ -193,7 +198,16 @@ export async function applyItemStorageValue(
 ): Promise<ItemStorageValueResult> {
   const value = op.itemStorage
   const schema = value.propertyRecordSchema
-  const where = [eq(metadata.propertyName, propertyName), eq(metadata.seedLocalId, seedLocalId)]
+  const property = await matchMetadataProperty(
+    {
+      propertyName,
+      seedLocalId,
+      modelName: value.modelType,
+      definitionId: schema?.id as string | number | undefined,
+    },
+    db,
+  )
+  const where = [metadataRowsOfProperty(property), eq(metadata.seedLocalId, seedLocalId)]
   if (value.versionLocalId) where.push(eq(metadata.versionLocalId, value.versionLocalId))
   const rows: MetadataType[] = await db.select().from(metadata).where(and(...where))
   const latest = [...rows].sort(compareMetadataRowsLatestFirst)[0]
@@ -326,20 +340,27 @@ export async function applyDelete(
     await db.update(seeds).set({ _markedForDeletion: 1 }).where(eq(seeds.localId, op.seedLocalId))
     return { filePaths: [] }
   }
-  if (value.mode === 'property') {
-    await db
-      .delete(metadata)
-      .where(and(eq(metadata.seedLocalId, op.seedLocalId), inArray(metadata.propertyName, value.propertyNames)))
-    return { filePaths: [] }
-  }
-  if (value.mode === 'drafts') {
+  if (value.mode === 'property' || value.mode === 'drafts') {
+    // The properties' rows by property_id (decision D4), and rows with none by the names given
+    const ids = new Set<number>()
+    const names = new Set<string>(value.propertyNames)
+    for (const propertyName of value.propertyNames) {
+      const match = await matchMetadataProperty({ propertyName, seedLocalId: op.seedLocalId }, db)
+      if (match.propertyId == null) continue
+      ids.add(match.propertyId)
+      for (const name of match.names) names.add(name)
+    }
+    const byName = inArray(metadata.propertyName, [...names])
+    const ofProperties = ids.size
+      ? or(inArray(metadata.propertyId, [...ids]), and(isNull(metadata.propertyId), byName))
+      : byName
     await db
       .delete(metadata)
       .where(
         and(
           eq(metadata.seedLocalId, op.seedLocalId),
-          inArray(metadata.propertyName, value.propertyNames),
-          isNull(metadata.uid),
+          ofProperties,
+          ...(value.mode === 'drafts' ? [isNull(metadata.uid)] : []),
         ),
       )
     return { filePaths: [] }

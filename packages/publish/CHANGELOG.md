@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Before registering a property schema, publish looks for one with the exact definition (`getEasSchemaUidForExactDefinition`). It looked List properties up by name and others through the SDK's `getEasSchemaForItemProperty`, which is removed.
 - Publish revokes the attestations of retracted properties (`property.clear({ retract: true })`, ADR 0021) in a new `revokingRetractedProperties` state after the attestations, from the seed's attester. An EOA publisher signs a second transaction. A failed revocation leaves the publish in `retractionFailureRecoverable`, where `retry` sends it again; the next Publish also sends whatever is still live. `checking` fails before anything is attested when the wallet can't revoke (an automation session key, or a seed attested by the executor module).
 - `item.unpublish()` revokes the seed attestation before its versions and properties. A sync that runs between the batches then sees the seed revoked and keeps the item's last values, instead of storing its revoked properties as retracted.
 

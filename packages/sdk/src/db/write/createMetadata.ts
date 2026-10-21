@@ -1,14 +1,13 @@
-import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { metadata, MetadataType } from '@/seedSchema'
 import { generateId } from '@/helpers'
-import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
+import { resolveMetadataProperty } from '@/db/read/metadataProperty'
 import { PropertyType } from '@/types'
 import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { BaseDb } from '../Db/BaseDb'
 import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
-import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
+import { metadataStorageName } from '@/helpers/metadataPropertyNames'
 
 /** Validation error shape for MetadataValidationError */
 type MetadataValidationErrorItem = { field: string; message: string; code?: string }
@@ -72,10 +71,25 @@ export const createMetadata: CreateMetadata = async (
     metadataValues.modelType = easName(metadataValues.modelName)
   }
 
-  // List of Relation rows live under the storage name (authors → authorIdentityIds), never the schema key.
-  if (metadataValues.propertyName) {
-    const storageName = listRelationEasPropertyName(metadataValues.propertyName, propertyRecordSchema)
-    if (storageName) metadataValues.propertyName = storageName
+  // property_id is the match key (decision D4); the row is written under the property's storage name.
+  const property = await resolveMetadataProperty(
+    {
+      propertyId: metadataValues.propertyId,
+      definitionId: propertyRecordSchema?.id as string | number | undefined,
+      propertyName: metadataValues.propertyName,
+      modelName: metadataValues.modelName ?? metadataValues.modelType,
+      modelFileId: options?.modelFileId,
+      seedLocalId: metadataValues.seedLocalId,
+      seedUid: metadataValues.seedUid,
+    },
+    appDb,
+    { onAmbiguousModel: 'none' },
+  )
+  if (property) {
+    metadataValues.propertyId = property.id
+    metadataValues.propertyName = property.storageName
+  } else if (metadataValues.propertyName && propertyRecordSchema) {
+    metadataValues.propertyName = metadataStorageName(metadataValues.propertyName, propertyRecordSchema)
   }
 
   const isItemStorage = propertyRecordSchema && propertyRecordSchema.storageType === 'ItemStorage'
@@ -137,36 +151,6 @@ export const createMetadata: CreateMetadata = async (
   if (!options?.db && !isItemStorage && !metadataValues.schemaUid && metadataValues.propertyName) {
     const schemaUid = await resolveMetadataSchemaUid(metadataValues.propertyName, propertyRecordSchema)
     if (schemaUid) metadataValues.schemaUid = schemaUid
-  }
-
-  // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup.
-  // propertyRecordSchema.id is the integer properties.id only when built from a DB row; from schema
-  // files and Model it is the schemaFileId string, which must be looked up (Number() gives NaN).
-  if (metadataValues.propertyId == null) {
-    const schemaId = propertyRecordSchema?.id as unknown
-    const modelKey = metadataValues.modelName ?? metadataValues.modelType ?? undefined
-    if (typeof schemaId === 'number' && Number.isInteger(schemaId)) {
-      metadataValues.propertyId = schemaId
-    } else if (modelKey) {
-      // Model names are only unique per schema: resolve against the item's own model row.
-      const modelFileId = await resolveItemModelFileId(
-        {
-          modelFileId: options?.modelFileId,
-          seedLocalId: metadataValues.seedLocalId,
-          seedUid: metadataValues.seedUid,
-        },
-        appDb,
-      )
-      if (typeof schemaId === 'string' && schemaId) {
-        metadataValues.propertyId =
-          (await getPropertyIdForSchemaFileId(modelKey, schemaId, { modelFileId }, appDb)) ?? undefined
-      }
-      if (metadataValues.propertyId == null && metadataValues.propertyName) {
-        metadataValues.propertyId =
-          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName, { modelFileId }, appDb)) ??
-          undefined
-      }
-    }
   }
 
   let inserted: MetadataType[]

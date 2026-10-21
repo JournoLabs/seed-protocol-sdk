@@ -7,7 +7,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { BaseFileManager, getMetadataPropertyNamesForQuery } from '@/helpers'
+import { BaseFileManager } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { ensureImageLocal } from '@/helpers/ensureImageLocal'
@@ -72,17 +72,23 @@ export const hydrateFromDb = fromCallback<
       propertyRecordSchema &&
       normalizedDataType === ModelPropertyDataTypes.Html
 
-    // Html/Image/File/Relation store metadata with Id suffix (e.g. htmlId); query both variants
-    const propertyNames = getMetadataPropertyNamesForQuery(
-      propertyName,
-      normalizedDataType,
-      normalizedRefValueType
+    // The property's rows: linked by property_id (decision D4), else stored under one of its names
+    // (Html/Image/File/Relation rows are `htmlId` and the like)
+    const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
+    const property = await matchMetadataProperty(
+      {
+        propertyId: context.propertyId,
+        propertyName,
+        modelName,
+        modelFileId: context.modelFileId,
+        seedLocalId,
+        seedUid,
+        dataType: normalizedDataType,
+        refValueType: normalizedRefValueType,
+      },
+      appDb,
     )
-    whereClauses.push(
-      propertyNames.length > 1
-        ? or(...propertyNames.map((n) => eq(metadata.propertyName, n)))
-        : eq(metadata.propertyName, propertyNames[0])
-    )
+    whereClauses.push(metadataRowsOfProperty(property))
 
     // Draft rows often have only seed_local_id populated; on-chain rows may have uid.
     // Requiring both with AND misses valid metadata when only one column is set.

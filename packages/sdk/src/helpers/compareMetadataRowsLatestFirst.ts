@@ -42,16 +42,48 @@ export function compareMetadataRowsLatestFirst(a: MetadataRecencyRow, b: Metadat
   return kb.localId.localeCompare(ka.localId)
 }
 
-/** The row readers show for each property name (first by {@link compareMetadataRowsLatestFirst}). */
+type PropertyGroupRow = { propertyId?: number | null; propertyName?: string | null; seedLocalId?: string | null }
+
+/**
+ * One key per property for grouping rows (decision D4): `#<property_id>`. A row with no property_id
+ * takes the id of a row of the same seed stored under the same name (a row written before writers
+ * set it, beside newer ones), else its stored name.
+ */
+export function metadataPropertyGroupKeys<T extends PropertyGroupRow>(rows: readonly T[]): (row: T) => string {
+  const idByName = new Map<string, number>()
+  for (const row of rows) {
+    if (row.propertyId != null && row.propertyName) idByName.set(`${row.seedLocalId ?? ''}\u0000${row.propertyName}`, row.propertyId)
+  }
+  return (row) => {
+    if (row.propertyId != null) return `#${row.propertyId}`
+    const sibling = idByName.get(`${row.seedLocalId ?? ''}\u0000${row.propertyName ?? ''}`)
+    return sibling != null ? `#${sibling}` : (row.propertyName ?? '')
+  }
+}
+
+/** SQL form of metadataPropertyGroupKeys over the metadata table's columns. */
+export const METADATA_PROPERTY_GROUP_KEY_SQL = `COALESCE('#' || property_id, (
+  SELECT '#' || sibling.property_id FROM metadata sibling
+  WHERE sibling.seed_local_id = metadata.seed_local_id AND sibling.property_name = metadata.property_name
+    AND sibling.property_id IS NOT NULL
+  LIMIT 1
+), property_name)`
+
+/**
+ * The row readers show for each property (first by {@link compareMetadataRowsLatestFirst}). Rows
+ * group by property as {@link metadataPropertyGroupKeys} keys them.
+ */
 export function pickLatestMetadataRowPerProperty<
-  T extends MetadataRecencyRow & { propertyName?: string | null },
+  T extends MetadataRecencyRow & PropertyGroupRow,
 >(rows: readonly T[]): T[] {
+  const groupKey = metadataPropertyGroupKeys(rows)
   const latestByProperty = new Map<string, T>()
   for (const row of rows) {
     if (!row.propertyName) continue
-    const existing = latestByProperty.get(row.propertyName)
+    const key = groupKey(row)
+    const existing = latestByProperty.get(key)
     if (!existing || compareMetadataRowsLatestFirst(row, existing) < 0) {
-      latestByProperty.set(row.propertyName, row)
+      latestByProperty.set(key, row)
     }
   }
   return Array.from(latestByProperty.values())

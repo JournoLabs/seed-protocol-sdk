@@ -1,10 +1,10 @@
 import { and, eq, or, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, type MetadataType } from '@/seedSchema'
-import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
+import { matchMetadataProperty, metadataRowsOfProperty } from '@/db/read/metadataProperty'
 import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import { isPublishedMetadataRow } from '@/helpers/isPublishedMetadataRow'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 
 /** An empty current value that publishing changes: it has live attestations to remove or retract. */
 export type PropertyClear = {
@@ -25,21 +25,29 @@ const isEmptyValue = (value: string | null | undefined): boolean => value == nul
 /**
  * What publishing a property with an empty value does (ADR 0021). Undefined when there is nothing
  * to publish: the newest row holds a value, or the property has no live attestation (never
- * published, or already retracted). Rows of every name the property is stored under count.
+ * published, or already retracted). The property's rows are those linked by property_id, and rows
+ * with none stored under one of its names.
  */
 export async function getPropertyClear(params: {
   seedLocalId?: string | null
   seedUid?: string | null
   propertyName: string
+  /** metadata.property_id when the caller has it; otherwise resolved from the name. */
+  propertyId?: number | null
+  modelName?: string | null
   dataType?: string
   refValueType?: string
 }): Promise<PropertyClear | undefined> {
-  const { seedLocalId, seedUid, propertyName, dataType, refValueType } = params
+  const { seedLocalId, seedUid, propertyName, propertyId, modelName, dataType, refValueType } = params
   if (!seedLocalId && !seedUid) return undefined
   const appDb = BaseDb.getAppDb()
   if (!appDb) return undefined
 
-  const names = getMetadataPropertyNamesForQuery(propertyName, dataType, refValueType)
+  // The property's rows by property_id (decision D4), rows with none by name
+  const property = await matchMetadataProperty(
+    { propertyId, propertyName, modelName, seedLocalId, seedUid, dataType, refValueType },
+    appDb,
+  )
   const seedWhere =
     seedLocalId && seedUid
       ? or(eq(metadata.seedLocalId, seedLocalId), eq(metadata.seedUid, seedUid))
@@ -49,7 +57,7 @@ export async function getPropertyClear(params: {
   const rows = (await appDb
     .select()
     .from(metadata)
-    .where(and(or(...names.map((name) => eq(metadata.propertyName, name))), seedWhere))
+    .where(and(metadataRowsOfProperty(property), seedWhere))
     .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as MetadataType[]
 
   const newest = rows[0]
