@@ -219,6 +219,10 @@ export const processSchemaFiles = fromCallback<
     }
     // Collect models to add to context (schemas are now loaded on-demand via database queries)
     const allModels: { [key: string]: any } = { ...(context.models || {}) }
+    // The models built below describe rows that loadSchemaFromFile or an earlier init already wrote:
+    // they adopt those rows, and only a model with no row writes one. Without it every init rewrote
+    // each property row and cleared is_edited.
+    const rowsWritten = Promise.resolve()
 
     // Linked model count per schema row, to tell whether an earlier load already applied a file's models
     const linkedModelCounts = new Map<number, number>()
@@ -263,11 +267,11 @@ export const processSchemaFiles = fromCallback<
               schemaData.schemaRecordId != null &&
               (linkedModelCounts.get(schemaData.schemaRecordId) ?? 0) >= expectedModelCount
             if (alreadyWritten || alreadyApplied) {
-              const modelDefinitions = await createModelsFromJsonFile(latestFilePath)
+              const modelDefinitions = await createModelsFromJsonFile(latestFilePath, rowsWritten)
               Object.assign(allModels, modelDefinitions)
             } else {
               await loadSchemaFromFile(latestFilePath)
-              const modelDefinitions = await createModelsFromJsonFile(latestFilePath)
+              const modelDefinitions = await createModelsFromJsonFile(latestFilePath, rowsWritten)
               Object.assign(allModels, modelDefinitions)
             }
           } catch (error) {
@@ -322,6 +326,7 @@ export const processSchemaFiles = fromCallback<
                 importData as any,
                 modelFileIds,
                 propertyFileIds,
+                rowsWritten,
               )
               Object.assign(allModels, modelDefinitions)
               logger(`Loaded ${Object.keys(modelDefinitions).length} models from schema data for ${schemaName}`)
@@ -379,6 +384,7 @@ export const processSchemaFiles = fromCallback<
               importData as any,
               modelFileIds,
               propertyFileIds,
+              rowsWritten,
             )
             Object.assign(allModels, modelDefinitions)
             logger(`Loaded ${Object.keys(modelDefinitions).length} models from draft schema ${schemaName}`)
