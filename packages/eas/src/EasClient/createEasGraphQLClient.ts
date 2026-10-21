@@ -19,11 +19,26 @@ function withTimeout(init: FetchInit, timeoutMs: number): FetchInit {
   return { ...init, signal }
 }
 
+export type EasGraphQLClientOptions = {
+  /**
+   * Passed to `fetch` as `dispatcher` on every request (Node's fetch takes an undici
+   * `Dispatcher` there; other runtimes ignore it). `@seedprotocol/eas/node` sets one.
+   */
+  dispatcher?: unknown
+}
+
 /** A GraphQL client for the EAS indexer at `url` whose requests abort after `timeoutMs`. */
-export function createEasGraphQLClient(url: string, timeoutMs = EAS_REQUEST_TIMEOUT_MS): GraphQLClient {
+export function createEasGraphQLClient(
+  url: string,
+  timeoutMs = EAS_REQUEST_TIMEOUT_MS,
+  { dispatcher }: EasGraphQLClientOptions = {},
+): GraphQLClient {
   return new GraphQLClient(url, {
     // Resolved per call, so a fetch replaced after construction (tests, polyfills) is used.
-    fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) =>
-      timedEasFetch(() => fetch(input, withTimeout(init, timeoutMs)), init),
+    fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) => {
+      const timed = withTimeout(init, timeoutMs)
+      const requestInit = dispatcher ? ({ ...timed, dispatcher } as FetchInit) : timed
+      return timedEasFetch(() => fetch(input, requestInit), init)
+    },
   })
 }
