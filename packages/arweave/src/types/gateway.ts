@@ -66,4 +66,10 @@ export interface ResolvedSeedGatewayEndpoints {
   gatewayHyperKey?: string
   /** Resolved absolute proxy base when activePath is http-proxy */
   proxyBaseUrl?: string
+  /**
+   * Public HTTP gateway (`scheme://host`) for URLs written into published content, from
+   * `arweaveDomain` (default `ar.seedprotocol.io`). Differs from {@link arweaveBaseUrl} on the
+   * sidecar and proxy paths, whose hosts only resolve on this machine or for this app.
+   */
+  publicArweaveBaseUrl: string
 }
