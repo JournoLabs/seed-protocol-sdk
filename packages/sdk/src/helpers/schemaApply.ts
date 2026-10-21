@@ -14,7 +14,6 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getContentHash, getDeterministicId } from '@/helpers/crypto'
-import { generateId } from '@/helpers/generateId'
 import { isInternalSchema } from '@/helpers/constants'
 import { ModelPropertyDataTypes, normalizePropertyRecordSchema } from '@/helpers/property'
 import { refreshCachedProperties } from '@/helpers/cachedPropertyRefresh'

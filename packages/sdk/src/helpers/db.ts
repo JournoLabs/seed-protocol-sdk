@@ -1,6 +1,5 @@
 import {
   appState,
-  metadata,
   models as modelsTable,
   NewModelRecord,
   NewPropertyRecord,
@@ -9,17 +8,13 @@ import {
   PropertyType,
   seeds,
 } from '@/seedSchema'
-import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { ModelDefinitions } from '@/types'
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { easName } from '@seedprotocol/eas'
-import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { InferInsertModel } from 'drizzle-orm'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { refreshCachedProperties } from './cachedPropertyRefresh'
 // Dynamic import to break circular dependency: Model -> ... -> helpers/db -> ModelProperty -> ... -> Model
@@ -29,11 +24,10 @@ import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import {
   resolveModelRecord,
   resolveModelRecordByNameOrType,
-  resolveRefModelRecord,
   type ModelScope,
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
-import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
+import { normalizePropertyRecordSchema } from '@/helpers/property'
 import { propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import {
   findOrCreateModelRow,
