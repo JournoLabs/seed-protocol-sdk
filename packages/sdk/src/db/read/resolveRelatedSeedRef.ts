@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds, versions } from '@/seedSchema'
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { seeds } from '@/seedSchema'
+import { eq } from 'drizzle-orm'
+import { findSeedRowsByUid } from './findSeedRowsByUid'
 import { ZERO_BYTES32 } from '@/helpers/constants'
 import { isVersionRevoked } from './subqueries/liveVersion'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -22,10 +23,10 @@ const selectSeed = {
 }
 
 /**
- * The local seed row a relation/list/image ref points at, by local id or uid. A uid that is no
- * seed's current uid can be the old uid of a seed that was unpublished and published again (a new
- * seed attestation, same local seed): its old version rows still record it, so it resolves to that
- * seed. Null when nothing local matches (e.g. a published uid with no local copy).
+ * The local seed row a relation/list/image ref points at, by local id or uid. A uid resolves as
+ * {@link findSeedRowsByUid} resolves it (the order EAS sync matches seeds in): the old uid of a seed
+ * that was unpublished and published again resolves to that seed, through its old version rows.
+ * Null when nothing local matches (e.g. a published uid with no local copy).
  */
 export const findRelatedSeedRow = async ({
   seedLocalId,
@@ -41,20 +42,10 @@ export const findRelatedSeedRow = async ({
     if (row?.seedLocalId) return row as RelatedSeedRow
   }
   if (!seedUid || seedUid === ZERO_BYTES32) return null
-  const [byUid] = await appDb.select(selectSeed).from(seeds).where(eq(seeds.uid, seedUid)).limit(1)
-  if (byUid?.seedLocalId) return byUid as RelatedSeedRow
-  const [version] = await appDb
-    .select({ seedLocalId: versions.seedLocalId })
-    .from(versions)
-    .where(and(eq(versions.seedUid, seedUid), isNotNull(versions.seedLocalId)))
-    .limit(1)
-  if (!version?.seedLocalId) return null
-  const [republished] = await appDb
-    .select(selectSeed)
-    .from(seeds)
-    .where(eq(seeds.localId, version.seedLocalId))
-    .limit(1)
-  return republished?.seedLocalId ? (republished as RelatedSeedRow) : null
+  const row = (await findSeedRowsByUid([seedUid])).get(seedUid)
+  return row?.localId
+    ? { seedLocalId: row.localId, seedUid: row.uid, revokedAt: row.revokedAt, type: row.type }
+    : null
 }
 
 /** The seed is attested and its attestation is live. */

@@ -46,6 +46,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
+import { findSeedRowsByUid } from '@/db/read/findSeedRowsByUid'
 import { rowsPerInsert, selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
@@ -310,36 +311,27 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
 
   const seedUids = itemSeeds.map((seed) => seed.id)
 
-  const existingSeedRecordsRows: SeedType[] = await selectInBatches(seedUids, (chunk) =>
-    appDb.select().from(seeds).where(inArray(seeds.uid, chunk)),
-  )
+  // By versions first: a republished seed's old uid is that seed, not a new one (see findSeedRowsByUid).
+  const existingSeedByUid = await findSeedRowsByUid(seedUids)
 
-  const existingSeedUids = new Set<string>()
-
-  if (existingSeedRecordsRows && existingSeedRecordsRows.length > 0) {
-    for (const row of existingSeedRecordsRows) {
-      if (row.uid) {
-        existingSeedUids.add(row.uid)
-        if (row.localId) {
-          seedUidToLocalId.set(row.uid, row.localId)
-        }
-        if (row.type) {
-          seedUidToModelType.set(row.uid, row.type)
-        }
-      }
+  for (const [uid, row] of existingSeedByUid) {
+    if (row.localId) {
+      seedUidToLocalId.set(uid, row.localId)
+    }
+    if (row.type) {
+      seedUidToModelType.set(uid, row.type)
     }
   }
 
-  const newSeeds = itemSeeds.filter((seed) => !existingSeedUids.has(seed.id))
+  const newSeeds = itemSeeds.filter((seed) => !existingSeedByUid.has(seed.id))
 
   // Update existing seeds when attestations are revoked on EAS, and replace a local unpublish stamp
-  // with EAS's revocationTime once EAS reports one (see `syncedRevokedAt`).
-  const seedByUid = new Map(itemSeeds.map((s) => [s.id, s]))
-  for (const row of existingSeedRecordsRows) {
-    if (!row.uid || !row.localId) continue
-    const attestation = seedByUid.get(row.uid)
-    if (!attestation) continue
-    const revokedAt = syncedRevokedAt(attestation, row.revokedAt)
+  // with EAS's revocationTime once EAS reports one (see `syncedRevokedAt`). A seed matched by an old
+  // uid has moved to a new attestation, so the old one's revocation is not its state.
+  for (const seed of itemSeeds) {
+    const row = existingSeedByUid.get(seed.id)
+    if (!row?.localId || row.uid !== seed.id) continue
+    const revokedAt = syncedRevokedAt(seed, row.revokedAt)
     if (revokedAt == null || revokedAt === row.revokedAt) continue
     await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
   }
