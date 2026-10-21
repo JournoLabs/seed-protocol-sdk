@@ -24,7 +24,13 @@ type Posted = {
 async function runWorker(
   data: Record<string, unknown>,
   fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
-  opfs: { existing?: Record<string, string>; failWrite?: boolean | ((name: string) => boolean) } = {},
+  opfs: {
+    /** By file name, or by path under the OPFS root (`files/html/<name>`) to make it listable. */
+    existing?: Record<string, string>
+    failWrite?: boolean | ((name: string) => boolean)
+    /** Files from an earlier run, by name; this run reads and writes the same map. */
+    shared?: OpfsFiles
+  } = {},
 ): Promise<{
   saved: Map<string, string>
   raw: Map<string, Uint8Array>
@@ -33,36 +39,65 @@ async function runWorker(
   closed: string[]
 }> {
   const encoder = new TextEncoder()
-  const bytes = new Map<string, Uint8Array>(
-    Object.entries(opfs.existing ?? {}).map(([name, text]) => [name, encoder.encode(text)]),
-  )
+  const files = opfs.shared ?? newOpfsFiles()
+  const bytes = files.bytes
+  for (const [key, text] of Object.entries(opfs.existing ?? {})) {
+    const segments = key.split('/')
+    const name = segments.pop()!
+    bytes.set(name, encoder.encode(text))
+    if (segments.length) files.dirOf.set(name, segments.join('/'))
+  }
   const posted: Posted[] = []
   const fetched: string[] = []
   const closed: string[] = []
 
   // Byte-level stand-in for FileSystemSyncAccessHandle: write() overwrites in place, so stale
-  // trailing bytes survive unless the file is truncated first.
-  const dir: any = {
-    getDirectoryHandle: async () => dir,
-    getFileHandle: async (name: string) => ({
-      createSyncAccessHandle: async () => ({
-        truncate: (size: number) => bytes.set(name, (bytes.get(name) ?? new Uint8Array()).slice(0, size)),
-        write: (buf: Uint8Array, { at = 0 }: { at?: number } = {}) => {
-          if (typeof opfs.failWrite === 'function' ? opfs.failWrite(name) : opfs.failWrite) {
-            throw new DOMException('disk full', 'QuotaExceededError')
-          }
-          const current = bytes.get(name) ?? new Uint8Array()
-          const next = new Uint8Array(Math.max(current.length, at + buf.length))
-          next.set(current)
-          next.set(buf, at)
-          bytes.set(name, next)
-          return buf.length
-        },
-        flush: () => {},
-        close: () => closed.push(name),
-      }),
+  // trailing bytes survive unless the file is truncated first. Files are kept by name; the
+  // directory each one was written to is tracked for lookups without `create` and for listing.
+  const notFound = () => new DOMException('not found', 'NotFoundError')
+  const fileHandle = (name: string): any => ({
+    kind: 'file',
+    name,
+    getFile: async () => ({ size: (bytes.get(name) ?? new Uint8Array()).length }),
+    createSyncAccessHandle: async () => ({
+      truncate: (size: number) => bytes.set(name, (bytes.get(name) ?? new Uint8Array()).slice(0, size)),
+      write: (buf: Uint8Array, { at = 0 }: { at?: number } = {}) => {
+        if (typeof opfs.failWrite === 'function' ? opfs.failWrite(name) : opfs.failWrite) {
+          throw new DOMException('disk full', 'QuotaExceededError')
+        }
+        const current = bytes.get(name) ?? new Uint8Array()
+        const next = new Uint8Array(Math.max(current.length, at + buf.length))
+        next.set(current)
+        next.set(buf, at)
+        bytes.set(name, next)
+        return buf.length
+      },
+      flush: () => {},
+      close: () => closed.push(name),
     }),
-  }
+  })
+  const dirHandle = (path: string): any => ({
+    kind: 'directory',
+    getDirectoryHandle: async (segment: string, options?: { create?: boolean }) => {
+      const child = path ? `${path}/${segment}` : segment
+      const known = [...files.dirOf.values()].some((d) => d === child || d.startsWith(`${child}/`))
+      if (!options?.create && !known && !files.dirs.has(child)) throw notFound()
+      files.dirs.add(child)
+      return dirHandle(child)
+    },
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      if (options?.create) {
+        if (!files.dirOf.has(name)) files.dirOf.set(name, path)
+      } else if (!bytes.has(name) || files.dirOf.get(name) !== path) {
+        throw notFound()
+      }
+      return fileHandle(name)
+    },
+    values: async function* () {
+      for (const [name, dir] of files.dirOf) if (dir === path && bytes.has(name)) yield fileHandle(name)
+    },
+  })
+  const dir = dirHandle('')
 
   vi.stubGlobal('navigator', { storage: { getDirectory: async () => dir } })
   vi.stubGlobal('postMessage', (m: Posted & { requestId?: number; bytes?: ArrayBuffer; expected?: string }) => {
@@ -99,6 +134,9 @@ async function runWorker(
 }
 
 let lastClosed: string[] = []
+
+type OpfsFiles = { bytes: Map<string, Uint8Array>; dirOf: Map<string, string>; dirs: Set<string> }
+const newOpfsFiles = (): OpfsFiles => ({ bytes: new Map(), dirOf: new Map(), dirs: new Set() })
 
 describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
   beforeEach(() => {
@@ -457,5 +495,123 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     )
 
     expect(fetched).toEqual([`https://arweave.net/raw/${TX}`])
+  })
+
+  /** Audit V10 (G21-2): a bulk run used to fetch, write and announce every file again. */
+  describe('skipExisting', () => {
+    const TX_B = 'B'.repeat(43)
+    const TX_C = 'C'.repeat(43)
+    const respond = async (url: string) =>
+      url.endsWith(TX_B)
+        ? new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]) as BodyInit, {
+            status: 200,
+            headers: { 'content-type': 'image/png' },
+          })
+        : url.endsWith(TX_C)
+          ? new Response('{"c":3}', { status: 200 })
+          : new Response('<p>a</p>', { status: 200 })
+    const savedPaths = (posted: Posted[]) =>
+      posted.filter((m) => m.message === 'fileSaved').map((m) => m.filePath)
+    const nextRun = () => {
+      vi.unstubAllGlobals()
+      delete (globalThis as any).onmessage
+    }
+
+    it('a second run with every file on disk fetches and writes nothing', async () => {
+      const shared = newOpfsFiles()
+      const data = { transactionIds: [TX, TX_B, TX_C], arweaveHost: HOST, skipExisting: true }
+
+      const first = await runWorker(data, respond, { shared })
+      expect(first.fetched).toHaveLength(3)
+      expect(savedPaths(first.posted)).toEqual([
+        `/files/html/${TX}.html`,
+        `/files/images/${TX_B}`,
+        `/files/json/${TX_C}.json`,
+      ])
+
+      nextRun()
+      const second = await runWorker(data, respond, { shared })
+      expect(second.fetched).toEqual([])
+      expect(savedPaths(second.posted)).toEqual([])
+      expect(second.closed).toEqual([])
+      // Still one liveness signal per transaction, and done.
+      expect(second.posted.filter((m) => m.message === 'fileProcessed').map((m) => m.transactionId))
+        .toEqual([TX, TX_B, TX_C])
+      expect(second.posted.at(-1)).toMatchObject({ done: true })
+    })
+
+    it('downloads only the transactions without a file', async () => {
+      const { fetched } = await runWorker(
+        { transactionIds: [TX, TX_B, TX_C], arweaveHost: HOST, skipExisting: true },
+        respond,
+        // Legacy data:image download (images/<txId>.<ext>) counts too.
+        { existing: { [`files/html/${TX}.html`]: '<p>a</p>', [`files/images/${TX_B}.png`]: 'png' } },
+      )
+      expect(fetched).toEqual([`${HOST}/raw/${TX_C}`])
+    })
+
+    it('an empty file is downloaded again', async () => {
+      const { fetched, saved } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, skipExisting: true },
+        respond,
+        { existing: { [`files/html/${TX}.html`]: '' } },
+      )
+      expect(fetched).toEqual([`${HOST}/raw/${TX}`])
+      expect(saved.get(`${TX}.html`)).toBe('<p>a</p>')
+    })
+
+    it('a file with the same name in another directory does not count', async () => {
+      const { fetched } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, skipExisting: true },
+        respond,
+        { existing: { [`files/other/${TX}.html`]: '<p>a</p>' } },
+      )
+      expect(fetched).toEqual([`${HOST}/raw/${TX}`])
+    })
+
+    it('without skipExisting, files on disk are fetched and written again', async () => {
+      const { fetched, posted } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST },
+        respond,
+        { existing: { [`files/html/${TX}.html`]: '<p>a</p>' } },
+      )
+      expect(fetched).toEqual([`${HOST}/raw/${TX}`])
+      expect(savedPaths(posted)).toEqual([`/files/html/${TX}.html`])
+    })
+
+    it('a composite counts as stored only when every routed child is on disk', async () => {
+      const composite = async () =>
+        new Response(
+          encodeCompositeUpload([
+            { name: 'html', bytes: new TextEncoder().encode('<p>post</p>') },
+            { name: 'notes', bytes: new TextEncoder().encode('# notes') },
+          ]) as BodyInit,
+          { status: 200, headers: { 'content-type': 'application/octet-stream' } },
+        )
+      const shared = newOpfsFiles()
+
+      // Before sync knows the notes property: html/ fallback only, notes unrouted.
+      const first = await runWorker({ transactionIds: [TX], arweaveHost: HOST, skipExisting: true }, composite, { shared })
+      expect(savedPaths(first.posted)).toEqual([`/files/html/${TX}.html`])
+
+      // Now routed: notes is missing, so the composite is fetched again and placed.
+      const compositeChildPaths = { [TX]: { html: `html/${TX}.html`, notes: `notes/${TX}.md` } }
+      nextRun()
+      const second = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, skipExisting: true, compositeChildPaths },
+        composite,
+        { shared },
+      )
+      expect(savedPaths(second.posted)).toEqual([`/files/html/${TX}.html`, `/files/notes/${TX}.md`])
+
+      nextRun()
+      const third = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, skipExisting: true, compositeChildPaths },
+        composite,
+        { shared },
+      )
+      expect(third.fetched).toEqual([])
+      expect(savedPaths(third.posted)).toEqual([])
+    })
   })
 })
