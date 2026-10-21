@@ -106,6 +106,36 @@ export const analyzeInput = fromCallback<
       throw new Error('propertyName is required')
     }
 
+    // A clear (ADR 0021): a null value with no file reference, written like a plain value. The old
+    // storage seed and its file stay, as when a value is replaced.
+    if (event?.clear) {
+      const written = await timed(`${label} write`, () => writePlainValue({
+        localId,
+        newValue: null,
+        versionLocalId,
+        versionUid,
+        modelName,
+        schemaUid,
+        dataType: propertyRecordSchema.dataType,
+        refValueType: propertyRecordSchema.refValueType,
+        clear: event.clear,
+      }))
+      if (written.skipped) return true
+      sendBack({
+        type: 'updateContext',
+        propertyValue: null,
+        renderValue: null,
+        refResolvedValue: undefined,
+        refResolvedDisplayValue: undefined,
+        localStorageDir: undefined,
+        storageTransactionId: undefined,
+        retract: event.clear.retract || undefined,
+        conflict: written.conflict ?? null,
+        ...rowContext(written.result),
+      })
+      return true
+    }
+
     if (
       normalizeDataType(propertyRecordSchema.dataType) === ModelPropertyDataTypes.List &&
       typeof newValue === 'string' &&
@@ -129,6 +159,28 @@ export const analyzeInput = fromCallback<
 
     const normalizedDataType = normalizeDataType(propertyRecordSchema.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema.refValueType)
+
+    // An empty Image, File or Html value is a clear (ItemProperty.setValue sends one). Refused when
+    // it arrives as a value: saveImage would take '' for the images folder itself.
+    const isStorageSeedValue =
+      normalizedRefValueType === ModelPropertyDataTypes.Image ||
+      normalizedDataType === ModelPropertyDataTypes.Image ||
+      normalizedDataType === ModelPropertyDataTypes.File ||
+      normalizedDataType === ModelPropertyDataTypes.Html
+    if (isStorageSeedValue && (newValue == null || (typeof newValue === 'string' && newValue.trim() === ''))) {
+      sendBack({
+        type: 'saveValueValidationError',
+        errors: [
+          {
+            field: 'value',
+            message: `${propertyName} can't be saved empty: use clear() to remove a ${propertyRecordSchema.dataType} value`,
+            code: 'empty_storage_value',
+            severity: 'error' as const,
+          },
+        ],
+      })
+      return false
+    }
 
     // A Relation with a non-Image refValueType stores the related seed id like any other value,
     // through the write below.

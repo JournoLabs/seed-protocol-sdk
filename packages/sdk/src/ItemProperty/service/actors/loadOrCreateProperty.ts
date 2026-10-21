@@ -377,6 +377,10 @@ export const loadOrCreateProperty = fromCallback<
       renderValue = propertyValueOut
     }
 
+    // A stored row with no value is a cleared property (ADR 0021): send null so the machine drops
+    // what context held (undefined keeps it).
+    const cleared = metadataRecord.propertyValue === null && !metadataRecord.refResolvedValue
+
     timing.mark('value')
     timing.log(timingLabel)
     // Return loaded property data (use propertyName from context to match schema key, e.g. "html" not "htmlId")
@@ -384,8 +388,8 @@ export const loadOrCreateProperty = fromCallback<
       type: 'loadOrCreatePropertySuccess',
       property: {
         propertyName,
-        propertyValue: propertyValueOut,
-        renderValue,
+        propertyValue: propertyValueOut ?? (cleared ? null : undefined),
+        renderValue: renderValue ?? (cleared ? null : undefined),
         seedLocalId: metadataRecord.seedLocalId || seedLocalId,
         seedUid: metadataRecord.seedUid || seedUid,
         versionLocalId: metadataRecord.versionLocalId || versionLocalId,
@@ -397,7 +401,7 @@ export const loadOrCreateProperty = fromCallback<
         modelFileId: modelFileId ?? context.modelFileId,
         propertyRecordSchema,
         refSeedType: refSeedType ?? context.refSeedType,
-        refResolvedValue: metadataRecord.refResolvedValue ?? context.refResolvedValue,
+        refResolvedValue: metadataRecord.refResolvedValue ?? (cleared ? null : context.refResolvedValue),
         refResolvedDisplayValue,
         localStorageDir: metadataRecord.localStorageDir ?? context.localStorageDir ?? (normalizedDataType === 'Image' ? '/images' : undefined),
       },

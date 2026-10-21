@@ -13,6 +13,7 @@ import { ensureWalletThenPublish } from './ensureWalletThenPublish'
 const RECOVERABLE_FAILURE_STATES = new Set([
   'attestationFailureRecoverable',
   'attestationFailureRecoverableDirectToEas',
+  'retractionFailureRecoverable',
 ])
 
 function errorMessage(error: unknown): string | undefined {

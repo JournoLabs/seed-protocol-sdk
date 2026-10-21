@@ -5,6 +5,7 @@ import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { getEasEndpoint } from './easEndpoint.js'
+import { timedFetchQuery } from './easTiming.js'
 import { VERSION_SCHEMA_UID } from './constants.js'
 import {
   GET_PROPERTIES,
@@ -36,7 +37,7 @@ export const getItemVersionsFromEas = async ({
   const versionsOfSeeds = { refUID: { in: seedUids }, schemaId: { equals: VERSION_SCHEMA_UID } }
   const where = excludeRevoked ? withExcludeRevokedFilter(versionsOfSeeds) : versionsOfSeeds
 
-  const { itemVersions } = (await queryClient.fetchQuery({
+  const { itemVersions } = (await timedFetchQuery(queryClient, {
     queryKey: [`getVersionsForAllModels`, [...seedUids].sort(), excludeRevoked],
     queryFn: async () =>
       easClient.request(GET_VERSIONS, {
@@ -61,7 +62,7 @@ export const getItemPropertiesFromEas = async ({
     ? withExcludeRevokedFilter({ refUID: { in: versionUids } })
     : { refUID: { in: versionUids } }
 
-  const { itemProperties } = (await queryClient.fetchQuery({
+  const { itemProperties } = (await timedFetchQuery(queryClient, {
     queryKey: [`getPropertiesForAllModels`, [...versionUids].sort(), excludeRevoked],
     queryFn: async () =>
       easClient.request(GET_PROPERTIES, {
@@ -155,7 +156,7 @@ export const getSeedsFromSchemaUids = async ({
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const { itemSeeds } = (await queryClient.fetchQuery({
+  const { itemSeeds } = (await timedFetchQuery(queryClient, {
     queryKey: [
       `getSeedsForAllModels`,
       excludeRevoked,
@@ -206,7 +207,7 @@ export const getSeedsBySchemaName = async (
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const { itemSeeds } = (await queryClient.fetchQuery({
+  const { itemSeeds } = (await timedFetchQuery(queryClient, {
     queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal, uidPrefix ?? null],
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, variables),
   })) as { itemSeeds: Attestation[] }
@@ -255,7 +256,7 @@ export const getSchemaNamesBySchemaUids = async (
 
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
-  const { schemas } = (await queryClient.fetchQuery({
+  const { schemas } = (await timedFetchQuery(queryClient, {
     queryKey: [`getSchemaNamesBySchemaUids`, [...missing].sort()],
     queryFn: async () =>
       easClient.request(GET_SCHEMAS, {
@@ -290,7 +291,7 @@ export const getSeedsByUidsFromEas = async ({
 
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
-  const { itemSeeds } = (await queryClient.fetchQuery({
+  const { itemSeeds } = (await timedFetchQuery(queryClient, {
     queryKey: [`getSeedsByUidsFromEas`, [...uids].sort(), excludeRevoked],
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, { where, take: uids.length, skip: 0 }),
   })) as { itemSeeds: Attestation[] }
@@ -342,7 +343,7 @@ export const getAttestationChangesSince = async ({
   const easClient = BaseEasClient.getEasClient()
   const responses = await Promise.all(
     filters.map((filter) =>
-      queryClient.fetchQuery({
+      timedFetchQuery(queryClient, {
         queryKey: [`getAttestationChangesSince`, filter, since],
         queryFn: async () =>
           easClient.request(GET_ATTESTATION_CHANGES, { where: { AND: [filter, changedSince] } }),

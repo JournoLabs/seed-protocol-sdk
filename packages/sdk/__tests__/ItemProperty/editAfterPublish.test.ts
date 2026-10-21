@@ -16,48 +16,11 @@ import {
   createGetPublishPayloadTestSchema,
   createItemWithList,
   createPublishedTestAuthor,
+  markPublished,
   UNPUBLISH_TEST_PUBLISHER,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
-
-const randomUid = () =>
-  '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-
-/**
- * Marks the item, its version and every metadata row attested by an owned address, and gives each property its row's
- * uid, as a reload (or the browser's metadata live query) does after a publish.
- */
-async function markPublished(item: ItemClass<any>, related: ItemClass<any>[] = []): Promise<void> {
-  const db = BaseDb.getAppDb()
-  for (const other of related) {
-    const uid = randomUid()
-    await db.update(seeds).set({ uid }).where(eq(seeds.localId, other.seedLocalId!))
-    other.getService().send({ type: 'updateContext', seedUid: uid })
-  }
-  const seedUid = randomUid()
-  const versionUid = randomUid()
-  const attestedAt = Date.now() - 10_000
-  // Published by an owned address, so the item stays editable.
-  await db
-    .update(seeds)
-    .set({ uid: seedUid, publisher: UNPUBLISH_TEST_PUBLISHER })
-    .where(eq(seeds.localId, item.seedLocalId!))
-  await db.update(versions).set({ uid: versionUid, seedUid }).where(eq(versions.seedLocalId, item.seedLocalId!))
-  const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
-  for (const row of rows) {
-    await db
-      .update(metadata)
-      .set({ uid: randomUid(), seedUid, versionUid, attestationCreatedAt: attestedAt, createdAt: attestedAt })
-      .where(eq(metadata.localId, row.localId!))
-  }
-  item.getService().send({ type: 'updateContext', seedUid, latestVersionUid: versionUid })
-  const attested = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
-  for (const property of item.properties) {
-    const row = attested.find((r) => r.localId === property.localId)
-    if (row) property.getService().send({ type: 'updateContext', uid: row.uid, versionUid })
-  }
-}
 
 const propertyOf = (item: ItemClass<any>, name: string) =>
   item.properties.find((p) => p.propertyName === name) as IItemProperty<any>

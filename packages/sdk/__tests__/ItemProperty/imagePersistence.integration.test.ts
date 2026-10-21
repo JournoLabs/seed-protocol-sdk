@@ -7,7 +7,7 @@ import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
-import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { ClearNotSupportedError, ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -119,6 +119,14 @@ testDescribe('Image property persistence integration tests', () => {
           featureImage: {
             id: generateId(),
             type: 'Image',
+          },
+          attachment: {
+            id: generateId(),
+            type: 'File',
+          },
+          featured: {
+            id: generateId(),
+            type: 'Boolean',
           },
         },
       },
@@ -390,5 +398,146 @@ testDescribe('Image property persistence integration tests', () => {
       )
     expect([...(await read(first))]).toEqual([1, 2, 3])
     expect([...(await read(second))]).toEqual([4, 5, 6, 7])
+  })
+
+  /** Wait for a save to settle: not saving, and the error or validation errors it ended with. */
+  async function waitForSaveSettled(property: ItemProperty<any>) {
+    const snapshot = await waitFor(
+      property.getService(),
+      (s) => {
+        const ctx = s.context as Record<string, any>
+        return !ctx.isSaving && (!!ctx._saveError || !!ctx._saveValidationErrors?.length)
+      },
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+    return snapshot.context as Record<string, any>
+  }
+
+  async function itemWithSavedImage(title: string) {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const item = await Item.create({ modelName: 'Post', schemaName, title })
+    await waitForItemIdle(item)
+    const property = item.properties.find(
+      (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+    ) as ItemProperty<any>
+    property.value = createPngFile('cover.png')
+    await waitForRefResolvedValue(property)
+    const saved = property.getService().getSnapshot().context as Record<string, any>
+    return { item, property, saved }
+  }
+
+  const imageSeedCount = async () =>
+    (await BaseDb.getAppDb()!.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'image'))).length
+
+  const latestRow = async (seedLocalId: string, propertyName: string) =>
+    (
+      await BaseDb.getAppDb()!
+        .select()
+        .from(metadata)
+        .where(eq(metadata.seedLocalId, seedLocalId))
+    )
+      .filter((r) => r.propertyName === propertyName || r.propertyName === `${propertyName}Id`)
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
+
+  for (const [label, clearIt] of [
+    ["''", (p: ItemProperty<any>) => { p.value = ''; return p.save() }],
+    ['null', (p: ItemProperty<any>) => { p.value = null; return p.save() }],
+    ['clear()', (p: ItemProperty<any>) => p.clear()],
+  ] as const) {
+    it(`clears an Image with ${label} and keeps the old image seed and file`, async () => {
+      const { item, property, saved } = await itemWithSavedImage(`Post cleared with ${label}`)
+      const seedsBefore = await imageSeedCount()
+
+      await clearIt(property)
+
+      const ctx = property.getService().getSnapshot().context as Record<string, any>
+      expect(ctx._saveValidationErrors ?? []).toEqual([])
+      expect(ctx._saveError ?? null).toBeNull()
+      expect(ctx.propertyValue ?? null).toBeNull()
+      expect(property.value ?? null).toBeNull()
+      const row = await latestRow(item.seedLocalId!, 'featureImage')
+      expect(row.propertyValue).toBeNull()
+      expect(row.refResolvedValue).toBeNull()
+      expect(row.retract ?? null).toBeNull()
+      // Nothing new is stored, and the old image stays, as when an image is replaced
+      expect(await imageSeedCount()).toBe(seedsBefore)
+      expect(await BaseFileManager.pathExists(BaseFileManager.getFilesPath('images', saved.refResolvedValue))).toBe(true)
+    })
+  }
+
+  it('reads a cleared Image as empty after reload', async () => {
+    const { item, property } = await itemWithSavedImage('Post cleared before reload')
+    await property.clear()
+
+    const seedLocalId = item.seedLocalId
+    item.unload()
+    const reloaded = await Item.find({ modelName: 'Post', seedLocalId })
+    expect(reloaded).toBeTruthy()
+    await waitForItemIdle(reloaded!)
+    const reloadedProp = reloaded!.properties.find(
+      (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+    ) as ItemProperty<any>
+    await waitForItemPropertyIdle(reloadedProp)
+
+    expect(reloadedProp.value ?? null).toBeNull()
+    expect(reloadedProp.refResolvedValue ?? null).toBeNull()
+  })
+
+  it('marks a retracted clear on its row, and a later value unmarks it', async () => {
+    const { item, property } = await itemWithSavedImage('Post retracted')
+
+    await property.clear({ retract: true })
+    expect((await latestRow(item.seedLocalId!, 'featureImage')).retract).toBe(true)
+
+    property.value = createPngFile('again.png')
+    await waitForRefResolvedValue(property)
+    const row = await latestRow(item.seedLocalId!, 'featureImage')
+    expect(row.retract ?? null).toBeNull()
+    expect(row.refResolvedValue).toBeTruthy()
+  })
+
+  it("clears a File with ''", async () => {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with empty attachment' })
+    await waitForItemIdle(item)
+    const property = item.properties.find((p) => p.propertyName === 'attachment') as ItemProperty<any>
+    expect(property).toBeTruthy()
+
+    property.value = ''
+    await property.save()
+
+    const fileSeeds = await BaseDb.getAppDb()!.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'file'))
+    expect(fileSeeds).toEqual([])
+    expect(property.value ?? null).toBeNull()
+  })
+
+  it('refuses to clear a Boolean without retract, and leaves its value', async () => {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Featured post', featured: true })
+    await waitForItemIdle(item)
+    const property = item.properties.find((p) => p.propertyName === 'featured') as ItemProperty<any>
+
+    await expect(property.clear()).rejects.toBeInstanceOf(ClearNotSupportedError)
+    expect(property.value).toBeTruthy()
+
+    await property.clear({ retract: true })
+    expect((await latestRow(item.seedLocalId!, 'featured')).retract).toBe(true)
+  })
+
+  it('restores the saved image when saving a new one fails', async () => {
+    const { property, saved } = await itemWithSavedImage('Post with a failed image save')
+    const shownBefore = property.value
+
+    // Not a file name, data URL or URL: saveImage finds no file data and throws
+    property.value = 'not an image!'
+    const ctx = await waitForSaveSettled(property)
+
+    expect(ctx._saveError?.message).toBe('No file data found')
+    expect(ctx.propertyValue).toBe(saved.propertyValue)
+    expect(ctx.renderValue).toBe(saved.renderValue)
+    expect(property.value).toBe(shownBefore)
   })
 })

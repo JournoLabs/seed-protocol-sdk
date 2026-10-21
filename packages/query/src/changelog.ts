@@ -1,4 +1,4 @@
-import { decodeEasNumber, isNumericEasType } from '@seedprotocol/eas'
+import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
 import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import type {
@@ -33,6 +33,8 @@ export type DecodedProperty = {
   propertyName: string
   value: string | string[]
   camelName?: string
+  /** The attestation records the property's removal (ADR 0021): readers treat it as absent. */
+  removed?: boolean
 }
 
 /**
@@ -89,6 +91,7 @@ export function decodePropertyAttestation(
     propertyName: propertyNameSnake,
     value: propertyValue,
     camelName: camelName !== propertyNameSnake ? camelName : undefined,
+    ...(isEasEmptyValue(easType, metadata.value) && { removed: true }),
   }
 }
 
@@ -101,7 +104,8 @@ export function buildFlatSnapshotFromProperties(
   const snapshot: Record<string, unknown> = {}
   for (const property of properties) {
     const decoded = decodePropertyAttestation(property)
-    if (!decoded) continue
+    // A removed property is absent, so it diffs as removed
+    if (!decoded || decoded.removed) continue
     snapshot[decoded.propertyName] = decoded.value
     if (decoded.camelName) {
       snapshot[decoded.camelName] = decoded.value
@@ -175,7 +179,8 @@ export function diffPropertyAttestations(
     const previousValue = previousByProperty.has(decoded.propertyName)
       ? previousByProperty.get(decoded.propertyName)
       : undefined
-    const nextValue = decoded.value
+    // A removal's next value is undefined
+    const nextValue = decoded.removed ? undefined : decoded.value
 
     if (!changelogValuesEqual(previousValue, nextValue)) {
       entries.push({

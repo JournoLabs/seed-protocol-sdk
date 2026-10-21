@@ -548,7 +548,9 @@ describe.sequential('runSyncFromEas: revocations', () => {
     expect(relatedSeedRequests()).toEqual([])
   })
 
-  describe.sequential('readers prefer a live row over a newer revoked one', () => {
+  // ADR 0021: the newest row wins, revoked or not. On a live seed a revoked newest row is a
+  // retraction (no value), and an earlier version's value doesn't show through it.
+  describe.sequential('readers take the newest row, revoked or not', () => {
     const seed = uid('71')
     const oldVersion = uid('72')
     const newVersion = uid('73')
@@ -591,21 +593,22 @@ describe.sequential('runSyncFromEas: revocations', () => {
       }
     }
 
-    it('reads the older version\'s live value when the newer version\'s property is fully revoked', async () => {
+    it('reads no value when the newer version\'s property is fully revoked, over the older version\'s', async () => {
       await sync()
       expect(await readTitles()).toEqual({
-        getItemProperties: 'old',
-        getPropertyData: 'old',
-        metadataLatest: ['old'],
+        getItemProperties: '',
+        getPropertyData: null,
+        metadataLatest: [null],
       })
     })
 
-    it('falls back to the newest revoked value once no live row is left', async () => {
+    // ADR 0021: on a live seed, a property with no live attestation left is retracted
+    it('reads no value once no live row is left', async () => {
       await sync(1_700_007_100)
       expect(await readTitles()).toEqual({
-        getItemProperties: 'gone',
-        getPropertyData: 'gone',
-        metadataLatest: ['gone'],
+        getItemProperties: '',
+        getPropertyData: null,
+        metadataLatest: [null],
       })
     })
 
@@ -620,10 +623,10 @@ describe.sequential('runSyncFromEas: revocations', () => {
         { localId: 'd', attestationCreatedAt: 4, revokedAt: 1_700_000_001 },
       ]
       expect(rows.sort(compareMetadataRowsLatestFirst).map((r) => r.localId)).toEqual([
-        'c',
-        'b',
         'd',
         'a',
+        'c',
+        'b',
       ])
       expect(
         pickLatestMetadataRowPerProperty([
@@ -631,7 +634,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
           { propertyName: 'title', localId: 'old', attestationCreatedAt: 1, revokedAt: null },
           { propertyName: 'body', localId: 'gone', attestationCreatedAt: 9, revokedAt: 1 },
         ]).map((r) => r.localId),
-      ).toEqual(['old', 'gone'])
+      ).toEqual(['new', 'gone'])
     })
   })
 
@@ -711,7 +714,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
       expect(await readTitle()).toBe('older')
     })
 
-    it('keeps the newest revoked attestation, marked revoked, once all are revoked', async () => {
+    it('keeps the newest revoked attestation, marked revoked and with no value, once all are revoked', async () => {
       await sync([
         property(
           olderTitle,
@@ -732,8 +735,9 @@ describe.sequential('runSyncFromEas: revocations', () => {
           1_700_003_000,
         ),
       ])
-      expect(await titles()).toEqual([[newerTitle, 'newer', 1_700_003_000]])
-      expect(await readTitle()).toBe('newer')
+      // The seed is live, so the property is retracted: kept revoked, with no value (ADR 0021)
+      expect(await titles()).toEqual([[newerTitle, null, 1_700_003_000]])
+      expect(await readTitle()).toBe('')
     })
 
     it('replaces the stored attestation with a newer live one', async () => {

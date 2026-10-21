@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2b9514b2-20c5-4340-8a19-68f4d0926e43",
+  "id": "932b9df0-151c-4c9c-83d4-516250bd7b31",
   "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
   "tables": {
     "appState": {
@@ -580,6 +580,13 @@
         "derived_from_uid": {
           "name": "derived_from_uid",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retract": {
+          "name": "retract",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1314,13 +1321,6 @@
         "is_edited": {
           "name": "is_edited",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "content_hash": {
-          "name": "content_hash",
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

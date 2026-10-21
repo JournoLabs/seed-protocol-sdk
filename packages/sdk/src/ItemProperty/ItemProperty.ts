@@ -255,6 +255,42 @@ export class ItemPropertySaveValidationError extends Error {
   }
 }
 
+/**
+ * Thrown by ItemProperty.clear() for a Boolean or Date property: their EAS types have no empty value
+ * to attest, so only a retraction can clear one (ADR 0021).
+ */
+export class ClearNotSupportedError extends Error {
+  constructor(
+    public readonly propertyName: string,
+    public readonly dataType: string,
+  ) {
+    super(`${propertyName} can't be cleared: ${dataType} properties have no empty value. Use clear({ retract: true }).`)
+    this.name = 'ClearNotSupportedError'
+  }
+}
+
+/** Types whose value is a storage seed: an empty value is a clear, not a value to store. */
+const STORAGE_SEED_TYPES = new Set(['Image', 'File', 'Html'])
+
+/** What a clear shows at once: no value and no file. */
+const CLEARED_CONTEXT = {
+  propertyValue: null,
+  renderValue: null,
+  refResolvedValue: undefined,
+  refResolvedDisplayValue: undefined,
+  localStorageDir: undefined,
+  storageTransactionId: undefined,
+} as const
+
+const snapshotOf = (context: PropertyMachineContext): PropertyValueSnapshot => ({
+  propertyValue: context.propertyValue,
+  renderValue: context.renderValue,
+  refResolvedValue: context.refResolvedValue,
+  refResolvedDisplayValue: context.refResolvedDisplayValue,
+  localStorageDir: context.localStorageDir,
+  storageTransactionId: context.storageTransactionId,
+})
+
 type ItemPropertyFindProps = {
   propertyName: string
   propertyLocalId?: string
@@ -700,6 +736,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           return { refResolvedDisplayValue: undefined }
         }
 
+        // A row with no value and no file is a cleared property (ADR 0021), here or synced from
+        // another device: drop the storage transaction id too, or the old file's gateway URL shows.
+        const clearedFromRow = (row: { propertyValue: string | null; refResolvedValue: string | null }) =>
+          row.propertyValue == null && !row.refResolvedValue ? { storageTransactionId: undefined } : {}
+
         const drizzleMod = await import('drizzle-orm')
         const { eq, and } = drizzleMod
         const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
@@ -745,6 +786,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             schemaUid: metaRow.schemaUid || undefined,
             refResolvedValue: metaRow.refResolvedValue || undefined,
             ...displayValueFromRow(metaRow),
+            ...clearedFromRow(metaRow),
             localStorageDir: metaRow.localStorageDir || undefined,
           })
         }
@@ -769,7 +811,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 FROM metadata
                 WHERE seed_uid = ${resolvedSeedUid} AND property_name IS NOT NULL
                   AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
-                ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
               `
             }
             if (resolvedSeedLocalId) {
@@ -780,7 +822,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 FROM metadata
                 WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name IS NOT NULL
                   AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
-                ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
+                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
               `
             }
             return sql`SELECT 1 WHERE 1 = 0`
@@ -843,6 +885,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 schemaUid: metaRow.schemaUid || undefined,
                 refResolvedValue: metaRow.refResolvedValue || undefined,
                 ...displayValueFromRow(metaRow),
+                ...clearedFromRow(metaRow),
                 localStorageDir: metaRow.localStorageDir || undefined,
               })
             },
@@ -1656,17 +1699,57 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   setValue(value: any, options: { before?: PropertyValueSnapshot } = {}): void {
     const context = this._getSnapshotContext()
     // Restored if the save is refused (item not owned), breaks a validation rule, or fails.
-    const before = options.before ??
-      this._unsavedBefore ?? { propertyValue: context.propertyValue, renderValue: context.renderValue }
+    const before = options.before ?? this._unsavedBefore ?? snapshotOf(context)
     this._unsavedBefore = undefined
+    // An empty Image, File or Html value has nothing to store: it clears the property
+    if ((value == null || (typeof value === 'string' && value.trim() === '')) && this._holdsStorageSeed(context)) {
+      this._sendSave(null, before, { retract: false })
+      return
+    }
+    this._sendSave(value, before)
+  }
+
+  /**
+   * Clears the value and resolves once it is stored, like `save()` (ADR 0021). A refused or failed
+   * clear restores the value. Publish then attests the property's empty value, so its history shows
+   * the removal and reads of earlier Versions keep the old value.
+   *
+   * @param options.retract - Publish revokes the property's attestations instead, so reads of earlier
+   *   Versions stop showing the value too. Revocation is permanent.
+   * @throws ClearNotSupportedError for a Boolean or Date property without `retract`: their EAS types
+   *   have no empty value.
+   */
+  async clear(options: { retract?: boolean } = {}): Promise<void> {
+    const retract = options.retract === true
+    const context = this._getSnapshotContext()
+    const dataType = normalizeDataType(this._dataType ?? context.propertyRecordSchema?.dataType)
+    if (!retract && (dataType === 'Boolean' || dataType === 'Date')) {
+      throw new ClearNotSupportedError(this.propertyName, dataType)
+    }
+    const before = this._unsavedBefore ?? snapshotOf(context)
+    this._unsavedBefore = undefined
+    this._sendSave(null, before, { retract })
+    await this.save()
+  }
+
+  /** An Image, File or Html property, or a Relation to Image: its value is a storage seed. */
+  private _holdsStorageSeed(context: PropertyMachineContext): boolean {
+    const schema = context.propertyRecordSchema
+    const dataType = normalizeDataType(this._dataType ?? schema?.dataType)
+    return STORAGE_SEED_TYPES.has(dataType ?? '') || normalizeDataType(schema?.refValueType) === 'Image'
+  }
+
+  /** Shows `value` at once and sends the save; `clear` shows and saves a cleared value instead. */
+  private _sendSave(value: any, before: PropertyValueSnapshot, clear?: { retract: boolean }): void {
+    const context = this._getSnapshotContext()
     // Update context immediately so UI shows the value before save completes. A new edit settles
     // the property's conflict (ADR 0019).
     this._service.send({
       type: 'updateContext',
-      propertyValue: value,
-      renderValue: value,
+      ...(clear ? CLEARED_CONTEXT : { propertyValue: value, renderValue: value }),
       conflict: null,
     })
+    const saveEvent = { type: 'save' as const, newValue: value, before, ...(clear && { clear }) }
 
     // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)
     if (!context.propertyRecordSchema) {
@@ -1680,7 +1763,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         (schema) => {
           if (!schema) return false
           this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
-          this._service.send({ type: 'save', newValue: value, before })
+          this._service.send(saveEvent)
           return true
         },
         () => false,
@@ -1690,11 +1773,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (this._pendingSchemaSave === pending) this._pendingSchemaSave = undefined
       })
     } else {
-      this._service.send({
-        type: 'save',
-        newValue: value,
-        before,
-      })
+      this._service.send(saveEvent)
     }
   }
 
@@ -1706,7 +1785,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   showValue(value: any): void {
     if (!this._unsavedBefore) {
       const context = this._getSnapshotContext()
-      this._unsavedBefore = { propertyValue: context.propertyValue, renderValue: context.renderValue }
+      this._unsavedBefore = snapshotOf(context)
     }
     this._service.send({ type: 'updateContext', propertyValue: value, renderValue: value })
   }

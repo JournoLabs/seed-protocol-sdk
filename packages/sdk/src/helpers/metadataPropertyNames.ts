@@ -206,13 +206,20 @@ export function getAlternatePropertyNameForInstanceLookup(
 /** Minimal shape for resolveMetadataRecord; MetadataType from DB has propertyName as string | null */
 type RecordWithRef = {
   propertyName: string | null
+  propertyValue?: string | null
   refResolvedValue?: string | null
-  refSeedType?: string
+  refSeedType?: string | null
+  propertyId?: number | null
 }
 
 /**
  * Resolve the best metadata record when multiple variants exist (base + Id).
  * For Image/File/Html: prefer the record with refResolvedValue (Id variant has filename).
+ *
+ * Records come newest first. When they all share one property_id, the newest is the value.
+ * Otherwise only each name's newest record counts, so an older record of the
+ * same name (the value before a clear, or an earlier Version's) never wins. A cleared Id record (no
+ * value, no file) wins over the base variant (ADR 0021).
  */
 export function resolveMetadataRecord<T extends RecordWithRef>(
   records: T[],
@@ -221,11 +228,26 @@ export function resolveMetadataRecord<T extends RecordWithRef>(
   refValueType?: string
 ): T {
   if (records.length === 0) throw new Error('No records to resolve')
+  // Rows linked to one property by property_id are that property's, whatever name each is stored
+  // under (decision D4): the newest is its value.
+  const firstId = records[0].propertyId
+  if (firstId != null && records.every((record) => record.propertyId === firstId)) return records[0]
+  records = records.filter(
+    (record, index) => records.findIndex((other) => other.propertyName === record.propertyName) === index,
+  )
   if (records.length === 1) return records[0]
 
   const needsId =
     needsMetadataIdSuffix(dataType, refValueType) ||
     (dataType === undefined && refValueType === undefined)
+
+  if (needsId) {
+    const cleared = records.find(
+      // A stored row holds null, not undefined, when it has no value
+      (r) => r.propertyName?.endsWith('Id') && r.propertyValue === null && !r.refResolvedValue,
+    )
+    if (cleared) return cleared
+  }
 
   // For Image/File/Html: prefer the record with refResolvedValue (Id variant has filename)
   if (needsId) {

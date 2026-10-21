@@ -180,15 +180,22 @@
     {
       "idx": 25,
       "version": "6",
-      "when": 1792582614256,
-      "tag": "0025_add_content_hash_to_schemas",
+      "when": 1792585560172,
+      "tag": "0025_add_metadata_retract",
       "breakpoints": true
     },
     {
       "idx": 26,
       "version": "6",
-      "when": 1792587176763,
-      "tag": "0026_link_metadata_property_ids",
+      "when": 1792587787468,
+      "tag": "0026_add_content_hash_to_schemas",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1792587787964,
+      "tag": "0027_link_metadata_property_ids",
       "breakpoints": true
     }
   ]

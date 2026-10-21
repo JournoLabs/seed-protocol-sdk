@@ -68,6 +68,17 @@ export const propertyMachine = setup({
     // stateIn return type does not satisfy setup() inference; runtime guard is correct for root state `idle`.
     propertyMachineIsIdle: stateIn('idle') as any,
   },
+  actions: {
+    /**
+     * A storage save (Image, File, Html, ItemStorage) failed. Each throws before or during its
+     * write, so nothing was stored: restore the shown value, as saveFailed does.
+     */
+    restoreValueAfterSaveError: assign(({ context, event }) => ({
+      _saveError: toError((event as { error?: unknown }).error),
+      ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
+      _valueBeforeSave: undefined,
+    })),
+  },
   actors: {
     waitForDb,
     loadOrCreateProperty,
@@ -278,9 +289,7 @@ export const propertyMachine = setup({
             saveImageSuccess: 'doneSaving',
             saveImageError: {
               target: 'doneSaving',
-              actions: assign({
-                _saveError: ({ event }) => toError((event as { type: 'saveImageError'; error: unknown }).error),
-              }),
+              actions: 'restoreValueAfterSaveError',
             },
           },
           invoke: {
@@ -296,9 +305,7 @@ export const propertyMachine = setup({
             saveFileSuccess: 'doneSaving',
             saveFileError: {
               target: 'doneSaving',
-              actions: assign({
-                _saveError: ({ event }) => toError((event as { type: 'saveFileError'; error: unknown }).error),
-              }),
+              actions: 'restoreValueAfterSaveError',
             },
           },
           invoke: {
@@ -313,9 +320,7 @@ export const propertyMachine = setup({
             saveHtmlSuccess: 'doneSaving',
             saveHtmlError: {
               target: 'doneSaving',
-              actions: assign({
-                _saveError: ({ event }) => toError((event as { type: 'saveHtmlError'; error: unknown }).error),
-              }),
+              actions: 'restoreValueAfterSaveError',
             },
           },
           invoke: {
@@ -330,9 +335,7 @@ export const propertyMachine = setup({
             saveItemStorageSuccess: 'doneSaving',
             saveItemStorageError: {
               target: 'doneSaving',
-              actions: assign({
-                _saveError: ({ event }) => toError((event as { type: 'saveItemStorageError'; error: unknown }).error),
-              }),
+              actions: 'restoreValueAfterSaveError',
             },
           },
           invoke: {

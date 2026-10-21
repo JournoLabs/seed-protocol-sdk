@@ -13,6 +13,7 @@ import {
   getMetadataAttestationUidsForSeedUid,
   getAttesterForSeed,
   updateSeedRevokedAt,
+  markPropertyAttestationsRetracted,
   VERSION_SCHEMA_UID,
   isValidEasAttestationUid,
   getGetAdditionalSyncAddresses,
@@ -171,6 +172,70 @@ async function revokeBatch(
 }
 
 /**
+ * The wallet that can revoke the seed's attestations: its attester's. Throws when nobody can (the
+ * executor module attested it) or the connected wallet is an automation session key.
+ */
+async function resolveRevokeSender(params: { seedLocalId: string; seedUid: string }): Promise<PublishWallet> {
+  // Revoking on one chain must not update revokedAt for a seed attested on another.
+  await assertLocalDbChain()
+  await verifyPublishChain()
+  const attester = await getAttesterForSeed(params)
+  if (await isLegacyModularExecutorAttester(attester)) {
+    throw new Error(
+      'Revocation not supported for items attested by the Seed executor module: the executor has no revoke and is the only attester that could revoke them.',
+    )
+  }
+  const wallet = await resolveRevokeWallet(attester)
+  if (await isAutomationRevoke(wallet, attester)) {
+    throw new Error(
+      'Automation session keys cannot revoke attestations. Revoking is owner-only: connect the account that published this item.',
+    )
+  }
+  return wallet
+}
+
+/**
+ * Throws unless the connected wallet can revoke the seed's attestations. Publish calls it before
+ * attesting anything when the item has a retracted property (ADR 0021).
+ */
+export async function assertCanRevokeSeedAttestations(params: {
+  seedLocalId: string
+  seedUid: string
+}): Promise<void> {
+  await resolveRevokeSender(params)
+}
+
+/**
+ * Revokes property attestations for retracted properties (ADR 0021), one `multiRevoke` per
+ * schema from the seed's attester, and records them locally as retracted. The seed stays live.
+ */
+export async function revokePropertyAttestations(params: {
+  seedLocalId: string
+  seedUid: string
+  attestations: { uid: string; schemaUid: string }[]
+}): Promise<void> {
+  const { seedLocalId, seedUid, attestations } = params
+  const valid = attestations.filter((a) => isValidEasAttestationUid(a.uid))
+  if (valid.length === 0) return
+  const { txSender } = await resolveRevokeSender({ seedLocalId, seedUid })
+
+  const bySchema = new Map<string, Hex[]>()
+  for (const { uid, schemaUid } of valid) {
+    const list = bySchema.get(schemaUid) ?? []
+    list.push(uid as Hex)
+    bySchema.set(schemaUid, list)
+  }
+  for (const [schema, uids] of bySchema) {
+    await revokeBatch(txSender, { schema: schema as Hex, data: uids.map((uid) => ({ uid })) })
+  }
+
+  await markPropertyAttestationsRetracted({
+    uids: valid.map((a) => a.uid),
+    revokedAt: Math.floor(Date.now() / 1000),
+  })
+}
+
+/**
  * Revokes the Seed attestation and all Version and metadata attestations on EAS.
  * Sends from the attester: the registered publish wallet when it is the attester, else the
  * connected Thirdweb account resolved to the attester (see {@link resolveRevokeWallet}).
@@ -185,24 +250,7 @@ export async function revokeAttestations(params: {
   seedSchemaUid: string
 }): Promise<void> {
   const { seedLocalId, seedUid, seedSchemaUid } = params
-  // Revoking on one chain must not update revokedAt for a seed attested on another.
-  await assertLocalDbChain()
-  await verifyPublishChain()
-  const attester = await getAttesterForSeed({ seedLocalId, seedUid })
-  if (await isLegacyModularExecutorAttester(attester)) {
-    throw new Error(
-      'Revocation not supported for items attested by the Seed executor module: the executor has no revoke and is the only attester that could revoke them.',
-    )
-  }
-
-  const wallet = await resolveRevokeWallet(attester)
-
-  const txSender = wallet.txSender
-  if (await isAutomationRevoke(wallet, attester)) {
-    throw new Error(
-      'Automation session keys cannot revoke attestations. Revoking is owner-only: connect the account that published this item.',
-    )
-  }
+  const { txSender } = await resolveRevokeSender({ seedLocalId, seedUid })
 
   const [versionRows, metadataRows] = await Promise.all([
     getVersionsForSeedUid(seedUid),
@@ -220,10 +268,13 @@ export async function revokeAttestations(params: {
     metadataBySchema.set(schemaUid, list)
   }
 
+  // The seed first: a property attestation revoked while its seed is live reads as retracted, and
+  // sync drops its value (ADR 0021). A sync between batches must see the seed revoked already, so
+  // the item keeps its last values.
   const requests: Array<{
     schema: `0x${string}`
     data: Array<{ uid: `0x${string}`; value?: bigint }>
-  }> = []
+  }> = [{ schema: seedSchemaUid as `0x${string}`, data: [{ uid: seedUid as `0x${string}` }] }]
 
   for (const [schemaUid, uids] of metadataBySchema) {
     if (uids.length > 0) {
@@ -240,11 +291,6 @@ export async function revokeAttestations(params: {
       data: versionUids.map((uid: string) => ({ uid: uid as `0x${string}` })),
     })
   }
-
-  requests.push({
-    schema: seedSchemaUid as `0x${string}`,
-    data: [{ uid: seedUid as `0x${string}` }],
-  })
 
   for (const req of requests) {
     if (req.data.length === 0) continue

@@ -473,9 +473,11 @@ DELETE FROM \`seeds\` WHERE \`local_id\` IN (
 );
 `
 
-export const migrationSql_0025_add_content_hash_to_schemas = `ALTER TABLE \`schemas\` ADD \`content_hash\` text;`
+export const migrationSql_0025_add_metadata_retract = `ALTER TABLE \`metadata\` ADD \`retract\` integer;`
 
-export const migrationSql_0026_link_metadata_property_ids = `-- Links metadata rows written without property_id to their property (decision D4: readers match
+export const migrationSql_0026_add_content_hash_to_schemas = `ALTER TABLE \`schemas\` ADD \`content_hash\` text;`
+
+export const migrationSql_0027_link_metadata_property_ids = `-- Links metadata rows written without property_id to their property (decision D4: readers match
 -- rows by property_id). Only rows whose seed records its model (seeds.model_file_id) are linked,
 -- and only to one of that model's properties. Rows that match no property, or several, keep NULL
 -- and are read by name.
@@ -734,15 +736,22 @@ export const journalJson = `{
     {
       "idx": 25,
       "version": "6",
-      "when": 1792582614256,
-      "tag": "0025_add_content_hash_to_schemas",
+      "when": 1792585560172,
+      "tag": "0025_add_metadata_retract",
       "breakpoints": true
     },
     {
       "idx": 26,
       "version": "6",
-      "when": 1792587176763,
-      "tag": "0026_link_metadata_property_ids",
+      "when": 1792587787468,
+      "tag": "0026_add_content_hash_to_schemas",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1792587787964,
+      "tag": "0027_link_metadata_property_ids",
       "breakpoints": true
     }
   ]
@@ -751,8 +760,8 @@ export const journalJson = `{
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
 export const snapshotJson = `{
-  "id": "7bfe4bb0-e334-45ef-a640-18d7ae42002e",
-  "prevId": "2b9514b2-20c5-4340-8a19-68f4d0926e43",
+  "id": "c7851baa-6148-4738-9db2-28c46948b66c",
+  "prevId": "dee41a34-bc54-4e42-b033-7b750051a382",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -1332,6 +1341,13 @@ export const snapshotJson = `{
         "derived_from_uid": {
           "name": "derived_from_uid",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retract": {
+          "name": "retract",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

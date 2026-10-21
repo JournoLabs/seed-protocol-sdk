@@ -22,6 +22,7 @@ import { eq } from 'drizzle-orm'
 import type { UploadProperty } from '@/db/read/getPublishUploads'
 import type { PublishMode } from '@/db/read/getPublishPayload'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import { getPropertyClear } from '@/db/read/getPropertyClear'
 import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
 import {
   findRelatedSeedRow,
@@ -42,6 +43,11 @@ export type PublishWorkSummary = {
   newSeedCount: number
   newVersionCount: number
   attestationCount: number
+  /**
+   * Property attestations publish revokes for retracted properties (ADR 0021). An EOA publisher
+   * signs them in a second transaction.
+   */
+  revocationCount: number
   uploadCount: number
   uploadBytes: number
   /** Size of each upload, in bytes (Arweave charges per transaction, not only per byte). */
@@ -440,7 +446,30 @@ async function summarizeItem(
     seenProps.add(key)
     // A ref back to an item this publish creates is left for a later publish (publishDraftGraph.ts).
     if (graph.deferredProperties.has(prop)) continue
-    if (shouldAttestProperty(prop, forceFullSnapshot)) acc.attestationCount += 1
+    if (shouldAttestProperty(prop, forceFullSnapshot)) {
+      acc.attestationCount += 1
+      continue
+    }
+    // An empty value attests a removal, or revokes for a retraction (ADR 0021)
+    const context = propertyContext(prop)
+    if (!context || INTERNAL_PROPERTY_NAMES.includes(prop.propertyName)) continue
+    const value = getPublishValue(prop, context)
+    if (!(value == null || value === '' || (Array.isArray(value) && value.length === 0))) continue
+    if (prop.uid && !forceFullSnapshot) continue
+    const propertyDef =
+      prop.propertyDef ?? (context.propertyRecordSchema as { dataType?: string; refValueType?: string } | undefined)
+    const clear = await getPropertyClear({
+      seedLocalId: context.seedLocalId as string | undefined,
+      seedUid: context.seedUid as string | undefined,
+      propertyId: context.propertyId as number | undefined,
+      modelName: context.modelName as string | undefined,
+      propertyName: prop.propertyName,
+      dataType: propertyDef?.dataType,
+      refValueType: propertyDef?.refValueType,
+    })
+    if (!clear) continue
+    if (clear.retract) acc.revocationCount += clear.retractScope.length
+    else acc.attestationCount += 1
   }
 }
 
@@ -512,6 +541,7 @@ export const summarizePublishWork = async (
     newSeedCount: 0,
     newVersionCount: 0,
     attestationCount: 0,
+    revocationCount: 0,
     uploadCount: 0,
     uploadBytes: 0,
     uploadSizes: [],

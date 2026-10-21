@@ -18,7 +18,7 @@ Use revocation when a user no longer wants their Seed to appear in:
 
 ### `item.unpublish()`
 
-Revokes the Seed attestation and all Version and metadata attestations for the item.
+Revokes the Seed attestation and all Version and metadata attestations for the item. The Seed attestation goes first: a sync that runs between the batches then sees the seed revoked, and keeps the item's last values rather than reading its revoked properties as retracted.
 
 ```typescript
 await item.unpublish()
@@ -76,7 +76,11 @@ Code that needs the revoked versions on purpose reads the version rows directly 
 
 ### EAS sync
 
-Sync fetches revoked attestations too and keeps local metadata on the canonical attestation per (version, property schema): the newest non-revoked one. When that attestation is later revoked, sync replaces the stored row with the next newest live attestation; when a newer one is published, it replaces the stored row. When every attestation of a property on a version is revoked (an unpublished item), sync keeps the newest one with `metadata.revoked_at` set, so a revoked item synced to a new device still has its last values. A non-null `revoked_at` therefore means "kept for its last value", not "present on the version". Readers pick each property's value across versions by preferring the newest row with `revoked_at` null (local drafts included), and fall back to the newest revoked row only when no live row is left, so a property revoked on a newer version doesn't hide a live value on an older one. Rows sync derives for ItemStorage properties from a `storage_transaction_id` attestation (marked by `metadata.derived_from_uid`, the attestation's uid) follow that attestation: they're removed when it stops being canonical and carry its `revoked_at`. They rank at that attestation's time and are published content, not local drafts: an edit of the property goes into a local draft row of its own. Seeds, versions and metadata record `revoked_at` from EAS `revocationTime`, for already-stored rows too. A stamp written by local unpublish (on the seed, its versions and its property rows) is kept until EAS reports a revocation time, which then replaces it: unpublish stamps only after its revoke transactions are mined and revocation is permanent, so EAS still reporting an attestation live means its index lags. Derived ItemStorage rows take their source row's stamp the same way and never lose one to a live report.
+Sync fetches revoked attestations too and keeps local metadata on the canonical attestation per (version, property schema): the newest non-revoked one. When that attestation is later revoked, sync replaces the stored row with the next newest live attestation; when a newer one is published, it replaces the stored row. When every attestation of a property on a version is revoked, sync keeps the newest one with `metadata.revoked_at` set. On a revoked seed (an unpublished item) it keeps its value, so a revoked item synced to a new device still has its last values. On a live seed it is a retraction ([ADR 0021](./adr/0021-clearing-a-property.md)) and is stored with no value. Readers pick each property's value across versions by taking the newest row, revoked or not (local drafts included), so a property retracted on a newer version doesn't show an older version's value. Rows sync derives for ItemStorage properties from a `storage_transaction_id` attestation (marked by `metadata.derived_from_uid`, the attestation's uid) follow that attestation: they're removed when it stops being canonical and carry its `revoked_at`. They rank at that attestation's time and are published content, not local drafts: an edit of the property goes into a local draft row of its own. Seeds, versions and metadata record `revoked_at` from EAS `revocationTime`, for already-stored rows too. A stamp written by local unpublish (on the seed, its versions and its property rows) is kept until EAS reports a revocation time, which then replaces it: unpublish stamps only after its revoke transactions are mined and revocation is permanent, so EAS still reporting an attestation live means its index lags. Derived ItemStorage rows take their source row's stamp the same way and never lose one to a live report.
+
+## Retracting one property
+
+`property.clear({ retract: true })` revokes one property's attestations on the next Publish and leaves the seed live. See [PUBLISHING.md](./PUBLISHING.md#clearing-a-property). It goes to EAS from the attester the same way, so the same wallet rules apply.
 
 ## Republishing
 
@@ -87,7 +91,7 @@ When the item's seed is revoked (`seeds.revoked_at` set), the publish payload as
 - The `seeds` row takes the new uid, and its `revoked_at` and stored `attestation_raw` (which belonged to the old seed) are cleared.
 - `item.seedUid` is the new uid, `item.revokedAt` is cleared (`item.isRevoked` is `false`), and the item instance cache's uid alias moves from the old uid to the new one.
 - The new version attestation is recorded on the local draft version, or on a new version row when there is no draft. `item.latestVersionUid` / `item.latestVersionLocalId` and the published version helpers report it.
-- The old version and property rows keep their old uids and `revoked_at`. They are history of the old seed. Readers prefer live rows, and EAS sync stores the new property attestations.
+- The old version and property rows keep their old uids and `revoked_at`. They are history of the old seed. The new property attestations are newer, so readers take them, and EAS sync stores them.
 - EAS sync still returns the old, revoked seed attestation. Sync matches it to this item through the old version rows (`versions.seed_uid`) and stores no seed row for it; its revocation doesn't touch the item's `revoked_at`.
 
 Other items' relations to this item aren't rewritten. When a referring item is published, each relation, list member and image/file ref it attests is checked against the local seed it points at:

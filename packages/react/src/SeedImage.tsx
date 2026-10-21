@@ -113,6 +113,12 @@ const SeedImageInner = ({
     setBlobPreviewUrl(null)
   }, [isFileOrBlob, rawValue])
 
+  // Another file, or none (a cleared property, ADR 0021): the URLs found for the last one don't apply
+  useEffect(() => {
+    setSizedContentUrl(undefined)
+    setOriginalContentUrl(undefined)
+  }, [resolvedFilename])
+
   // Fallback: when we have filename but no blob URL (e.g. after reload, or sized versions missing), load original file
   useEffect(() => {
     if (!resolvedFilename) return

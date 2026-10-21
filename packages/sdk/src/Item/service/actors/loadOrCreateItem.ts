@@ -22,8 +22,17 @@ function metadataValueStrength(row: any): number {
   return String(v).trim().length
 }
 
-/** When storage + schema names map to the same key, prefer non-empty, then richer payload, then newer row. */
+/** A `<name>Id` row with no value and no file: a cleared Image, File, Html or Relation (ADR 0021). */
+const isClearedIdRow = (row: any): boolean =>
+  !!row?.propertyName?.endsWith('Id') && row.propertyValue === null && !row.refResolvedValue
+
+/**
+ * When storage + schema names map to the same key, prefer non-empty, then richer payload, then newer
+ * row. A cleared Id row newer than the other wins: the other is the value it cleared, or older.
+ */
 function pickBetterMetadataRowForSameInstance(a: any, b: any): any {
+  const newer = compareMetadataRowsLatestFirst(a, b) < 0 ? a : b
+  if (isClearedIdRow(newer)) return newer
   const sa = metadataValueStrength(a)
   const sb = metadataValueStrength(b)
   if (sa > 0 && sb === 0) return a

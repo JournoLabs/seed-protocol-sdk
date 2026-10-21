@@ -47,6 +47,11 @@ export type SetPropertyValueOp = {
   schemaUid?: string | null
   dataType?: string
   refValueType?: string
+  /**
+   * A clear (ADR 0021): `newValue` is null and the row's file reference is dropped. `retract` marks
+   * a clear that publish revokes.
+   */
+  clear?: { retract: boolean }
 }
 
 /** The row a `set` op wrote (updateItemPropertyValue's result). */
@@ -493,8 +498,21 @@ export function startItemOutbox(): void {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         // Before the write, which makes the edit the newest row
         const conflict = await findSetConflict(op, value, tx)
+        const { clear, ...props } = value
         const result = await updateItemPropertyValue(
-          { ...value, seedLocalId: op.seedLocalId, propertyName: op.propertyName ?? undefined } as never,
+          {
+            ...props,
+            ...(clear && {
+              newValue: null,
+              refSeedType: null,
+              refResolvedValue: null,
+              refResolvedDisplayValue: null,
+              localStorageDir: null,
+              retract: clear.retract,
+            }),
+            seedLocalId: op.seedLocalId,
+            propertyName: op.propertyName ?? undefined,
+          } as never,
           { db: tx },
         )
         await recordPropertyEdit(op, conflict, tx)

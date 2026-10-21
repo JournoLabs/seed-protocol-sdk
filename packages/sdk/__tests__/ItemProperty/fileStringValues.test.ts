@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { classifyFileString } from '@/ItemProperty/service/actors/saveValueToDb/saveFile'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /** Strings assigned to File properties: only data URLs are decoded and only real URLs fetched. */
@@ -23,6 +24,12 @@ describe('classifyFileString', () => {
     expect((await classifyFileString('hello')).kind).toBe('text')
     expect((await classifyFileString('photo.jpg')).kind).toBe('text')
     expect((await classifyFileString('some notes, with punctuation.')).kind).toBe('text')
+  })
+
+  it("doesn't take an empty string for the files folder", async () => {
+    await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('files'))
+    expect((await classifyFileString('')).kind).toBe('text')
+    expect((await classifyFileString('  ')).kind).toBe('text')
   })
 
   it('fetches only http(s) and blob URLs', async () => {

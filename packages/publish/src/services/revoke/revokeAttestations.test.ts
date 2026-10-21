@@ -27,6 +27,7 @@ const state = {
   revokedVersionUids: null as string[] | null,
   versions: [] as { uid: string }[],
   metadata: [] as { uid: string; schemaUid: string }[],
+  retractedUids: null as string[] | null,
 }
 
 const sdkActual = await import('@seedprotocol/sdk')
@@ -49,6 +50,9 @@ mock.module('@seedprotocol/sdk', () => ({
     state.revokedAt = revokedAt
     state.revokedMetadataUids = metadataUids ?? null
     state.revokedVersionUids = versionUids ?? null
+  },
+  markPropertyAttestationsRetracted: async ({ uids }: { uids: string[] }) => {
+    state.retractedUids = uids
   },
 }))
 
@@ -119,7 +123,7 @@ mock.module('~/helpers/publishWalletRegistry', () => ({
 }))
 
 const { setConfigRef } = await import('~/config')
-const { revokeAttestations } = await import('./revokeAttestations')
+const { revokeAttestations, revokePropertyAttestations } = await import('./revokeAttestations')
 
 setConfigRef({
   uploadApiBaseUrl: 'https://example.com',
@@ -141,7 +145,17 @@ afterEach(() => {
   state.revokedVersionUids = null
   state.versions = []
   state.metadata = []
+  state.retractedUids = null
 })
+
+/** The uids of each multiRevoke sent, in order. */
+const sentUids = () =>
+  state.sent.map((tx) => {
+    const { args } = decodeFunctionData({ abi: easAbi, data: tx.data })
+    return (args![0] as unknown as Array<{ data: Array<{ uid: string }> }>).flatMap((r) =>
+      r.data.map((d) => d.uid.toLowerCase()),
+    )
+  })
 
 const params = { seedLocalId: 'seed1', seedUid: SEED_UID, seedSchemaUid: SEED_SCHEMA }
 
@@ -222,18 +236,18 @@ describe('revokeAttestations', () => {
     state.metadata = [u1, u2, u3].map((uid) => ({ uid, schemaUid: schemaA }))
     state.revokedOnChain.add(u2)
     await revokeAttestations(params)
-    expect(revokedBatchUids()).toEqual([u1, u3, SEED_UID])
+    expect(revokedBatchUids()).toEqual([SEED_UID, u1, u3])
     expect([u1, u2, u3, SEED_UID].every((u) => state.revokedOnChain.has(u))).toBe(true)
   })
 
   test('an AlreadyRevoked revert matched by selector re-reads EAS and retries the rest', async () => {
     state.metadata = [u1, u2, u3].map((uid) => ({ uid, schemaUid: schemaA }))
     state.revokedOnChain.add(u2)
-    // The first reads (one per uid) fail, so the batch goes out with u2 and reverts by selector;
-    // the re-read then sees u2 as revoked.
-    state.readFailuresLeft = 3
+    // The first reads (the seed's, then one per uid) fail, so the batch goes out with u2 and
+    // reverts by selector; the re-read then sees u2 as revoked.
+    state.readFailuresLeft = 4
     await revokeAttestations(params)
-    expect(revokedBatchUids()).toEqual([u1, u3, SEED_UID])
+    expect(revokedBatchUids()).toEqual([SEED_UID, u1, u3])
     expect(state.revokedAt).not.toBeNull()
   })
 
@@ -252,5 +266,53 @@ describe('revokeAttestations', () => {
     await revokeAttestations(params)
     expect(state.sent).toHaveLength(0)
     expect(state.revokedAt).not.toBeNull()
+  })
+})
+
+describe('revokeAttestations order', () => {
+  test('revokes the seed before its properties, so a sync in between keeps their values', async () => {
+    const titleUid = `0x${'33'.repeat(32)}`
+    state.metadata = [{ uid: titleUid, schemaUid: `0x${'43'.repeat(32)}` }]
+    await revokeAttestations(params)
+    expect(sentUids()).toEqual([[SEED_UID.toLowerCase()], [titleUid]])
+  })
+})
+
+describe('revokePropertyAttestations (ADR 0021)', () => {
+  const coverSchema = `0x${'44'.repeat(32)}`
+  const titleSchema = `0x${'45'.repeat(32)}`
+  const cover1 = `0x${'34'.repeat(32)}`
+  const cover2 = `0x${'35'.repeat(32)}`
+  const title = `0x${'36'.repeat(32)}`
+
+  test('revokes one batch per schema, leaves the seed live, and records the retraction', async () => {
+    await revokePropertyAttestations({
+      seedLocalId: 'seed1',
+      seedUid: SEED_UID,
+      attestations: [
+        { uid: cover1, schemaUid: coverSchema },
+        { uid: title, schemaUid: titleSchema },
+        { uid: cover2, schemaUid: coverSchema },
+      ],
+    })
+    expect(sentUids()).toEqual([[cover1, cover2], [title]])
+    expect(state.revokedOnChain.has(SEED_UID.toLowerCase())).toBe(false)
+    expect(state.retractedUids?.slice().sort()).toEqual([cover1, cover2, title].sort())
+    expect(state.revokedAt).toBeNull()
+  })
+
+  test('automation session keys are refused before sending', async () => {
+    state.signer = SESSION_KEY
+    state.automationActive = true
+    await expect(
+      revokePropertyAttestations({ seedLocalId: 'seed1', seedUid: SEED_UID, attestations: [{ uid: cover1, schemaUid: coverSchema }] }),
+    ).rejects.toThrow('Automation session keys cannot revoke')
+    expect(state.sent).toHaveLength(0)
+    expect(state.retractedUids).toBeNull()
+  })
+
+  test('sends nothing without attestations', async () => {
+    await revokePropertyAttestations({ seedLocalId: 'seed1', seedUid: SEED_UID, attestations: [] })
+    expect(state.sent).toHaveLength(0)
   })
 })

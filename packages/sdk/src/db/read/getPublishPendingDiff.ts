@@ -7,6 +7,7 @@ import { isPublishedMetadataRow as isPublished } from '@/helpers/isPublishedMeta
 import { compareMetadataRowsLatestFirst, metadataPropertyGroupKeys } from '@/helpers/compareMetadataRowsLatestFirst'
 import { readMetadataPropertiesById } from '@/db/read/metadataProperty'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
+import { getPropertyClear } from '@/db/read/getPropertyClear'
 
 export type PublishPendingPropertyDiff = {
   propertyName: string
@@ -15,6 +16,11 @@ export type PublishPendingPropertyDiff = {
   previousPublishedValue: string | null
   /** True when the latest row for this property has no `uid` (not yet attested) */
   pending: boolean
+  /**
+   * `set` for a new value. `removed` for an empty value that publish attests as removed, and
+   * `retracted` for one whose attestations publish revokes (ADR 0021).
+   */
+  change: 'set' | 'removed' | 'retracted'
 }
 
 export type GetPublishPendingDiffResult = {
@@ -94,11 +100,24 @@ export async function getPublishPendingDiff(
       const prevWithUid = list.find(isPublished)
       const groupId = list.find((row) => row.propertyId != null)?.propertyId
       const property = groupId != null ? propertiesById.get(groupId) : undefined
+      const isEmpty = latest.propertyValue == null || latest.propertyValue === ''
+      // An empty value changes nothing on chain unless it has an attestation to remove or retract
+      // (ADR 0021): one never published, or already retracted, isn't pending.
+      if (isEmpty) {
+        const clear = await getPropertyClear({
+          seedLocalId,
+          seedUid,
+          propertyId: groupId,
+          propertyName: latest.propertyName!,
+        })
+        if (!clear || (clear.retract && clear.retractScope.length === 0)) continue
+      }
       pendingProperties.push({
         propertyName: property?.storageName ?? latest.propertyName!,
         currentValue: latest.propertyValue ?? null,
         previousPublishedValue: prevWithUid?.propertyValue ?? null,
         pending: true,
+        change: !isEmpty ? 'set' : latest.retract ? 'retracted' : 'removed',
       })
     }
   }

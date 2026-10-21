@@ -261,6 +261,34 @@ describe('SeedImage integration tests', () => {
     expect((img as HTMLImageElement).src).toBeTruthy()
   })
 
+  it('stops showing the image once the property is cleared', async () => {
+    if (!testItem) return
+    const MINIMAL_PNG_BASE64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const bytes = Uint8Array.from(atob(MINIMAL_PNG_BASE64), (c) => c.charCodeAt(0))
+    const featureImageProperty = testItem.properties.find(
+      (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+    ) as ItemProperty<any>
+    featureImageProperty.value = new Blob([bytes], { type: 'image/png' })
+    await featureImageProperty.save()
+
+    render(
+      <SeedProviderWrapper>
+        <SeedImage imageProperty={featureImageProperty} alt="Feature image" width={400} />
+      </SeedProviderWrapper>,
+      { container }
+    )
+    const scoped = within(container)
+    await waitFor(
+      () => expect((scoped.queryByRole('img', { name: /feature image/i }) as HTMLImageElement | null)?.src).toMatch(/^blob:/),
+      { timeout: 15000 }
+    )
+
+    await featureImageProperty.clear()
+
+    await waitFor(() => expect(scoped.queryByRole('img', { name: /feature image/i })).toBeNull(), { timeout: 15000 })
+  })
+
   it('renders after reload when image was set via Blob', async () => {
     if (!testItem) return
 

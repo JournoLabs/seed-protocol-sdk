@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `SeedImage` stops showing an image once its property is cleared or points at another file. It kept the URLs it had found for the previous file.
+
 ## 0.7.8 (2026-10-20)
 
 - `useItemProperties` re-reads its item's metadata rows only when a write touched them, through the SDK's change feed (ADR 0020). Before, each mounted hook held a metadata liveQuery that re-ran on every metadata write in the database, in every tab, so a page mounting the hook per row ran one query per row for each save. Writes from other tabs and from sync still reach it. In Node it keeps the polling liveQuery.

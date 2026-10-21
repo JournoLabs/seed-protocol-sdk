@@ -41,6 +41,9 @@ export const metadata = sqliteTable('metadata', {
   // attestation (uid null, ref_value_type 'file', value = the transaction id): that attestation's
   // uid. Null for every other row. Marks the row as published content, not a local draft.
   derivedFromUid: text('derived_from_uid'),
+  // On a cleared local row (null value): publish revokes the property's attestations instead of
+  // attesting the empty value (ADR 0021). Null on every other row.
+  retract: int('retract', { mode: 'boolean' }),
 }, (table) => [
   index('metadata_seed_local_id_property_name_idx').on(table.seedLocalId, table.propertyName),
   index('metadata_seed_uid_idx').on(table.seedUid),

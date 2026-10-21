@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeEasNumber, isNumericEasType } from '../src/easValues.js'
+import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '../src/easValues.js'
 
 describe('decodeEasNumber', () => {
   it.each([
@@ -43,5 +43,25 @@ describe('isNumericEasType', () => {
   })
   it.each([['string'], ['bytes32'], ['bool'], ['uint256[]'], [undefined]])('%s is not', (t) => {
     expect(isNumericEasType(t as string)).toBe(false)
+  })
+})
+
+describe('isEasEmptyValue (ADR 0021)', () => {
+  it.each([
+    ['string', ''],
+    ['bytes32', '0x' + '0'.repeat(64)],
+  ])('%s %j is a removal', (type, value) => {
+    expect(isEasEmptyValue(type, value)).toBe(true)
+  })
+
+  it.each([
+    ['string', ' '],
+    ['string', null],
+    ['bytes32', '0x' + '0'.repeat(62) + '20'],
+    ['bytes32[]', []],
+    ['bool', false],
+    ['uint256', 0],
+  ])('%s %j is a value', (type, value) => {
+    expect(isEasEmptyValue(type, value)).toBe(false)
   })
 })
