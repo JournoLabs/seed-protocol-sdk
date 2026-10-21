@@ -442,6 +442,8 @@ CREATE TRIGGER \`entity_changes_metadata_delete\` AFTER DELETE ON \`metadata\` B
 	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) VALUES ('metadata', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, OLD.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
 END;`
 
+export const migrationSql_0024_add_metadata_retract = `ALTER TABLE \`metadata\` ADD \`retract\` integer;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -614,6 +616,13 @@ export const journalJson = `{
       "when": 1792455641631,
       "tag": "0023_add_entity_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792580727925,
+      "tag": "0024_add_metadata_retract",
+      "breakpoints": true
     }
   ]
 }`
@@ -623,8 +632,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "7767667b-3cf0-4630-b1ff-02913f2f35ad",
-  "prevId": "781ce7c2-f397-4df2-a32c-9267c4a4163d",
+  "id": "311f8f13-3b19-4a26-ba07-873d26dda987",
+  "prevId": "7767667b-3cf0-4630-b1ff-02913f2f35ad",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1202,6 +1211,13 @@ export const snapshotJson = `{
         "derived_from_uid": {
           "name": "derived_from_uid",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retract": {
+          "name": "retract",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
