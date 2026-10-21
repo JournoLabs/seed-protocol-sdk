@@ -32,7 +32,9 @@ writes the schema, model, property and link rows in one transaction. The row rec
 content hash; a file whose id, version and hash the row already has is not applied again. Missing
 ids are assigned once, at first apply, and written into the stored file: an id the stored schema
 already has for that name is kept, and a new one is derived from the schema, model and property
-names.
+names. Derived ids are the same on every device and for every fresh database. A rename through the
+SDK keeps the stored id, but a model or property renamed in a source file without an `id` reads as
+a new one, so a schema file that will be renamed in should pin its ids.
 
 **Rows change in place.**
 - A model rename updates its `models` row. Foreign keys use ids, so properties and items keep
