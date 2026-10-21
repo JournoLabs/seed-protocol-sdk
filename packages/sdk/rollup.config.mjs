@@ -164,6 +164,7 @@ const config = [
     external: [
       '@seedprotocol/feed',
       '@seedprotocol/eas',
+      '@seedprotocol/eas/node',
       '@seedprotocol/arweave',
       '@seedprotocol/query',
       '@seedprotocol/vite',
@@ -218,7 +219,7 @@ const config = [
     ],
     external: (id) => {
       if (id === '@seedprotocol/feed') return true
-      if (id === '@seedprotocol/eas') return true
+      if (id === '@seedprotocol/eas' || id === '@seedprotocol/eas/node') return true
       if (id === '@seedprotocol/arweave') return true
       if (id === '@seedprotocol/query') return true
       if (id === '@seedprotocol/vite') return true
