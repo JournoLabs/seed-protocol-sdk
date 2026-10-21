@@ -1,0 +1,1 @@
+ALTER TABLE `schemas` ADD `content_hash` text;
