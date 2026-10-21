@@ -6,15 +6,33 @@ import {
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItem } from '@/interfaces'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
+import { ItemLoads } from './itemLoads'
 
 /**
  * Collects all items that will be in the publish payload (main item + related items from
  * relations and lists). Used by ensureEasSchemas to register schemas for nested items.
  * Skips items that already have seedUid (already published).
+ *
+ * Each returned item carries one cache hold the caller releases with `unload()`.
  */
 export async function getRelatedItemsForPublish(
   item: IItem<any>,
   visited = new Set<string>(),
+): Promise<IItem<any>[]> {
+  const loads = new ItemLoads()
+  let result: IItem<any>[] = []
+  try {
+    result = await collectRelatedItemsForPublish(item, visited, loads)
+  } finally {
+    loads.release(result)
+  }
+  return result
+}
+
+async function collectRelatedItemsForPublish(
+  item: IItem<any>,
+  visited: Set<string>,
+  loads: ItemLoads,
 ): Promise<IItem<any>[]> {
   const seedLocalId = item.seedLocalId
   if (!seedLocalId || visited.has(seedLocalId)) {
@@ -25,9 +43,6 @@ export async function getRelatedItemsForPublish(
   const result: IItem<any>[] = []
   const { itemRelationProperties, itemImageProperties, itemListProperties } =
     await getSegmentedItemProperties(item)
-
-  const getItemMod = await import('./getItem')
-  const { getItem } = getItemMod
 
   const processRelationOrImage = async (
     prop: { getService: () => { getSnapshot: () => unknown }; propertyName?: string; propertyDef?: { dataType?: string; refValueType?: string } },
@@ -62,9 +77,9 @@ export async function getRelatedItemsForPublish(
     if (!normalized) return
     const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
     if (!seedLocalId && !seedUid) return
-    const relatedItem = await getItem({ seedLocalId, seedUid })
+    const relatedItem = await loads.getItem({ seedLocalId, seedUid })
     if (!relatedItem || relatedItem.seedUid) return
-    const nested = await getRelatedItemsForPublish(relatedItem, visited)
+    const nested = await collectRelatedItemsForPublish(relatedItem, visited, loads)
     result.push(...nested, relatedItem)
   }
 
@@ -91,9 +106,9 @@ export async function getRelatedItemsForPublish(
       if (!normalized) continue
       const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
       if (!seedLocalId && !seedUid) continue
-      const relatedItem = await getItem({ seedLocalId, seedUid })
+      const relatedItem = await loads.getItem({ seedLocalId, seedUid })
       if (!relatedItem || relatedItem.seedUid) continue
-      const nested = await getRelatedItemsForPublish(relatedItem, visited)
+      const nested = await collectRelatedItemsForPublish(relatedItem, visited, loads)
       result.push(...nested, relatedItem)
     }
   }
