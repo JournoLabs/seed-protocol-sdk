@@ -687,18 +687,9 @@ export async function renameModelProperty(
 
   logger(`Renamed property ${oldPropertyName} to ${newPropertyName} in schema ${schemaName} v${newVersion}`)
 
-  // Migrate metadata rows so ItemProperty values follow the new name (prevents duplicate ItemProperties)
-  const { migrateMetadataForPropertyRename } = await import('./db')
-  const migratedCount = await migrateMetadataForPropertyRename(
-    modelName,
-    oldPropertyName,
-    newPropertyName,
-    oldProperty.id,
-    { schemaName },
-  )
-  if (migratedCount > 0) {
-    logger(`Migrated ${migratedCount} metadata rows for property rename`)
-  }
+  // Item values follow the property by property_id (decision D4); only pending edits name it
+  const { renamePendingWritesForProperty } = await import('./db')
+  await renamePendingWritesForProperty(modelName, oldPropertyName, newPropertyName)
 
   // Defer loadSchemaFromFile to avoid sync cascade: it triggers addSchemaToDb/addModelsToDb,
   // which post to BroadcastChannel and cause React invalidates. Running that synchronously

@@ -3,7 +3,7 @@ import { TProperty } from '@/Schema'
 // Dynamic import to break circular dependency: Model -> ... -> helpers/property -> Model
 // import { Model } from '@/Model/Model'
 import pluralize from 'pluralize'
-import { resolveStorageNameToSchemaName } from '@/helpers/metadataPropertyNames'
+import { propertyKeyFromStoredName } from '@/helpers/metadataPropertyNames'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties, PropertyType } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
@@ -97,8 +97,8 @@ export const getPropertySchema = async (
       return propName
     }
 
-    // List-of-relation storage name (e.g. authorIdentityIds) -> schema key (authors)
-    const listSchemaKey = resolveStorageNameToSchemaName(schema, propName)
+    // A stored name (authorIdentityIds, authorId) -> its schema key (authors, author)
+    const listSchemaKey = propertyKeyFromStoredName(schema, propName)
     if (listSchemaKey && schema[listSchemaKey]) {
       return listSchemaKey
     }

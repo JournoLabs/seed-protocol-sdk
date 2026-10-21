@@ -74,72 +74,6 @@ const hasStorageSettings = (columns: PropertyStorageColumns): boolean =>
   columns.storageType != null || columns.localStorageDir != null || columns.filenameSuffix != null
 
 /**
- * Resolve property_id (integer properties.id) from a property's schemaFileId (the string `id` in
- * schema files and propertyRecordSchema). Scoped to the model since schemaFileIds are per schema file.
- * Reads `db` (a transaction's `tx`, say), the app database by default.
- * @returns properties.id or null if not found
- */
-export async function getPropertyIdForSchemaFileId(
-  modelNameOrType: string,
-  schemaFileId: string,
-  scope: ModelScope = {},
-  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
-): Promise<number | null> {
-  if (!db || !modelNameOrType || !schemaFileId) return null
-  const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
-  if (!modelRecord) return null
-  const rows = await db
-    .select({ id: properties.id })
-    .from(properties)
-    .where(and(eq(properties.modelId, modelRecord.id), eq(properties.schemaFileId, schemaFileId)))
-    .limit(1)
-  return rows[0]?.id ?? null
-}
-
-/**
- * Resolve property_id from model name/type and property name.
- * Handles property name variants (e.g. htmlId -> html, avatarImageIds -> avatarImages).
- * @param modelNameOrType - Model name (PascalCase) or model type (snake_case)
- * @param propertyName - Property name as stored in metadata (may have Id/Ids suffix)
- * @param scope - Which model is meant when several schemas define one with this name
- * @param db - The database or transaction to read; the app database by default
- * @returns properties.id or null if not found
- */
-export async function getPropertyIdForModelAndName(
-  modelNameOrType: string,
-  propertyName: string,
-  scope: ModelScope = {},
-  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
-): Promise<number | null> {
-  if (!db) return null
-  if (!modelNameOrType || !propertyName) return null
-
-  const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
-  if (!modelRecord) return null
-
-  const propertyNamesToTry = [propertyName]
-  if (propertyName.endsWith('Ids')) {
-    propertyNamesToTry.push(propertyName.slice(0, -3))
-  }
-  if (propertyName.endsWith('Id')) {
-    propertyNamesToTry.push(propertyName.slice(0, -2))
-  }
-
-  for (const pName of propertyNamesToTry) {
-    const rows = await db
-      .select({ id: properties.id })
-      .from(properties)
-      .where(and(eq(properties.modelId, modelRecord.id), eq(properties.name, pName)))
-      .limit(1)
-
-    if (rows.length > 0 && rows[0].id != null) {
-      return rows[0].id
-    }
-  }
-  return null
-}
-
-/**
  * A model's ItemStorage properties as stored in `properties` (storage_type 'ItemStorage'), with
  * their storage path and extension. Reads the table, not ModelProperty instances, so it doesn't
  * depend on whether (or from where) the model's property instances have loaded.
@@ -164,90 +98,18 @@ export async function getItemStoragePropertiesForModel(
 }
 
 /**
- * Migrate metadata rows when a property is renamed.
- * Updates metadata.propertyName from old to new for all rows that reference the renamed property.
- * Called from renameModelProperty to prevent duplicate ItemProperties.
- * @param modelName - Model name (PascalCase)
- * @param oldPropertyName - Current property name before rename
- * @param newPropertyName - New property name after rename
- * @param propertySchemaFileId - Optional schema file ID for the property (most reliable lookup)
- * @returns Count of metadata rows updated
+ * Moves a renamed property's pending outbox edits (ADR 0019) to its new name, so they apply as the
+ * property's. Its metadata rows need no move: readers match them by property_id (decision D4).
+ * Returns the number of ops renamed.
  */
-export async function migrateMetadataForPropertyRename(
+export async function renamePendingWritesForProperty(
   modelName: string,
   oldPropertyName: string,
   newPropertyName: string,
-  propertySchemaFileId?: string,
-  scope: ModelScope = {},
 ): Promise<number> {
   const db = BaseDb.getAppDb()
-  if (!db) {
-    logger('[migrateMetadataForPropertyRename] Database not available, skipping')
-    return 0
-  }
-
-  // Find the property row by schemaFileId (preferred) or by name
-  let propertyId: number | null = null
-  if (propertySchemaFileId) {
-    propertyId = await getPropertyIdForSchemaFileId(modelName, propertySchemaFileId, scope)
-  }
-  if (propertyId == null) {
-    propertyId = await getPropertyIdForModelAndName(modelName, oldPropertyName, scope)
-  }
-  if (propertyId == null) {
-    logger(
-      `[migrateMetadataForPropertyRename] Property not found: ${modelName}.${oldPropertyName}, skipping`,
-    )
-    return 0
-  }
-
-  // Primary path: update metadata by propertyId
-  const toUpdateByPropertyId = await db
-    .select({ localId: metadata.localId })
-    .from(metadata)
-    .where(eq(metadata.propertyId, propertyId))
-  const updatedByPropertyId = toUpdateByPropertyId.length
-  if (updatedByPropertyId > 0) {
-    await db
-      .update(metadata)
-      .set({ propertyName: newPropertyName })
-      .where(eq(metadata.propertyId, propertyId))
-  }
-
-  // Fallback: update metadata with null propertyId (legacy rows) by propertyName + modelType
-  const modelType = easName(modelName)
-  const toUpdateByFallback = await db
-    .select({ localId: metadata.localId })
-    .from(metadata)
-    .where(
-      and(
-        eq(metadata.propertyName, oldPropertyName),
-        eq(metadata.modelType, modelType),
-        isNull(metadata.propertyId),
-      ),
-    )
-  const updatedByFallback = toUpdateByFallback.length
-  if (updatedByFallback > 0) {
-    await db
-      .update(metadata)
-      .set({ propertyName: newPropertyName })
-      .where(
-        and(
-          eq(metadata.propertyName, oldPropertyName),
-          eq(metadata.modelType, modelType),
-          isNull(metadata.propertyId),
-        ),
-      )
-  }
-
-  if (updatedByFallback > 0) {
-    logger(
-      `[migrateMetadataForPropertyRename] Fallback updated ${updatedByFallback} rows (propertyId was null)`,
-    )
-  }
-
-  // Edits of the property still in the outbox (ADR 0019) apply under its new name
-  await db
+  if (!db) return 0
+  const renamed = await db
     .update(pendingWrites)
     .set({ propertyName: newPropertyName })
     .where(
@@ -256,71 +118,12 @@ export async function migrateMetadataForPropertyRename(
         eq(pendingWrites.status, 'pending'),
         inArray(
           pendingWrites.seedLocalId,
-          db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, modelType)),
+          db.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, easName(modelName))),
         ),
       ),
     )
-
-  const total = updatedByPropertyId + updatedByFallback
-  if (total > 0) {
-    logger(
-      `[migrateMetadataForPropertyRename] Migrated ${total} metadata rows for ${modelName}.${oldPropertyName} -> ${newPropertyName}`,
-    )
-  }
-  return total
-}
-
-/**
- * Moves a renamed property's metadata rows to its new name: rows linked by propertyId, and legacy
- * rows without one by name and model type. Each stored form of the name moves to the same form of
- * the new one: the key (`author` → `writer`), a single relation's `<key>Id` (`authorId` →
- * `writerId`), a list relation's storage name (`authorIdentityIds` → `writerIdentityIds`).
- * Returns the number of rows moved.
- */
-export async function moveMetadataToRenamedProperty(
-  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  {
-    propertyId,
-    modelType,
-    oldName,
-    newName,
-    propertyDef,
-  }: {
-    propertyId: number
-    modelType: string
-    oldName: string
-    newName: string
-    propertyDef?: { dataType?: string; refValueType?: string; ref?: string; refModelName?: string }
-  },
-): Promise<number> {
-  const forms = (name: string) => [
-    name,
-    toMetadataPropertyName(name, propertyDef?.dataType, propertyDef?.refValueType),
-    listRelationEasPropertyName(name, propertyDef) ?? name,
-  ]
-  const oldForms = forms(oldName)
-  const newForms = forms(newName)
-  let moved = 0
-  const seen = new Set<string>()
-  for (let i = 0; i < oldForms.length; i++) {
-    const from = oldForms[i]!
-    const to = newForms[i]!
-    if (from === to || seen.has(from)) continue
-    seen.add(from)
-    const byId = await db
-      .update(metadata)
-      .set({ propertyName: to })
-      .where(and(eq(metadata.propertyId, propertyId), eq(metadata.propertyName, from)))
-      .returning({ localId: metadata.localId })
-    const legacy = await db
-      .update(metadata)
-      .set({ propertyName: to })
-      .where(and(isNull(metadata.propertyId), eq(metadata.propertyName, from), eq(metadata.modelType, modelType)))
-      .returning({ localId: metadata.localId })
-    moved += byId.length + legacy.length
-  }
-  if (moved > 0) logger(`[moveMetadataToRenamedProperty] moved ${moved} metadata rows ${oldName} -> ${newName}`)
-  return moved
+    .returning({ opId: pendingWrites.opId })
+  return renamed.length
 }
 
 /**
@@ -1224,16 +1027,6 @@ export const addModelsToDb = async (
             .where(eq(properties.id, existingProperty.id!))
           const updatedFileId = updateData.schemaFileId ?? existingProperty.schemaFileId
           if (updatedFileId) updatedPropertyFileIds.push(updatedFileId)
-        }
-        if (existingProperty.name !== propertyName) {
-          // Renamed (matched by id): its values move to the new name.
-          await moveMetadataToRenamedProperty(db, {
-            propertyId: existingProperty.id!,
-            modelType: easName(modelName),
-            oldName: existingProperty.name,
-            newName: propertyName,
-            propertyDef: propertyValues,
-          })
         }
       } else {
         // Property doesn't exist, create it with schemaFileId

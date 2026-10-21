@@ -1,10 +1,10 @@
 import { metadata, MetadataType } from '@/seedSchema'
-import { and, eq, or, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
 import { getSeedData } from '@/db/read/getSeedData'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
-import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
+import { matchMetadataProperty, metadataRowsOfProperty } from '@/db/read/metadataProperty'
 import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -71,6 +71,25 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
   const appDb = options.db ?? BaseDb.getAppDb()
 
+  // The property's rows are matched by property_id (decision D4); rows with none by name.
+  const property = await matchMetadataProperty(
+    {
+      propertyName,
+      modelName,
+      seedLocalId,
+      seedUid,
+      dataType,
+      refValueType: (refValueType ?? refSeedType) ?? undefined,
+    },
+    appDb,
+  )
+  const propertyRows = async (seed: string, match: { propertyId?: number | null; names: string[] } = property) =>
+    (await appDb
+      .select()
+      .from(metadata)
+      .where(and(metadataRowsOfProperty(match), eq(metadata.seedLocalId, seed)))
+      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
+
   // Path 1: When localId is provided, query by local_id first (avoids property name mismatch)
   let rows: (MetadataType & { localId?: string | null })[]
   if (localIdParam && seedLocalId) {
@@ -84,19 +103,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         ),
       )
     rows = localIdRows as (MetadataType & { localId?: string | null })[]
-    if (rows.length === 0) {
-      // Fallback: row may have been created with different property_name variant
-      const names = getMetadataPropertyNamesForQuery(propertyName!, dataType, (refValueType ?? refSeedType) ?? undefined)
-      const propertyNameWhere =
-        names.length > 1
-          ? or(...names.map((n) => eq(metadata.propertyName, n)))
-          : eq(metadata.propertyName, names[0])
-      rows = (await appDb
-        .select()
-        .from(metadata)
-        .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId)))
-        .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
-    }
+    // The row may be gone (a draft deleted or replaced): fall back to the property's rows
+    if (rows.length === 0) rows = await propertyRows(seedLocalId)
   } else if (localIdParam) {
     const localIdRows = await appDb
       .select()
@@ -104,17 +112,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       .where(eq(metadata.localId, localIdParam))
     rows = localIdRows as (MetadataType & { localId?: string | null })[]
   } else {
-    // Path 2: Query by property name variants (align with read path)
-    const names = getMetadataPropertyNamesForQuery(propertyName!, dataType, (refValueType ?? refSeedType) ?? undefined)
-    const propertyNameWhere =
-      names.length > 1
-        ? or(...names.map((n) => eq(metadata.propertyName, n)))
-        : eq(metadata.propertyName, names[0])
-    rows = (await appDb
-      .select()
-      .from(metadata)
-      .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId!)))
-      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
+    // Path 2: the property's rows
+    rows = await propertyRows(seedLocalId!)
   }
 
   // A localId can name a published row that an edit has since moved off (a property whose context
@@ -122,24 +121,18 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   // adds another draft, and setting the published value back looks unchanged and keeps the draft.
   const localIdRow = localIdParam ? rows.find((row) => row.localId === localIdParam) : undefined
   if (localIdRow?.uid && localIdRow.propertyName && localIdRow.seedLocalId) {
-    const newestRows = (await appDb
-      .select()
-      .from(metadata)
-      .where(
-        and(
-          eq(metadata.propertyName, localIdRow.propertyName),
-          eq(metadata.seedLocalId, localIdRow.seedLocalId),
-        ),
-      )
-      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
-      .limit(1)) as (MetadataType & { localId?: string | null })[]
-    if (newestRows.length > 0) rows = newestRows
+    const newestRows = await propertyRows(localIdRow.seedLocalId, {
+      propertyId: localIdRow.propertyId ?? property.propertyId,
+      names: [localIdRow.propertyName],
+    })
+    if (newestRows.length > 0) rows = newestRows.slice(0, 1)
   }
 
   if (rows && rows.length > 0) {
     const {
       localId,
       uid,
+      propertyId: propertyIdFromDb,
       propertyName: propertyNameFromDb,
       propertyValue: propertyValueFromDb,
       modelType,
@@ -184,6 +177,10 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       if (localStorageDir !== undefined) {
         updatePayload.localStorageDir = localStorageDir ?? null
       }
+      // A draft written before its property resolved gets its property_id now
+      if (propertyIdFromDb == null && property.propertyId != null) {
+        updatePayload.propertyId = property.propertyId
+      }
       await appDb
         .update(metadata)
         .set(updatePayload as Partial<typeof metadata.$inferInsert>)
@@ -203,7 +200,9 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     await appDb.insert(metadata).values({
       localId: newLocalId,
       ...(publisher && { publisher }),
-      propertyName: propertyNameFromDb,
+      propertyId: propertyIdFromDb ?? property.propertyId,
+      // New rows take the property's storage name, whatever the row they replace is stored under
+      propertyName: property.property?.storageName ?? propertyNameFromDb,
       propertyValue: safeNewValue ?? null,
       modelType: modelType || modelTypeForName || null,
       seedUid: seedDataFromDb?.uid || null,
@@ -248,7 +247,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   await appDb.insert(metadata).values({
     localId: newLocalId,
     ...(publisher && { publisher }),
-    propertyName,
+    propertyId: property.propertyId,
+    propertyName: property.property?.storageName ?? propertyName,
     propertyValue: safeNewValue ?? null,
     modelType: modelName ? easName(modelName) : '',
     seedUid: seedUid || null,

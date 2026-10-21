@@ -10,7 +10,6 @@ import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import {
   BaseFileManager,
-  getMetadataPropertyNamesForQuery,
   resolveMetadataRecord,
 } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
@@ -58,12 +57,22 @@ export const loadOrCreateProperty = fromCallback<
       seedUid: seedUid ?? undefined 
     })
     
-    // Html/Image/File/Relation store metadata with Id suffix (e.g. htmlId); query both variants
-    const propertyNames = getMetadataPropertyNamesForQuery(propertyName)
-    const propertyNameWhere =
-      propertyNames.length > 1
-        ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
-        : eq(metadataLatest.propertyName, propertyNames[0])
+    // The property's rows: linked by property_id (decision D4), else stored under one of its names
+    // (Html/Image/File/Relation rows are `htmlId` and the like)
+    const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
+    const property = await matchMetadataProperty(
+      {
+        propertyId: context.propertyId,
+        propertyName,
+        modelName: context.modelName,
+        modelFileId: context.modelFileId,
+        seedLocalId,
+        seedUid,
+      },
+      db,
+    )
+    timing.mark('property')
+    const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
 
     // A value whose outbox op hasn't applied yet (ADR 0019), read before the stored row: an op that
     // applies between the two reads is then in one of them

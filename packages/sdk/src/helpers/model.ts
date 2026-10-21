@@ -11,6 +11,8 @@ export function modelPropertiesToObject(properties: ModelProperty[]): { [propert
     const propContext = property._getSnapshotContext()
     if (propContext.name) {
       schemaObj[propContext.name] = {
+        // The schemaFileId: metadata writers resolve property_id from it (decision D4).
+        ...(propContext.id ? { id: propContext.id } : {}),
         dataType: propContext.dataType,
         ref: propContext.refModelName || propContext.ref,
         refValueType: propContext.refValueType,

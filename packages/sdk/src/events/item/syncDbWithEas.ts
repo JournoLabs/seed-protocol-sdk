@@ -14,8 +14,9 @@ import { easTypeFitsProperty, syncedPropertyValue } from '@/helpers/easValueType
 import {
   easPropertyNameForPublish,
   listRelationEasPropertyName,
-  toMetadataPropertyName,
+  metadataStorageName,
 } from '@/helpers/metadataPropertyNames'
+import { resolveMetadataPropertyId } from '@/db/read/metadataProperty'
 import {
   parseEasPropertyMetadata,
   parseEasRelationPropertyName,
@@ -38,7 +39,6 @@ import { GET_SEEDS } from '@seedprotocol/eas'
 import {
   getAllAddressesFromDb,
   getItemStoragePropertiesForModel,
-  getPropertyIdForModelAndName,
 } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
@@ -142,6 +142,8 @@ type SyncedPropertyName = {
   refSeedType?: string
   /** The matched local property's data type; undefined when no local property matched. */
   dataType?: string
+  /** The matched local property's schemaFileId, for property_id. */
+  definitionId?: string
 }
 
 const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
@@ -196,17 +198,16 @@ const resolveSyncedPropertyName = (
         )
         return undefined
       }
+      // Stored under the property's storage name, as local writers store it (decision D4)
+      const propertyName = metadataStorageName(key, def)
+      const definitionId = typeof def?.id === 'string' && def.id ? def.id : undefined
       if (isListRelation) {
-        return { propertyName: key, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined }
+        return { propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
       }
       if (isSingleRef) {
-        return {
-          propertyName: toMetadataPropertyName(key, def?.dataType, def?.refValueType),
-          isRelation: true,
-          isList: false,
-        }
+        return { propertyName, isRelation: true, isList: false, definitionId }
       }
-      return { propertyName: key, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType) }
+      return { propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
     }
     // A name one of the model's properties would match at a looser level than its nameMatch
     // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
@@ -580,14 +581,15 @@ const createMetadataRecordsForStorageTransactionId = async (
     }
 
     const propertyId =
-      propertyDef.id ??
-      (modelType != null
-        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
-            getPropertyIdForModelAndName(modelType, _propertyName, {
-              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
-            }),
-          )) ?? null)
-        : null)
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
+        resolveMetadataPropertyId({
+          definitionId: propertyDef.id,
+          propertyName: _propertyName,
+          modelName: modelType,
+          seedLocalId,
+          seedUid,
+        }),
+      )) ?? null
 
     const propertyLocalId = generateId()
     await appDb.insert(metadata).values({
@@ -959,14 +961,16 @@ const insertSyncedProperties = async ({
     }
 
     const propertyId =
-      modelType != null
-        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
-            getPropertyIdForModelAndName(modelType, propertyName, {
-              // EAS identifies models by name only; a locally-created seed still knows its model.
-              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
-            }),
-          )) ?? null)
-        : null
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
+        resolveMetadataPropertyId({
+          definitionId: resolvedName.definitionId,
+          propertyName,
+          // EAS identifies models by name only; a locally-created seed still knows its model.
+          modelName: modelType,
+          seedLocalId,
+          seedUid,
+        }),
+      )) ?? null
     rows.push({
       localId: propertyLocalId,
       uid: property.id,

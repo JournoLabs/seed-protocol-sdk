@@ -73,7 +73,7 @@ testDescribe('Property Rename Metadata Migration', () => {
     await teardownTestEnvironment()
   })
 
-  it('should migrate metadata when property is renamed, preventing duplicate ItemProperties', async () => {
+  it('keeps item values readable under the new name after a rename', async () => {
     const testSchema = createTestSchema(schemaName, {
       Post: {
         id: generateId(),
@@ -115,21 +115,19 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     await renameModelProperty(schemaName, 'Post', 'featureImage', 'coverImage')
 
-    // renameModelProperty defers its schema reload. The metadata asserted below is migrated before it
-    // returns; wait for the reload so it doesn't overlap the rest of the test or afterEach cleanup.
+    // renameModelProperty defers its schema reload (the property row rename); wait for it.
     await whenDeferredSchemaReloadsSettled()
 
+    // The value row needs no move: it stays linked to the property by property_id (decision D4)
     const metadataAfterRename = await db
       .select()
       .from(metadata)
       .where(eq(metadata.seedLocalId, seedLocalId!))
-
-    const coverImageMeta = metadataAfterRename.filter((m) => m.propertyName === 'coverImage')
-    const featureImageMetaAfter = metadataAfterRename.filter((m) => m.propertyName === 'featureImage')
-
-    expect(coverImageMeta.length).toBe(1)
-    expect(coverImageMeta[0].propertyValue).toBe('test-value')
-    expect(featureImageMetaAfter.length).toBe(0)
+    const valueRows = metadataAfterRename.filter((m) => m.propertyValue === 'test-value')
+    expect(valueRows).toHaveLength(1)
+    expect(valueRows[0].propertyId).toBe(featureImageMeta!.propertyId)
+    const [propertyRow] = await db.select().from(properties).where(eq(properties.id, featureImageMeta!.propertyId!))
+    expect(propertyRow?.name).toBe('coverImage')
 
     item.unload?.()
 
@@ -141,6 +139,7 @@ testDescribe('Property Rename Metadata Migration', () => {
     await waitForItemIdle(loadedItem!)
 
     expect(loadedItem!.coverImage).toBe('test-value')
+    expect(loadedItem!.featureImage).toBeUndefined()
   })
 
   it('should rename the property row in place when the schema reloads after a rename', async () => {

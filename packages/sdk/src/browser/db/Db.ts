@@ -148,11 +148,8 @@ export class BrowserDb implements IDb {
 
         this.appDb = db
 
-        const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
-        await backfillMetadataPropertyIds()
-
         // Loaded Items and ItemProperties hear about row changes through it (ADR 0020). Started
-        // after the fixups above, so their log rows aren't dispatched.
+        // after the migrations above, so their log rows aren't dispatched.
         await startChangeFeed(db, {
           liveQuery: (query) => this.liveQuery(query),
           sql: ((...args: Parameters<typeof sqlocalDrizzle.sql>) => sqlocalDrizzle.sql(...args)) as never,

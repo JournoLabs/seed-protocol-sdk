@@ -6,9 +6,11 @@ import {
   toSchemaPropertyName,
   getAlternatePropertyNameForInstanceLookup,
   resolveMetadataRecord,
-  resolveStorageNameToSchemaName,
-  listRelationStoragePropertyName,
   listRelationEasPropertyName,
+  metadataStorageName,
+  metadataStoredNameForms,
+  propertyKeyFromStoredName,
+  metadataRowPropertyKey,
 } from '@/helpers/metadataPropertyNames'
 
 describe('metadataPropertyNames', () => {
@@ -131,34 +133,49 @@ describe('metadataPropertyNames', () => {
     })
   })
 
-  describe('listRelationStoragePropertyName / resolveStorageNameToSchemaName', () => {
+  describe('storage-name codec (decision D4)', () => {
     const postSchemas = {
       authors: { dataType: 'List', ref: 'Identity' },
+      contributors: { dataType: 'List', refModelName: 'Identity' },
+      editor: { dataType: 'Relation', ref: 'Identity' },
+      cover: { dataType: 'Image' },
+      tags: { dataType: 'List', refValueType: 'Text' },
       title: { dataType: 'Text' },
     }
 
-    it('maps schema key to storage name (singular + ref + Ids)', () => {
-      expect(listRelationStoragePropertyName(postSchemas, 'authors')).toBe('authorIdentityIds')
+    it('writes each property under one storage name', () => {
+      expect(metadataStorageName('authors', postSchemas.authors)).toBe('authorIdentityIds')
+      expect(metadataStorageName('contributors', postSchemas.contributors)).toBe('contributorIdentityIds')
+      expect(metadataStorageName('editor', postSchemas.editor)).toBe('editorId')
+      expect(metadataStorageName('cover', postSchemas.cover)).toBe('coverId')
+      expect(metadataStorageName('tags', postSchemas.tags)).toBe('tags')
+      expect(metadataStorageName('title', postSchemas.title)).toBe('title')
+      expect(metadataStorageName('storageTransactionId', { dataType: 'Text' })).toBe('storageTransactionId')
     })
 
-    it('returns undefined for non-List properties', () => {
-      expect(listRelationStoragePropertyName(postSchemas, 'title')).toBeUndefined()
+    it('lists the names older writers and sync stored a property under', () => {
+      expect(metadataStoredNameForms('authors', postSchemas.authors)).toEqual(['authorIdentityIds', 'authors'])
+      expect(metadataStoredNameForms('photos', { dataType: 'List', refValueType: 'Image' })).toEqual(['photos', 'photosId'])
+      expect(metadataStoredNameForms('editor', postSchemas.editor)).toEqual(['editorId', 'editor'])
+      expect(metadataStoredNameForms('title', postSchemas.title)).toEqual(['title'])
     })
 
-    it('maps storage name back to schema key', () => {
-      expect(resolveStorageNameToSchemaName(postSchemas, 'authorIdentityIds')).toBe('authors')
+    it('maps every stored form back to one key', () => {
+      expect(propertyKeyFromStoredName(postSchemas, 'authorIdentityIds')).toBe('authors')
+      expect(propertyKeyFromStoredName(postSchemas, 'authors')).toBe('authors')
+      expect(propertyKeyFromStoredName(postSchemas, 'contributorIdentityIds')).toBe('contributors')
+      expect(propertyKeyFromStoredName(postSchemas, 'editorId')).toBe('editor')
+      expect(propertyKeyFromStoredName(postSchemas, 'coverId')).toBe('cover')
+      expect(propertyKeyFromStoredName(postSchemas, 'tagTagIds')).toBeUndefined()
+      expect(propertyKeyFromStoredName(postSchemas, 'titleId')).toBeUndefined()
     })
 
-    it('returns undefined when no List matches storage name', () => {
-      expect(resolveStorageNameToSchemaName(postSchemas, 'tagTagIds')).toBeUndefined()
-    })
-
-    it('supports refModelName on schema def', () => {
-      const schemas = {
-        contributors: { dataType: 'List', refModelName: 'Identity' },
-      }
-      expect(listRelationStoragePropertyName(schemas, 'contributors')).toBe('contributorIdentityIds')
-      expect(resolveStorageNameToSchemaName(schemas, 'contributorIdentityIds')).toBe('contributors')
+    it('takes a row key from property_id first, then from its stored name', () => {
+      expect(metadataRowPropertyKey({ propertyKey: 'heading', propertyName: 'title' }, postSchemas)).toBe('heading')
+      expect(metadataRowPropertyKey({ propertyName: 'authorIdentityIds' }, postSchemas)).toBe('authors')
+      expect(metadataRowPropertyKey({ propertyName: 'avatarId', refSeedType: 'image' })).toBe('avatar')
+      expect(metadataRowPropertyKey({ propertyName: 'avatarId' })).toBe('avatarId')
+      expect(metadataRowPropertyKey({ propertyName: 'storageTransactionId', refSeedType: 'file' })).toBe('storageTransactionId')
     })
   })
 

@@ -175,9 +175,6 @@ export class NodeDb implements IDb {
 
     this.db = db
 
-    const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
-    await backfillMetadataPropertyIds()
-
     return this.db
   }
 

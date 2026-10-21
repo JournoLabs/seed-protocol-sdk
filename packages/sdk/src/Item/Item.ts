@@ -8,10 +8,11 @@ import {
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import {
   getAlternatePropertyNameForInstanceLookup,
-  resolveStorageNameToSchemaName,
+  metadataRowPropertyKey,
   toItemPropertyKey,
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
+import { metadataPropertyKeyColumn } from '@/db/read/metadataProperty'
 import { VersionsType } from '@/seedSchema'
 // Dynamic import to break circular dependency: Model -> Item -> Model
 // import { Model } from '@/Model/Model'
@@ -65,7 +66,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { deleteItem } from '@/db/write/deleteItem'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
-import { eq } from 'drizzle-orm'
+import { eq, getTableColumns } from 'drizzle-orm'
 import debug from 'debug'
 
 const itemLogger = debug('seedSdk:Item')
@@ -1243,7 +1244,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
 
           const metadataRows = await appDb
-            .select()
+            .select({ ...getTableColumns(metadata), propertyKey: metadataPropertyKeyColumn() })
             .from(metadata)
             .where(
               and(
@@ -1276,25 +1277,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
           for (const metaRow of metadataRows) {
             try {
-              let propertyName = metaRow.propertyName as string | undefined
-              const listSchemaKey =
-                propertyName &&
-                Object.keys(propertySchemas).length > 0 &&
-                resolveStorageNameToSchemaName(propertySchemas, propertyName)
-              if (listSchemaKey) {
-                propertyName = listSchemaKey
-              } else {
-                const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-                const refSeedType = metaRow.refSeedType as string | undefined
-                const isRefTypeFromMeta =
-                  refSeedType === 'file' ||
-                  refSeedType === 'image' ||
-                  refSeedType === 'relation' ||
-                  refSeedType === 'html'
-                if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-                  propertyName = baseName
-                }
-              }
+              const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
               if (!propertyName) {
                 continue
               }
@@ -2176,7 +2159,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               
               // Query metadata for the latest version
               const metadataRows = await db
-                .select()
+                .select({ ...getTableColumns(metadata), propertyKey: metadataPropertyKeyColumn() })
                 .from(metadata)
                 .where(
                   and(
@@ -2210,21 +2193,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   }
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {
-                      let propertyName = metaRow.propertyName
-                      const listSchemaKey =
-                        propertyName &&
-                        Object.keys(propertySchemas).length > 0 &&
-                        resolveStorageNameToSchemaName(propertySchemas, propertyName)
-                      if (listSchemaKey) {
-                        propertyName = listSchemaKey
-                      } else {
-                        const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-                        const refSeedType = metaRow.refSeedType as string | undefined
-                        const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
-                        if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-                          propertyName = baseName
-                        }
-                      }
+                      const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
+                      if (!propertyName) return
                       const property = await ItemProperty.find({
                         propertyName,
                         seedLocalId: watchedSeedLocalId,

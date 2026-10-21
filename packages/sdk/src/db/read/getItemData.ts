@@ -13,7 +13,8 @@ import { getSeedData } from "./getSeedData"
 import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
 import { isVersionRevoked } from "./subqueries/liveVersion"
 import { latestVersionOrder } from "./subqueries/latestVersion"
-import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
+import { metadataRowPropertyKey } from "@/helpers/metadataPropertyNames"
+import { metadataPropertyNameForms, readMetadataPropertiesById } from "@/db/read/metadataProperty"
 
 const logger = debug('seedSdk:db:read:getItemData')
 
@@ -188,16 +189,29 @@ export const getItemData: GetItemData = async ({
     return itemData
   }
 
+  // Rows linked by property_id are their property's (decision D4): read under its key, and under
+  // the stored name only when that is one of the key's stored forms (`textId`, `authorIdentityIds`).
+  // A renamed property's rows keep the old name, which is no longer the property's.
+  const propertiesById = await readMetadataPropertiesById(
+    appDb,
+    propertiesData.map((data) => (data as { propertyId?: number | null }).propertyId),
+  )
   for (const propertyData of propertiesData) {
     const propertyName = propertyData.propertyName
-
     const propertyValue = propertyData.propertyValue
-
-    const schemaBaseName = toSchemaPropertyName(propertyName)
-    if (schemaBaseName && propertyData.refSeedType) {
-      itemData[schemaBaseName] = propertyValue
+    const propertyId = (propertyData as { propertyId?: number | null }).propertyId
+    const property = propertyId != null ? propertiesById.get(propertyId) : undefined
+    if (property) {
+      itemData[property.name] = propertyValue
+      if (metadataPropertyNameForms(property).includes(propertyName)) itemData[propertyName] = propertyValue
+      continue
     }
 
+    // No property_id: the stored name, and for a ref row its `<key>Id` stripped
+    const key = metadataRowPropertyKey(propertyData)
+    if (key && key !== propertyName && propertyData.refSeedType) {
+      itemData[key] = propertyValue
+    }
     itemData[propertyName] = propertyValue
   }
 

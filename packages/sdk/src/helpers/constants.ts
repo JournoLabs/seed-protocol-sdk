@@ -59,8 +59,11 @@ export const INTERNAL_DATA_TYPES = {
   },
 }
 
-/** Full property names ending in `Id` that must not be stripped to a “base” name for `allProperties` keys. */
-export const PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP = new Set<string>(['storageTransactionId'])
+/**
+ * Internal property names ending in `Id` that are names in their own right: never stripped to a
+ * base name, and never given an `Id` suffix in metadata.
+ */
+export const PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP = new Set<string>(['storageTransactionId', 'transactionId'])
 
 export const INTERNAL_PROPERTY_NAMES = [
   'localId',

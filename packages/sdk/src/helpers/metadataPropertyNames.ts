@@ -33,38 +33,37 @@ export function listRelationEasPropertyName(
   return `${pluralize(propertyName, 1)}${ref}Ids`
 }
 
-/**
- * For a schema property key like `authors` (List of Relation to Identity), returns the
- * internal storage/EAS name: `authorIdentityIds` (singular + ref + Ids).
- */
-export function listRelationStoragePropertyName(
-  propertySchemas: Record<string, PropertySchemaEntry>,
-  schemaPropertyKey: string,
-): string | undefined {
-  return listRelationEasPropertyName(schemaPropertyKey, propertySchemas[schemaPropertyKey])
-}
+/** refSeedType values of rows whose value names a storage or related seed. */
+const REF_SEED_TYPES = new Set(['file', 'image', 'relation', 'html'])
 
 /**
- * Reverse of listRelationStoragePropertyName: maps DB/EAS name `authorIdentityIds` to schema key `authors`.
+ * The key an item exposes a metadata row's property under. `propertyKey` (the properties row's
+ * name, through property_id) when the row has one. Otherwise from the stored name: the key it is a
+ * stored form of among `defs`, else the name without a trailing `Id`/`Ids` when `defs` has that
+ * key or the row is a ref (refSeedType), else the stored name.
  */
-export function resolveStorageNameToSchemaName(
-  propertySchemas: Record<string, PropertySchemaEntry>,
-  storagePropertyName: string,
+export function metadataRowPropertyKey(
+  row: { propertyKey?: string | null; propertyName?: string | null; refSeedType?: string | null },
+  defs: Record<string, MetadataPropertyDef | undefined> = {},
 ): string | undefined {
-  for (const [schemaKey, propDef] of Object.entries(propertySchemas)) {
-    if (normalizeDataType(propDef?.dataType) !== 'List') continue
-    const ref = propDef.ref || propDef.refModelName
-    if (!ref) continue
-    const internalName = `${pluralize(schemaKey, 1)}${ref}Ids`
-    if (internalName === storagePropertyName) {
-      return schemaKey
-    }
+  if (row.propertyKey) return row.propertyKey
+  const name = row.propertyName
+  if (!name) return undefined
+  const key = propertyKeyFromStoredName(defs, name)
+  if (key) return key
+  const base = name.endsWith('Ids')
+    ? name.slice(0, -3)
+    : name.endsWith('Id') && !ID_SUFFIX_EXCLUDE.has(name)
+      ? name.slice(0, -2)
+      : undefined
+  if (base && (Object.prototype.hasOwnProperty.call(defs, base) || REF_SEED_TYPES.has(row.refSeedType ?? ''))) {
+    return base
   }
-  return undefined
+  return name
 }
 
 /** Internal property names that never use Id-suffix metadata convention */
-const ID_SUFFIX_EXCLUDE = new Set(['storageTransactionId', 'transactionId'])
+const ID_SUFFIX_EXCLUDE = PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP
 
 /** Data types that store metadata with Id suffix in DB */
 const METADATA_ID_SUFFIX_TYPES = ['Image', 'File', 'Html', 'Relation']
@@ -100,6 +99,49 @@ export function toMetadataPropertyName(
     return `${propertyName}Id`
   }
   return propertyName
+}
+
+/** Minimal property def shape for the storage-name codec. */
+export type MetadataPropertyDef = PropertySchemaEntry & { refValueType?: string }
+
+/**
+ * The name new metadata rows of a property are written under (decision D4): a List of Relation's
+ * `<singular key><Ref>Ids` (`authors` → `authorIdentityIds`), a single Image, File, Html or
+ * Relation's `<key>Id`, anything else its key. Readers match rows by `property_id`; this name only
+ * matters for rows that have none.
+ */
+export function metadataStorageName(key: string, def: MetadataPropertyDef | undefined): string {
+  const listName = listRelationEasPropertyName(key, def)
+  if (listName) return listName
+  if (normalizeDataType(def?.dataType) === 'List') return key
+  return toMetadataPropertyName(key, def?.dataType, def?.refValueType)
+}
+
+/**
+ * Every name a row of this property may be stored under: its storage name, its key, and for an
+ * Image, File, Html or Relation (single or List) `<key>Id`, which older writers and sync used.
+ */
+export function metadataStoredNameForms(key: string, def: MetadataPropertyDef | undefined): string[] {
+  const forms = [metadataStorageName(key, def), key]
+  if (!ID_SUFFIX_EXCLUDE.has(key) && needsMetadataIdSuffix(def?.dataType, def?.refValueType)) forms.push(`${key}Id`)
+  return [...new Set(forms)]
+}
+
+/**
+ * The schema key a stored metadata name belongs to among `defs` (keyed by schema key): an exact key
+ * first, then any of a key's stored forms. Undefined when no property matches. For rows without
+ * `property_id`; rows with one take the key from their properties row.
+ */
+export function propertyKeyFromStoredName(
+  defs: Record<string, MetadataPropertyDef | undefined>,
+  storedName: string,
+): string | undefined {
+  if (!storedName) return undefined
+  if (Object.prototype.hasOwnProperty.call(defs, storedName)) return storedName
+  for (const [key, def] of Object.entries(defs)) {
+    if (metadataStoredNameForms(key, def).includes(storedName)) return key
+  }
+  return undefined
 }
 
 /**

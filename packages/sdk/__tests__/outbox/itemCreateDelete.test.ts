@@ -6,7 +6,7 @@ import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { migrateMetadataForPropertyRename } from '@/helpers/db'
+import { renamePendingWritesForProperty } from '@/helpers/db'
 import { hardDeleteLocalSeedsByLocalIds } from '@/db/write/removeLocalCopiesForAddresses'
 import { appendOutboxOp, getOutboxOps, startItemOutbox, waitForPendingOutboxOps } from '@/outbox'
 import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
@@ -166,11 +166,11 @@ testDescribe('item lifecycle through the outbox', () => {
     const post = await createPost()
     pauseOutboxDrainForTests(true)
     const opId = await appendOutboxOp({ seedLocalId: post.seedLocalId, propertyName: 'body', kind: 'set', value: { newValue: 'y' } })
-    await migrateMetadataForPropertyRename(MODEL, 'body', 'summary', undefined, { schemaName: SCHEMA_NAME })
+    await renamePendingWritesForProperty(MODEL, 'body', 'summary')
     const [op] = await getOutboxOps([opId])
     expect(op.propertyName).toBe('summary')
     // Back, for the other tests' rows
-    await migrateMetadataForPropertyRename(MODEL, 'summary', 'body', undefined, { schemaName: SCHEMA_NAME })
+    await renamePendingWritesForProperty(MODEL, 'summary', 'body')
     await db().delete(pendingWrites).where(eq(pendingWrites.opId, opId))
     post.unload()
   }, 30000)
