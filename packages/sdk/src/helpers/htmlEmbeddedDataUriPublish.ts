@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { getArweaveUrlForTransaction } from '@/helpers'
+import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
 import { getContentHash } from '@/helpers/crypto'
 import type { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
@@ -544,13 +544,13 @@ async function rewriteHtmlEmbeddedImagesOfItem(
       const txId = txBySeedLocalId.get(r.imageSeedLocalId.trim())
       if (!txId) continue
       const dataUri = await findDataUriForStableKey(html, r.stableKey)
-      if (dataUri) replacements.set(dataUri, getArweaveUrlForTransaction(txId))
+      if (dataUri) replacements.set(dataUri, getPublicArweaveRawUrl(txId))
     }
 
     const urlByPropertyName = new Map<string, string>()
     for (const name of findSeedPropertyRefsInHtml(html)) {
       const txId = await resolveSeedPropertyRefTxId(parentItem, name, txBySeedLocalId)
-      urlByPropertyName.set(name, getArweaveUrlForTransaction(txId))
+      urlByPropertyName.set(name, getPublicArweaveRawUrl(txId))
     }
 
     const newHtml = replaceSeedPropertyRefsInHtml(replaceDataUrisInParsedHtml(html, replacements), urlByPropertyName)

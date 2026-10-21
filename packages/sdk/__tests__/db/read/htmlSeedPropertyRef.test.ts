@@ -2,7 +2,15 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { waitFor } from 'xstate'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
-import { generateId, getArweaveUrlForTransaction } from '@/helpers'
+import {
+  DEFAULT_ARWEAVE_HOST,
+  getPublicArweaveRawUrl,
+  getResolvedSeedGatewayEndpoints,
+  resolveSeedGatewayEndpoints,
+  setResolvedSeedGatewayEndpoints,
+  type SeedGatewayConfig,
+} from '@seedprotocol/arweave'
+import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
@@ -132,7 +140,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
     expect(phase1.map((u) => u.seedLocalId)).not.toContain(htmlSeed)
 
     await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, phase1, deferredHtmlSeedLocalIds)
-    const imageUrl = getArweaveUrlForTransaction(phase1.find((u) => u.seedLocalId === imageSeed)!.txId)
+    const imageUrl = getPublicArweaveRawUrl(phase1.find((u) => u.seedLocalId === imageSeed)!.txId)
     expect(await readHtml(post)).toBe(ARCHIVE(imageUrl))
 
     const phase2 = await getPublishUploads(post as any, [], undefined, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds })
@@ -150,7 +158,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
     await waitForIdle(imageItem, 'Item', 15000)
 
     await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, [], [contextOf(post, 'html').propertyValue!])
-    expect(await readHtml(post)).toBe(ARCHIVE(getArweaveUrlForTransaction(publishedTx)))
+    expect(await readHtml(post)).toBe(ARCHIVE(getPublicArweaveRawUrl(publishedTx)))
   }, 90000)
 
   it('fail the rewrite when the property was neither uploaded nor published', async () => {
@@ -181,4 +189,73 @@ testDescribe('seed:property/ placeholders in Html', () => {
       )
     }
   }, 120000)
+
+  // Published Html is permanent, so its URLs must name a public gateway, not the read host the SDK
+  // fetches through. platformClassesInit points the read host at the sidecar or proxy.
+  describe('under a local read gateway', () => {
+    let previousEndpoints: ReturnType<typeof getResolvedSeedGatewayEndpoints>
+    let previousBaseUrl = ''
+
+    const useGateway = async (config: SeedGatewayConfig) => {
+      previousEndpoints = getResolvedSeedGatewayEndpoints()
+      previousBaseUrl = BaseArweaveClient.getBaseUrl()
+      const resolved = await resolveSeedGatewayEndpoints({ ...config, hyper: { ...config.hyper, probeSidecar: false } })
+      setResolvedSeedGatewayEndpoints(resolved)
+      BaseArweaveClient.setHost(`${resolved.arweaveProtocol}://${resolved.arweaveHost}`)
+      return resolved
+    }
+
+    afterEach(() => {
+      setResolvedSeedGatewayEndpoints(previousEndpoints)
+      BaseArweaveClient.setHost(previousBaseUrl)
+    })
+
+    const publishedSrcs = async () => {
+      vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(async () => ({ id: 'unsigned', tags: [] }) as any)
+      const post = await createPost(
+        ARCHIVE('seed:property/featureImage') + `<img src="data:image/png;base64,${TINY_PNG_B64}">`,
+      )
+      const { deferredHtmlSeedLocalIds } = await prepareHtmlEmbeddedImagesForPublish(post as any, 'materialize')
+      const phase1 = withTxIds(
+        await getPublishUploads(post as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      )
+      await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, phase1, deferredHtmlSeedLocalIds)
+      const html = await readHtml(post)
+      const srcs = [...html.matchAll(/src="([^"]+)"/g)].map((m) => m[1])
+      const txIds = new Set(phase1.map((u) => u.txId))
+      return { srcs, txIds }
+    }
+
+    it('write public gateway URLs under transport hyper', async () => {
+      const resolved = await useGateway({ transport: 'hyper', hyper: { localSidecarPort: 4321 } })
+      expect(resolved.activePath).toBe('hyper-sidecar')
+      expect(BaseArweaveClient.getBaseUrl()).toBe('http://127.0.0.1:4321')
+
+      const { srcs, txIds } = await publishedSrcs()
+      expect(srcs).toHaveLength(2)
+      for (const src of srcs) {
+        const match = new RegExp(`^https://${DEFAULT_ARWEAVE_HOST.replace(/\./g, '\\.')}/raw/(.+)$`).exec(src)
+        expect(match, src).toBeTruthy()
+        expect(txIds.has(match![1])).toBe(true)
+      }
+    }, 90000)
+
+    it('write public gateway URLs on the http-proxy path, from arweaveDomain', async () => {
+      const resolved = await useGateway({
+        transport: 'http-gateway',
+        arweaveDomain: 'arweave.net',
+        proxyBaseUrl: 'https://app.example.com/api/seed-gateway',
+      })
+      expect(resolved.activePath).toBe('http-proxy')
+      expect(BaseArweaveClient.getBaseUrl()).toBe('https://app.example.com/api/seed-gateway')
+
+      const { srcs, txIds } = await publishedSrcs()
+      expect(srcs).toHaveLength(2)
+      for (const src of srcs) {
+        const match = /^https:\/\/arweave\.net\/raw\/(.+)$/.exec(src)
+        expect(match, src).toBeTruthy()
+        expect(txIds.has(match![1])).toBe(true)
+      }
+    }, 90000)
+  })
 })

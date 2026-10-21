@@ -130,6 +130,11 @@ export const gateway = {
 
 Top-level `arweaveDomain` / `uploadApiBaseUrl` still work; `gateway` merges with them.
 
+`arweaveDomain` is also the gateway named in published content. When publish rewrites
+`seed:property/` placeholders and embedded data URIs in Html, it writes
+`https://<arweaveDomain>/raw/<tx>` (from `publicArweaveBaseUrl` on the resolved endpoints), never
+the sidecar or proxy host that reads go through, since the uploaded Html can't be changed later.
+
 ## Preferred read gateways
 
 An item is served by the gateway it was uploaded through (sidecar or app-server proxy) as soon as

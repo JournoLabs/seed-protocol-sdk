@@ -27,6 +27,7 @@ function resolved(
     arweaveGraphqlUrl: 'https://arweave.net/graphql',
     uploadApiBaseUrl: 'https://arweave.net',
     activePath: 'http',
+    publicArweaveBaseUrl: 'https://arweave.net',
     ...overrides,
   }
 }

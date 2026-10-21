@@ -136,6 +136,7 @@ describe('fetchTransactionStatusAcrossGateways', () => {
       arweaveGraphqlUrl: `${proxy}/graphql`,
       uploadApiBaseUrl: proxy,
       activePath: 'http-proxy',
+      publicArweaveBaseUrl: 'https://ar.seedprotocol.io',
     })
     const calls = stubGateways({ [proxy]: 503 })
     expect((await fetchTransactionStatusAcrossGateways(TX)).status).toBe(503)
