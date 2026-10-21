@@ -1,5 +1,6 @@
 import { InferSelectModel } from 'drizzle-orm'
-import { index, int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, int, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { attestedUidSql } from './attestedUid'
 
 export const seeds = sqliteTable(
   'seeds',
@@ -24,7 +25,12 @@ export const seeds = sqliteTable(
     _markedForDeletion: int('_marked_for_deletion'),
     revokedAt: int('revoked_at'),
   },
-  (table) => [index('seeds_uid_idx').on(table.uid), index('seeds_type_idx').on(table.type)],
+  (table) => [
+    index('seeds_uid_idx').on(table.uid),
+    index('seeds_type_idx').on(table.type),
+    // One row per attested seed uid (migration 0029). Drafts hold a placeholder uid and are left out.
+    uniqueIndex('seeds_attested_uid_unique').on(table.uid).where(attestedUidSql(table.uid)),
+  ],
   // {
   //   triggers: [
   //     sql<string>`CREATE TRIGGER IF NOT EXISTS seeds_created_at_trigger
