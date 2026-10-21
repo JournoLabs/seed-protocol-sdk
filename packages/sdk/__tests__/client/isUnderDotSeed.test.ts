@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isUnderDotSeed } from '@/client/actors/platformClassesInit'
+import { isUnderDotSeed } from '@/helpers/dotSeedPath'
 
 describe('isUnderDotSeed', () => {
   it.each(['.seed', '.seed/', '.seed/files', './.seed/files', '.seed\\files'])('%s is under .seed', (p) => {

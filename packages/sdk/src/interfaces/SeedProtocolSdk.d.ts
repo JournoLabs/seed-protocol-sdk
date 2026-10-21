@@ -13,7 +13,4 @@ export interface SeedProtocolSdk {
   Text: typeof import('@/Schema').Text;
   Json: typeof import('@/Schema').Json;
   Relation: typeof import('@/Schema').Relation;
-
-  // Node-specific exports
-  withSeed?: typeof import('@/node').withSeed;
 } 

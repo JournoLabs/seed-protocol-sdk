@@ -976,131 +976,6 @@ export const renameModelInDb = async (
 }
 
 /**
- * Check if a property has been locally edited (has unsaved changes)
- * This checks both the in-memory cache (for current session) and the database
- * (for persistence across reloads) by comparing database values with schema file values.
- * @param modelName - The name of the model
- * @param propertyName - The name of the property
- * @param schemaFileValue - Optional schema file value to compare against database
- * @returns true if the property is marked as edited, false otherwise
- */
-async function checkIfPropertyIsEdited(
-  modelName: string,
-  propertyName: string,
-  schemaFileValue?: {
-    dataType?: string
-    ref?: string
-    refValueType?: string
-    required?: boolean
-    storageType?: string | null
-    localStorageDir?: string | null
-    filenameSuffix?: string | null
-  },
-  /** The property's models row (model names are only unique per schema). */
-  modelId?: number,
-): Promise<boolean> {
-  try {
-    // When schemaFileValue is provided (schema sync path), do database check FIRST.
-    // This avoids the ModelProperty dynamic import which can hang due to circular
-    // dependency (ModelProperty -> helpers/db) when called from addModelsToDb during init.
-    if (schemaFileValue) {
-      const db = BaseDb.getAppDb()
-      if (db) {
-        // Find the model
-        const resolvedModel = await resolveModelRecord(modelName, { modelId }, db)
-        const modelRecords = resolvedModel ? [resolvedModel] : []
-        
-        if (modelRecords.length > 0) {
-          const modelRecord = modelRecords[0]
-          // Find the property in the database
-          const propertyRecords = await db
-            .select()
-            .from(properties)
-            .where(
-              and(
-                eq(properties.name, propertyName),
-                eq(properties.modelId, modelRecord.id!),
-              ),
-            )
-            .limit(1)
-          
-          if (propertyRecords.length > 0) {
-            const dbProperty = propertyRecords[0]
-            // Compare database value with schema file value
-            // If they differ, the property has been edited
-            if (dbProperty.dataType !== schemaFileValue.dataType) {
-              logger(`Property ${modelName}:${propertyName} has been edited (dataType differs: DB=${dbProperty.dataType}, Schema=${schemaFileValue.dataType})`)
-              return true
-            }
-            
-            // Check refModelId if it's a relation
-            if (schemaFileValue.ref) {
-              const refModelRecord = await resolveRefModelRecord(
-                schemaFileValue.ref,
-                { modelId: modelRecord.id },
-                db,
-              )
-              if (refModelRecord) {
-                const expectedRefModelId = refModelRecord.id
-                if (dbProperty.refModelId !== expectedRefModelId) {
-                  logger(`Property ${modelName}:${propertyName} has been edited (refModelId differs)`)
-                  return true
-                }
-              }
-            } else if (dbProperty.refModelId !== null) {
-              // Schema file has no ref, but DB has one
-              logger(`Property ${modelName}:${propertyName} has been edited (refModelId differs)`)
-              return true
-            }
-            
-            // Check refValueType
-            if (dbProperty.refValueType !== (schemaFileValue.refValueType || null)) {
-              logger(`Property ${modelName}:${propertyName} has been edited (refValueType differs)`)
-              return true
-            }
-
-            // Check required (for Relation/Image properties)
-            if (schemaFileValue.required !== undefined) {
-              const schemaRequired = !!schemaFileValue.required
-              const dbRequired = dbProperty.required === true
-              if (dbRequired !== schemaRequired) {
-                logger(`Property ${modelName}:${propertyName} has been edited (required differs: DB=${dbRequired}, Schema=${schemaRequired})`)
-                return true
-              }
-            }
-
-            // Storage settings. Rows written before they were stored (all null) aren't edits: the
-            // schema file's values fill them in on this load.
-            const dbStorage = {
-              storageType: dbProperty.storageType ?? null,
-              localStorageDir: dbProperty.localStorageDir ?? null,
-              filenameSuffix: dbProperty.filenameSuffix ?? null,
-            }
-            if (hasStorageSettings(dbStorage)) {
-              const fileStorage = propertyStorageColumns(schemaFileValue)
-              if (
-                dbStorage.storageType !== fileStorage.storageType ||
-                dbStorage.localStorageDir !== fileStorage.localStorageDir ||
-                dbStorage.filenameSuffix !== fileStorage.filenameSuffix
-              ) {
-                logger(`Property ${modelName}:${propertyName} has been edited (storage settings differ)`)
-                return true
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return false
-  } catch (error) {
-    // If we can't check, assume it's not edited to be safe
-    logger('Error checking if property is edited:', error)
-    return false
-  }
-}
-
-/**
  * Adds models and their properties to the database.
  * Optionally connects models to a schema via join records.
  * @param models - The model definitions to add
@@ -1304,24 +1179,8 @@ export const addModelsToDb = async (
         // Mark this DB property as matched
         matchedDbPropertyIds.add(existingProperty.id!)
         
-        // When syncing from schema (schemaFileData present), skip the expensive checkIfPropertyIsEdited.
-        // It can hang for minutes in browser due to circular deps / SQLite contention during init.
-        // Use DB isEdited column as a fast check: if already marked edited, preserve.
-        const skipEditCheck = !!schemaFileData
-        const isPropertyEdited = skipEditCheck
-          ? existingProperty.isEdited === true
-          : await checkIfPropertyIsEdited(
-              modelName,
-              existingProperty.name,
-              {
-                dataType: propertyValues.dataType,
-                ref: propertyValues.ref,
-                refValueType: propertyValues.refValueType,
-                required: propertyValues.required,
-                ...propertyStorageColumns(propertyValues),
-              },
-              modelRecord.id,
-            )
+        // A property edited locally keeps its row.
+        const isPropertyEdited = existingProperty.isEdited === true
         
         if (isPropertyEdited) {
           // Property has been locally edited - skip update to preserve local changes

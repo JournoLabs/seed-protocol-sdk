@@ -24,7 +24,6 @@ type InitEvent = {
   options: SeedConstructorOptions
 }
 
-export { isUnderDotSeed } from '@/helpers/dotSeedPath'
 
 export const platformClassesInit = fromCallback<
 EventObject, 
@@ -104,7 +103,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     // filesDir falls back to endpoints.files (applySeedConfigDefaults fills both)
 
     let normalizedFilesDir = filesDir || endpoints?.files
-    // jsdom (and any env with both Node + window) is "browser" for SDK: PathResolver is OPFS/virtual.
+    // jsdom (and any env with both Node + window) is "browser" for SDK: filesDir is an OPFS path.
     // Do not run real fs against those paths (e.g. mkdir '/.seed').
     if (isNode() && !isBrowser() && normalizedFilesDir) {
       // Lives in the Node platform so browser bundles (and Next.js server builds, which

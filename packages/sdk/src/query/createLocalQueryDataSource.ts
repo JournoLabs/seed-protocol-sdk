@@ -1,5 +1,4 @@
 import { and, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
-import { startCase } from 'lodash-es'
 import type {
   AttestationLike,
   QueryDataSource,
@@ -8,9 +7,6 @@ import { easName, isValidEasAttestationUid } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { seeds, versions, metadata } from '@/seedSchema'
-import { models } from '@/seedSchema/ModelSchema'
-import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 
 function msToUnixSeconds(ms: number | null | undefined): number {
   if (ms == null || !Number.isFinite(ms)) return 0
@@ -81,16 +77,12 @@ function seedRowToAttestation(row: {
   attestationRaw: string | null
   attestationCreatedAt: number | null
   revokedAt?: number | null
-  schemaName?: string | null
 }): LocalAttestation | null {
   if (!row.uid || !isValidEasAttestationUid(row.uid)) return null
   const fromRaw = attestationFromRaw(row.attestationRaw)
   if (fromRaw) {
-    const schemaName =
-      row.schemaName ??
-      fromRaw.schema?.schemaNames?.[0]?.name ??
-      row.type ??
-      'unknown'
+    // The EAS schema name ("post"), which `seeds.type` also holds.
+    const schemaName = fromRaw.schema?.schemaNames?.[0]?.name ?? row.type ?? 'unknown'
     return withLocalRevocation(
       {
         ...fromRaw,
@@ -108,7 +100,7 @@ function seedRowToAttestation(row: {
     )
   }
 
-  const schemaName = row.schemaName ?? row.type ?? 'unknown'
+  const schemaName = row.type ?? 'unknown'
   return withLocalRevocation(
     {
       id: row.uid,
@@ -211,30 +203,6 @@ function metadataRowToAttestation(row: {
   )
 }
 
-async function resolveSchemaNameForSeedType(
-  appDb: any,
-  seedType: string | null,
-  /** seeds.model_file_id: the seed's own model (model names are only unique per schema). */
-  modelFileId?: string | null,
-): Promise<string | null> {
-  if (!seedType) return null
-  const normalized = startCase(seedType)
-  try {
-    const schemaRows = await appDb
-      .select({ schemaName: schemasTable.name })
-      .from(models)
-      .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
-      .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-      .where(modelFileId ? eq(models.schemaFileId, modelFileId) : eq(models.name, normalized))
-      .orderBy(desc(models.id))
-      .limit(1)
-    if (schemaRows[0]?.schemaName) return schemaRows[0].schemaName as string
-  } catch {
-    // ignore
-  }
-  return seedType
-}
-
 function monthBoundsUnix(year: number, month: number): {
   startTs: number
   endTs: number
@@ -268,7 +236,6 @@ async function listPublishedSeedRows(
       uid: seeds.uid,
       schemaUid: seeds.schemaUid,
       type: seeds.type,
-      modelFileId: seeds.modelFileId,
       publisher: seeds.publisher,
       attestationRaw: seeds.attestationRaw,
       attestationCreatedAt: seeds.attestationCreatedAt,
@@ -311,11 +278,7 @@ async function listPublishedSeedRows(
     )
     if (!hasPublished) continue
 
-    const schemaResolved = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
-    const att = seedRowToAttestation({
-      ...row,
-      schemaName: schemaResolved === schemaName ? schemaName : (schemaResolved ?? schemaName),
-    })
+    const att = seedRowToAttestation(row)
     if (!att) continue
     // Force requested schema name so assembleSeeds filters correctly
     att.schema = { schemaNames: [{ name: schemaName }] }
@@ -350,7 +313,6 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
-          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -364,8 +326,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
       if (!row?.uid || !isValidEasAttestationUid(row.uid)) return null
       if (isRevokedLocally(row.revokedAt)) return null
 
-      const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
-      return seedRowToAttestation({ ...row, schemaName })
+      return seedRowToAttestation(row)
     },
 
     async listSeedsBySchemaName(
@@ -470,7 +431,6 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
-          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -482,8 +442,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
       const out: AttestationLike[] = []
       for (const row of rows) {
         if (isRevokedLocally(row.revokedAt)) continue
-        const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
-        const att = seedRowToAttestation({ ...row, schemaName })
+        const att = seedRowToAttestation(row)
         if (att) out.push(att)
       }
       return out

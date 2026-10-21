@@ -1,42 +1,9 @@
-import { Endpoints, Environment } from './index'
-import { ActorRefFrom } from 'xstate'
-import { PublishRequestData } from './seedProtocol'
+import { Endpoints } from './index'
 import { SchemaFileFormat } from './import'
 import type { Model } from '@/Model/Model'
 
 // InternalMachineContext removed - functionality moved to ClientManager
 // DbServiceContext removed - dbMachine and db service have been removed
-
-export type GlobalMachineContext = {
-  isInitialized?: boolean
-  environment?: Environment
-  endpoints?: Endpoints
-  addresses?: string[]
-  models?: { [key: string]: Model }
-  publishItemService?: ActorRefFrom<any>
-  arweaveDomain?: string
-  uploadApiBaseUrl?: string
-  gatewayTransport?: import('./gateway').SeedGatewayTransportMode
-  gatewayHyperKey?: string
-  gatewaySidecarHost?: string
-  gatewaySidecarPort?: number
-  gatewayProxyBaseUrl?: string
-  filesDir?: string
-}
-
-export type PublishMachineContext = PublishRequestData & {
-  status: string
-}
-
-export type GetSchemaForModelEvent = {
-  type: 'getSchemaForModel'
-  modelName: string
-}
-
-export type HydrateExistingItemEvent = {
-  type: 'hydrateExistingItem'
-  existingItem: any
-}
 
 export type FromCallbackInput<T, P = undefined> = {
   context: T
