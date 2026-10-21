@@ -6,27 +6,20 @@ import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { cleanupTestSchemaData } from '../../test-utils/cleanupTestDb'
+import { wrapDbDriver } from '../../test-utils/wrapDbDriver'
 
-type Driver = (sql: string, params: unknown[], method: string) => Promise<unknown>
-
-// Schema import persists its models through addModelsToDb. The Model instances it creates adopt those
+// Schema import persists its models through addModelsToDb, in one transaction. The Model instances it creates adopt those
 // rows instead of writing their own, so each model and property row is written once: an insert, and no
 // update from a second writer (or a second insert, when the two writers race).
 describe('schema import writes each model and property row once', () => {
   const writes: { sql: string; params: unknown[] }[] = []
-  let originalClient: Driver
 
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
-    const session = (BaseDb.getAppDb() as any).session as { client: Driver }
-    originalClient = session.client
-    session.client = async (sql, params, method) => {
+    return wrapDbDriver((client) => async (sql, params, method) => {
       if (/^(insert into|update) /.test(sql)) writes.push({ sql, params })
-      return originalClient(sql, params, method)
-    }
-    return () => {
-      session.client = originalClient
-    }
+      return client(sql, params, method)
+    })
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {

@@ -308,8 +308,7 @@ export const useAllSchemaVersions = () => {
     }
 
     try {
-      // Use DB-first approach: load all schemas from database
-      // This will also import any missing schemas from files
+      // One entry per schema row (reads only; init applies schema files)
       const allSchemasData = await loadAllSchemasFromDb()
 
       // Extract unique schema names

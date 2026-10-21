@@ -35,7 +35,7 @@ import {
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
-import { linkModelToSchema } from '@/db/write/linkModelToSchema'
+import { insertModelSchemaLink, linkModelToSchema } from '@/db/write/linkModelToSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 
 const logger = debug('seedSdk:helpers:db')
@@ -1169,7 +1169,8 @@ export const addModelsToDb = async (
       const toInsert = modelIds.filter(({ modelId }) => !existingSet.has(modelId))
       if (toInsert.length > 0) {
         for (const { modelName, modelId } of toInsert) {
-          if (!(await linkModelToSchema(db, modelId, schemaRecord.id))) continue
+          const link = options.db ? insertModelSchemaLink : linkModelToSchema
+          if (!(await link(db, modelId, schemaRecord.id))) continue
           logger(`Created join table entry for model ${modelName} (id: ${modelId}) to schema (id: ${schemaRecord.id})`)
         }
       }

@@ -18,6 +18,7 @@ import { generateId } from '@/helpers/generateId'
 import { isInternalSchema } from '@/helpers/constants'
 import { ModelPropertyDataTypes, normalizePropertyRecordSchema } from '@/helpers/property'
 import { refreshCachedProperties } from '@/helpers/cachedPropertyRefresh'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import {
   findLatestSchemaFile,
   getSchemaFilePath,
@@ -373,6 +374,13 @@ export async function applySchemaFile(
   }
 
   const models = await createModelsForSchemaFile(file)
+  // Callers use the models next (an item create reads their properties): wait until each has them.
+  // A model stopped meanwhile (its schema evicted) ends the wait at once.
+  await Promise.all(
+    Object.values(models).map((model) =>
+      waitForEntityIdle(model as unknown as Parameters<typeof waitForEntityIdle>[0], { throwOnError: false }).catch(() => {}),
+    ),
+  )
   return { schemaFile: file, filePath, schemaRecord: schemaRecord!, skipped, models }
 }
 
