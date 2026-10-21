@@ -120,6 +120,10 @@ testDescribe('Image property persistence integration tests', () => {
             id: generateId(),
             type: 'Image',
           },
+          attachment: {
+            id: generateId(),
+            type: 'File',
+          },
         },
       },
     },
@@ -390,5 +394,90 @@ testDescribe('Image property persistence integration tests', () => {
       )
     expect([...(await read(first))]).toEqual([1, 2, 3])
     expect([...(await read(second))]).toEqual([4, 5, 6, 7])
+  })
+
+  /** Wait for a save to settle: not saving, and the error or validation errors it ended with. */
+  async function waitForSaveSettled(property: ItemProperty<any>) {
+    const snapshot = await waitFor(
+      property.getService(),
+      (s) => {
+        const ctx = s.context as Record<string, any>
+        return !ctx.isSaving && (!!ctx._saveError || !!ctx._saveValidationErrors?.length)
+      },
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+    return snapshot.context as Record<string, any>
+  }
+
+  async function itemWithSavedImage(title: string) {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const item = await Item.create({ modelName: 'Post', schemaName, title })
+    await waitForItemIdle(item)
+    const property = item.properties.find(
+      (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+    ) as ItemProperty<any>
+    property.value = createPngFile('cover.png')
+    await waitForRefResolvedValue(property)
+    const saved = property.getService().getSnapshot().context as Record<string, any>
+    return { item, property, saved }
+  }
+
+  const imageSeedCount = async () =>
+    (await BaseDb.getAppDb()!.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'image'))).length
+
+  const imageRows = async (seedLocalId: string) =>
+    BaseDb.getAppDb()!
+      .select({ propertyValue: metadata.propertyValue, refResolvedValue: metadata.refResolvedValue })
+      .from(metadata)
+      .where(eq(metadata.seedLocalId, seedLocalId))
+      .then((rows) => rows.filter((r) => r.refResolvedValue))
+
+  for (const empty of ['', null] as const) {
+    it(`refuses ${JSON.stringify(empty)} for an Image and keeps the saved image`, async () => {
+      const { item, property, saved } = await itemWithSavedImage(`Post cleared with ${JSON.stringify(empty)}`)
+      const seedsBefore = await imageSeedCount()
+
+      property.value = empty
+      const ctx = await waitForSaveSettled(property)
+
+      expect(ctx._saveValidationErrors?.[0]?.code).toBe('empty_storage_value')
+      expect(ctx.propertyValue).toBe(saved.propertyValue)
+      expect(ctx.refResolvedValue).toBe(saved.refResolvedValue)
+      expect(await imageSeedCount()).toBe(seedsBefore)
+      expect(await imageRows(item.seedLocalId!)).toEqual([
+        { propertyValue: saved.propertyValue, refResolvedValue: saved.refResolvedValue },
+      ])
+    })
+  }
+
+  it("refuses '' for a File", async () => {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with empty attachment' })
+    await waitForItemIdle(item)
+    const property = item.properties.find((p) => p.propertyName === 'attachment') as ItemProperty<any>
+    expect(property).toBeTruthy()
+
+    property.value = ''
+    const ctx = await waitForSaveSettled(property)
+
+    expect(ctx._saveValidationErrors?.[0]?.code).toBe('empty_storage_value')
+    const fileSeeds = await BaseDb.getAppDb()!.select({ localId: seeds.localId }).from(seeds).where(eq(seeds.type, 'file'))
+    expect(fileSeeds).toEqual([])
+  })
+
+  it('restores the saved image when saving a new one fails', async () => {
+    const { property, saved } = await itemWithSavedImage('Post with a failed image save')
+    const shownBefore = property.value
+
+    // Not a file name, data URL or URL: saveImage finds no file data and throws
+    property.value = 'not an image!'
+    const ctx = await waitForSaveSettled(property)
+
+    expect(ctx._saveError?.message).toBe('No file data found')
+    expect(ctx.propertyValue).toBe(saved.propertyValue)
+    expect(ctx.renderValue).toBe(saved.renderValue)
+    expect(property.value).toBe(shownBefore)
   })
 })

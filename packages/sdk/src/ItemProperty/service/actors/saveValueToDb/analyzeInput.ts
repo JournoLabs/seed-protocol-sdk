@@ -130,6 +130,29 @@ export const analyzeInput = fromCallback<
     const normalizedDataType = normalizeDataType(propertyRecordSchema.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema.refValueType)
 
+    // An Image, File or Html value is stored as a seed holding the content, so an empty value has
+    // nothing to store. Refused rather than saved: '' passed saveImage's existing-file check (the
+    // images folder itself) and wrote an image seed for a file that doesn't exist.
+    const isStorageSeedValue =
+      normalizedRefValueType === ModelPropertyDataTypes.Image ||
+      normalizedDataType === ModelPropertyDataTypes.Image ||
+      normalizedDataType === ModelPropertyDataTypes.File ||
+      normalizedDataType === ModelPropertyDataTypes.Html
+    if (isStorageSeedValue && (newValue == null || (typeof newValue === 'string' && newValue.trim() === ''))) {
+      sendBack({
+        type: 'saveValueValidationError',
+        errors: [
+          {
+            field: 'value',
+            message: `${propertyName} can't be cleared: ${propertyRecordSchema.dataType} properties don't take an empty value`,
+            code: 'empty_storage_value',
+            severity: 'error' as const,
+          },
+        ],
+      })
+      return false
+    }
+
     // A Relation with a non-Image refValueType stores the related seed id like any other value,
     // through the write below.
     if (

@@ -79,7 +79,13 @@ export const saveImage = fromCallback<
     // Check before classifying the string: a filename like "photo.png" also matches the URL regex
     // and would otherwise be fetched relative to the page.
     let isExistingFileReference = false
-    if (typeof newValue === 'string' && !newValue.includes('/') && !newValue.startsWith('data:')) {
+    // An empty name would check the images folder itself
+    if (
+      typeof newValue === 'string' &&
+      newValue.trim() !== '' &&
+      !newValue.includes('/') &&
+      !newValue.startsWith('data:')
+    ) {
       const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
       if (await BaseFileManager.pathExists(existingFilePath)) {
         isExistingFileReference = true
