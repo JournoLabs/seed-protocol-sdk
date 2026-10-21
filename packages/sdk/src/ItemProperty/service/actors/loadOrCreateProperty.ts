@@ -1,28 +1,13 @@
-import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, type MetadataType } from '@/seedSchema'
-import { eq, and, or } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
-import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
-import {
-  BaseFileManager,
-  resolveMetadataRecord,
-} from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
-import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
+import { normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
 import { timingMarks } from '@/helpers/timing'
-import { ensureImageLocal } from '@/helpers/ensureImageLocal'
-import { ImageSize } from '@/helpers/constants'
-import { downloadTransactionIdWithDedupe } from '@/events/files/download'
-import {
-  readHtmlBodyForStorageSeedPropertyValue,
-  resolveHtmlStorageSeedLocalId,
-} from '@/helpers/readHtmlBodyForStorageSeed'
-import { updateMetadata } from '@/db/write/updateMetadata'
+import { resolveStorageDisplay, storedValueKind } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:itemProperty:actors:loadOrCreateProperty')
 
@@ -50,44 +35,20 @@ export const loadOrCreateProperty = fromCallback<
     const timing = timingMarks()
     const timingLabel = `property ${seedLocalId ?? seedUid} ${propertyName} loadOrCreateProperty`
 
-    // Use getMetadataLatest subquery pattern to get the latest metadata record for the property
-    const metadataLatest = getMetadataLatest({ 
-      seedLocalId: seedLocalId ?? undefined, 
-      seedUid: seedUid ?? undefined 
-    })
-    
-    // The property's rows: linked by property_id (decision D4), else stored under one of its names
-    // (Html/Image/File/Relation rows are `htmlId` and the like)
-    const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
-    const property = await matchMetadataProperty(
+    // The row that holds the property's value, a pending outbox value over it (ADR 0019)
+    const { currentPropertyRow } = await import('@/db/read/currentPropertyRow')
+    const metadataRecord = await currentPropertyRow(
+      { seedLocalId, seedUid },
       {
         propertyId: context.propertyId,
         propertyName,
         modelName: context.modelName,
         modelFileId: context.modelFileId,
-        seedLocalId,
-        seedUid,
       },
-      db,
     )
-    timing.mark('property')
-    const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
-
-    // A value whose outbox op hasn't applied yet (ADR 0019), read before the stored row: an op that
-    // applies between the two reads is then in one of them
-    const { applyPendingRow, getPendingPropertyRow, pendingSetValueOf } = await import('@/outbox/pendingValues')
-    const pendingFirst = seedLocalId ? await getPendingPropertyRow(seedLocalId, propertyName) : undefined
-    timing.mark('pending value')
-
-    const metadataRecords = await db
-      .with(metadataLatest)
-      .select()
-      .from(metadataLatest)
-      .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
-      .limit(5)
     timing.mark('metadata')
 
-    if (metadataRecords.length === 0) {
+    if (!metadataRecord) {
       // Metadata not found - this is a new property, will be created elsewhere.
       // Still resolve propertyRecordSchema from Model so getSegmentedItemProperties and
       // getPublishPayload can route and attest the property (e.g. title, description).
@@ -122,14 +83,12 @@ export const loadOrCreateProperty = fromCallback<
         }
       }
       logger(`Metadata not found in database for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
-      // No row yet, but maybe a value waiting in the outbox
-      const pendingValue = pendingSetValueOf(pendingFirst) ?? undefined
       sendBack({
         type: 'loadOrCreatePropertySuccess',
         property: {
           propertyName,
-          propertyValue: context.propertyValue || pendingValue,
-          renderValue: context.renderValue || context.propertyValue || pendingValue,
+          propertyValue: context.propertyValue,
+          renderValue: context.renderValue || context.propertyValue,
           seedLocalId,
           seedUid,
           versionLocalId: versionLocalId || context.versionLocalId,
@@ -144,17 +103,6 @@ export const loadOrCreateProperty = fromCallback<
       })
       return
     }
-
-    // Resolve best metadata record when multiple variants exist (base + Id)
-    const metadataRecord = resolveMetadataRecord(
-      metadataRecords as (MetadataType & { refResolvedValue?: string | null; refSeedType?: string })[],
-      propertyName
-    )
-    // An assigned value whose outbox op hasn't applied yet wins over the stored row
-    const pending = seedLocalId
-      ? pendingFirst
-      : await getPendingPropertyRow(metadataRecord.seedLocalId, propertyName)
-    if (pending) Object.assign(metadataRecord, applyPendingRow({}, pending))
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
@@ -208,165 +156,31 @@ export const loadOrCreateProperty = fromCallback<
       }
     }
 
-    // For Html: read file content for renderValue (propertyValue is seed ID; blob URLs in DB are invalid after reload)
+    // A file's display: a session URL for an Image or File, the text of an Html body, fetched when
+    // it isn't on disk. ItemStorage content is read by the display subscriber.
     let renderValue: string | string[] | undefined = metadataRecord.propertyValue || undefined
-    const refSeedType = (metadataRecord as { refSeedType?: string }).refSeedType
-    const normalizedHtmlDt = normalizeDataType(propertyRecordSchema?.dataType)
-    const isHtml =
-      refSeedType === 'html' || normalizedHtmlDt === ModelPropertyDataTypes.Html
-    // Fallback: derive refResolvedValue/localStorageDir from propertyValue when missing (e.g. EAS sync, legacy data).
-    // After publish, propertyValue may be the Html storage seed uid while files stay named `{localId}.html`.
-    if (isHtml && !metadataRecord.refResolvedValue && metadataRecord.propertyValue) {
-      const lid = await resolveHtmlStorageSeedLocalId(metadataRecord.propertyValue)
-      if (lid) {
-        metadataRecord.refResolvedValue = `${lid}.html`
-        metadataRecord.localStorageDir = '/html'
-      }
-    }
-    // Fallback: when Html has refResolvedValue but localStorageDir is null (e.g. EAS sync, legacy records)
-    if (isHtml && metadataRecord.refResolvedValue && !metadataRecord.localStorageDir) {
-      metadataRecord.localStorageDir = '/html'
-    }
-    if (isHtml && metadataRecord.refResolvedValue && metadataRecord.localStorageDir) {
-      try {
-        const dir = metadataRecord.localStorageDir.replace(/^\//, '')
-        const filePath = BaseFileManager.getFilesPath(dir, metadataRecord.refResolvedValue)
-        let exists = await BaseFileManager.pathExists(filePath)
-        if (!exists) {
-          await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
-          exists = await BaseFileManager.pathExists(filePath)
-        }
-        if (exists) {
-          renderValue = await BaseFileManager.readFileAsString(filePath)
-        } else {
-          const viaSeedPointer = await readHtmlBodyForStorageSeedPropertyValue(
-            metadataRecord.propertyValue,
-          )
-          if (viaSeedPointer) {
-            renderValue = viaSeedPointer
-          }
-        }
-      } catch (e) {
-        logger(`Failed to read Html file for ${propertyName}: ${e}`)
-      }
-    }
-    // Covers missing ref row, wrong ref, or DB dataType casing "html" (handled by isHtml above).
-    if (isHtml && metadataRecord.propertyValue) {
-      const pv = String(metadataRecord.propertyValue).trim()
-      const rv = typeof renderValue === 'string' ? renderValue.trim() : ''
-      if (!rv || rv === pv) {
-        const recovered = await readHtmlBodyForStorageSeedPropertyValue(metadataRecord.propertyValue)
-        if (recovered) {
-          renderValue = recovered
-        }
-      }
-    }
-
+    const refSeedType = metadataRecord.refSeedType ?? undefined
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
-    const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-    const isImage =
-      refSeedType === 'image' ||
-      normalizedDataType === 'Image' ||
-      normalizedRefValueType === 'Image'
-    const isFile =
-      refSeedType === 'file' ||
-      normalizedDataType === 'File'
-
-    // Image and File: the display value is a session URL minted from the file below. A stored one is a
-    // dead blob: URL after reload (or a file:// URL that breaks when filesDir moves), so never read it.
+    const kind = storedValueKind(propertyRecordSchema, metadataRecord)
+    // A stored display value is a dead blob: URL after reload (or a file:// URL that breaks when
+    // filesDir moves): Image, File and Html never read it.
     let refResolvedDisplayValue: string | undefined =
-      isImage || isFile
+      kind === 'image' || kind === 'file'
         ? context.refResolvedDisplayValue ?? undefined
-        : (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
-
-    const resolveMatchingFilePath = async (dir: string, needle: string): Promise<string | undefined> => {
-      const dirPath = BaseFileManager.getFilesPath(dir)
-      const dirExists = await BaseFileManager.pathExists(dirPath)
-      if (!dirExists) return undefined
-      const fs = await BaseFileManager.getFs()
-      const path = BaseFileManager.getPathModule()
-      const files = await fs.promises.readdir(dirPath)
-      const matchingFiles = files.filter((file: string) =>
-        path.basename(file).includes(needle)
-      )
-      if (!matchingFiles?.length) return undefined
-      return BaseFileManager.getFilesPath(dir, matchingFiles[0])
-    }
-
-    // EAS-synced rows: parent metadata stores the image seed uid in property_value; filename/Arweave id is on the image seed's metadata.
-    // hydrateFromDb already repairs this; doing it here avoids a multi-second gap where UI shows a non-blob value until rehydrate runs.
-    if (
-      isImage &&
-      !metadataRecord.refResolvedValue &&
-      typeof metadataRecord.propertyValue === 'string' &&
-      metadataRecord.propertyValue.length === 66
-    ) {
-      const storageTxRows = await db
-        .select({ propertyValue: metadata.propertyValue })
-        .from(metadata)
-        .where(
-          and(
-            eq(metadata.seedUid, metadataRecord.propertyValue),
-            or(
-              eq(metadata.propertyName, 'storageTransactionId'),
-              eq(metadata.propertyName, 'transactionId'),
-            ),
-          ),
-        )
-        .limit(1)
-      const derivedTxId = storageTxRows[0]?.propertyValue
-      if (derivedTxId) {
-        metadataRecord.refResolvedValue = derivedTxId
-        metadataRecord.localStorageDir = metadataRecord.localStorageDir ?? '/images'
-        if (metadataRecord.localId) {
-          try {
-            await updateMetadata({
-              localId: metadataRecord.localId,
-              refResolvedValue: derivedTxId,
-              localStorageDir: '/images',
-            })
-          } catch (e) {
-            logger(`loadOrCreateProperty: updateMetadata refResolvedValue failed for ${propertyName}:`, e)
-          }
-        }
-      }
-    }
-
-    if (isImage && metadataRecord.refResolvedValue) {
+        : kind === 'html'
+          ? undefined
+          : (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
+    if (kind && kind !== 'itemStorage') {
       try {
-        const dir = (metadataRecord.localStorageDir ?? '/images').replace(/^\//, '')
-        await ensureImageLocal({
-          transactionId: metadataRecord.refResolvedValue,
-          fileName: metadataRecord.refResolvedValue,
-          widths: [ImageSize.EXTRA_SMALL],
-        })
-        const filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
-        if (filePath) {
-          const file = await BaseFileManager.readFile(filePath)
-          const freshBlobUrl = createSessionObjectUrl(file)
-          renderValue = freshBlobUrl
-          refResolvedDisplayValue = freshBlobUrl
+        const display = await resolveStorageDisplay(kind, metadataRecord, { fetch: true })
+        metadataRecord.refResolvedValue = display.ref.refResolvedValue ?? null
+        metadataRecord.localStorageDir = display.ref.localStorageDir ?? null
+        if (display.renderValue !== undefined) {
+          renderValue = display.renderValue
+          if (kind !== 'html') refResolvedDisplayValue = display.renderValue
         }
       } catch (e) {
-        logger(`Failed to resolve Image file for ${propertyName}: ${e}`)
-      }
-    }
-
-    if (isFile && metadataRecord.refResolvedValue) {
-      try {
-        const dir = (metadataRecord.localStorageDir ?? '/files').replace(/^\//, '')
-        let filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
-        if (!filePath) {
-          await downloadTransactionIdWithDedupe(metadataRecord.refResolvedValue)
-          filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
-        }
-        if (filePath) {
-          // The content URL saveFile and hydrateFromDb set, so the value reads the same everywhere.
-          renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
-          refResolvedDisplayValue = renderValue as string | undefined
-        }
-      } catch (e) {
-        logger(`Failed to resolve File for ${propertyName}: ${e}`)
+        logger(`Failed to resolve the ${kind} file for ${propertyName}: ${e}`)
       }
     }
 

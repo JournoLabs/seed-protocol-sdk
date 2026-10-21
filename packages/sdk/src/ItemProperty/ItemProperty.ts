@@ -14,15 +14,15 @@ import {
 } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { getPropertyData } from '@/db/read/getPropertyData'
+import { currentPropertyRow } from '@/db/read/currentPropertyRow'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
+import { watchEntityRows } from '@/browser/db/changeFeed'
 import {
   BaseFileManager,
   getCorrectId,
-  resolveMetadataRecord,
 } from '@/helpers'
+import { resolveStorageDisplay, storageSubdir, storedValueKind } from '@/storageValue/resolve'
 import {
   getMetadataPropertyNamesForQuery,
   listRelationEasPropertyName,
@@ -510,45 +510,37 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           this._schemaUid = context.schemaUid
         }
 
-        if (
-          (isImage || isFile || isItemStorage || isHtml) &&
-          context.refResolvedValue
-        ) {
-          const dir = context.localStorageDir?.replace(/^\//, '') || (isHtml ? 'html' : 'images')
-          let filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
+        // The file a stored value names: an Image or File shows a session URL (one already minted for
+        // the same file is kept), Html and ItemStorage their text
+        const fileKind = isImage ? 'image' : isFile ? 'file' : isItemStorage ? 'itemStorage' : isHtml ? 'html' : undefined
+        if (fileKind && context.refResolvedValue) {
           try {
-            // An ItemStorage value whose op is pending is in its staged file (ADR 0019)
-            if (isItemStorage) {
+            let found: boolean
+            if ((fileKind === 'image' || fileKind === 'file') && context.refResolvedDisplayValue) {
+              const dir = storageSubdir(fileKind, context.localStorageDir)
+              found = await BaseFileManager.pathExists(BaseFileManager.getFilesPath(dir, context.refResolvedValue))
+              if (found) renderValue = context.refResolvedDisplayValue
+            } else {
+              // An ItemStorage value whose op is pending is in its staged file (ADR 0019)
               const { getPendingPropertyRow } = await import('@/outbox/pendingValues')
-              const staged = (await getPendingPropertyRow(context.seedLocalId, context.propertyName))?.stagedPath
-              if (staged && (await BaseFileManager.pathExists(staged))) filePath = staged
+              const stagedPath =
+                fileKind === 'itemStorage'
+                  ? (await getPendingPropertyRow(context.seedLocalId, context.propertyName))?.stagedPath
+                  : undefined
+              const display = await resolveStorageDisplay(
+                fileKind,
+                {
+                  propertyValue: typeof pv === 'string' ? pv : undefined,
+                  refResolvedValue: context.refResolvedValue,
+                  localStorageDir: context.localStorageDir,
+                },
+                { stagedPath },
+              )
+              found = display.renderValue !== undefined
+              renderValue = display.renderValue
+              if (found && (fileKind === 'image' || fileKind === 'file')) mintedDisplayValue = display.renderValue
             }
-            let exists = await BaseFileManager.pathExists(filePath)
-            if (!exists && isHtml) {
-              await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
-              exists = await BaseFileManager.pathExists(filePath)
-            }
-            if (exists && (isItemStorage || isHtml)) {
-              renderValue = await BaseFileManager.readFileAsString(filePath,)
-            }
-            if (exists && isImage) {
-              if (context.refResolvedDisplayValue) {
-                renderValue = context.refResolvedDisplayValue
-              } 
-              if (!context.refResolvedDisplayValue) {
-                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
-              }
-            }
-            if (exists && isFile) {
-              // A File's value is its content URL (a blob URL in browsers, file:// in Node), as saveFile
-              // and hydrateFromDb set it. Reading the text here made the value change from the URL to
-              // the file's contents a moment after every save or load.
-              renderValue = context.refResolvedDisplayValue
-              if (!renderValue) {
-                renderValue = mintedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
-              }
-            }
-            if (!exists) {
+            if (!found) {
               // Keep filename for display when File object is present but not yet saved to disk
               if (isFile && isFileValue) {
                 renderValue = (pv as unknown as File).name
@@ -685,7 +677,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
         // The property's rows: linked by property_id (decision D4), else stored under one of its names
         const { context: matchContext } = this._service.getSnapshot()
-        const { matchMetadataProperty, metadataRowsOfProperty } = await import('@/db/read/metadataProperty')
+        const { matchMetadataProperty } = await import('@/db/read/metadataProperty')
         const property = await matchMetadataProperty(
           {
             propertyId: matchContext.propertyId,
@@ -719,15 +711,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // one unless the row now points at a different file, then clear it so the next render mints anew.
         // A kept URL is also the renderValue: the row's propertyValue (the storage seed id) showed for a
         // moment on every write to the metadata table, then the subscriber put the URL back.
-        const displayValueFromRow = (row: { refResolvedValue: string | null; refResolvedDisplayValue: string | null }) => {
+        // Html's stored display value is an unused session URL too (its display is the file's text).
+        const displayValueFromRow = (row: { refResolvedValue?: string | null; refResolvedDisplayValue?: string | null }) => {
           const { context } = this._service.getSnapshot()
-          const isSessionUrlType =
-            normalizedDataType === 'Image' ||
-            normalizedDataType === 'File' ||
-            normalizedRefValueType === 'Image' ||
-            context.refSeedType === 'image' ||
-            context.refSeedType === 'file'
-          if (!isSessionUrlType) {
+          const kind = storedValueKind(propertyRecordSchema, context)
+          if (kind === 'html') return { refResolvedDisplayValue: undefined }
+          if (kind !== 'image' && kind !== 'file') {
             return { refResolvedDisplayValue: row.refResolvedDisplayValue || undefined }
           }
           if ((row.refResolvedValue || undefined) === context.refResolvedValue) {
@@ -738,96 +727,36 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
         // A row with no value and no file is a cleared property (ADR 0021), here or synced from
         // another device: drop the storage transaction id too, or the old file's gateway URL shows.
-        const clearedFromRow = (row: { propertyValue: string | null; refResolvedValue: string | null }) =>
+        const clearedFromRow = (row: { propertyValue?: string | null; refResolvedValue?: string | null }) =>
           row.propertyValue == null && !row.refResolvedValue ? { storageTransactionId: undefined } : {}
 
-        const drizzleMod = await import('drizzle-orm')
-        const { eq, and } = drizzleMod
-        const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
-        const { getMetadataLatest } = metadataLatestMod
+        // The current row with the pending outbox value over it (ADR 0019, decision D2)
+        const readRow = () =>
+          currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
 
-        // Query initial metadata using getMetadataLatest subquery pattern
-        const metadataLatest = getMetadataLatest({ seedLocalId, seedUid })
-        const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
-        // In the browser the feed watch below reads the same row at once, so only Node (no change
-        // feed) reads it here.
-        const initialMetadata = isBrowser
-          ? []
-          : await db
-              .with(metadataLatest)
-              .select()
-              .from(metadataLatest)
-              .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
-              .limit(15)
-
-        if (initialMetadata.length > 0) {
-          const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
-          const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-          const metaRow = resolveMetadataRecord(
-            initialMetadata as (import('@/seedSchema').MetadataType & {
-              refResolvedValue?: string | null
-              refSeedType?: string
-            })[],
-            propertyName,
-            normalizedDataType,
-            normalizedRefValueType,
-          )
+        // In the browser the feed watch below reads the row at once, so only Node (no change feed)
+        // reads it here.
+        const initialRow = isBrowser ? undefined : await readRow()
+        if (initialRow) {
           logger(`[ItemProperty._setupLiveQuerySubscription] Initial query returned metadata record`)
-          
-          // Update context with initial metadata
           this._service.send({
             type: 'updateContext',
-            propertyValue: metaRow.propertyValue,
-            renderValue: metaRow.propertyValue,
-            localId: metaRow.localId || undefined,
-            uid: metaRow.uid || undefined,
-            versionLocalId: metaRow.versionLocalId || undefined,
-            versionUid: metaRow.versionUid || undefined,
-            schemaUid: metaRow.schemaUid || undefined,
-            refResolvedValue: metaRow.refResolvedValue || undefined,
-            ...displayValueFromRow(metaRow),
-            ...clearedFromRow(metaRow),
-            localStorageDir: metaRow.localStorageDir || undefined,
+            propertyValue: initialRow.propertyValue,
+            renderValue: initialRow.propertyValue,
+            localId: initialRow.localId || undefined,
+            uid: initialRow.uid || undefined,
+            versionLocalId: initialRow.versionLocalId || undefined,
+            versionUid: initialRow.versionUid || undefined,
+            schemaUid: initialRow.schemaUid || undefined,
+            refResolvedValue: initialRow.refResolvedValue || undefined,
+            ...displayValueFromRow(initialRow),
+            ...clearedFromRow(initialRow),
+            localStorageDir: initialRow.localStorageDir || undefined,
           })
         }
 
         // Only watch for changes in the browser (the change feed is browser-only)
         if (isBrowser) {
-          // Use proper SQL parameter binding - ensure values are strings, not objects
-          const resolvedSeedUid = seedUid || null
-          const resolvedSeedLocalId = seedLocalId || null
-          
-          // The property's rows by property_id, or with none by name (one bound JSON list of names).
-          // Built with primitive params only (SQLocal bind rejects SQL fragment objects). ORDER BY
-          // spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason.
-          const namesJson = JSON.stringify(property.names)
-          type MetadataRow = { localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }
-          const metadataQuery = (sql: any) => {
-            if (resolvedSeedUid) {
-              return sql`
-                SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue,
-                       version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                       ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                FROM metadata
-                WHERE seed_uid = ${resolvedSeedUid} AND property_name IS NOT NULL
-                  AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
-                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-              `
-            }
-            if (resolvedSeedLocalId) {
-              return sql`
-                SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue,
-                       version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                       ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                FROM metadata
-                WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name IS NOT NULL
-                  AND (property_id = ${propertyId} OR (property_id IS NULL AND property_name IN (SELECT value FROM json_each(${namesJson}))))
-                ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
-              `
-            }
-            return sql`SELECT 1 WHERE 1 = 0`
-          }
-
           const instanceState = itemPropertyInstanceState.get(this)
           if (!instanceState) {
             logger('[ItemProperty._setupLiveQuerySubscription] Instance state not found')
@@ -838,18 +767,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           if (isActorStopped(this._service)) return
 
           // Re-read on each change to this property's metadata rows (ADR 0020)
-          const subscription = watchEntityRows<MetadataRow[]>(
+          const subscription = watchEntityRows(
             {
-              seedLocalId: resolvedSeedLocalId,
-              seedUid: resolvedSeedUid,
+              seedLocalId: seedLocalId || null,
+              seedUid: seedUid || null,
               tables: ['metadata'],
               propertyNames,
             },
-            () => queryEntityRows<MetadataRow>(metadataQuery),
-            (metadataRows) => {
-              if (metadataRows.length === 0) return
-              
-              const metaRow = metadataRows[0]
+            readRow,
+            (metaRow) => {
+              if (!metaRow) return
               logger(`[ItemProperty._setupLiveQuerySubscription] Metadata updated in database for propertyName: ${propertyName}`)
 
               // While this property has a save pending, the row is older than the value in memory
@@ -868,9 +795,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               // An ItemStorage row that points at its file holds no content: keep the value shown until
               // the pass this update starts reads the file. Taking renderValue from the row showed null
               // in between, e.g. when publish moved a legacy verbatim row's content to its file.
+              // An Html row's value is its storage seed's id: the subscriber shows the file's text.
+              const kind = storedValueKind(context.propertyRecordSchema, context)
               const contentInFile =
-                context.propertyRecordSchema?.storageType === 'ItemStorage' &&
-                metaRow.propertyValue == null &&
+                ((kind === 'itemStorage' && metaRow.propertyValue == null) || kind === 'html') &&
                 !!metaRow.refResolvedValue
 
               // Update context with metadata changes
@@ -1329,15 +1257,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       foundProperty = cachedEntry.instance as ItemProperty<any>
     } else {
       // Query database
-      const propertyData = await getPropertyData({
-        propertyName,
-        seedLocalId,
-        seedUid,
-        modelName: modelNameOption,
-      })
-      if (!propertyData) {
+      const row = await currentPropertyRow(
+        { seedLocalId, seedUid },
+        { propertyName, modelName: modelNameOption },
+        { overlay: false },
+      )
+      if (!row) {
         return undefined
       }
+      const { overlaid: _overlaid, stagedPath: _stagedPath, ...rowFields } = row
+      const propertyData = rowFields as Partial<CreatePropertyInstanceProps>
       // Ensure modelName for constructor: metadata may have modelType only, or neither (e.g. when Item passes it)
       // modelType is the EAS name ("test_post"); modelTypeToModelName finds the model it names
       const data = propertyData as { modelName?: string; modelType?: string }

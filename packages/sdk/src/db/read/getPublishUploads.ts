@@ -1,9 +1,7 @@
 import { BaseFileManager } from '@/helpers'
-import {
-  getStorageDirForDataType,
-  getItemStorageLocalFileName,
-  getItemStorageSubdir,
-} from '@/helpers/storageDir'
+import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
+import { storageUploadPath } from '@/storageValue/resolve'
+import { currentPropertyRow, type CurrentPropertyRow } from '@/db/read/currentPropertyRow'
 import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString, BaseArweaveClient } from '@seedprotocol/arweave'
 import { isPlaceholderUid } from '@seedprotocol/eas'
@@ -17,9 +15,7 @@ import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { findEmbeddedImageFilePath } from '@/helpers/htmlEmbeddedDataUriPublish'
-import { and, eq } from 'drizzle-orm'
-import { metadata, type MetadataType } from '@/seedSchema'
-import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
+import { eq } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
@@ -153,8 +149,11 @@ const getStorageSeedUploadData = async (
       continue
     }
 
-    const baseDir = getStorageDirForDataType(dataType)
-    const filePath = `${baseDir}/${refResolvedValue}`
+    const filePath = storageUploadPath({
+      dataType,
+      refResolvedValue,
+      localStorageDir: (context as any).localStorageDir,
+    })
 
     const exists = await BaseFileManager.pathExists(filePath)
     if (!exists) {
@@ -245,18 +244,19 @@ type ChildUploadData = {
 const isUsablePath = (filePath: string | void | null | undefined): filePath is string =>
   !!filePath && !filePath.endsWith('undefined') && !filePath.endsWith('null')
 
-/** The newest metadata row of an ItemStorage property, read from the DB (not the live query). */
+/** An ItemStorage property's current row, read from the DB (not the property's context). */
 const getLatestItemStorageRow = async (
   childProperty: IItemProperty<any>,
-): Promise<MetadataType | undefined> => {
-  const appDb = BaseDb.getAppDb()
+): Promise<CurrentPropertyRow | undefined> => {
   const seedLocalId = childProperty.seedLocalId
   const propertyName = childProperty.storagePropertyName || childProperty.propertyName
-  if (!appDb || !seedLocalId || !propertyName) return undefined
-  const where = [eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, propertyName)]
-  if (childProperty.versionLocalId) where.push(eq(metadata.versionLocalId, childProperty.versionLocalId))
-  const rows: MetadataType[] = await appDb.select().from(metadata).where(and(...where))
-  return [...rows].sort(compareMetadataRowsLatestFirst)[0]
+  if (!seedLocalId || !propertyName) return undefined
+  // Publish waits for the seed's outbox ops before it reads, so no overlay
+  return currentPropertyRow(
+    { seedLocalId },
+    { propertyName, modelName: childProperty.modelName, definitionId: childProperty.propertyDef?.id },
+    { overlay: false },
+  )
 }
 
 /**
@@ -347,8 +347,11 @@ async function storageSeedHasUploadCandidates(
       itemProperty.propertyDef?.refValueType ??
       itemProperty.propertyDef?.dataType ??
       'Image'
-    const baseDir = getStorageDirForDataType(dataType)
-    const filePath = `${baseDir}/${refResolvedValue}`
+    const filePath = storageUploadPath({
+      dataType,
+      refResolvedValue,
+      localStorageDir: (context as any).localStorageDir,
+    })
 
     if (await BaseFileManager.pathExists(filePath)) {
       return true

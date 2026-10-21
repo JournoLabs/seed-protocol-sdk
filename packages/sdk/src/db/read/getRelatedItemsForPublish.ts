@@ -61,12 +61,12 @@ async function collectRelatedItemsForPublish(
     if (!value && prop.propertyName && isStorageSeed) {
       const ctx = context as { seedLocalId?: string; seedUid?: string }
       if (ctx.seedLocalId || ctx.seedUid) {
-        const { getPropertyData } = await import('./getPropertyData')
-        const meta = await getPropertyData({
-          propertyName: prop.propertyName,
-          seedLocalId: ctx.seedLocalId,
-          seedUid: ctx.seedUid,
-        })
+        const { currentPropertyRow } = await import('./currentPropertyRow')
+        const meta = await currentPropertyRow(
+          { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid },
+          { propertyName: prop.propertyName },
+          { overlay: false },
+        )
         value = meta?.propertyValue
       }
     }

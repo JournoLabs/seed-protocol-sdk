@@ -5,6 +5,7 @@ import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
 import type { MetadataType } from '@/seedSchema'
 import { outboxAppendGeneration, outboxOpValue, type OutboxOp } from './outbox'
 import type { ItemStorageValueOp, SetPropertyValueOp, StorageValueOp } from './itemAppliers'
+import { storageValueRowOf } from './storageValueRow'
 
 /**
  * What a property's row will hold once its pending value ops apply (ADR 0019's read overlay): the
@@ -36,13 +37,14 @@ function overlayOf(op: Pick<OutboxOp, 'kind' | 'value'>): PendingPropertyRow | u
   const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
   if (!value) return undefined
   if (isItemStorageOp(value)) return { stagedPath: value.itemStorage.stagedPath }
-  const fields = value.create.values
+  const row = storageValueRowOf(value)
+  // A storage value's display value is a session URL its readers mint from the file
   return {
-    propertyValue: (fields.propertyValue as string | null | undefined) ?? value.storageSeed.localId,
-    refSeedType: fields.refSeedType ?? value.storageSeed.type,
-    refResolvedValue: fields.refResolvedValue ?? null,
-    refResolvedDisplayValue: fields.refResolvedDisplayValue ?? null,
-    localStorageDir: fields.localStorageDir ?? null,
+    propertyValue: value.storageSeed.localId,
+    refSeedType: value.storageSeed.type,
+    refResolvedValue: row.refResolvedValue || null,
+    refResolvedDisplayValue: null,
+    localStorageDir: row.localStorageDir || null,
   }
 }
 

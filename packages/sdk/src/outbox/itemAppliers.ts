@@ -2,7 +2,7 @@
  * The appliers for item ops (ADR 0019). Every tab registers them at init: the leader applies ops
  * that other tabs appended.
  */
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { createSeed, type NewSeedFields } from '@/db/write/createSeed'
@@ -12,7 +12,7 @@ import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { metadata, seeds, type MetadataType } from '@/seedSchema'
 import type { PropertyType } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { compareMetadataRowsLatestFirst, METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { matchMetadataProperty, metadataRowsOfProperty } from '@/db/read/metadataProperty'
 import { getItemStorageFilePath, tryWithItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
@@ -31,6 +31,7 @@ import {
   type OutboxOp,
 } from './outbox'
 import { findSetConflict, recordPropertyEdit } from './conflicts'
+import { storageValueRowOf } from './storageValueRow'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -76,11 +77,32 @@ export type StorageValueOp = {
   }
   /** The file written for this value, deleted if the op never applies. Absent for a reference to a file that was already there. */
   ownedFilePath?: string
-  /** The row when the property has none yet (createMetadata). */
-  create: { values: Partial<MetadataType> & { modelName?: string }; propertyRecordSchema?: PropertyType }
-  /** The update when it has one (updateItemPropertyValue); its `localId` is filled in when applied. */
-  update: Record<string, unknown>
+  /**
+   * The row's fields besides the ones the storage seed gives (value, `refSeedType`, EAS type), for
+   * the property's first row and for a newer one alike. Ops appended by an older SDK carry `create`
+   * and `update` instead (see storageValueRowOf).
+   */
+  row?: StorageValueRow
+  propertyRecordSchema?: PropertyType
+  /** Older ops: the first row's fields. */
+  create?: { values: Partial<MetadataType> & { modelName?: string }; propertyRecordSchema?: PropertyType }
+  /** Older ops: a newer row's fields. */
+  update?: Record<string, unknown>
 }
+
+export type StorageValueRow = {
+  refResolvedValue: string
+  localStorageDir: string
+  schemaUid?: string | null
+  /** The storage model's EAS schema uid. */
+  refModelUid?: string | null
+  modelName?: string | null
+  seedUid?: string | null
+  versionLocalId?: string | null
+  versionUid?: string | null
+}
+
+const STORAGE_DATA_TYPE = { image: 'Image', file: 'File', html: 'Html' } as const
 
 /**
  * Writes a storage value's rows on `db`. The property's row is looked up here, on `db`, rather than
@@ -105,35 +127,57 @@ export async function applyStorageValue(
   )
   await createVersion({ seedLocalId: storageSeed.localId, seedType: storageSeed.type }, { db })
 
-  // The property's newest row, by property_id (decision D4), else by name
-  const property = await matchMetadataProperty(
+  // The property's current row (decision D4); the op's own value isn't stored yet, so no overlay
+  const row = storageValueRowOf(value)
+  const { currentPropertyRow } = await import('@/db/read/currentPropertyRow')
+  const existing = await currentPropertyRow(
+    { seedLocalId },
     {
       propertyName,
-      seedLocalId,
-      modelName: value.create.values.modelName ?? value.create.values.modelType,
-      definitionId: value.create.propertyRecordSchema?.id as string | number | undefined,
+      modelName: row.modelName,
+      definitionId: row.propertyRecordSchema?.id as string | number | undefined,
     },
-    db,
+    { overlay: false, db: db! },
   )
-  const [existing] = await db
-    .select({ localId: metadata.localId })
-    .from(metadata)
-    .where(and(eq(metadata.seedLocalId, seedLocalId), metadataRowsOfProperty(property)))
-    .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
-    .limit(1)
+  const fields = {
+    schemaUid: row.schemaUid,
+    refSeedType: storageSeed.type,
+    refModelUid: row.refModelUid,
+    refResolvedValue: row.refResolvedValue,
+    localStorageDir: row.localStorageDir,
+    easDataType: 'bytes32',
+  }
   if (existing?.localId) {
     const result = await updateItemPropertyValue(
-      { ...value.update, localId: existing.localId, seedLocalId, propertyName } as never,
+      {
+        ...fields,
+        newValue: storageSeed.localId,
+        versionLocalId: row.versionLocalId,
+        modelName: row.modelName,
+        dataType: STORAGE_DATA_TYPE[storageSeed.type],
+        localId: existing.localId,
+        seedLocalId,
+        propertyName,
+      } as never,
       { db },
     )
     return result ?? null
   }
-  const row = await createMetadata(
-    { ...value.create.values, seedLocalId, propertyName },
-    value.create.propertyRecordSchema,
+  const created = await createMetadata(
+    {
+      ...fields,
+      propertyValue: storageSeed.localId,
+      seedUid: row.seedUid,
+      versionLocalId: row.versionLocalId,
+      versionUid: row.versionUid,
+      modelName: row.modelName ?? undefined,
+      seedLocalId,
+      propertyName,
+    },
+    row.propertyRecordSchema,
     { db },
   )
-  return row.localId ? { localId: row.localId, uid: row.uid ?? null, schemaUid: row.schemaUid ?? '' } : null
+  return created.localId ? { localId: created.localId, uid: created.uid ?? null, schemaUid: created.schemaUid ?? '' } : null
 }
 
 /**

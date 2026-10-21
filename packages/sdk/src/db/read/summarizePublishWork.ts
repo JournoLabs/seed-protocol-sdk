@@ -3,7 +3,7 @@
  * without building transactions or requiring a valid payload.
  */
 import { BaseFileManager } from '@/helpers'
-import { getStorageDirForDataType } from '@/helpers/storageDir'
+import { storageUploadPath } from '@/storageValue/resolve'
 import { INTERNAL_PROPERTY_NAMES, ZERO_BYTES32 } from '@/helpers/constants'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -215,11 +215,11 @@ async function collectUploadBytes(
       itemProperty.propertyDef?.refValueType ??
       itemProperty.propertyDef?.dataType ??
       'Image'
-    const fromGetter = itemProperty.localStoragePath
-    const filePath =
-      typeof fromGetter === 'string' && fromGetter
-        ? fromGetter
-        : `${getStorageDirForDataType(String(dataType))}/${refResolvedValue}`
+    const filePath = storageUploadPath({
+      dataType: String(dataType),
+      refResolvedValue,
+      localStorageDir: (context.localStorageDir as string | undefined) ?? (itemProperty.localStorageDir || undefined),
+    })
     await addUploadFromPath(
       acc,
       seen,

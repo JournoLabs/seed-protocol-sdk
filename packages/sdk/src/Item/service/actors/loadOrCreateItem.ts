@@ -6,7 +6,7 @@ import { seeds } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { getVersionData } from '@/db/read/subqueries/versionData'
-import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
+import { currentPropertyRows } from '@/db/read/currentPropertyRow'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { metadataRowPropertyKey } from '@/helpers/metadataPropertyNames'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
@@ -413,15 +413,11 @@ export const loadOrCreateItem = fromCallback<
     // Step 3: Latest metadata row per property for this seed (matches loadOrCreateProperty /
     // getItemProperties). Strict version_local_id = latest would drop properties whose rows lag version bumps.
     const versionsMs = timingSince(timingStart) - seedMs
-    const metadataLatest = getMetadataLatest({
-      seedLocalId: resolvedSeedLocalId,
-      seedUid: resolvedSeedUid,
-    })
-    const metadataRecords = await db
-      .with(metadataLatest)
-      .select()
-      .from(metadataLatest)
-      .where(eq(metadataLatest.rowNum, 1))
+    // Each instance's load reads its row again with the pending outbox value over it
+    const metadataRecords = await currentPropertyRows(
+      { seedLocalId: resolvedSeedLocalId, seedUid: resolvedSeedUid },
+      { overlay: false, db },
+    )
 
     logger(
       `Found ${metadataRecords.length} latest-per-property metadata rows for seed ${resolvedSeedLocalId} (latestVersionLocalId=${latestVersionLocalId} used for placeholders only)`,
