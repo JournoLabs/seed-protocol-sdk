@@ -17,7 +17,7 @@ const UID_A = '0x' + 'a'.repeat(64)
 const UID_B = '0x' + 'b'.repeat(64)
 
 /** Stub EAS indexer: answers every schema query with `schemas`, counting requests. */
-let schemas: Array<{ id: string }> = []
+let schemas: Array<{ id: string; schema?: string }> = []
 let failNext = false
 let offline = false
 const request = vi.fn(async () => {
@@ -132,23 +132,29 @@ describe('forgetting misses when a schema becomes known', () => {
 })
 
 describe('getEasSchemaUidForSchemaDefinition', () => {
-  it('caches misses and forgets them when a schema is registered', async () => {
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBeUndefined()
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBeUndefined()
+  it('caches misses and forgets them when the definition is registered', async () => {
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBeUndefined()
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBeUndefined()
     expect(request).toHaveBeenCalledTimes(1)
 
     setSchemaUidForSchemaDefinition({ text: 'string title', schemaUid: UID_A })
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBe(UID_A)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('looks the exact definition up, not a name it ends with', async () => {
     schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBe(UID_A)
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBe(UID_A)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32 storage_transaction_id' })).toBe(UID_A)
+    expect(request).toHaveBeenCalledWith(expect.anything(), {
+      where: { schema: { equals: 'bytes32 storage_transaction_id' } },
+    })
   })
 
   it('returns undefined without caching when the request fails', async () => {
     failNext = true
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBeUndefined()
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBeUndefined()
     schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'title' })).toBe(UID_A)
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBe(UID_A)
   })
 })
 
@@ -175,18 +181,23 @@ describe('getEasSchemaUidForModel', () => {
   })
 
 
-  it("asks EAS for the model's EAS name, as publish registers it", async () => {
-    schemas = [{ id: UID_A }]
+  it("asks EAS for the model's exact schema, as publish registers it", async () => {
+    schemas = [{ id: UID_A, schema: 'bytes32 blog_post' }]
     expect(await getEasSchemaUidForModel('BlogPost')).toBe(UID_A)
-    const variables = request.mock.calls[0]?.[1] as { where: { schemaNames: { some: { name: { equals: string } } } } }
-    expect(variables.where.schemaNames.some.name.equals).toBe('blog_post')
+    const variables = request.mock.calls[0]?.[1] as { where: { schema: { in: string[] } } }
+    expect(variables.where.schema.in).toEqual(['bytes32 blog_post'])
+  })
+
+  it("ignores a schema under an older SDK's name", async () => {
+    schemas = [{ id: UID_A, schema: 'bytes32 blogpost' }]
+    expect(await getEasSchemaUidForModel('BlogPost')).toBeUndefined()
   })
 
   it('returns undefined instead of throwing when EAS is unreachable', async () => {
     failNext = true
     expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
     // Not cached as a miss: found once EAS answers again.
-    schemas = [{ id: UID_A }]
+    schemas = [{ id: UID_A, schema: 'bytes32 article' }]
     expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
   })
 })

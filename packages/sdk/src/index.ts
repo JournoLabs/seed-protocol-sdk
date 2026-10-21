@@ -91,8 +91,11 @@ export { Model } from './Model/Model'
 
 export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
-export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
-export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas'
+export {
+  setSchemaUidForSchemaDefinition,
+  setSchemaUidForModel,
+  getEasSchemaUidForExactDefinition,
+} from './stores/eas'
 export { listRelationEasPropertyName, easPropertyNameForPublish } from './helpers/metadataPropertyNames'
 
 export {
@@ -100,7 +103,6 @@ export {
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   getCanonicalItemPropertiesFromEas,
-  getEasSchemaUidBySchemaName,
   getSeedsFromSchemaUids,
   getSeedsBySchemaName,
 } from './eas'

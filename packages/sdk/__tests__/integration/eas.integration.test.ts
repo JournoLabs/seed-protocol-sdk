@@ -15,7 +15,6 @@ import {
   getSeedsBySchemaName,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
-  getEasSchemaUidBySchemaName,
 } from '@/eas'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import { IQueryClient } from '@/interfaces/IQueryClient'
@@ -127,17 +126,6 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
         const metadata = parsed[0]?.value
         expect(metadata).toHaveProperty('name', 'text')
         expect(metadata).toHaveProperty('value')
-      }
-    }, NETWORK_TIMEOUT)
-  })
-
-  describe('getEasSchemaUidBySchemaName', () => {
-    it('returns schema UID for known schema name', async () => {
-      const schemaUid = await getEasSchemaUidBySchemaName({ schemaName: TWEET_SCHEMA_NAME })
-
-      if (schemaUid) {
-        expect(typeof schemaUid).toBe('string')
-        expect(schemaUid).toMatch(/^0x[a-fA-F0-9]{64}$/)
       }
     }, NETWORK_TIMEOUT)
   })

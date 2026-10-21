@@ -7,6 +7,7 @@ import {
   isNameMatchLevel,
   matchEasName,
   partitionByRefAttester,
+  matchEasModelSchemas,
 } from '@seedprotocol/eas'
 import { loadNameMatchLevels, nameMatchLevels } from '@/db/read/nameMatchLevels'
 import { normalizeDataType } from '@/helpers/property'
@@ -23,7 +24,6 @@ import {
 import {
   metadata,
   MetadataType,
-  modelUids,
   seeds,
   SeedType,
   versions,
@@ -43,7 +43,8 @@ import {
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { getModelSchemas } from '@/db/read/getModelSchemas'
+import { writeModelUids } from '@/db/write/writeModelUids'
+import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
 import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
 import { findSeedRowsByUid } from '@/db/read/findSeedRowsByUid'
@@ -1130,45 +1131,13 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   // ADR 0009: this run matches names at the levels the stored schema files set now.
   await loadNameMatchLevels(appDb)
 
-  const { matchModelRecord } = await getModelSchemas()
-
-  const modelSchemas = await getModelSchemasFromEas()
-
-  const schemaUids: string[] = []
-
-  for (const modelSchema of modelSchemas) {
-    // ADR 0008: matched by name, so seeds published under an older SDK's name are found too.
-    const foundModel = matchModelRecord(modelSchema.schema)
-
-    if (!foundModel) {
-      // Skip schemas that don't have a corresponding model in the user's config
-      // This can happen with "bytes32 image" if there's no Image model defined
-      console.warn(
-        `[item/events] [syncDbWithEas] Model not found for schema ${modelSchema.schema}, skipping`
-      )
-      continue
-    }
-
-    try {
-      await appDb
-        .insert(modelUids)
-        .values({
-          modelId: foundModel.id,
-          uid: modelSchema.id,
-        })
-        .onConflictDoNothing()
-    } catch (err: unknown) {
-      // Model may have been deleted by test teardown or another process; skip to avoid unhandled rejection
-      const e = err as { code?: string; rawCode?: number; cause?: { code?: string; rawCode?: number } }
-      const code = e?.code ?? e?.rawCode ?? e?.cause?.code ?? e?.cause?.rawCode
-      if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 787) {
-        continue
-      }
-      throw err
-    }
-
-    schemaUids.push(modelSchema.id)
-  }
+  // ADR 0008: matched by name, so seeds published under an older SDK's name are found too. Schemas
+  // that match no local model (e.g. "bytes32 image" with no Image model) aren't fetched.
+  const modelSchemaLookups = await localModelSchemaLookups()
+  const modelSchemaMatches = matchEasModelSchemas(await getModelSchemasFromEas(modelSchemaLookups), modelSchemaLookups)
+  // The same rule as init: only each model's exact schema goes into model_uids.
+  await writeModelUids(modelSchemaMatches, appDb)
+  const schemaUids = [...new Set(modelSchemaMatches.map((match) => match.schema.id))]
 
   // If no schemas were found, skip the rest of the sync process
   // This can happen when models exist but don't have schemas registered in EAS yet

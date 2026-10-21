@@ -4,7 +4,7 @@ import {
   INTERNAL_DATA_TYPES,
   ModelPropertyDataTypes,
   normalizeDataType,
-  getEasSchemaForItemProperty,
+  getEasSchemaUidForExactDefinition,
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
   listRelationEasPropertyName,
@@ -309,37 +309,12 @@ async function ensureEasSchemasForItemResolved(
       )
     }
 
-    const validEasTypes = [
-      'string',
-      'address',
-      'bool',
-      'bytes',
-      'bytes32',
-      'uint8',
-      'uint16',
-      'uint32',
-      'uint64',
-      'uint128',
-      'uint256',
-    ] as const
-    const easDataTypeForLookup = validEasTypes.includes(
-      easDataTypeRaw as (typeof validEasTypes)[number],
-    )
-      ? (easDataTypeRaw as (typeof validEasTypes)[number])
-      : undefined
-
-    const schema = await getEasSchemaForItemProperty({
-      // A list relation's cached schemaUid may be for its schema-key name; don't look it up.
-      schemaUid: listRelationName ? undefined : property.schemaUid,
-      propertyName: propertyNameSnakeCase,
-      easDataType: easDataTypeForLookup,
-    })
-
-    if (schema) {
-      const onChainRecord = await getSchemaRecord(schema.id)
-      const matches = onChainRecord && onChainRecord.schema === schemaDef
-      if (matches) {
-        setSchemaUidForSchemaDefinition({ text: schemaDef, schemaUid: schema.id })
+    // Already on EAS under this exact definition (a name alone matches schemas of any type)
+    const existingUid = await getEasSchemaUidForExactDefinition(schemaDef).catch(() => undefined)
+    if (existingUid) {
+      const onChainRecord = await getSchemaRecord(existingUid)
+      if (onChainRecord && onChainRecord.schema === schemaDef) {
+        setSchemaUidForSchemaDefinition({ text: schemaDef, schemaUid: existingUid })
         continue
       }
     }

@@ -95,7 +95,7 @@ mock.module('@seedprotocol/sdk', () => ({
   normalizeDataType,
   getSegmentedItemProperties: async () => segmented(),
   getRelatedItemsForPublish: async () => [],
-  getEasSchemaForItemProperty: async () => null,
+  getEasSchemaUidForExactDefinition: async () => undefined,
   setSchemaUidForSchemaDefinition: () => {},
   setSchemaUidForModel: () => {},
   // Mirrors the SDK helper for the names used here (staff, authors).
