@@ -553,6 +553,25 @@ WHERE \`property_id\` IS NULL AND (
 ) = 1;
 `
 
+export const migrationSql_0028_add_definition_to_properties = `ALTER TABLE \`properties\` ADD \`definition\` text;
+--> statement-breakpoint
+-- Backfill from the stored schema files: a property row takes the property object whose \`id\` is
+-- its schema_file_id, from the newest schema version that has one. Rows no stored file names by id
+-- keep NULL and read their definition from the columns alone.
+UPDATE \`properties\` SET \`definition\` = (
+	SELECT \`p\`.\`value\`
+	FROM \`schemas\` \`s\`,
+		json_each(CASE WHEN json_valid(\`s\`.\`schema_data\`) THEN \`s\`.\`schema_data\` ELSE '{}' END, '$.models') \`m\`,
+		json_each(\`m\`.\`value\`, '$.properties') \`p\`
+	WHERE \`m\`.\`type\` = 'object'
+		AND json_type(\`m\`.\`value\`, '$.properties') = 'object'
+		AND \`p\`.\`type\` = 'object'
+		AND json_extract(\`p\`.\`value\`, '$.id') = \`properties\`.\`schema_file_id\`
+	ORDER BY \`s\`.\`version\` DESC, \`s\`.\`id\` DESC
+	LIMIT 1
+) WHERE \`definition\` IS NULL AND \`schema_file_id\` IS NOT NULL;
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -753,6 +772,13 @@ export const journalJson = `{
       "when": 1792587787964,
       "tag": "0027_link_metadata_property_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1792596417502,
+      "tag": "0028_add_definition_to_properties",
+      "breakpoints": true
     }
   ]
 }`
@@ -760,10 +786,10 @@ export const journalJson = `{
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
 export const snapshotJson = `{
-  "id": "c7851baa-6148-4738-9db2-28c46948b66c",
-  "prevId": "dee41a34-bc54-4e42-b033-7b750051a382",
   "version": "6",
   "dialect": "sqlite",
+  "id": "083c3909-4feb-4b61-bf23-fa806a60b826",
+  "prevId": "c7851baa-6148-4738-9db2-28c46948b66c",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1381,15 +1407,15 @@ export const snapshotJson = `{
         "metadata_property_id_properties_id_fk": {
           "name": "metadata_property_id_properties_id_fk",
           "tableFrom": "metadata",
+          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
-          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1528,6 +1554,13 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "definition": {
+          "name": "definition",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1551,28 +1584,28 @@ export const snapshotJson = `{
         "properties_model_id_models_id_fk": {
           "name": "properties_model_id_models_id_fk",
           "tableFrom": "properties",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "properties_ref_model_id_models_id_fk": {
           "name": "properties_ref_model_id_models_id_fk",
           "tableFrom": "properties",
+          "tableTo": "models",
           "columnsFrom": [
             "ref_model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1609,28 +1642,28 @@ export const snapshotJson = `{
         "model_schemas_model_id_models_id_fk": {
           "name": "model_schemas_model_id_models_id_fk",
           "tableFrom": "model_schemas",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "model_schemas_schema_id_schemas_id_fk": {
           "name": "model_schemas_schema_id_schemas_id_fk",
           "tableFrom": "model_schemas",
+          "tableTo": "schemas",
           "columnsFrom": [
             "schema_id"
           ],
-          "tableTo": "schemas",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1675,15 +1708,15 @@ export const snapshotJson = `{
         "model_uids_model_id_models_id_fk": {
           "name": "model_uids_model_id_models_id_fk",
           "tableFrom": "model_uids",
+          "tableTo": "models",
           "columnsFrom": [
             "model_id"
           ],
-          "tableTo": "models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1897,15 +1930,15 @@ export const snapshotJson = `{
         "property_uids_property_id_properties_id_fk": {
           "name": "property_uids_property_id_properties_id_fk",
           "tableFrom": "property_uids",
+          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
-          "tableTo": "properties",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2410,9 +2443,9 @@ export const snapshotJson = `{
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}
