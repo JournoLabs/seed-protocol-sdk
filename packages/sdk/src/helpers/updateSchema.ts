@@ -14,7 +14,7 @@ import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models as modelsTable } from '@/seedSchema'
+import { resolveModelRecord } from '@/db/read/resolveModelRecord'
 import { eq, desc } from 'drizzle-orm'
 import { generateId } from './index'
 import debug from 'debug'
@@ -170,34 +170,6 @@ export async function writeFullSchemaNewVersion(
 }
 
 /**
- * Get model name from modelId
- * @param modelId - The model ID to look up
- * @returns The model name, or undefined if not found
- */
-export async function getModelNameFromId(modelId: number | undefined): Promise<string | undefined> {
-  if (!modelId) {
-    return undefined
-  }
-
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not found')
-  }
-
-  const modelRecords = await db
-    .select()
-    .from(modelsTable)
-    .where(eq(modelsTable.id, modelId))
-    .limit(1)
-
-  if (modelRecords.length === 0) {
-    return undefined
-  }
-
-  return modelRecords[0].name
-}
-
-/**
  * Convert a TProperty/ModelPropertyMachineContext to SchemaPropertyUpdate format
  * This function converts the internal property representation to the schema file format
  * @param property - The TProperty instance to convert
@@ -223,7 +195,7 @@ export async function convertPropertyToSchemaUpdate(
       updates.model = property.ref
     } else if (property.refModelId) {
       // If ref is not set but refModelId is, get the model name from the database
-      const refModelName = await getModelNameFromId(property.refModelId)
+      const refModelName = (await resolveModelRecord(undefined, { modelId: property.refModelId }))?.name
       if (refModelName) {
         updates.model = refModelName
       }
@@ -238,7 +210,7 @@ export async function convertPropertyToSchemaUpdate(
         updates.ref = property.ref
       } else if (property.refModelId) {
         // If ref is not set but refModelId is, get the model name from the database
-        const refModelName = await getModelNameFromId(property.refModelId)
+        const refModelName = (await resolveModelRecord(undefined, { modelId: property.refModelId }))?.name
         if (refModelName) {
           updates.ref = refModelName
         }

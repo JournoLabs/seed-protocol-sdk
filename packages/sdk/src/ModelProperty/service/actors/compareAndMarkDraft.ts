@@ -23,18 +23,17 @@ export const compareAndMarkDraft = fromCallback<
     const schemaFileIdForResolve = fullContext._propertyFileId || (typeof fullContext.id === 'string' ? fullContext.id : undefined)
     if (schemaFileIdForResolve && (fullContext.modelName === undefined || fullContext.dataType === undefined)) {
       try {
-        const dbMod = await import('../../../helpers/db')
-        const { getPropertyModelNameAndDataType, getModelNameByModelId } = dbMod
-        let fromDb: { modelName: string; dataType: string } | undefined
+        const { resolveModelRecord, resolvePropertyModelRecord } = await import('../../../db/read/resolveModelRecord')
+        let fromDb: { name: string; dataType: string } | undefined
         for (let attempt = 0; attempt < 6; attempt++) {
-          fromDb = await getPropertyModelNameAndDataType(schemaFileIdForResolve)
+          fromDb = await resolvePropertyModelRecord(schemaFileIdForResolve)
           if (fromDb) break
           if (attempt < 5) await new Promise((r) => setTimeout(r, 40))
         }
         if (fromDb) {
           fullContext = {
             ...fullContext,
-            modelName: fullContext.modelName ?? fromDb.modelName,
+            modelName: fullContext.modelName ?? fromDb.name,
             dataType: fullContext.dataType ?? fromDb.dataType,
           }
         }
@@ -43,7 +42,7 @@ export const compareAndMarkDraft = fromCallback<
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileIdForResolve)
           if (pendingModelId != null) {
-            const modelName = await getModelNameByModelId(pendingModelId)
+            const modelName = (await resolveModelRecord(undefined, { modelId: pendingModelId }))?.name
             if (modelName) {
               fullContext = { ...fullContext, modelName }
             }

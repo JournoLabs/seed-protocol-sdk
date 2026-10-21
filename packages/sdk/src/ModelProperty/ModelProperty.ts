@@ -7,7 +7,7 @@ import type { CreateWaitOptions } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
-import { getModelId, getModelIdByFileId } from '@/helpers/db'
+import { resolveModelRecord } from '@/db/read/resolveModelRecord'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { Model } from '@/Model/Model'
 import { Schema } from '@/Schema/Schema'
@@ -520,8 +520,9 @@ export class ModelProperty {
       if (modelId == null) return undefined
 
       // Resolve modelFileId (string) to database ID (number) if needed - modelSchemas.modelId expects number
-      const modelIdNum: number =
-        typeof modelId === 'string' ? await getModelIdByFileId(modelId) : modelId
+      const modelIdNum =
+        typeof modelId === 'string' ? (await resolveModelRecord(undefined, { modelFileId: modelId }, db))?.id : modelId
+      if (modelIdNum == null) return undefined
 
       const modelSchemaRecords = await db
         .select({ schemaName: schemas.name })
@@ -675,7 +676,7 @@ export class ModelProperty {
 
     const newInstance = new this(propertyWithId)
     
-    // Set schema name before async operations so getModelId can resolve the correct model
+    // Set schema name before async operations so the model lookup is scoped to the right schema
     if (schemaName) {
       newInstance._service.send({
         type: 'setSchemaName',
@@ -751,7 +752,7 @@ export class ModelProperty {
             } else if (typeof propertyWithId.modelId === 'string') {
               // modelId is a string (modelFileId), need to convert to database ID
               try {
-                resolvedModelId = await getModelIdByFileId(propertyWithId.modelId)
+                resolvedModelId = (await resolveModelRecord(undefined, { modelFileId: propertyWithId.modelId }))?.id
                 logger(`Converted modelFileId "${propertyWithId.modelId}" to database modelId: ${resolvedModelId}`)
               } catch (error) {
                 logger(`Failed to convert modelFileId "${propertyWithId.modelId}" to database ID: ${error}`)
@@ -764,8 +765,15 @@ export class ModelProperty {
           if (!resolvedModelId && propertyWithId.modelName) {
             try {
               // Get schemaName from context if available
+              // With a schema name only that schema's model counts (no name-only fallback)
               const schemaName = snapshot.context._schemaName
-              resolvedModelId = await getModelId(propertyWithId.modelName, schemaName)
+              resolvedModelId = (
+                await resolveModelRecord(propertyWithId.modelName, {
+                  modelFileId: propertyWithId.modelName,
+                  schemaName,
+                  strict: true,
+                })
+              )?.id
               logger(`Resolved modelId for model "${propertyWithId.modelName}": ${resolvedModelId}`)
             } catch (error) {
               logger(`Failed to resolve modelId for model "${propertyWithId.modelName}": ${error}`)

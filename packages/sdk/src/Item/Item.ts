@@ -38,7 +38,7 @@ import {
   SnapshotFrom,
   waitFor,
 } from 'xstate'
-import { orderBy, startCase } from 'lodash-es'
+import { orderBy } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
@@ -694,7 +694,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     if (!props.modelName && props.type) {
-      props.modelName = startCase(props.type)
+      // The model the seed's type names (its easName, at the model's nameMatch level): `blog_post`
+      // finds "Blog Post". No match leaves the type, which then fails as an unknown model.
+      const { resolveModelRecordByNameOrType } = await import('../db/read/resolveModelRecord')
+      const model = await resolveModelRecordByNameOrType(props.type, {
+        modelFileId: (props as any).modelFileId,
+        schemaName: (props as any).schemaName,
+      })
+      props.modelName = model?.name ?? props.type
     }
     if (props.seedUid || props.seedLocalId) {
       cacheReuse: {
@@ -810,16 +817,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Scope the constructor's Model lookup to this model's schema (as getItemData does on reload),
       // so a same-named model cached from another schema can't supply the property set.
       if (modelRecord && !(props as any).schemaName) {
-        const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
-        const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
-        const schemaRows = await db
-          .select({ schemaName: schemasTable.name })
-          .from(modelSchemas)
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(modelSchemas.modelId, modelRecord.id))
-          .limit(1)
-        if (schemaRows[0]?.schemaName) {
-          ;(props as any).schemaName = schemaRows[0].schemaName
+        const { getModelSchemaName } = await import('../db/read/resolveModelRecord')
+        const modelSchemaName = await getModelSchemaName(modelRecord.id, db)
+        if (modelSchemaName) {
+          ;(props as any).schemaName = modelSchemaName
         }
       }
       
@@ -1947,6 +1948,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
 
         // Query initial seed and version data
+        const { findSeedRow } = await import('../db/read/findSeedRow')
+        const seed = await findSeedRow({ localId: seedLocalId, uid: seedUid }, db)
+        if (!seed) {
+          logger(`[Item._setupLiveQuerySubscription] Seed not found for seedLocalId: ${seedLocalId}`)
+          return
+        }
         const versionData = getVersionData()
         const seedRecords = await db
           .with(versionData)
@@ -1960,9 +1967,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           })
           .from(seeds)
           .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
-          .where(
-            seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId)
-          )
+          .where(eq(seeds.localId, seed.localId))
           .limit(1)
 
         if (seedRecords.length === 0) {

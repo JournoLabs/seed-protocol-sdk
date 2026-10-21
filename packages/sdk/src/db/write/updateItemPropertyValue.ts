@@ -1,7 +1,7 @@
 import { metadata, MetadataType } from '@/seedSchema'
 import { and, eq, or, sql } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
-import { getSeedData } from '@/db/read/getSeedData'
+import { findSeedRow } from '@/db/read/findSeedRow'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
 import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
@@ -192,7 +192,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       return { localId, uid: null, schemaUid: schemaUid ?? '' }
     }
 
-    const seedDataFromDb = seedLocalId ? await getSeedData({ seedLocalId }, appDb) : null
+    const seedDataFromDb = seedLocalId ? await findSeedRow({ localId: seedLocalId }, appDb) : null
     const versionDataFromDb = versionLocalId ? await getVersionData({ localId: versionLocalId }, appDb) : null
 
     // Here we don't have a local-only record so we need to create a new one
@@ -230,7 +230,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   const newLocalId = generateId()
 
   if (!seedUid) {
-    const seedData = await getSeedData({ seedLocalId: seedLocalId || undefined }, appDb)
+    const seedData = await findSeedRow({ localId: seedLocalId }, appDb)
     if (seedData) {
       seedUid = seedData.uid || undefined
     }

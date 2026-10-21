@@ -37,8 +37,8 @@ export async function resolveHtmlStorageSeedLocalId(
   const pv = String(propertyValue ?? '').trim()
   if (!pv) return undefined
   if (SEED_UID_HEX_RE.test(pv)) {
-    const { getSeedData } = await import('../db/read/getSeedData')
-    return (await getSeedData({ seedUid: pv }))?.localId ?? undefined
+    const { findSeedRow } = await import('../db/read/findSeedRow')
+    return (await findSeedRow({ uid: pv }))?.localId ?? undefined
   }
   return pv
 }

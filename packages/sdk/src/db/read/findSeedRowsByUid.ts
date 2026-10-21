@@ -14,9 +14,13 @@ import type { SeedType } from '@/seedSchema'
  * Going through versions first also resolves a republished seed's old uid to the item when an
  * older sync left a second, version-less seed row with that uid (migration 0024 removes those).
  */
-export const findSeedRowsByUid = async (uids: readonly string[]): Promise<Map<string, SeedType>> => {
+export const findSeedRowsByUid = async (
+  uids: readonly string[],
+  /** The database or transaction to read; the app database by default. */
+  db: ReturnType<typeof BaseDb.getAppDb> = BaseDb.getAppDb(),
+): Promise<Map<string, SeedType>> => {
   const result = new Map<string, SeedType>()
-  const appDb = BaseDb.getAppDb()
+  const appDb = db
   const wanted = [...new Set(uids.filter(Boolean))]
   if (!appDb || wanted.length === 0) return result
 
