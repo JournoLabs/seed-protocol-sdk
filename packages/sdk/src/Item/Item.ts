@@ -1366,12 +1366,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     skipKeys: Set<string>,
   ): Promise<void> {
     const { ItemCreateValidationError } = await import('./errors')
-    const { getPropertySchema } = await import('../helpers/property')
+    const { getModelPropertyDefinitions, resolvePropertyKey } = await import('../helpers/property')
     const { SchemaValidationService } = await import('../Schema/service/validation/SchemaValidationService')
     const validationService = new SchemaValidationService()
     const modelName = props.modelName as string
     const known = new Set(propertyNames)
     const problems: import('./errors').ItemCreateProblem[] = []
+    let definitions: Record<string, import('../helpers/propertyDefinition').PropertyDefinition> | undefined
 
     for (const [key, value] of Object.entries(props)) {
       if (Item.CREATE_METADATA_KEYS.has(key) || skipKeys.has(key)) continue
@@ -1384,10 +1385,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         continue
       }
       if (value === undefined || value === null) continue
-      const propertySchema = await getPropertySchema(modelName, key, {
-        modelFileId: props.modelFileId as string | undefined,
-        schemaName: props.schemaName as string | undefined,
-      })
+      definitions ??= Object.fromEntries(
+        await getModelPropertyDefinitions(modelName, {
+          modelFileId: props.modelFileId as string | undefined,
+          schemaName: props.schemaName as string | undefined,
+        }),
+      )
+      const definitionKey = resolvePropertyKey(definitions, key)
+      const propertySchema = definitionKey ? definitions[definitionKey] : undefined
       const dataType = normalizeDataType(propertySchema?.dataType ?? dataTypeByPropertyName.get(key) ?? '')
       if (!dataType) continue
       // Lists may be passed as the JSON array string they are stored as.
@@ -1400,17 +1405,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           // Not JSON: validated as given, and rejected as a non-array
         }
       }
-      const { resolvePropertyValidationRules } = await import('../helpers/propertyValidationRules')
-      const rules =
-        propertySchema?.validation ??
-        (await resolvePropertyValidationRules(modelName, key, {
-          modelFileId: props.modelFileId as string | undefined,
-          schemaName: props.schemaName as string | undefined,
-        }))
       const result = validationService.validatePropertyValue(
         checked,
         dataType as ModelPropertyDataTypes,
-        rules,
+        propertySchema?.validation,
         propertySchema?.refValueType,
       )
       for (const error of result.errors) {

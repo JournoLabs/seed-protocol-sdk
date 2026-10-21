@@ -44,6 +44,10 @@ export const properties = sqliteTable(
     storageType: text('storage_type'), // 'ItemStorage' | 'PropertyStorage'
     localStorageDir: text('local_storage_dir'), // storage.path, e.g. '/html'
     filenameSuffix: text('filename_suffix'), // storage.extension, e.g. '.html'
+    // The whole definition as JSON: the schema file's property object, or a code-defined one
+    // (validation, htmlEmbeddedDataUriPolicy, description and any other field). The columns above
+    // win for the fields they hold. Read through helpers/propertyDefinition.
+    definition: text('definition'),
   },
   (table) => {
     return {

@@ -19,7 +19,9 @@ const testDescribe = typeof window === 'undefined' ? describe.sequential : descr
 const OWNED = '0xabc0000000000000000000000000000000000001'
 const OWNED_CHECKSUM = '0xAbC0000000000000000000000000000000000001'
 const MODULE = '0xmod0000000000000000000000000000000000002'
-const REAL_UID = '0x' + 'c'.repeat(64)
+// A new attested uid per call: seeds.uid is unique (migration 0029).
+const realUid = () =>
+  '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
 
 async function insertListedSeed(opts: {
   localId: string
@@ -106,16 +108,16 @@ testDescribe('ownership address policy', () => {
       draftNULL: { publisher: null, uid: 'NULL', attestationRaw: null },
       draftZero: { publisher: null, uid: ` ${ZERO_BYTES32} `, attestationRaw: null },
       draftClaimed: { publisher: OWNED, uid: null, attestationRaw: null },
-      stampedOwned: { publisher: OWNED_CHECKSUM, uid: REAL_UID, attestationRaw: null },
-      stampedOther: { publisher: OTHER, uid: REAL_UID, attestationRaw: null },
-      realUidNoPublisher: { publisher: null, uid: REAL_UID, attestationRaw: null },
-      attesterOwned: { publisher: null, uid: REAL_UID, attestationRaw: raw(OWNED_CHECKSUM) },
-      attesterOwnedBlankPublisher: { publisher: '', uid: REAL_UID, attestationRaw: raw(OWNED) },
-      attesterOther: { publisher: null, uid: REAL_UID, attestationRaw: raw(OTHER) },
+      stampedOwned: { publisher: OWNED_CHECKSUM, uid: realUid(), attestationRaw: null },
+      stampedOther: { publisher: OTHER, uid: realUid(), attestationRaw: null },
+      realUidNoPublisher: { publisher: null, uid: realUid(), attestationRaw: null },
+      attesterOwned: { publisher: null, uid: realUid(), attestationRaw: raw(OWNED_CHECKSUM) },
+      attesterOwnedBlankPublisher: { publisher: '', uid: realUid(), attestationRaw: raw(OWNED) },
+      attesterOther: { publisher: null, uid: realUid(), attestationRaw: raw(OTHER) },
       attesterNoUid: { publisher: null, uid: null, attestationRaw: raw(OWNED) },
-      attesterMissing: { publisher: null, uid: REAL_UID, attestationRaw: '{}' },
-      malformedRaw: { publisher: null, uid: REAL_UID, attestationRaw: 'not json' },
-      publisherWinsOverAttester: { publisher: OTHER, uid: REAL_UID, attestationRaw: raw(OWNED) },
+      attesterMissing: { publisher: null, uid: realUid(), attestationRaw: '{}' },
+      malformedRaw: { publisher: null, uid: realUid(), attestationRaw: 'not json' },
+      publisherWinsOverAttester: { publisher: OTHER, uid: realUid(), attestationRaw: raw(OWNED) },
     }
     for (const [name, row] of Object.entries(cases)) {
       await insertListedSeed({ localId: `${prefix}${name}`, ...row })
@@ -147,12 +149,12 @@ testDescribe('ownership address policy', () => {
     await insertListedSeed({
       localId: checksumId,
       publisher: OWNED_CHECKSUM,
-      uid: REAL_UID,
+      uid: realUid(),
     })
     await insertListedSeed({
       localId: nullUidId,
       publisher: null,
-      uid: '0x' + 'd'.repeat(64),
+      uid: realUid(),
     })
     await insertListedSeed({ localId: draftId, publisher: null, uid: null })
 
@@ -175,7 +177,7 @@ testDescribe('ownership address policy', () => {
     await insertListedSeed({
       localId: stampedId,
       publisher: OWNED_CHECKSUM,
-      uid: REAL_UID,
+      uid: realUid(),
     })
 
     await client.setAddresses({ owned: [] })
@@ -187,21 +189,11 @@ testDescribe('ownership address policy', () => {
     expect(await isItemOwned({ seedLocalId: stampedId })).toBe(true)
   })
 
-  it('isItemOwned prefers the localId row over another row sharing the uid', async () => {
+  it('isItemOwned falls back to the uid when the localId has no row', async () => {
     const { client } = await import('@/client')
     const t = Date.now()
-    const sharedUid = '0x' + '7'.repeat(64)
-    const strayId = `owned-stray-${t}`
-    const ownId = `owned-own-${t}`
-    // Inserted first so a `localId OR uid` LIMIT 1 lookup would tend to return it.
-    await insertListedSeed({ localId: strayId, publisher: null, uid: sharedUid })
-    await insertListedSeed({ localId: ownId, publisher: OWNED, uid: sharedUid })
-
     await client.setAddresses({ owned: [OWNED] })
-    expect(await isItemOwned({ seedLocalId: ownId, seedUid: sharedUid })).toBe(true)
-    expect(await isItemOwned({ seedLocalId: strayId, seedUid: sharedUid })).toBe(false)
-    // localId with no row: falls back to uid.
-    const fallbackUid = '0x' + '8'.repeat(64)
+    const fallbackUid = realUid()
     await insertListedSeed({ localId: `owned-fallback-${t}`, publisher: OWNED, uid: fallbackUid })
     expect(await isItemOwned({ seedLocalId: `missing-${t}`, seedUid: fallbackUid })).toBe(true)
   })
@@ -215,7 +207,7 @@ testDescribe('ownership address policy', () => {
     await insertListedSeed({
       localId: sealedId,
       publisher: null,
-      uid: '0x' + 'e'.repeat(64),
+      uid: realUid(),
       attestationRaw: JSON.stringify({ attester: '0xsomeone' }),
     })
 
@@ -268,7 +260,7 @@ testDescribe('ownership address policy', () => {
       await insertListedSeed({
         localId: moduleId,
         publisher: MODULE,
-        uid: REAL_UID,
+        uid: realUid(),
       })
 
       expect(await isItemOwned({ seedLocalId: moduleId })).toBe(false)
