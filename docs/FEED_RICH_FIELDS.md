@@ -22,7 +22,7 @@ This guide explains how to turn RSS/XML strings (feature images, content, seed r
 | Capability | Package | API |
 |------------|---------|-----|
 | Classify / resolve / normalize | `@seedprotocol/sdk` | `classifyMediaRef`, `resolveMediaRef`, `normalizeFeedItemFields`, `getFeedItemStringField` |
-| Parse RSS/XML | `@seedprotocol/feed` | `parseRssString` (also re-exports the SDK helpers above) |
+| Parse RSS/XML | `@seedprotocol/feed` | `parseRssString` (also re-exports `classifyMediaRef`, `normalizeFeedItemFields` and `getFeedItemStringField`, plus the RSS image-relation helpers, from `@seedprotocol/arweave`) |
 | Publish RSS/Atom/JSON | `@seedprotocol/feed` | `createFeed`, `pickFeedItemContent`, `pickFeedItemDescription`, `feedItemRichTextContainsDataUriImage` |
 | React | `@seedprotocol/react` | `useResolvedMediaRef`, `SeedMediaImage`, `SeedMediaAudio`, `SeedMediaVideo`, `SeedMediaFile`, `SeedHtml`, `SeedJson`, `formatSeedJson`, `useNormalizedFeedItemFields` |
 
@@ -30,13 +30,13 @@ React apps do **not** need to depend on `@seedprotocol/feed` unless they parse R
 
 ## Publishing feeds (Seed → RSS / Atom / JSON)
 
-When `@seedprotocol/feed` builds a feed from GraphQL/EAS-assembled items (via `createFeed` and the internal `transformToFeedItems` step), `getFeedItemsBySchemaName` first annotates relation-backed fields with storage model metadata, then rich body is resolved in this order:
+When `@seedprotocol/feed` builds a feed from EAS-assembled items (via `createFeed` and the internal `transformToFeedItems` step), rich body is resolved in this order. The storage model metadata it reads is added by `@seedprotocol/query` during assembly, for any `queryBySchema`, `getSeed` or `getSeeds` call whose `relations` mode is not `'uids'`, so records from those calls carry the maps whether or not they went through `getFeedItemsBySchemaName`.
 
 1. **Typed storage relations** — Fields listed in `_feedFieldStorageModels` / `_feedListElementStorageModels` whose related Seed schema is `html`, `file`, or `json` (case-insensitive). Among those, the chosen value is deterministic: model priority **html**, then **file**, then **json**; ties break by field name (lexical), then list index. For list relations, only elements typed as one of those three are candidates.
 2. **Legacy body / HTML fields** — `html`, `Html`, `body`, `Body`, `content`, `Content` (first non-empty string wins).
 3. **Fallbacks** — `summary`, `description`, `text` (and capitalized variants), same order as legacy behavior.
 
-Items that never pass through `getFeedItemsBySchemaName` (for example hand-built GraphQL shapes) keep **only** steps 2–3 unless you attach the `_feed*` maps yourself.
+Items built by hand keep **only** steps 2–3 unless you attach the `_feed*` maps yourself.
 
 **Short text for excerpts** uses only `summary`, `description`, and `text` (and capitalized variants), not `body` / `html`, so a typical article can keep a **summary** separate from full **body** HTML.
 
@@ -59,7 +59,7 @@ Feeds that include full HTML with inline `data:image/...;base64,...` URIs can pr
 - **Per call:** pass the 8th argument to `createFeed`: `transformOverrides` with `{ richTextDataUriImages: 'include_items' }` (overrides env for that generation).
 - **Detection helper:** `feedItemRichTextContainsDataUriImage(item)` scans the same sources as `pickFeedItemContent` (typed `html` / `file` / `json` fields and list slots when `_feed*` maps are present, then the legacy primary keys) plus excerpt keys (`summary`, `description`, `text` and capitalized variants) and requires both `data:image/` and `;base64,` in the string.
 
-If you publish HTML with embedded images, prefer **materialized** Image seeds and normal `https://` or Arweave URLs in stored HTML (see publish docs for `htmlEmbeddedDataUriPolicy` and two-phase L1 upload). Items that still contain data-URI images after publish remain eligible for omission unless you opt in as above.
+If you publish HTML with embedded images, prefer **materialized** Image seeds and normal `https://` or Arweave URLs in stored HTML (see publish docs for `htmlEmbeddedDataUriPolicy`). Items that still contain data-URI images after publish remain eligible for omission unless you opt in as above.
 
 ## Field manifest example
 
@@ -192,7 +192,7 @@ For local items and `useItemProperty`, see [GETTING_STARTED.md – Displaying Ht
 
 ### List relation properties (e.g. authors)
 
-When the feed server loads related seeds and `expandRelations` is enabled in feed config, list-of-relation fields (such as `authorIdentityIds` on the wire) are expanded to the public schema key (`authors`) with an **array of plain objects**—one per related item—so RSS can emit nested elements (for example repeated `<author>` with child fields like `<displayName>`). Storage-style keys that map to the same relation are removed from the serialized item so XML does not duplicate IDs alongside nested content. Related items that only have an Arweave `storageTransactionId` are still surfaced as URL lists instead of full object expansion.
+With query's default `relations: 'expand'` (feed uses it unless `FEED_EXPAND_RELATIONS=false`, which selects `'urls'`), list-of-relation fields (such as `authorIdentityIds` on the wire) are expanded to the public schema key (`authors`) with an **array of plain objects**—one per related item—so RSS can emit nested elements (for example repeated `<author>` with child fields like `<displayName>`). Storage-style keys that map to the same relation are removed from the serialized item so XML does not duplicate IDs alongside nested content. Related items that only have an Arweave `storageTransactionId` are still surfaced as URL lists instead of full object expansion. Image relations expand to objects with an `arweaveUrl`, which `createFeed` uses for the item's image enclosure.
 
 ## `SeedImage` vs `SeedMediaImage`
 

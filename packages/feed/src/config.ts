@@ -87,10 +87,15 @@ export function resetSiteConfig(): void {
  * - FEED_ITEM_URL_BASE: Base URL for attestation links (e.g. https://base.easscan.org).
  *   Item links use {base}/attestation/view/{uid}. Default: the EAS explorer of the configured
  *   chain (`EAS_CHAIN_ID`, or the SDK / publish chain in-process), else 'https://easscan.org'.
- * - FEED_ITEM_URL_PATH: Path segment for attestation links (default: 'attestation/view').
- *   Only used when FEED_ITEM_URL_BASE is set.
- * - FEED_SITE_URL: Site URL for fallback when FEED_ITEM_URL_BASE is unset (default: 'https://seedprotocol.io').
- * - FEED_EXPAND_RELATIONS: When 'false', relation properties stay as UIDs. Default: true (expand to nested objects).
+ * - FEED_ITEM_URL_PATH: Path segment for attestation links (default: 'attestation/view'), with
+ *   FEED_ITEM_URL_BASE or its default.
+ * - FEED_SITE_URL: Site URL for item links without an item URL base (default:
+ *   'https://seedprotocol.io'). Item links currently always have a base (see FEED_ITEM_URL_BASE),
+ *   so this has no effect.
+ * - FEED_EXPAND_RELATIONS: Default true: query's `relations: 'expand'` (related seeds as nested
+ *   objects, Html/File relations as Arweave URLs). 'false' selects `relations: 'urls'`: Html/File
+ *   relations still become Arweave URLs, Image and other relations stay seed UIDs. Both fetch the
+ *   same related seeds.
  * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25).
  * - FEED_INCLUDE_DATA_URI_HTML_ITEMS: When 'true', include items whose body/html contain embedded data-URI images.
  *   Default: false (omit such items to avoid huge RSS payloads).
