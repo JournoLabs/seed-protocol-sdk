@@ -202,6 +202,3 @@ export async function hydrateArweaveRichTextInItems(
 
   await runWithConcurrency(tasks, HYDRATE_CONCURRENCY)
 }
-
-/** @deprecated Use {@link hydrateArweaveRichTextInItems} */
-export const hydrateArweaveRichTextInFeedItems = hydrateArweaveRichTextInItems

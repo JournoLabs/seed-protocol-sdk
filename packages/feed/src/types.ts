@@ -61,8 +61,6 @@ export interface FeedItem {
   [key: string]: unknown
 }
 
-/** @deprecated Use {@link FeedItem}. Items come from `@seedprotocol/query`, not GraphQL. */
-export type GraphQLItem = FeedItem
 
 /**
  * Image metadata extracted from Arweave transaction

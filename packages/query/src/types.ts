@@ -27,13 +27,8 @@ export type QuerySourceMode = 'local' | 'remote' | 'auto'
 export type RelationsMode = 'expand' | 'urls' | 'uids'
 
 export type AssembleOptions = {
-  /** Default `'expand'`. Takes precedence over `expandRelations`. */
+  /** Default `'expand'`. */
   relations?: RelationsMode
-  /**
-   * @deprecated Use `relations`: `true` is `'expand'`, `false` is `'urls'`. Ignored when
-   * `relations` is given.
-   */
-  expandRelations?: boolean
   /** Fetch Arweave gateway bodies into html/body/content (and marked storage fields). Default true. */
   hydrateStorage?: boolean
   /**
@@ -50,13 +45,9 @@ export type AssembleOptions = {
   source?: QuerySourceMode
 }
 
-/** The relations mode `options` ask for, with `expandRelations` as its fallback. */
-export function relationsModeOf(options?: {
-  relations?: RelationsMode
-  expandRelations?: boolean
-}): RelationsMode {
-  if (options?.relations) return options.relations
-  return options?.expandRelations === false ? 'urls' : 'expand'
+/** The relations mode `options` ask for. */
+export function relationsModeOf(options?: { relations?: RelationsMode }): RelationsMode {
+  return options?.relations ?? 'expand'
 }
 
 export type ChangelogInclude = 'data' | 'data+changelog' | 'changelog'

@@ -4,8 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- `FeedItem` names the feed entry type. `GraphQLItem` is a deprecated alias for it; `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
-- `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are re-exported from `@seedprotocol/query` and marked deprecated; use `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from query.
+- Breaking: `GraphQLItem` (use `FeedItem`), `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are no longer exported. Import `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`.
+- `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
 - `express`, `@types/express` and `graphql-request` are no longer dependencies.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read; they never did anything.
 

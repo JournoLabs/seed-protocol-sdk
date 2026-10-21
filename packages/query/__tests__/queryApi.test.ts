@@ -105,7 +105,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     const result = await queryBySchema('post', {
       limit: 10,
       skip: 0,
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
       cache: false,
     })
@@ -170,7 +170,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     ])
 
     const records = await assembleSeeds('post', seeds, {
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
     })
     expect(records[0]!.data.title).toBe('New')
@@ -236,7 +236,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
 
     const result = await getSeed(seedUid, {
       include: 'data+changelog',
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
       cache: false,
     })
@@ -324,7 +324,7 @@ describe('queryBySchema / getSeed caching', () => {
     rmSync(cacheDir, { recursive: true, force: true })
   })
 
-  const uncachedOpts = { limit: 10, skip: 0, expandRelations: false, hydrateStorage: false }
+  const uncachedOpts = { limit: 10, skip: 0, relations: 'urls' as const, hydrateStorage: false }
   const optionsKey = buildAssembleOptionsKey(uncachedOpts)
 
   it('caches collection on skip=0 and returns etag', async () => {
@@ -477,12 +477,12 @@ describe('queryBySchema / getSeed caching', () => {
   it('keeps collections for different assemble options apart', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'One', 100)
     await queryBySchema('post', uncachedOpts)
-    await queryBySchema('post', { ...uncachedOpts, expandRelations: true })
+    await queryBySchema('post', { ...uncachedOpts, relations: 'expand' })
     expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(2)
     expect(
       await getQueryCacheManager().getCollection(
         'post',
-        buildAssembleOptionsKey({ expandRelations: true, hydrateStorage: false }),
+        buildAssembleOptionsKey({ relations: 'expand', hydrateStorage: false }),
       ),
     ).not.toBeNull()
   })
@@ -580,7 +580,7 @@ describe('queryBySchema / getSeed caching', () => {
 
     mockRequest.mockClear()
     const hit = await getSeed('0xseed1', {
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
     })
     expect(hit?.data.title).toBe('FromCollection')
@@ -602,7 +602,7 @@ describe('queryBySchema / getSeed caching', () => {
         },
       ],
     })
-    const opts = { expandRelations: false, hydrateStorage: false }
+    const opts = { relations: 'urls' as const, hydrateStorage: false }
     expect((await getSeed('0xseed1', opts))?.data.title).toBe('Before')
 
     mockAssembledPost('0xseed1', '0xver2', 'New version', 100)
@@ -622,7 +622,7 @@ describe('queryBySchema / getSeed caching', () => {
       { id: '0xseed1', refUID: '0x0', timeCreated: 100, revocationTime: 9_999_999_999 },
     ])
     mockRequest.mockResolvedValue({ itemSeeds: [] })
-    expect(await getSeed('0xseed1', { expandRelations: false, hydrateStorage: false })).toBeNull()
+    expect(await getSeed('0xseed1', { relations: 'urls', hydrateStorage: false })).toBeNull()
     expect(await getQueryCacheManager().getItem('0xseed1', optionsKey)).toBeNull()
   })
 
@@ -656,7 +656,7 @@ describe('queryBySchema / getSeed caching', () => {
     it('getSeed results throw on mutation, fresh or cached', async () => {
       mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
       mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
-      const opts = { expandRelations: false, hydrateStorage: false }
+      const opts = { relations: 'urls' as const, hydrateStorage: false }
 
       const fresh = await getSeed('0xseed1', opts)
       expect(writeTitle(fresh!)).toThrow(TypeError)
@@ -673,7 +673,7 @@ describe('queryBySchema / getSeed caching', () => {
       mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
       const result = await getSeed('0xseed1', {
         include: 'data+changelog',
-        expandRelations: false,
+        relations: 'urls',
         hydrateStorage: false,
       })
       expect(() => (result!.changelog as unknown[]).push({})).toThrow(TypeError)
@@ -768,18 +768,18 @@ describe('queryBySchema / getSeed caching', () => {
 
     const withCl = await getSeed(seedUid, {
       include: 'data+changelog',
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
     })
     expect(withCl?.changelog?.length).toBeGreaterThan(0)
 
     const dataKey = buildAssembleOptionsKey({
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
     })
     const clKey = buildAssembleOptionsKey({
       include: 'data+changelog',
-      expandRelations: false,
+      relations: 'urls',
       hydrateStorage: false,
     })
     expect(dataKey).not.toBe(clKey)

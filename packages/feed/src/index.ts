@@ -11,7 +11,7 @@ export {
   type SiteConfigOverrides,
 } from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
-export type { FeedConfig, FeedFormat, FeedItem, GraphQLItem } from './types';
+export type { FeedConfig, FeedFormat, FeedItem } from './types';
 export {
   initializeFeedPlatform,
   initializeSeedClient,
@@ -60,19 +60,12 @@ import {
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
 
-/** @deprecated Use `enrichImageSeedClone` from `@seedprotocol/query`. */
-export { enrichImageSeedCloneForFeed } from '@seedprotocol/query';
 export {
   pickFeedItemContent,
   pickFeedItemDescription,
   feedItemRichTextContainsDataUriImage,
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
-/** @deprecated Use `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`. */
-export {
-  FEED_RICH_BODY_STORAGE_SCHEMAS,
-  isFeedRichBodyStorageSchema,
-} from '@seedprotocol/query';
 
 /** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
 function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
