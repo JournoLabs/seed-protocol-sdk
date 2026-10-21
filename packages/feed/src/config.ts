@@ -92,10 +92,6 @@ export function resetSiteConfig(): void {
  * - FEED_SITE_URL: Site URL for item links without an item URL base (default:
  *   'https://seedprotocol.io'). Item links currently always have a base (see FEED_ITEM_URL_BASE),
  *   so this has no effect.
- * - FEED_EXPAND_RELATIONS: Default true: query's `relations: 'expand'` (related seeds as nested
- *   objects, Html/File relations as Arweave URLs). 'false' selects `relations: 'urls'`: Html/File
- *   relations still become Arweave URLs, Image and other relations stay seed UIDs. Both fetch the
- *   same related seeds.
  * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25; a value that isn't a positive
  *   integer gives the default).
  * - FEED_INCLUDE_DATA_URI_HTML_ITEMS: When 'true', include items whose body/html contain embedded data-URI images.
@@ -105,7 +101,6 @@ export function loadFeedConfig(): {
   itemUrlBase: string;
   itemUrlPath: string;
   siteUrl: string;
-  expandRelations: boolean;
   pageSize: number;
   richTextDataUriImages: 'omit_items' | 'include_items';
 } {
@@ -117,12 +112,11 @@ export function loadFeedConfig(): {
     process.env.FEED_ITEM_URL_PATH?.trim() || 'attestation/view';
   const siteUrl =
     process.env.FEED_SITE_URL?.trim() || 'https://seedprotocol.io';
-  const expandRelations = process.env.FEED_EXPAND_RELATIONS?.toLowerCase() !== 'false';
   const pageSize = Math.max(1, parseInt(process.env.FEED_PAGE_SIZE || '25', 10) || 25);
   const richTextDataUriImages =
     process.env.FEED_INCLUDE_DATA_URI_HTML_ITEMS?.toLowerCase() === 'true'
       ? 'include_items'
       : 'omit_items';
 
-  return { itemUrlBase, itemUrlPath, siteUrl, expandRelations, pageSize, richTextDataUriImages };
+  return { itemUrlBase, itemUrlPath, siteUrl, pageSize, richTextDataUriImages };
 }

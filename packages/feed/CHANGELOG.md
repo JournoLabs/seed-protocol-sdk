@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Breaking: `FEED_EXPAND_RELATIONS` is removed and feeds always assemble with `relations: 'expand'`. Setting it to `false` fetched the same related seeds but left Image and author relations as seed UIDs, so items lost their image enclosures and author names. `loadFeedConfig()` no longer returns `expandRelations`.
 - A feed body read back from the disk cache keeps its ETag and expiry. Before, loading it into memory gave it a new ETag (so the next `If-None-Match` missed) and a full `CACHE_TTL`, including page 2+ and archive entries that should expire after `CACHE_PAGE_TTL` / `CACHE_ARCHIVE_TTL`.
 - Image metadata probes stop at the first gateway that answers, image or not; only an error or a non-ok status moves to the next gateway. When no gateway answers, nothing is cached and the next request probes again; before, the transaction was cached as "not an image" for `IMAGE_METADATA_TTL` (7 days). `ArweaveImageService.detectImage` returns null in that case.
 - Image metadata is cached whenever `IMAGE_METADATA_ENABLED` is on, including when content caching is off (the development default), and at most 8 probes run at once.

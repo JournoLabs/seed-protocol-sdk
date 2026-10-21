@@ -82,7 +82,6 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 ### Items and pages
 
 - `FEED_PAGE_SIZE` - Items per page (default: `25`).
-- `FEED_EXPAND_RELATIONS` - Default `true`: related seeds come back as nested objects (authors with names, images with `arweaveUrl` for enclosures), and Html/File relations as Arweave URLs. `false` keeps Html/File as URLs but leaves Image and other relations as seed UIDs, so items lose image enclosures and author names. It fetches the same related seeds either way.
 - `FEED_INCLUDE_DATA_URI_HTML_ITEMS` - `true` keeps items whose rich text embeds `data:image/` URIs. Default: such items are left out of the feed.
 - `CACHE_MAX_AGE` - Seconds a checked collection is served by `@seedprotocol/query` with no indexer request (default `0`). See the [query README](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md).
 

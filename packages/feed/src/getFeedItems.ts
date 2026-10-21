@@ -313,14 +313,14 @@ export const getFeedItemsBySchemaName = async (
   options?: { limit?: number; skip?: number },
 ): Promise<Record<string, unknown>[]> => {
   await initializeFeedPlatform()
-  const feedConfig = loadFeedConfig()
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
 
+  // Expanded relations give items their author names and image enclosures.
   const { items } = await queryBySchema(schemaName, {
     limit,
     skip,
-    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
+    relations: 'expand',
     hydrateStorage: true,
   })
   return seedRecordsToFeedItems(schemaName, items)
@@ -332,10 +332,9 @@ export const getFeedItemsBySchemaNameForMonth = async (
   month: number,
 ): Promise<Record<string, unknown>[]> => {
   await initializeFeedPlatform()
-  const feedConfig = loadFeedConfig()
 
   const records = await queryBySchemaForMonth(schemaName, year, month, {
-    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
+    relations: 'expand',
     hydrateStorage: true,
   })
   return seedRecordsToFeedItems(schemaName, records)
