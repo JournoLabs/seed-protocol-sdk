@@ -685,6 +685,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const propertyNameWhere = metadataRowsOfProperty(property, metadataLatest)
         // In the browser the feed watch below reads the same row at once, so only Node (no change
         // feed) reads it here.
+        const valueBeforeRead = this._service.getSnapshot().context.propertyValue
         const initialMetadata = isBrowser
           ? []
           : await db
@@ -697,7 +698,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (initialMetadata.length > 0) {
           const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
           const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
-          const metaRow = resolveMetadataRecord(
+          const stored = resolveMetadataRecord(
             initialMetadata as (import('@/seedSchema').MetadataType & {
               refResolvedValue?: string | null
               refSeedType?: string
@@ -706,13 +707,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             normalizedDataType,
             normalizedRefValueType,
           )
+          // A value whose outbox op hasn't applied yet wins over the stored row (ADR 0019), as in
+          // loadOrCreateProperty
+          const { applyPendingRow, getPendingPropertyRow } = await import('@/outbox/pendingValues')
+          const pending = await getPendingPropertyRow(seedLocalId || stored.seedLocalId, propertyName)
+          const metaRow = pending ? applyPendingRow({ ...stored }, pending) : stored
+          // The load or an assignment set the value while this read ran: theirs is newer
+          const valueChanged = this._service.getSnapshot().context.propertyValue !== valueBeforeRead
           logger(`[ItemProperty._setupLiveQuerySubscription] Initial query returned metadata record`)
           
           // Update context with initial metadata
           this._service.send({
             type: 'updateContext',
-            propertyValue: metaRow.propertyValue,
-            renderValue: metaRow.propertyValue,
+            ...(!valueChanged && { propertyValue: metaRow.propertyValue, renderValue: metaRow.propertyValue }),
             localId: metaRow.localId || undefined,
             uid: metaRow.uid || undefined,
             versionLocalId: metaRow.versionLocalId || undefined,
