@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `getItemVersionsFromEas` returns only Version attestations (`schemaId` is `VERSION_SCHEMA_UID`). It returned every attestation whose `refUID` was one of the seeds, and PublishedBy sidecars use seed uids as `refUID`: a sidecar from the seed's own attester, being newer, was taken as the seed's latest version, and `@seedprotocol/query` assembled the record with no properties. `getCanonicalItemPropertiesFromEas` applies the same filter when it fetches the versions of the properties it checks, so a property on a non-version attestation no longer counts.
+- New exports `VERSION_SCHEMA_UID` and `VERSION_SCHEMA_DEF`, moved from `@seedprotocol/sdk`, which re-exports both (and the deprecated `VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA`) unchanged.
+
 ## 0.7.8 (2026-10-20)
 
 - `DefaultEasClient` requests abort after `EAS_REQUEST_TIMEOUT_MS` (30 s). `createEasGraphQLClient(url, timeoutMs?)` builds a client with that limit.
