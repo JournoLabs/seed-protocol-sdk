@@ -6,7 +6,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { getItemPropertyData } from '@/db/read/getItemProperty'
-import { getItemData } from '@/db/read/getItemData'
+import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { easName } from '@seedprotocol/eas'
 import { type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
@@ -61,7 +61,7 @@ export const saveItemStorage = fromCallback<
     if (!draftSeedLocalId) {
       throw new Error(`No metadata row to save ${propertyName} to`)
     }
-    const itemData = await getItemData({ seedLocalId: draftSeedLocalId })
+    const head = await getLatestVersionRow(draftSeedLocalId)
 
     // Staged until the op applies, then moved into the item's file (ADR 0019)
     const stagingDir = BaseFileManager.getFilesPath('staging')
@@ -75,8 +75,8 @@ export const saveItemStorage = fromCallback<
         itemStorage: {
           stagedPath,
           seedUid: draftSeedUid,
-          versionLocalId: itemData?.latestVersionLocalId ?? knownRow?.versionLocalId ?? undefined,
-          versionUid: itemData?.latestVersionUid ?? knownRow?.versionUid ?? undefined,
+          versionLocalId: head?.localId ?? knownRow?.versionLocalId ?? undefined,
+          versionUid: head?.uid ?? knownRow?.versionUid ?? undefined,
           modelType: (modelName ? easName(modelName) : knownRow?.modelType) || undefined,
           propertyRecordSchema,
         },

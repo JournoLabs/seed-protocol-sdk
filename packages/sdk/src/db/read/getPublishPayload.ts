@@ -742,12 +742,12 @@ const processRelationOrImageProperty = async (
         matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.Html) ||
         matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.Json)))
   if (isStorageSeed && ((context as any).seedLocalId || (context as any).seedUid)) {
-    const { getPropertyData: getPropertyDataFromDb } = await import('@/db/read/getPropertyData')
-    const metaRow = await getPropertyDataFromDb({
-      propertyName: relationOrImageProperty.propertyName,
-      seedLocalId: (context as any).seedLocalId,
-      seedUid: (context as any).seedUid,
-    })
+    const { currentPropertyRow } = await import('@/db/read/currentPropertyRow')
+    const metaRow = await currentPropertyRow(
+      { seedLocalId: (context as any).seedLocalId, seedUid: (context as any).seedUid },
+      { propertyName: relationOrImageProperty.propertyName },
+      { overlay: false },
+    )
     const fromMeta = metaRow?.propertyValue
     if (typeof fromMeta === 'string' && fromMeta.trim() !== '') {
       const idsCtx = resolveSeedIdsFromRefString(normalizeRelationPropertyValue(value) ?? '')

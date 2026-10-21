@@ -194,14 +194,16 @@ describe('ensureImageLocal', () => {
       resolveDownload = () => resolve(true)
     })
 
+    let downloaded = false
     mocks.pathExists.mockImplementation(async (p: string) => {
       if (p === '/app-files/images') return true
-      if (p === originalPath) return true
+      if (p === originalPath) return downloaded
       return false
     })
     mocks.readdir.mockResolvedValue([])
     mocks.downloadTransactionIdWithDedupe.mockImplementation(async () => {
       await downloadPromise
+      downloaded = true
       mocks.readdir.mockResolvedValue([VALID_ARWEAVE_TX])
       return true
     })

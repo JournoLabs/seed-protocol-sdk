@@ -574,7 +574,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
 
     const readTitles = async () => {
       const { getItemProperties } = await import('@/db/read/getItemProperties')
-      const { getPropertyData } = await import('@/db/read/getPropertyData')
+      const { currentPropertyRow } = await import('@/db/read/currentPropertyRow')
       const { getMetadataLatest } = await import('@/db/read/subqueries/metadataLatest')
       const { BaseDb } = await import('@/db/Db/BaseDb')
       const seedLocalId = (await seedRow(seed))!.localId!
@@ -587,7 +587,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
         .where(and(eq(latest.rowNum, 1), eq(latest.propertyName, 'title')))
       return {
         getItemProperties: properties.find((p) => p.propertyName === 'title')?.propertyValue,
-        getPropertyData: (await getPropertyData({ propertyName: 'title', seedUid: seed }))
+        currentPropertyRow: (await currentPropertyRow({ seedUid: seed }, { propertyName: 'title' }))
           ?.propertyValue,
         metadataLatest: latestRows.map((r: { propertyValue: string | null }) => r.propertyValue),
       }
@@ -597,7 +597,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
       await sync()
       expect(await readTitles()).toEqual({
         getItemProperties: '',
-        getPropertyData: null,
+        currentPropertyRow: null,
         metadataLatest: [null],
       })
     })
@@ -607,7 +607,7 @@ describe.sequential('runSyncFromEas: revocations', () => {
       await sync(1_700_007_100)
       expect(await readTitles()).toEqual({
         getItemProperties: '',
-        getPropertyData: null,
+        currentPropertyRow: null,
         metadataLatest: [null],
       })
     })

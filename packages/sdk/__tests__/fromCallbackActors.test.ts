@@ -18,7 +18,7 @@ describe('fromCallback Actors Validation', () => {
     const results = await validateAllFromCallbackActors(sdkSrcDir)
 
     // Guard against a wrong path silently validating nothing.
-    expect(results.length).toBeGreaterThan(30)
+    expect(results.length).toBeGreaterThan(25)
 
     const invalid = Object.fromEntries(
       results

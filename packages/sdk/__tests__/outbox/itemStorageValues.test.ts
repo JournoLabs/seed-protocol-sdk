@@ -179,9 +179,9 @@ testDescribe('storage values through the outbox', () => {
 
       const ops = await storageOps(post.seedLocalId)
       expect(ops).toHaveLength(1)
-      expect(outboxOpValue<StorageValueOp>(ops[0])!.create.values.refResolvedValue).not.toContain('older')
+      expect(outboxOpValue<StorageValueOp>(ops[0])!.row!.refResolvedValue).not.toContain('older')
       expect(await BaseFileManager.pathExists(olderPath!)).toBe(false)
-      expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', outboxOpValue<StorageValueOp>(ops[0])!.create.values.refResolvedValue!))).toBe('<p>newer</p>')
+      expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', outboxOpValue<StorageValueOp>(ops[0])!.row!.refResolvedValue!))).toBe('<p>newer</p>')
     } finally {
       spy.mockRestore()
     }
