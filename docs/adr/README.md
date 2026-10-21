@@ -31,6 +31,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0019](0019-item-writes-through-an-outbox.md) | Item edits go through a durable outbox that the leader tab drains | Accepted (being implemented) |
 | [0020](0020-entity-reactivity-through-a-change-log.md) | Loaded entities learn about row changes from one trigger-fed change log | Accepted (being implemented) |
 | [0021](0021-clearing-a-property.md) | A property is cleared by attesting an empty value or by revoking its attestations | Accepted (being implemented) |
+| [0022](0022-properties-may-reference-the-seed.md) | Readers can accept property attestations that reference the Seed | Proposed |
 
 ## Writing one
 
