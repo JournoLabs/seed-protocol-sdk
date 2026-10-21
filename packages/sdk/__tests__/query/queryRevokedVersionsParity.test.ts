@@ -13,6 +13,7 @@ import {
   GET_SEEDS,
   GET_SEEDS_LEAN,
   GET_VERSIONS,
+  VERSION_SCHEMA_UID,
   resetSchemaNamesCache,
 } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -30,7 +31,6 @@ const uid = (byte: string) => '0x' + byte.repeat(32)
 const ZERO = uid('00')
 const SCHEMA = 'rvparity_post'
 const SEED_SCHEMA_UID = '0x' + 'f0'.repeat(31) + '01'
-const VERSION_SCHEMA_UID = '0x' + 'f0'.repeat(31) + '02'
 const TITLE_SCHEMA_UID = '0x' + 'f0'.repeat(31) + '03'
 const ATTESTER = '0x1234567890123456789012345678901234567890'
 const REVOKED_AT = 1_700_009_999
@@ -119,7 +119,7 @@ const matches = (att: Record<string, any>, where: Record<string, any>): boolean 
     if (key === 'timeCreated') {
       return (cond.gte == null || att.timeCreated >= cond.gte) && (cond.lt == null || att.timeCreated < cond.lt)
     }
-    if (key === 'id' || key === 'refUID' || key === 'revoked') {
+    if (key === 'id' || key === 'refUID' || key === 'revoked' || key === 'schemaId') {
       if ('equals' in cond) return att[key] === cond.equals
       if ('in' in cond) return cond.in.includes(att[key])
       if ('startsWith' in cond) return String(att[key]).startsWith(cond.startsWith)
