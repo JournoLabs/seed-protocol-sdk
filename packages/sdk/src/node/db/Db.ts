@@ -11,7 +11,6 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
 import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
-import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 
 const logger = debug('seedSdk:node:db:Db')
@@ -32,19 +31,26 @@ function resolveDbPaths(filesDir: string, config?: DbConfig) {
 }
 
 /**
+ * The installed @seedprotocol/sdk's dist directory, resolved from this module rather than the
+ * working directory (hoisted monorepos, packaged Electron apps and scripts run from elsewhere all
+ * differ). The working directory when the package can't be resolved.
+ */
+function installedSdkDistDir(): string {
+  try {
+    const { createRequire } = process.getBuiltinModule('node:module')
+    const pkgJson = createRequire(import.meta.url).resolve('@seedprotocol/sdk/package.json')
+    return path.join(path.dirname(pkgJson), 'dist')
+  } catch {
+    return process.cwd()
+  }
+}
+
+/**
  * Locate prebuilt drizzle migration SQL shipped with the SDK
  * (same files the browser embeds via drizzleFiles.ts).
  */
 export function resolveSdkDrizzleMigrationsDir(sdkRootDir?: string): string {
-  const root =
-    sdkRootDir ||
-    (() => {
-      try {
-        return BasePathResolver.getSdkRootDir()
-      } catch {
-        return process.cwd()
-      }
-    })()
+  const root = sdkRootDir || installedSdkDistDir()
 
   // Look next to this module first, so the SDK always runs its own migrations
   // whatever the working directory (monorepos, packaged Electron apps, scripts

@@ -138,8 +138,12 @@ export async function recordRelatedSeedUid(params: {
       logger('related item %s not found; its seed uid is not recorded', seedLocalId)
       return
     }
-    ;(related as { seedUid?: string }).seedUid = seedUid
-    await persistSeedUidSafely(related, publisherAddress, attestationCreatedAtMs)
+    try {
+      ;(related as { seedUid?: string }).seedUid = seedUid
+      await persistSeedUidSafely(related, publisherAddress, attestationCreatedAtMs)
+    } finally {
+      related.unload()
+    }
   } catch (err) {
     logger('recording seed uid of related item %s failed: %O', seedLocalId, err)
   }

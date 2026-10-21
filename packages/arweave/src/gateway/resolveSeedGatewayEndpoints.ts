@@ -33,6 +33,11 @@ function parseGatewayHost(input: string | undefined): { host: string; protocol: 
   return { protocol: 'https', host: raw.replace(/\/$/, '') }
 }
 
+function publicArweaveBaseUrl(config: SeedGatewayConfig): string {
+  const { host, protocol } = parseGatewayHost(config.arweaveDomain)
+  return `${protocol}://${host}`
+}
+
 function sidecarOrigin(config: SeedGatewayConfig): {
   host: string
   port: number
@@ -122,6 +127,7 @@ function buildHttpEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpo
     uploadApiBaseUrl,
     activePath: 'http',
     gatewayHyperKey: config.hyper?.gatewayHyperKey?.trim() || undefined,
+    publicArweaveBaseUrl: baseUrl,
   }
 }
 
@@ -137,6 +143,7 @@ function buildHyperEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndp
     uploadApiBaseUrl: sidecar.baseUrl,
     activePath: 'hyper-sidecar',
     gatewayHyperKey: key || undefined,
+    publicArweaveBaseUrl: publicArweaveBaseUrl(config),
   }
 }
 
@@ -159,6 +166,7 @@ function buildProxyEndpoints(
     activePath: 'http-proxy',
     gatewayHyperKey: config.hyper?.gatewayHyperKey?.trim() || undefined,
     proxyBaseUrl: absoluteProxyBaseUrl,
+    publicArweaveBaseUrl: publicArweaveBaseUrl(config),
   }
 }
 

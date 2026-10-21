@@ -442,7 +442,38 @@ CREATE TRIGGER \`entity_changes_metadata_delete\` AFTER DELETE ON \`metadata\` B
 	INSERT INTO \`entity_changes\` (\`tbl\`, \`seed_local_id\`, \`seed_uid\`, \`property_name\`, \`at\`) VALUES ('metadata', OLD.\`seed_local_id\`, OLD.\`seed_uid\`, OLD.\`property_name\`, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER));
 END;`
 
-export const migrationSql_0024_add_metadata_retract = `ALTER TABLE \`metadata\` ADD \`retract\` integer;`
+export const migrationSql_0024_merge_republished_ghost_seeds = `-- A sync after an unpublish and republish inserted the old seed uid as a second seed row with no
+-- versions, while the item's old version rows still record that uid in versions.seed_uid. Property
+-- rows sync attached to that row move to the item, then the row is deleted.
+UPDATE \`metadata\` SET \`seed_local_id\` = (
+  SELECT \`v\`.\`seed_local_id\` FROM \`versions\` \`v\`
+  JOIN \`seeds\` \`owner\` ON \`owner\`.\`local_id\` = \`v\`.\`seed_local_id\`
+  JOIN \`seeds\` \`ghost\` ON \`ghost\`.\`uid\` = \`v\`.\`seed_uid\`
+  WHERE \`ghost\`.\`local_id\` = \`metadata\`.\`seed_local_id\` AND \`owner\`.\`local_id\` != \`ghost\`.\`local_id\`
+  LIMIT 1
+)
+WHERE \`seed_local_id\` IN (
+  SELECT \`ghost\`.\`local_id\` FROM \`seeds\` \`ghost\`
+  WHERE \`ghost\`.\`uid\` IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM \`versions\` WHERE \`versions\`.\`seed_local_id\` = \`ghost\`.\`local_id\`)
+    AND EXISTS (
+      SELECT 1 FROM \`versions\` \`v\` JOIN \`seeds\` \`owner\` ON \`owner\`.\`local_id\` = \`v\`.\`seed_local_id\`
+      WHERE \`v\`.\`seed_uid\` = \`ghost\`.\`uid\` AND \`owner\`.\`local_id\` != \`ghost\`.\`local_id\`
+    )
+);
+--> statement-breakpoint
+DELETE FROM \`seeds\` WHERE \`local_id\` IN (
+  SELECT \`ghost\`.\`local_id\` FROM \`seeds\` \`ghost\`
+  WHERE \`ghost\`.\`uid\` IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM \`versions\` WHERE \`versions\`.\`seed_local_id\` = \`ghost\`.\`local_id\`)
+    AND EXISTS (
+      SELECT 1 FROM \`versions\` \`v\` JOIN \`seeds\` \`owner\` ON \`owner\`.\`local_id\` = \`v\`.\`seed_local_id\`
+      WHERE \`v\`.\`seed_uid\` = \`ghost\`.\`uid\` AND \`owner\`.\`local_id\` != \`ghost\`.\`local_id\`
+    )
+);
+`
+
+export const migrationSql_0025_add_metadata_retract = `ALTER TABLE \`metadata\` ADD \`retract\` integer;`
 
 // Journal JSON file
 export const journalJson = `{
@@ -620,8 +651,15 @@ export const journalJson = `{
     {
       "idx": 24,
       "version": "6",
-      "when": 1792580727925,
-      "tag": "0024_add_metadata_retract",
+      "when": 1792576238054,
+      "tag": "0024_merge_republished_ghost_seeds",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792585560172,
+      "tag": "0025_add_metadata_retract",
       "breakpoints": true
     }
   ]
@@ -632,8 +670,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "311f8f13-3b19-4a26-ba07-873d26dda987",
-  "prevId": "7767667b-3cf0-4630-b1ff-02913f2f35ad",
+  "id": "932b9df0-151c-4c9c-83d4-516250bd7b31",
+  "prevId": "3264e54f-0bb8-4116-87e8-b059b4ac1ae7",
   "tables": {
     "appState": {
       "name": "appState",

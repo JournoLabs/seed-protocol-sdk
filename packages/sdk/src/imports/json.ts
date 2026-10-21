@@ -1433,10 +1433,12 @@ export const createModelsFromJson = async (
  * use correct schemaFileIds - preventing duplicate models (Publication 1, etc.) when
  * processSchemaFiles runs multiple times.
  * @param filePath - Path to the JSON import file
+ * @param persistedBy - See createModelsFromJson
  * @returns ModelDefinitions with Model classes created from the JSON schema
  */
 export const createModelsFromJsonFile = async (
   filePath: string,
+  persistedBy?: Promise<unknown>,
 ): Promise<ModelDefinitions> => {
   const workingDir = BaseFileManager.getWorkingDir()
   const internalFilePath = filePath.startsWith(workingDir) ? filePath : `${workingDir}/${filePath}`
@@ -1465,6 +1467,6 @@ export const createModelsFromJsonFile = async (
     }
   }
 
-  return createModelsFromJson(importData, modelFileIds, propertyFileIds)
+  return createModelsFromJson(importData, modelFileIds, propertyFileIds, persistedBy)
 }
 

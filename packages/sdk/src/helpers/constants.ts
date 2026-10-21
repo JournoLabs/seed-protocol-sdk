@@ -1,4 +1,5 @@
 import type { AttestationRequestData } from '@ethereum-attestation-service/eas-sdk'
+import { VERSION_SCHEMA_DEF, VERSION_SCHEMA_UID } from '@seedprotocol/eas'
 
 // Top-level re-export (not mid-file import + export): Rollup with
 // external `@seedprotocol/arweave` otherwise emits a side-effect-only import
@@ -21,13 +22,6 @@ export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 export const ZERO_BYTES = '0x'
 export const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000'
 
-
-// Primary config file name for Seed Protocol SDK
-export const SEED_CONFIG_FILE = 'seed.config.ts'
-// Fallback config file names (in order of preference)
-export const SEED_CONFIG_FALLBACKS = ['seed.schema.ts', 'schema.ts']
-// Legacy constant for backward compatibility
-export const SCHEMA_TS = SEED_CONFIG_FILE
 
 export const INTERNAL_DATA_TYPES = {
   Text: {
@@ -103,15 +97,7 @@ export const INTERNAL_PROPERTY_NAMES = [
   'revokedAt',
 ]
 
-/** Schema definition of the Version attestation (zero resolver, revocable). */
-export const VERSION_SCHEMA_DEF = 'bytes32 version'
-
-/**
- * UID of {@link VERSION_SCHEMA_DEF}. Schema UIDs hash the definition, resolver and revocable flag,
- * so this is the same on every chain; the schema must still be registered on each one.
- */
-export const VERSION_SCHEMA_UID =
-  '0x13c0fd59d69dbce40501a41f8b37768d26dd2e2bb0cad64615334d84f7b9bdf6'
+export { VERSION_SCHEMA_DEF, VERSION_SCHEMA_UID }
 
 /** @deprecated The UID is chain-independent. Use {@link VERSION_SCHEMA_UID}. */
 export const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA = VERSION_SCHEMA_UID
@@ -134,8 +120,6 @@ export enum ImageSize {
 }
 
 export const CLIENT_NOT_INITIALIZED = 'ClientManager is not initialized. Please call init() first.'
-
-export const INIT_SCRIPT_SUCCESS_MESSAGE = '[Seed Protocol] Finished running init script'
 
 export enum SeedModels {
   Seed = 'Seed',

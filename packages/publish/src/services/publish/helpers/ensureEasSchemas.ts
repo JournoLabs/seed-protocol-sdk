@@ -397,10 +397,15 @@ async function ensureEasSchemasForItemResolved(
   }
 
   const relatedItems = await getRelatedItemsForPublish(item)
-  for (const relatedItem of relatedItems) {
-    await ensureEasSchemasForItemResolved(relatedItem as IItem<any>, account, {
-      managedAddress: options?.managedAddress,
-      blockSchemaRegistration,
-    })
+  try {
+    for (const relatedItem of relatedItems) {
+      await ensureEasSchemasForItemResolved(relatedItem as IItem<any>, account, {
+        managedAddress: options?.managedAddress,
+        blockSchemaRegistration,
+      })
+    }
+  } finally {
+    // getRelatedItemsForPublish holds each item it returns
+    for (const relatedItem of relatedItems) relatedItem.unload()
   }
 }

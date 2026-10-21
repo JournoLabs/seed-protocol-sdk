@@ -1,7 +1,6 @@
 import { decodeEasNumber, easName } from '@seedprotocol/eas'
 import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
-// Dynamic import to break circular dependency with getItem -> BaseItem
-// import { getItem } from '@/db/read/getItem'
+import { ItemLoads } from '@/db/read/itemLoads'
 import {
   defaultAttestationData,
   INTERNAL_DATA_TYPES,
@@ -74,6 +73,8 @@ export { PublishValidationFailedError, type PublishValidationError }
 /** Context for collecting validation errors instead of throwing on first error. */
 export type PublishValidationContext = {
   errors: PublishValidationError[]
+  /** The related items this build loads; their holds are released when the build ends. */
+  loads: ItemLoads
   /** Refs to seeds whose attestation was revoked; publish stops with RelatedItemUnpublishedError. */
   unpublishedRelatedItems?: UnpublishedRelatedItem[]
   /**
@@ -921,10 +922,7 @@ const processRelationOrImageProperty = async (
     return multiPublishPayload
   }
 
-  // Use dynamic import to break circular dependency
-  const getItemMod = await import('../../db/read/getItem')
-  const { getItem } = getItemMod
-  const relatedItem = await getItem(
+  const relatedItem = await ctx.loads.getItem(
     relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
   )
 
@@ -1234,8 +1232,6 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
   if (rows.length === 0) return multiPublishPayload
 
   const forceFullSnapshot = buildOpts?.forceFullSnapshot === true
-  const getItemMod = await import('../../db/read/getItem')
-  const { getItem } = getItemMod
   const doneImages = new Set<string>()
 
   for (const row of rows) {
@@ -1261,7 +1257,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
     const htmlSchemaUid = await resolveHtmlPropertySchemaUidByHtmlSeed(item, row.htmlSeedLocalId, ctx)
     if (!htmlSchemaUid) continue
 
-    const relatedItem = await getItem({ seedLocalId: row.imageSeedLocalId })
+    const relatedItem = await ctx.loads.getItem({ seedLocalId: row.imageSeedLocalId })
     if (!relatedItem) {
       addValidationError(
         ctx,
@@ -1431,10 +1427,7 @@ const processListProperty = async (
     const memberLocalId = relatedSeed?.seedLocalId ?? seedLocalId
     if (memberLocalId && ctx.newSeedsInProgress?.has(memberLocalId)) continue
 
-    // Use dynamic import to break circular dependency
-    const getItemMod = await import('../../db/read/getItem')
-    const { getItem } = getItemMod
-    const relatedItem = await getItem(
+    const relatedItem = await ctx.loads.getItem(
       relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
     )
 
@@ -1710,7 +1703,20 @@ export const getPublishPayload = async (
   // Every edit made before publishing is in `metadata` first (ADR 0019)
   const { waitForPendingOutboxOps } = await import('@/outbox')
   await waitForPendingOutboxOps()
-  const validationCtx: PublishValidationContext = { errors: [] }
+  const validationCtx: PublishValidationContext = { errors: [], loads: new ItemLoads() }
+  try {
+    return await buildPublishPayload(item, uploadedTransactions, validationCtx, options)
+  } finally {
+    validationCtx.loads.release()
+  }
+}
+
+const buildPublishPayload = async (
+  item: IItem<any>,
+  uploadedTransactions: UploadedTransaction[],
+  validationCtx: PublishValidationContext,
+  options?: GetPublishPayloadOptions,
+): Promise<MultiPublishPayload> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
   // A revoked seed can't be published under again: republishing creates a new seed attestation
   // (new seedUid) and a new version carrying every property (see docs/ATTESTATION_REVOCATION.md).

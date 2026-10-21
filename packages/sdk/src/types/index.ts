@@ -7,8 +7,6 @@ export * from './model'
 export * from './item'
 export * from './property'
 export * from './machines'
-export * from './seedProtocol'
-export * from './browser'
 export * from './arweave'
 export * from './publish'
 
@@ -18,24 +16,6 @@ export type Endpoints = {
   filePaths: string
   files: string
 }
-
-export interface WebpackConfigContext {
-  dir: string
-  dev: boolean
-  isServer: boolean
-  buildId: string
-  config: any
-  defaultLoaders: {
-    babel: any
-  }
-  totalPages: number
-  webpack: any
-  nextRuntime?: 'nodejs' | 'edge'
-}
-
-
-export type Environment = 'browser' | 'node' | 'react-native'
-
 
 /** Where the Node SQLite database lives (`config.dbConfig`). The browser keeps its database in OPFS and ignores it. */
 export interface DbConfig {
@@ -119,7 +99,7 @@ export interface SeedConstructorOptions {
   readonly addresses?: AddressConfiguration
   /**
    * When true, after `setAddresses` persists to app_state, the SDK runs `runSyncFromEas`
-   * immediately via the EAS sync orchestrator (not only the `syncDbWithEas` event listener). Defaults to true so local
+   * immediately via the EAS sync orchestrator. Defaults to true so local
    * metadata hydrates after connect or an empty DB; set false to opt out or if you call
    * `syncFromEas` yourself.
    */
@@ -149,5 +129,3 @@ export interface ItemCreateOptions extends CreateWaitOptions {
    */
   validate?: boolean
 }
-
-export type ClientCallback = (event: any) => void

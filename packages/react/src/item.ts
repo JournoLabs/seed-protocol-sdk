@@ -8,6 +8,7 @@ import {
   Item,
   eventEmitter,
   EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
+  isValidEasAttestationUid,
 } from '@seedprotocol/sdk'
 import { orderBy } from 'lodash-es'
 import debug from 'debug'
@@ -203,6 +204,31 @@ type UseItemsProps = {
 
 type UseItems = (props: UseItemsProps) => UseItemsReturn
 
+/** A row of `useItems`' live query. */
+type LiveSeedRow = Pick<SeedType, 'localId' | 'uid' | 'createdAt' | 'attestationCreatedAt'> & {
+  lastVersionPublishedAt: number | null
+}
+
+/**
+ * What `useItems` sorts and refreshes on from its live rows: when each seed was last published,
+ * and a signature that changes when a listed seed is published, republished or reordered.
+ */
+type LiveSeedOrder = { signature: string; sortTimes: Map<string, number> }
+
+const getLiveSeedOrder = (rows: LiveSeedRow[] | undefined): LiveSeedOrder => {
+  const sortTimes = new Map<string, number>()
+  const parts: string[] = []
+  for (const row of rows ?? []) {
+    if (!row.localId) continue
+    // Drafts carry a placeholder uid (NULL, '' or zero bytes32): all the same unpublished state.
+    const uid = isValidEasAttestationUid(row.uid) ? row.uid!.toLowerCase() : ''
+    const sortTime = row.lastVersionPublishedAt || row.attestationCreatedAt || row.createdAt
+    if (sortTime) sortTimes.set(row.localId, sortTime)
+    parts.push(`${row.localId}:${uid}:${sortTime ?? ''}`)
+  }
+  return { signature: parts.sort().join(','), sortTimes }
+}
+
 const getItemsQueryKey = (
   modelName?: string,
   deleted?: boolean,
@@ -362,6 +388,7 @@ export const useItems: UseItems = ({
         schemaUid: seeds.schemaUid,
         createdAt: seeds.createdAt,
         attestationCreatedAt: seeds.attestationCreatedAt,
+        lastVersionPublishedAt: versionData.lastVersionPublishedAt,
         _markedForDeletion: seeds._markedForDeletion,
       })
       .from(seeds)
@@ -369,7 +396,17 @@ export const useItems: UseItems = ({
       .where(and(gt(versionData.versionsCount, 0), ...conditions))
       .groupBy(seeds.localId)
   }, [db, isClientReady, modelName, deleted, includeEas, addressFilter, addressesForFilter])
-  const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
+  const seedsTableData = useLiveQuery<LiveSeedRow>(seedsQuery)
+
+  // A publish keeps the seed's local id, so the refetch below doesn't run for it, and the Item
+  // instances only take its uid in place. The list follows the live rows instead: a new order (and
+  // a new array) whenever a listed seed's uid or publish time changes, and the same one otherwise.
+  const liveSeedOrderRef = useRef<LiveSeedOrder>(getLiveSeedOrder(undefined))
+  const nextLiveSeedOrder = getLiveSeedOrder(seedsTableData)
+  if (nextLiveSeedOrder.signature !== liveSeedOrderRef.current.signature) {
+    liveSeedOrderRef.current = nextLiveSeedOrder
+  }
+  const liveSeedOrder = liveSeedOrderRef.current
 
   // Refetch when the live seed ids differ from the listed items.
   useEffect(() => {
@@ -417,20 +454,22 @@ export const useItems: UseItems = ({
     requestRefetch()
   }, [isClientReady, seedsTableData, queryClient, queryKey, dataUpdatedAt, isFetching])
 
-  // Same array while the data is the same, so `items` can be an effect/memo dependency.
+  // Same array while the data is the same, so `items` can be an effect/memo dependency. The live
+  // rows' times come first: an Item instance keeps the publish times it loaded with.
   const sortedItems = useMemo(
     () =>
       orderBy(
         items,
         [
           (item) =>
+            (item.seedLocalId && liveSeedOrder.sortTimes.get(item.seedLocalId)) ||
             item.lastVersionPublishedAt ||
             item.attestationCreatedAt ||
             item.createdAt,
         ],
         ['desc'],
       ),
-    [items],
+    [items, liveSeedOrder],
   )
 
   return {

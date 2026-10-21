@@ -319,6 +319,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/insertConflicts.test.ts',
             'packages/sdk/__tests__/browser/db/importSingleWrite.test.ts',
             'packages/sdk/__tests__/browser/db/freshInitSingleWrite.test.ts',
+            'packages/sdk/__tests__/browser/db/loadNoPropertyRewrite.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,

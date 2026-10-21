@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - A property whose attestation is a removal (`''` for a `string`, a zero `bytes32`; ADR 0021) is left out of the assembled seed, and a zero `bytes32` is never fetched as a related seed. Before, query kept `''` and the zero uid as values and looked the zero uid up. The changelog reports a removal as a change to `undefined`, and version snapshots leave the property out.
+- `relations: 'expand' | 'urls' | 'uids'` on every assemble option set (default `'expand'`) replaces `expandRelations`, which still works: `true` is `'expand'`, `false` is `'urls'`, and `relations` wins when both are given. `'uids'` is new: relation values stay seed UIDs under their stored keys and no related seeds, versions or properties are fetched, so a cold `queryBySchema` makes three indexer requests instead of up to seven. A `'uids'` record's cache entry depends only on its seed and head version, so a change to a related seed doesn't invalidate it. Its cache key is `e2-…`; `'expand'` and `'urls'` keep `e1-…` and `e0-…`.
 
 ## 0.7.6 (2026-10-17)
 

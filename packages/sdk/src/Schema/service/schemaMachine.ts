@@ -127,7 +127,7 @@ export const schemaMachine = setup({
     _liveQueryModelIds: [],
   }),
   on: {
-    updateContext: {
+    updateContext: [{
       actions: assign(({ context, event }) => {
         const newContext = Object.assign({}, context)
 
@@ -162,7 +162,20 @@ export const schemaMachine = setup({
         })
       },
       target: '.validating',
-    },
+    }, {
+      // Internal-only updates (e.g. the _dbUpdatedAt refresh after a draft save) are applied
+      // without re-validating. Dropping them made the next save's conflict check compare
+      // against a stale _dbUpdatedAt.
+      actions: assign(({ context, event }) => {
+        const newContext = Object.assign({}, context)
+        for (const key of Object.keys(event)) {
+          if (key.startsWith('_')) {
+            ;(newContext as any)[key] = (event as any)[key]
+          }
+        }
+        return newContext
+      }),
+    }],
     validateSchema: {
       target: '.validating',
     },

@@ -22,7 +22,13 @@ import {
 } from './fieldStorageModel.js'
 import { getRemoteQueryDataSource } from './source/remote.js'
 import type { QueryDataSource } from './source/types.js'
-import type { AssembleOptions, AttestationLike, SeedRecord, VersionPin } from './types.js'
+import {
+  relationsModeOf,
+  type AssembleOptions,
+  type AttestationLike,
+  type SeedRecord,
+  type VersionPin,
+} from './types.js'
 
 const IMAGE_SCHEMA = 'image'
 
@@ -459,9 +465,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
   }
 }
 
-function expandRelationProperties(ctx: AssembleContext, expandRelations: boolean): void {
-  if (!expandRelations) return
-
+function expandRelationProperties(ctx: AssembleContext): void {
   for (const [, item] of requestedItems(ctx)) {
     const keysToProcess = Object.keys(item).filter(
       (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
@@ -573,8 +577,13 @@ export type SeedDependencies = {
   ids: string[]
 }
 
-function dependenciesOf(ctx: AssembleContext, seedUid: string): SeedDependencies {
-  const seedUids = [seedUid, ...(ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? [])]
+function dependenciesOf(
+  ctx: AssembleContext,
+  seedUid: string,
+  withRelated: boolean,
+): SeedDependencies {
+  const related = withRelated ? (ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? []) : []
+  const seedUids = [seedUid, ...related]
   const headVersionUids = seedUids
     .map((uid) => ctx.latestVersionUidsBySeedUid.get(uid))
     .filter((uid): uid is string => !!uid)
@@ -613,7 +622,9 @@ export async function assembleSeedsWithDependencies(
 /**
  * Records for `seeds`, in order, which may be of different schemas, with each record's
  * dependencies by seedUid. One set of requests for all of them: seeds and versions, properties,
- * related seeds and their versions, related properties, then storage bodies.
+ * related seeds and their versions, related properties, then storage bodies. With
+ * `relations: 'uids'` it stops after properties (storage bodies are still read): relation values
+ * stay seed UIDs and a record depends only on its seed and head version.
  */
 export async function assembleSeedRecords(
   seeds: AttestationLike[],
@@ -621,7 +632,7 @@ export async function assembleSeedRecords(
   dataSource: QueryDataSource,
   request: AssembleRequest = {},
 ): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
-  const expandRelations = options?.expandRelations !== false
+  const relations = relationsModeOf(options)
   const hydrateStorage = options?.hydrateStorage !== false
 
   const ctx = createAssembleContext()
@@ -636,7 +647,7 @@ export async function assembleSeedRecords(
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
     (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
   )
-  if (relatedSeedUidsArray.length > 0) {
+  if (relations !== 'uids' && relatedSeedUidsArray.length > 0) {
     // Their versions only need the UIDs, so they are fetched alongside the seeds. Versions of a
     // related seed that isn't returned (revoked, or not found) are ignored by processSeeds.
     const [relatedSeeds, relatedVersions] = await Promise.all([
@@ -646,8 +657,8 @@ export async function assembleSeedRecords(
     await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
-  resolveRelationPropertiesToUrls(ctx)
-  expandRelationProperties(ctx, expandRelations)
+  if (relations !== 'uids') resolveRelationPropertiesToUrls(ctx)
+  if (relations === 'expand') expandRelationProperties(ctx)
 
   const records = toSeedRecords(ctx, request.schemaName)
 
@@ -660,8 +671,9 @@ export async function assembleSeedRecords(
     )
   }
 
+  const withRelated = relations !== 'uids'
   const dependencies = new Map(
-    records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid)]),
+    records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid, withRelated)]),
   )
   return { records, dependencies }
 }

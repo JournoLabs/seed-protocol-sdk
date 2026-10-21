@@ -42,6 +42,7 @@ import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
+import { LATEST_VERSION_ORDER_SQL } from '@/db/read/subqueries/latestVersion'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
@@ -2049,9 +2050,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             schemaUid: string | null
             revokedAt: number | null
             publisher: string | null
+            attestationCreatedAt: number | null
           }
           const seedsQuery = (sql: any) => sql`
-              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher
+              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher,
+                attestation_created_at as attestationCreatedAt
               FROM seeds
               WHERE local_id = ${watchedSeedLocalId}
             `
@@ -2062,13 +2065,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             uid: string | null
             seedLocalId: string
             revokedAt: number | null
+            attestationCreatedAt: number | null
           }
-          const versionsQuery = (sql: any) => sql`
-              SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
+          // The tag binds every interpolation as a parameter, so the order goes in the strings.
+          const versionsQueryText = [
+            `SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt,
+                attestation_created_at as attestationCreatedAt
               FROM versions
-              WHERE seed_local_id = ${watchedSeedLocalId}
-              ORDER BY COALESCE(attestation_created_at, created_at) DESC
-            `
+              WHERE seed_local_id = `,
+            ` ORDER BY ${LATEST_VERSION_ORDER_SQL}`,
+          ]
+          const versionsQuery = (sql: any) =>
+            sql(Object.assign([...versionsQueryText], { raw: versionsQueryText }), watchedSeedLocalId)
 
           const instanceState = itemInstanceState.get(this)
           if (!instanceState) {
@@ -2119,6 +2127,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 revokedAt: seedRow.revokedAt ?? undefined,
                 // claimUnpublishedDrafts (here or in another tab) stamps drafts' publisher.
                 ...(seedRow.publisher ? { publisher: seedRow.publisher } : {}),
+                // Written by publish (persistSeedUid) after the item took its uid.
+                ...(seedRow.attestationCreatedAt ? { attestationCreatedAt: seedRow.attestationCreatedAt } : {}),
               })
             },
             {
@@ -2150,8 +2160,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   type: 'updateContext',
                   latestVersionLocalId: undefined,
                   latestVersionUid: undefined,
+                  lastVersionPublishedAt: undefined,
                 })
                 return
+              }
+              // As versionData computes it: the newest attestation among the live versions.
+              let lastVersionPublishedAt: number | undefined
+              for (const v of versionRows) {
+                if (isVersionRevoked(v.revokedAt) || !v.attestationCreatedAt) continue
+                lastVersionPublishedAt = Math.max(lastVersionPublishedAt ?? 0, v.attestationCreatedAt)
               }
               const latestVersionLocalId = latestVersion.localId
               
@@ -2245,6 +2262,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 type: 'updateContext',
                 latestVersionLocalId,
                 latestVersionUid: latestVersion.uid || undefined,
+                lastVersionPublishedAt,
               })
             },
             {

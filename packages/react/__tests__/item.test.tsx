@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import type { QueryClient } from '@tanstack/react-query'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useItem, useItems, useCreateItem, SeedProvider, useDeleteItem } from '@seedprotocol/react'
 import {
   client,
@@ -11,7 +11,11 @@ import {
   Schema,
   Model,
   Item,
+  eventEmitter,
+  EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
+  updateVersionUid,
 } from '@seedprotocol/sdk'
+import type { IItem } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { and, eq } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
@@ -169,6 +173,27 @@ function UseItemTest({
       {!item && (!seedLocalId && !seedUid) && (
         <div data-testid="item-null">null</div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Lists Posts with EAS items included and records every `items` array it gets. The rows are memoized
+ * on `items`, as an app deriving state from the list would.
+ */
+function UseItemsPublishedTest({ arrays }: { arrays: IItem<any>[][] }) {
+  const { items, isLoading } = useItems({
+    modelName: 'Post',
+    schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
+    includeEas: true,
+  })
+  // Recorded on render, not in an effect: the DOM can show a new list before effects run.
+  if (arrays[arrays.length - 1] !== items) arrays.push(items)
+  const rows = useMemo(() => items.map((i) => `${i.seedLocalId}:${i.seedUid || 'draft'}`).join(','), [items])
+  return (
+    <div>
+      <div data-testid="published-is-loading">{isLoading ? 'true' : 'false'}</div>
+      <div data-testid="published-rows">{rows}</div>
     </div>
   )
 }
@@ -1241,6 +1266,125 @@ describe('React Item Hooks Integration Tests', () => {
             },
             { timeout: WAIT_TIMEOUT_MS }
           )
+        })
+      })
+      // A publish keeps the item's local id and sets its seed uid; the list must still change.
+      describe('useItems after a publish', () => {
+        const fakeUid = (n: number) => '0x' + n.toString(16).padStart(64, 'f')
+
+        /** What a publish writes, minus the chain: the uids and attestation times. */
+        async function recordPublish(
+          item: Item<any>,
+          seedUid: string | undefined,
+          versionUid: string,
+          attestationCreatedAt: number,
+        ): Promise<void> {
+          // persistSeedUidFromPublishResult assigns it the same way.
+          if (seedUid) (item as { seedUid?: string }).seedUid = seedUid
+          await updateVersionUid({ seedLocalId: item.seedLocalId!, versionUid, attestationCreatedAt })
+          await item.persistSeedUid(undefined, attestationCreatedAt)
+        }
+
+        const rows = () => screen.getByTestId('published-rows').textContent ?? ''
+
+        async function renderList(arrays: IItem<any>[][]): Promise<void> {
+          render(<UseItemsPublishedTest arrays={arrays} />, { container, wrapper: SeedProviderWrapper })
+          await waitFor(() => expect(rows().split(',').filter(Boolean)).toHaveLength(3), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+        }
+
+        /** Item.all is not called again within `ms`: the list has stopped refetching. */
+        async function expectSettled(allSpy: { mock: { calls: unknown[] } }, ms = 1000): Promise<void> {
+          const calls = allSpy.mock.calls.length
+          await new Promise((resolve) => setTimeout(resolve, ms))
+          expect(allSpy.mock.calls.length).toBe(calls)
+        }
+
+        afterEach(() => {
+          vi.restoreAllMocks()
+        })
+
+        it('returns a new array with the published item first', async () => {
+          const arrays: IItem<any>[][] = []
+          await renderList(arrays)
+          const before = arrays[arrays.length - 1]
+          const id1 = testItem1!.seedLocalId
+          expect(rows()).toContain(`${id1}:draft`)
+
+          const seedUid = fakeUid(1)
+          const publishedAt = Date.now() + 60_000
+          await recordPublish(testItem1!, seedUid, fakeUid(101), publishedAt)
+
+          await waitFor(() => expect(rows().split(',')[0]).toBe(`${id1}:${seedUid}`), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          expect(arrays[arrays.length - 1]).not.toBe(before)
+          // The instance takes the publish times from its seed and version rows.
+          await waitFor(
+            () => {
+              expect(testItem1!.attestationCreatedAt).toBe(publishedAt)
+              expect(testItem1!.lastVersionPublishedAt).toBe(publishedAt)
+            },
+            { timeout: WAIT_TIMEOUT_MS },
+          )
+        })
+
+        it('stops refetching once drafts and a published item are listed', async () => {
+          const allSpy = vi.spyOn(Item, 'all')
+          const arrays: IItem<any>[][] = []
+          await renderList(arrays)
+          await expectSettled(allSpy)
+
+          const seedUid = fakeUid(2)
+          await recordPublish(testItem2!, seedUid, fakeUid(102), Date.now() + 60_000)
+          await waitFor(() => expect(rows()).toContain(`${testItem2!.seedLocalId}:${seedUid}`), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          await expectSettled(allSpy)
+        })
+
+        it('keeps the same array when a refetch finds nothing changed', async () => {
+          const allSpy = vi.spyOn(Item, 'all')
+          const arrays: IItem<any>[][] = []
+          await renderList(arrays)
+          await expectSettled(allSpy)
+          const before = arrays[arrays.length - 1]
+          const calls = allSpy.mock.calls.length
+
+          eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
+          await waitFor(() => expect(allSpy.mock.calls.length).toBeGreaterThan(calls), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          await allSpy.mock.results[allSpy.mock.results.length - 1].value
+          await expectSettled(allSpy, 300)
+
+          expect(arrays[arrays.length - 1]).toBe(before)
+        })
+
+        it('moves a republished item first', async () => {
+          const arrays: IItem<any>[][] = []
+          const now = Date.now()
+          const id1 = testItem1!.seedLocalId
+          const id2 = testItem2!.seedLocalId
+          await recordPublish(testItem1!, fakeUid(3), fakeUid(103), now + 60_000)
+          await recordPublish(testItem2!, fakeUid(4), fakeUid(104), now + 120_000)
+          await renderList(arrays)
+          await waitFor(() => expect(rows().split(',').slice(0, 2)).toEqual([`${id2}:${fakeUid(4)}`, `${id1}:${fakeUid(3)}`]), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          const before = arrays[arrays.length - 1]
+
+          // A new version of the already-published item is attested: the seed uid stays.
+          await recordPublish(testItem1!, undefined, fakeUid(105), now + 180_000)
+
+          await waitFor(() => expect(rows().split(',')[0]).toBe(`${id1}:${fakeUid(3)}`), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          expect(arrays[arrays.length - 1]).not.toBe(before)
+          await waitFor(() => expect(testItem1!.lastVersionPublishedAt).toBe(now + 180_000), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
         })
       })
   })

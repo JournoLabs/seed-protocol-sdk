@@ -159,13 +159,27 @@ type NormalizedRequest = {
   propertiesToUpdate: Array<{ publishLocalId: string; propertySchemaUid: string }>
 }
 
+type CreateAttestationsDirectToEasResult = {
+  easPayload: unknown
+  publishedBatch: PublishMachineContext['publishedBatch']
+}
+
 export const createAttestationsDirectToEas = fromPromise(
-  async ({
-    input: { context },
-  }: PublishInput): Promise<{
-    easPayload: unknown
-    publishedBatch: PublishMachineContext['publishedBatch']
-  }> => {
+  async ({ input: { context } }: PublishInput): Promise<CreateAttestationsDirectToEasResult> => {
+    // Items this actor loads itself (a restored publish record carries the item as plain data)
+    const loaded: IItem<any>[] = []
+    try {
+      return await executeCreateAttestationsDirectToEas(context, loaded)
+    } finally {
+      for (const item of loaded) item.unload()
+    }
+  },
+)
+
+async function executeCreateAttestationsDirectToEas(
+  context: PublishMachineContext,
+  loaded: IItem<any>[],
+): Promise<CreateAttestationsDirectToEasResult> {
     const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
@@ -187,6 +201,7 @@ export const createAttestationsDirectToEas = fromPromise(
     const waitForItemUsed = typeof item.getPublishUploads !== 'function'
     if (waitForItemUsed) {
       item = await waitForItem(item.seedLocalId)
+      loaded.push(item)
     }
 
     const txCount = arweaveTransactions.length
@@ -521,5 +536,4 @@ export const createAttestationsDirectToEas = fromPromise(
       : null
 
     return { easPayload: requestData, publishedBatch }
-  },
-)
+}

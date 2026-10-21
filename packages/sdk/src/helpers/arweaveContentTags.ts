@@ -7,8 +7,7 @@ import type { TransactionTag } from '@/types/arweave'
  * Tag every Seed upload carries with the hex digest of its data. Producers: the SDK's
  * `getPublishUploadData` / `getPublishUploads` (and through them both the L1 transaction path and
  * the bundler / DataItem path in `@seedprotocol/publish`). Consumer: the files download
- * (`events/files/download.ts` and the download worker), which verifies downloaded bytes against it
- * and copies a verified value into `metadata.content_hash`.
+ * (`events/files/download.ts` and the download worker), which verifies downloaded bytes against it.
  */
 export const CONTENT_SHA256_TAG = 'Content-SHA-256'
 export const CONTENT_TYPE_TAG = 'Content-Type'

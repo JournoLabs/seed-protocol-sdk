@@ -38,9 +38,6 @@ export * from '../imports'
 // Event bus
 export { eventEmitter } from '../eventBus'
 
-// Webpack helper
-export { withSeed } from './webpack'
-
 // Types
 // Note: PublishUpload type is available from '../db/read/getPublishUploads'
 // Type-only exports cause issues with Rollup's parser. Import directly if needed:
@@ -55,18 +52,7 @@ export type { MultiTabMode } from '../helpers/tabCoordinator'
 export type { SyncFromEasOptions } from '../events/item/syncDbWithEas'
 export type { HtmlEmbeddedDataUriPolicy } from '../helpers/property'
 
-// CLI exports
-export { PathResolver } from './helpers/PathResolver'
-export { BasePathResolver } from '../helpers/PathResolver/BasePathResolver'
-export {
-  commandExists,
-  ensureNodeDbSchema,
-  runSeedInit,
-  findSeedBinary,
-} from './helpers/scripts'
-export { INIT_SCRIPT_SUCCESS_MESSAGE, SCHEMA_TS } from '../helpers/constants'
-
-// Side effect imports for CLI — register platform services
+// Register the Node platform services
 import { createPlatformServices } from '../platform/index.node'
 import { configurePlatform } from '../platform/configurePlatform'
 configurePlatform(createPlatformServices())

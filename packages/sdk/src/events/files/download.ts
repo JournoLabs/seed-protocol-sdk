@@ -9,8 +9,6 @@ import debug from 'debug'
 // Dynamic import to break circular dependency with globalMachine
 // import { getGlobalService } from '@/services/global/globalMachine'
 import { waitFor } from 'xstate'
-import { getMetadata } from '@/db/read/getMetadata'
-import { saveMetadata } from '@/db/write/saveMetadata'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySelected } from '@/helpers'
@@ -227,28 +225,9 @@ const getExpectedContentHashes = async (transactionIds: string[]): Promise<Recor
   return out
 }
 
-/** Store the (now verified) Content-SHA-256 of each downloaded transaction on its metadata row. */
-const recordVerifiedContentHashes = async (
-  transactionIds: string[],
-  expectedContentHashes: Record<string, string>,
-): Promise<void> => {
-  for (const transactionId of transactionIds) {
-    const contentHash = expectedContentHashes[transactionId]
-    if (!contentHash) continue
-    try {
-      const metadataRecord = await getMetadata({ storageTransactionId: transactionId })
-      if (metadataRecord) {
-        await saveMetadata(metadataRecord, { contentHash })
-      }
-    } catch (error) {
-      logger(error)
-    }
-  }
-}
-
 const downloadTransactionIds = async (
   rawTransactionIds: string[],
-  options?: { resizeAllImages?: boolean },
+  options?: { skipExisting?: boolean },
 ): Promise<boolean> => {
   if (!supportsOpfsFileDownloads()) {
     return false
@@ -293,6 +272,7 @@ const downloadTransactionIds = async (
       excludedTransactions,
       expectedContentHash: expectedContentHashes[transactionId],
       compositeChildPaths: compositeChildPaths[transactionId],
+      skipExisting: options?.skipExisting,
     })
   } else {
     result = await BaseFileManager.downloadAllFiles({
@@ -302,6 +282,7 @@ const downloadTransactionIds = async (
       excludedTransactions,
       expectedContentHashes,
       compositeChildPaths,
+      skipExisting: options?.skipExisting,
     })
   }
 
@@ -310,14 +291,6 @@ const downloadTransactionIds = async (
       // Not saved by the worker; left for a later run (a gateway may serve the right bytes then).
       logger(`[download] ${transactionId}: downloaded bytes do not match Content-SHA-256; skipped`)
     }
-    await recordVerifiedContentHashes(result.verifiedTransactionIds, expectedContentHashes)
-  }
-
-  if (options?.resizeAllImages !== false) {
-    await BaseFileManager.resizeAllImages({
-      width: 480,
-      height: 480,
-    })
   }
 
   return true
@@ -330,7 +303,7 @@ const runBulkDownloadWithDedupe = async (transactionIds: string[]): Promise<void
 
   bulkDownloadInFlight = (async () => {
     try {
-      await downloadTransactionIds(transactionIds, { resizeAllImages: true })
+      await downloadTransactionIds(transactionIds, { skipExisting: true })
     } finally {
       bulkDownloadInFlight = null
     }
@@ -429,7 +402,9 @@ export const downloadTransactionIdWithDedupe = async (transactionId: string): Pr
 
   const inFlight = (async () => {
     try {
-      const ok = await downloadTransactionIds([normalizedTxId], { resizeAllImages: false })
+      // No skipExisting: the caller found no local file, so a file on disk it could not see is
+      // written again and announced.
+      const ok = await downloadTransactionIds([normalizedTxId])
       return ok
     } finally {
       lazyDownloadInFlightByTransactionId.delete(normalizedTxId)

@@ -14,6 +14,7 @@ import {
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { findEmbeddedImageFilePath, getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'
+import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
 
 /** The parts of the publish's draft graph that decide which refs a publish leaves for later. */
 type DraftGraphRefs = Pick<PublishDraftGraph, 'deferredProperties' | 'backReferences'>
@@ -233,14 +234,14 @@ async function collectUploadBytes(
 
 async function loadRelatedItem(
   value: unknown,
+  loads: ItemLoads,
 ): Promise<IItem<any> | undefined> {
   const normalized = normalizeRelationPropertyValue(value)
   if (!normalized) return undefined
   const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
   if (!seedLocalId && !seedUid) return undefined
-  const { getItem } = await import('./getItem')
   try {
-    return await getItem({ seedLocalId, seedUid })
+    return await loads.getItem({ seedLocalId, seedUid })
   } catch {
     return undefined
   }
@@ -248,10 +249,11 @@ async function loadRelatedItem(
 
 async function relatedIfUnpublished(
   prop: IItemProperty<any>,
+  loads: ItemLoads,
 ): Promise<IItem<any> | undefined> {
   const context = propertyContext(prop)
   if (!context) return undefined
-  const related = await loadRelatedItem(context.propertyValue)
+  const related = await loadRelatedItem(context.propertyValue, loads)
   if (!related || !isZeroUid(related.seedUid)) return undefined
   return related
 }
@@ -277,6 +279,7 @@ async function collectUnpublishedRelatedItems(
   isList: boolean,
   forceFullSnapshot: boolean,
   out: UnpublishedRelatedItem[],
+  loads: ItemLoads,
   backReferences?: Map<IItemProperty<any>, Set<string>>,
 ): Promise<void> {
   for (const prop of props) {
@@ -296,7 +299,7 @@ async function collectUnpublishedRelatedItems(
       ) {
         continue
       }
-      const related = await loadRelatedItem(row.seedLocalId)
+      const related = await loadRelatedItem(row.seedLocalId, loads)
       out.push({
         propertyName: prop.propertyName,
         modelName: related?.modelName ?? relatedModelNameFromDef(prop.propertyDef) ?? row.type ?? 'unknown',
@@ -315,10 +318,11 @@ async function collectUnpublishedRelatedItems(
 async function collectUnpublishedEmbeddedImages(
   item: IItem<any>,
   out: UnpublishedRelatedItem[],
+  loads: ItemLoads,
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb || !item.seedLocalId) return
-  for (const owner of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
+  for (const owner of [item, ...(await getRelatedDraftsCoPublishedWith(item, loads))]) {
     const rows = await appDb
       .select()
       .from(htmlEmbeddedImageCoPublish)
@@ -341,6 +345,7 @@ async function appendCoPublishImages(
   forceFullSnapshot: boolean,
   publishMode: PublishMode,
   graph: DraftGraphRefs,
+  loads: ItemLoads,
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
@@ -350,8 +355,7 @@ async function appendCoPublishImages(
     .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
 
   for (const row of rows) {
-    const { Item } = await import('../../Item/Item')
-    const imageItem = await Item.find({
+    const imageItem = await loads.find({
       seedLocalId: row.imageSeedLocalId,
       modelName: 'Image',
     })
@@ -362,7 +366,7 @@ async function appendCoPublishImages(
     const filePath = await findEmbeddedImageFilePath(imageItem.seedLocalId)
     if (filePath) await addUploadFromPath(acc, seen, filePath, `seed:${imageItem.seedLocalId}`)
 
-    await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph)
+    await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph, loads)
   }
 }
 
@@ -374,6 +378,7 @@ async function summarizeItem(
   seenUploads: Set<string>,
   visited: Set<string>,
   graph: DraftGraphRefs,
+  loads: ItemLoads,
 ): Promise<void> {
   const seedLocalId = item.seedLocalId
   if (!seedLocalId || visited.has(seedLocalId)) return
@@ -405,6 +410,7 @@ async function summarizeItem(
     false,
     forceFullSnapshot,
     acc.unpublishedRelatedItems,
+    loads,
     graph.backReferences,
   )
   await collectUnpublishedRelatedItems(
@@ -412,6 +418,7 @@ async function summarizeItem(
     true,
     forceFullSnapshot,
     acc.unpublishedRelatedItems,
+    loads,
     graph.backReferences,
   )
 
@@ -420,13 +427,13 @@ async function summarizeItem(
   const storageProperties = new Set(itemImageProperties)
   for (const rel of itemRelationProperties) {
     if (!storageProperties.has(rel)) continue
-    const related = await relatedIfUnpublished(rel)
+    const related = await relatedIfUnpublished(rel, loads)
     if (related) {
-      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph)
+      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph, loads)
     }
   }
 
-  await appendCoPublishImages(item, acc, seenUploads, visited, forceFullSnapshot, publishMode, graph)
+  await appendCoPublishImages(item, acc, seenUploads, visited, forceFullSnapshot, publishMode, graph, loads)
 
   const attestable: IItemProperty<any>[] = [
     ...itemBasicProperties,
@@ -486,6 +493,7 @@ async function collectUnpublishedRelatedItemsOf(
   forceFullSnapshot: boolean,
   out: UnpublishedRelatedItem[],
   backReferences: DraftGraphRefs['backReferences'],
+  loads: ItemLoads,
 ): Promise<void> {
   const { itemRelationProperties, itemListProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -494,9 +502,10 @@ async function collectUnpublishedRelatedItemsOf(
     false,
     forceFullSnapshot,
     out,
+    loads,
     backReferences,
   )
-  await collectUnpublishedRelatedItems(itemListProperties, true, forceFullSnapshot, out, backReferences)
+  await collectUnpublishedRelatedItems(itemListProperties, true, forceFullSnapshot, out, loads, backReferences)
 }
 
 /**
@@ -510,12 +519,14 @@ export const getUnpublishedRelatedItems = async (
 ): Promise<UnpublishedRelatedItem[]> => {
   const { forceFullSnapshot } = await publishForcesFullSnapshot(item, options?.publishMode ?? 'patch')
   const out: UnpublishedRelatedItem[] = []
-  // The item and every draft its publish carries along (publishDraftGraph.ts).
-  const { drafts, backReferences } = await getPublishDraftGraph(item, { forceFullSnapshot })
-  for (const owner of [item, ...drafts.map((d) => d.item)]) {
-    await collectUnpublishedRelatedItemsOf(owner, forceFullSnapshot, out, backReferences)
-  }
-  await collectUnpublishedEmbeddedImages(item, out)
+  await withItemLoads(undefined, async (loads) => {
+    // The item and every draft its publish carries along (publishDraftGraph.ts).
+    const { drafts, backReferences } = await getPublishDraftGraph(item, { forceFullSnapshot, loads })
+    for (const owner of [item, ...drafts.map((d) => d.item)]) {
+      await collectUnpublishedRelatedItemsOf(owner, forceFullSnapshot, out, backReferences, loads)
+    }
+    await collectUnpublishedEmbeddedImages(item, out, loads)
+  })
   return out
 }
 
@@ -537,14 +548,16 @@ export const summarizePublishWork = async (
     uploadSizes: [],
     unpublishedRelatedItems: [],
   }
-  const graph = await getPublishDraftGraph(item, { forceFullSnapshot })
-  const { drafts } = graph
-  const seenUploads = new Set<string>()
-  const visited = new Set<string>()
-  for (const owner of [item, ...drafts.map((d) => d.item)]) {
-    await summarizeItem(owner, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph)
-  }
-  await collectUnpublishedEmbeddedImages(item, acc.unpublishedRelatedItems)
+  await withItemLoads(undefined, async (loads) => {
+    const graph = await getPublishDraftGraph(item, { forceFullSnapshot, loads })
+    const { drafts } = graph
+    const seenUploads = new Set<string>()
+    const visited = new Set<string>()
+    for (const owner of [item, ...drafts.map((d) => d.item)]) {
+      await summarizeItem(owner, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph, loads)
+    }
+    await collectUnpublishedEmbeddedImages(item, acc.unpublishedRelatedItems, loads)
+  })
   // summarizeItem counts the root as an existing seed (it has a seedUid).
   if (republishRevokedSeed) acc.newSeedCount += 1
   return acc

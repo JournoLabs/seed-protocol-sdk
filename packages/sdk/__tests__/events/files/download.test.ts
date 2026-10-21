@@ -27,8 +27,6 @@ const mocks = vi.hoisted(() => {
     getQueryData: vi.fn((_key: unknown): unknown => undefined),
     getHost: vi.fn(() => 'arweave.net'),
     getBaseUrl: vi.fn(() => 'https://arweave.net'),
-    getMetadata: vi.fn(async () => null),
-    saveMetadata: vi.fn(async () => undefined),
     downloadAllFiles: vi.fn(async () => undefined),
     downloadFileByTransactionId: vi.fn(async () => undefined),
     resizeAllImages: vi.fn(async () => undefined),
@@ -91,14 +89,6 @@ vi.mock('@/helpers', () => ({
 vi.mock('@seedprotocol/arweave', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getTransactionTagsByIds: mocks.getTransactionTagsByIds,
-}))
-
-vi.mock('@/db/read/getMetadata', () => ({
-  getMetadata: mocks.getMetadata,
-}))
-
-vi.mock('@/db/write/saveMetadata', () => ({
-  saveMetadata: mocks.saveMetadata,
 }))
 
 vi.mock('@/eventBus', () => ({
@@ -282,7 +272,7 @@ describe('events/files/download dedupe', () => {
         return queryFn ? queryFn() : []
       })
 
-    it('looks the tags up in one batch, verifies downloads against them and records only verified hashes', async () => {
+    it('looks the tags up in one batch and verifies downloads against them', async () => {
       withEasTransactions([VALID_ARWEAVE_TX, TX_B, TX_C])
       mocks.getTransactionTagsByIds.mockResolvedValueOnce(
         new Map([
@@ -296,7 +286,6 @@ describe('events/files/download dedupe', () => {
         hashMismatchTransactionIds: [TX_B],
         failedTransactionIds: [],
       } as any)
-      mocks.getMetadata.mockImplementation(async ({ storageTransactionId }: any) => ({ localId: `row-${storageTransactionId}` }) as any)
 
       const mod = await import('@/events/files/download')
       await mod.downloadAllFilesBinaryRequestHandler()
@@ -310,9 +299,6 @@ describe('events/files/download dedupe', () => {
           expectedContentHashes: { [VALID_ARWEAVE_TX]: HASH_A, [TX_B]: HASH_B },
         }),
       )
-      expect(mocks.saveMetadata).toHaveBeenCalledTimes(1)
-      expect(mocks.saveMetadata).toHaveBeenCalledWith({ localId: `row-${VALID_ARWEAVE_TX}` }, { contentHash: HASH_A })
-      mocks.getMetadata.mockImplementation(async () => null)
     })
 
     it('uses cached tags instead of asking again', async () => {
@@ -337,7 +323,55 @@ describe('events/files/download dedupe', () => {
       expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
         expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, expectedContentHash: undefined }),
       )
-      expect(mocks.saveMetadata).not.toHaveBeenCalled()
     })
+  })
+})
+
+/** Audit V10 (G21-2): the worker skips files already on disk; the handler only has to ask it to. */
+describe('events/files/download skips files on disk', () => {
+  const TX_B = 'B'.repeat(43)
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.fetchQuery.mockImplementation(async ({ queryKey, queryFn }: { queryKey: unknown[]; queryFn?: () => unknown }) => {
+      if (queryKey[0] === 'getFilesMetadata') {
+        return {
+          filesMetadata: [VALID_ARWEAVE_TX, TX_B].map((id, i) => ({
+            id: `meta-${i}`,
+            decodedDataJson: JSON.stringify([{ value: { value: id } }]),
+          })),
+        }
+      }
+      return queryFn ? queryFn() : []
+    })
+    mocks.getTransactionTagsByIds.mockImplementation(async (ids: string[]) =>
+      new Map(ids.map((id) => [id, [{ name: 'Content-SHA-256', value: id[0]!.repeat(64) }]])),
+    )
+    mocks.downloadAllFiles.mockImplementation((async (params: any) => ({
+      verifiedTransactionIds: params.transactionIds,
+      hashMismatchTransactionIds: [],
+      failedTransactionIds: [],
+    })) as any)
+  })
+
+  it('bulk runs ask the worker to skip files on disk and do not bulk-resize images', async () => {
+    const mod = await import('@/events/files/download')
+    await mod.downloadAllFilesBinaryRequestHandler()
+    await mod.downloadAllFilesBinaryRequestHandler()
+
+    expect(mocks.downloadAllFiles).toHaveBeenCalledTimes(2)
+    for (const [params] of mocks.downloadAllFiles.mock.calls as any[]) {
+      expect(params).toMatchObject({ transactionIds: [VALID_ARWEAVE_TX, TX_B], skipExisting: true })
+    }
+    expect(mocks.resizeAllImages).not.toHaveBeenCalled()
+  })
+
+  it('a lazy download of one file does not skip: its caller found no local file', async () => {
+    const mod = await import('@/events/files/download')
+    await mod.downloadTransactionIdWithDedupe(VALID_ARWEAVE_TX)
+
+    expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
+      expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, skipExisting: undefined }),
+    )
   })
 })
