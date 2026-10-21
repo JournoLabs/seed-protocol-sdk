@@ -41,7 +41,8 @@ export async function classifyFileString(
   if (/^(https?:\/\/|blob:)/i.test(value)) {
     return { kind: 'url' }
   }
-  if (!/[\\/]/.test(value) && value.length < 256) {
+  // An empty name would check the files folder itself
+  if (value.trim() !== '' && !/[\\/]/.test(value) && value.length < 256) {
     const existingFilePath = BaseFileManager.getFilesPath('files', value)
     if (await BaseFileManager.pathExists(existingFilePath)) {
       return { kind: 'existing' }

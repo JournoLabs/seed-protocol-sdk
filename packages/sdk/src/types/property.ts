@@ -96,6 +96,15 @@ export type SaveValueToDbEvent = {
   newValue: ItemPropertyValueType
   /** Values shown before an assignment; restored if the save is refused or fails. */
   before?: PropertyValueSnapshot
+  /** A clear (ADR 0021): `newValue` is null, and `retract` marks one that publish revokes. */
+  clear?: { retract: boolean }
 }
 
-export type PropertyValueSnapshot = { propertyValue?: unknown; renderValue?: unknown }
+export type PropertyValueSnapshot = {
+  propertyValue?: unknown
+  renderValue?: unknown
+  refResolvedValue?: string | null
+  refResolvedDisplayValue?: string | null
+  localStorageDir?: string | null
+  storageTransactionId?: string
+}

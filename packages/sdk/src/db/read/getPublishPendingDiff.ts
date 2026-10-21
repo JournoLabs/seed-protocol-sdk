@@ -6,6 +6,7 @@ import type { IItem } from '@/interfaces'
 import { isPublishedMetadataRow as isPublished } from '@/helpers/isPublishedMetadataRow'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
+import { getPropertyClear } from '@/db/read/getPropertyClear'
 
 export type PublishPendingPropertyDiff = {
   propertyName: string
@@ -14,6 +15,11 @@ export type PublishPendingPropertyDiff = {
   previousPublishedValue: string | null
   /** True when the latest row for this property has no `uid` (not yet attested) */
   pending: boolean
+  /**
+   * `set` for a new value. `removed` for an empty value that publish attests as removed, and
+   * `retracted` for one whose attestations publish revokes (ADR 0021).
+   */
+  change: 'set' | 'removed' | 'retracted'
 }
 
 export type GetPublishPendingDiffResult = {
@@ -84,11 +90,19 @@ export async function getPublishPendingDiff(
     if (!latest) continue
     if (!isPublished(latest)) {
       const prevWithUid = list.find(isPublished)
+      const isEmpty = latest.propertyValue == null || latest.propertyValue === ''
+      // An empty value changes nothing on chain unless it has an attestation to remove or retract
+      // (ADR 0021): one never published, or already retracted, isn't pending.
+      if (isEmpty) {
+        const clear = await getPropertyClear({ seedLocalId, seedUid, propertyName })
+        if (!clear || (clear.retract && clear.retractScope.length === 0)) continue
+      }
       pendingProperties.push({
         propertyName,
         currentValue: latest.propertyValue ?? null,
         previousPublishedValue: prevWithUid?.propertyValue ?? null,
         pending: true,
+        change: !isEmpty ? 'set' : latest.retract ? 'retracted' : 'removed',
       })
     }
   }

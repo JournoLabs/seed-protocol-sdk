@@ -217,6 +217,18 @@ describe('metadataPropertyNames', () => {
       expect(resolveMetadataRecord([idVariant, base], 'avatarImage', 'Image')).toEqual(base)
     })
 
+    it('prefers a cleared Id record over the base variant (ADR 0021)', () => {
+      const base = { propertyName: 'avatarImage', propertyValue: 'old-seed-id', refSeedType: 'image' }
+      const cleared = { propertyName: 'avatarImageId', propertyValue: null, refResolvedValue: null }
+      expect(resolveMetadataRecord([base, cleared], 'avatarImage', 'Image')).toEqual(cleared)
+    })
+
+    it("counts only each name's newest record", () => {
+      const cleared = { propertyName: 'avatarImageId', propertyValue: null, refResolvedValue: null }
+      const before = { propertyName: 'avatarImageId', propertyValue: 'old-seed-id', refResolvedValue: 'old.png' }
+      expect(resolveMetadataRecord([cleared, before], 'avatarImage', 'Image')).toEqual(cleared)
+    })
+
     it('returns first record when no preference applies', () => {
       const a = { propertyName: 'avatarImage' }
       const b = { propertyName: 'avatarImageId' }

@@ -4,6 +4,7 @@
  * The indexer's `decodedDataJson` gives a small uint (`uint8`) as a JSON number or a numeric
  * string, and a wide one (`uint256`) as `{ type: 'BigNumber', hex }`. Seed publishes Number as a
  * decimal string and Date as `uint256` Unix seconds. {@link decodeEasNumber} reads all of these.
+ * Also the empty values Seed attests for a removed property (ADR 0021).
  */
 
 const INTEGER = /^-?\d+$/
@@ -45,4 +46,15 @@ export function decodeEasNumber(value: unknown): string | undefined {
     if (typeof hex === 'string') return fromHex(hex)
   }
   return undefined
+}
+
+/**
+ * Whether an attested value is the empty value Seed attests to record a property's removal
+ * (ADR 0021): `''` for a `string`, a zero `bytes32`. Readers treat the property as absent. An
+ * empty `bytes32[]` is an empty list, not a removal.
+ */
+export function isEasEmptyValue(easType: string | undefined | null, value: unknown): boolean {
+  if (easType === 'string') return value === ''
+  if (easType === 'bytes32') return typeof value === 'string' && /^0x0{64}$/i.test(value)
+  return false
 }

@@ -35,6 +35,8 @@ export interface IItemProperty<_PropertyType = any> {
   readonly conflict: import('@/outbox/conflicts').PropertyConflict | null;
   resolveConflict(choice: 'local' | 'remote'): Promise<void>;
   save(): Promise<void>;
+  /** Clears the value; `retract` makes publish revoke it instead of attesting the empty value. See ItemProperty.clear. */
+  clear(options?: { retract?: boolean }): Promise<void>;
   unload(): void;
   destroy(): Promise<void>;
   getService(): ActorRefFrom<any>;

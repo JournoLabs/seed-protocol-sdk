@@ -176,6 +176,13 @@
       "when": 1792576238054,
       "tag": "0024_merge_republished_ghost_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792585560172,
+      "tag": "0025_add_metadata_retract",
+      "breakpoints": true
     }
   ]
 }

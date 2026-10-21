@@ -63,7 +63,7 @@ export type { IItem, IItemProperty } from './interfaces'
 export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
-export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
+export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {
   ItemCreateError,
@@ -225,6 +225,8 @@ export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublish
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
+export { markPropertyAttestationsRetracted } from './db/write/markPropertyAttestationsRetracted'
+export { getPendingRetractions, type PendingRetraction } from './db/read/getPropertyClear'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'

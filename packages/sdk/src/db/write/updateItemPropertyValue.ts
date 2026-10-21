@@ -24,6 +24,8 @@ type UpdateItemPropertyValueResult = {
 
 type UpdateItemPropertyValueProps = Partial<MetadataType> & {
   newValue?: string | null
+  /** A cleared value (null) that publish retracts (ADR 0021). Any other write clears the flag. */
+  retract?: boolean | null
   modelName?: string | null
   dataType?: string
   refValueType?: string
@@ -58,6 +60,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   localStorageDir,
   dataType,
   refValueType,
+  retract,
 }, options = {}) => {
   if (!localIdParam && !seedLocalId) {
     logger(
@@ -68,6 +71,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
   // Every write below binds parameters: store the value as given (no SQL escaping).
   const safeNewValue = newValue
+  const retractValue = retract && newValue == null ? true : null
 
   const appDb = options.db ?? BaseDb.getAppDb()
 
@@ -149,6 +153,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       easDataType,
       refSeedType: refSeedTypeFromDb,
       refResolvedValue: refResolvedValueFromDb,
+      retract: retractFromDb,
     } = rows[0]
 
     // Stored model types are the model's EAS name (ADR 0008): `blog_post` for BlogPost.
@@ -159,7 +164,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       modelType === modelTypeForName &&
       // The DB holds null where callers leave a field out (plain values pass no ref fields).
       (refSeedTypeFromDb ?? null) === (refSeedType ?? null) &&
-      (refResolvedValueFromDb ?? null) === (refResolvedValue ?? null)
+      (refResolvedValueFromDb ?? null) === (refResolvedValue ?? null) &&
+      !!retractFromDb === !!retractValue
     ) {
       logger(
         `[db/write] [updateItemPropertyValue] value is the same as most recent record for property: ${propertyNameFromDb}`,
@@ -177,6 +183,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         refSeedType: refSeedType ?? null,
         refResolvedValue: refResolvedValue ?? null,
         refResolvedDisplayValue: refResolvedDisplayValue ?? null,
+        retract: retractValue,
         // Readers take the newest row by COALESCE(attestation_created_at, created_at), so a draft's
         // time is when its value was last set: a synced value older than this edit mustn't win.
         createdAt: now,
@@ -216,6 +223,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       refResolvedValue: refResolvedValue || null,
       refResolvedDisplayValue: refResolvedDisplayValue || null,
       localStorageDir: localStorageDir || null,
+      retract: retractValue,
     })
 
     return {
@@ -260,6 +268,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     refResolvedValue: refResolvedValue || null,
     refResolvedDisplayValue: refResolvedDisplayValue || null,
     localStorageDir: localStorageDir || null,
+    retract: retractValue,
   })
 
   return {

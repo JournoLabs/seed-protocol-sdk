@@ -4,6 +4,7 @@ import { camelCase } from 'lodash-es'
 import {
   Attestation,
   easName,
+  isEasEmptyValue,
   isNameMatchLevel,
   matchEasName,
   partitionByRefAttester,
@@ -104,6 +105,14 @@ const syncedRevokedAt = (
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
+
+
+/** A property attestation revoked while its seed is live: a retraction (ADR 0021), stored as no value. */
+const isRetracted = (property: Pick<Attestation, 'revoked' | 'refUID'>, itemSeeds: Attestation[], state: SyncRunState) => {
+  if (!property.revoked) return false
+  const seedUid = state.versionUidToSeedUid.get(property.refUID)
+  return !itemSeeds.find((seed) => seed.id === seedUid)?.revoked
+}
 
 
 /**
@@ -270,7 +279,9 @@ const collectRelatedSeedUids = async (
     if (!resolveSyncedPropertyName(name, value, modelSchema)?.isRelation) continue
     const values = Array.isArray(value) ? value : [value]
     for (const v of values) {
-      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v)) state.relatedSeedUids.add(v)
+      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v) && !isEasEmptyValue('bytes32', v)) {
+        state.relatedSeedUids.add(v)
+      }
     }
   }
 }
@@ -670,6 +681,8 @@ const saveEasPropertiesToDbBody = async ({
   const existingPropertyRecordsUids = new Set<string>()
   const staleUids = new Set<string>()
   const revokedAtUpdates = new Map<string, number | null>()
+  // Rows whose attestation EAS now reports revoked while the seed is live: retracted (ADR 0021)
+  const retractedUids = new Set<string>()
 
   for (const row of storedRows) {
     if (!row.uid) continue
@@ -684,6 +697,7 @@ const saveEasPropertiesToDbBody = async ({
     const revokedAt = syncedRevokedAt(canonical, row.revokedAt)
     if ((row.revokedAt ?? null) !== revokedAt) {
       revokedAtUpdates.set(row.uid, revokedAt)
+      if (revokedAt != null && isRetracted(canonical, itemSeeds, state)) retractedUids.add(row.uid)
     }
   }
 
@@ -705,7 +719,15 @@ const saveEasPropertiesToDbBody = async ({
   for (const [uid, revokedAt] of revokedAtUpdates) {
     await appDb
       .update(metadata)
-      .set({ revokedAt })
+      .set({
+        revokedAt,
+        ...(retractedUids.has(uid) && {
+          propertyValue: null,
+          refSeedType: null,
+          refResolvedValue: null,
+          refResolvedDisplayValue: null,
+        }),
+      })
       .where(eq(metadata.uid, uid))
   }
 
@@ -921,8 +943,14 @@ const insertSyncedProperties = async ({
       continue
     }
 
+    // A removal or a retraction (ADR 0021) is stored as no value, so it is the property's newest row
+    const cleared =
+      isEasEmptyValue(easDataType, propertyMetadata.value) || isRetracted(property, itemSeeds, state)
+
     // ADR 0010: numeric values decoded (Number as a decimal string, Date as ISO).
-    const decodedValue = syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
+    const decodedValue = cleared
+      ? null
+      : syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
     if (decodedValue === undefined) {
       console.warn(
         `[item/events] [syncDbWithEas] EAS property "${propertyNameSnake}" has a value that isn't a valid ${resolvedName.dataType}; skipping it`,
@@ -930,9 +958,10 @@ const insertSyncedProperties = async ({
       continue
     }
 
-    const propertyValue = typeof decodedValue === 'string' ? decodedValue : JSON.stringify(decodedValue)
+    const propertyValue =
+      decodedValue === null ? null : typeof decodedValue === 'string' ? decodedValue : JSON.stringify(decodedValue)
 
-    if (isRelation && !isList) {
+    if (isRelation && !isList && !cleared) {
       const relatedSeed = itemSeeds.find(
         (seed: Attestation) => seed.id === propertyMetadata.value,
       )
@@ -942,7 +971,7 @@ const insertSyncedProperties = async ({
       }
     }
 
-    if (isRelation && isList) {
+    if (isRelation && isList && !cleared) {
       const relatedSeeds = itemSeeds.filter((seed: Attestation) =>
         (propertyMetadata.value as string[]).includes(seed.id),
       )

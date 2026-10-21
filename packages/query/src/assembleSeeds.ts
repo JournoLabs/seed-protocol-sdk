@@ -1,5 +1,6 @@
 import {
   decodeEasNumber,
+  isEasEmptyValue,
   isNumericEasType,
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
@@ -172,6 +173,8 @@ async function processItemProperty(
   let isRelation = false
   let isList = false
   const easType = metadata.type
+  // A removed property (ADR 0021): absent from the seed, and a zero uid is no related seed
+  if (isEasEmptyValue(easType, metadata.value)) return
   const isBytes32Relation =
     (easType === 'bytes32' || easType === 'bytes32[]') &&
     propertyNameSnake !== 'storage_transaction_id' &&
