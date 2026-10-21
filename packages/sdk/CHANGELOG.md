@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - The bulk file download after each EAS sync skips transactions whose file is already on disk (a non-empty `<txId>` or `<txId>.<ext>` under `images/`, `html/`, `json/` or `files/`, or, for a composite with known child paths, every routed child). Before, every run fetched every known file from the gateway again, rewrote it in OPFS and announced it as changed in every tab. Lazy downloads of one file (`ensureImageLocal`, hydration) still always download.
 - The bulk download no longer writes `metadata.content_hash` (nothing read it) and no longer runs a bulk 480 px resize afterward, which never resized anything. Image saves and `ensureImageLocal` still create the size variants.
+- The image resize worker recognises a WebP file with no MIME type. It compared the fourth byte with `R` instead of `F` (`RIFF`), so such files went to `createImageBitmap` labelled `image/jpeg`.
 
 ### Breaking
 
