@@ -201,6 +201,13 @@
     {
       "idx": 28,
       "version": "6",
+      "when": 1792596417502,
+      "tag": "0028_add_definition_to_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
       "when": 1792596480144,
       "tag": "0029_dedupe_chain_uids_add_unique_indexes",
       "breakpoints": true

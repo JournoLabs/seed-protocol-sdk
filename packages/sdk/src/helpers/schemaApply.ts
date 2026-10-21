@@ -14,7 +14,6 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getContentHash, getDeterministicId } from '@/helpers/crypto'
-import { generateId } from '@/helpers/generateId'
 import { isInternalSchema } from '@/helpers/constants'
 import { ModelPropertyDataTypes, normalizePropertyRecordSchema } from '@/helpers/property'
 import { refreshCachedProperties } from '@/helpers/cachedPropertyRefresh'
@@ -164,8 +163,8 @@ export function schemaFilePropertyDefinition(
 
 /**
  * Every model's property definitions ({@link schemaFilePropertyDefinition}), by model name.
- * The property rows are written from these. (A definition column on `properties` would be filled
- * from the same map; audit T7.)
+ * The property rows' columns are written from these; their `definition` column from the file's
+ * property objects.
  */
 export function schemaFilePropertyDefinitions(file: SchemaFileFormat): Map<string, { [propName: string]: any }> {
   return new Map(
@@ -360,7 +359,13 @@ export async function applySchemaFile(
         {},
         record,
         options.modelRenames,
-        { schemaFileId: file.id, modelFileIds, propertyFileIds, propertyDefinitions },
+        {
+          schemaFileId: file.id,
+          modelFileIds,
+          propertyFileIds,
+          propertyDefinitions,
+          propertyFileDefinitions: new Map(Object.entries(file.models).map(([name, model]) => [name, model.properties ?? {}])),
+        },
         { db: tx },
       )
       if (dropped.length > 0) await unlinkModelsFromSchema(tx, record.id, dropped)

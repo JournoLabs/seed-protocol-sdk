@@ -1,6 +1,5 @@
 import {
   appState,
-  metadata,
   models as modelsTable,
   NewModelRecord,
   NewPropertyRecord,
@@ -9,17 +8,13 @@ import {
   PropertyType,
   seeds,
 } from '@/seedSchema'
-import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { ModelDefinitions } from '@/types'
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { easName } from '@seedprotocol/eas'
-import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { InferInsertModel } from 'drizzle-orm'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { refreshCachedProperties } from './cachedPropertyRefresh'
 // Dynamic import to break circular dependency: Model -> ... -> helpers/db -> ModelProperty -> ... -> Model
@@ -29,11 +24,11 @@ import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import {
   resolveModelRecord,
   resolveModelRecordByNameOrType,
-  resolveRefModelRecord,
   type ModelScope,
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
-import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
+import { normalizePropertyRecordSchema } from '@/helpers/property'
+import { propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import {
   findOrCreateModelRow,
   inDefinitionsTransaction,
@@ -230,6 +225,11 @@ export const addModelsToDb = async (
     modelFileIds?: Map<string, string>
     propertyFileIds?: Map<string, Map<string, string>>
     propertyDefinitions?: Map<string, { [propertyName: string]: any }>
+    /**
+     * The schema file's property objects as the file states them, by model name; stored in the
+     * `definition` column (description and other fields propertyDefinitions leaves out).
+     */
+    propertyFileDefinitions?: Map<string, { [propertyName: string]: any }>
   },
   options: { db?: AppDb } = {},
 ): Promise<string[]> => {
@@ -312,6 +312,8 @@ export const addModelsToDb = async (
             required: propertyValues.required ?? false,
             storage: propertyStorageColumns(propertyValues),
             isEdited: false,
+            definition: schemaFileData?.propertyFileDefinitions?.get(modelName)?.[propertyName] ?? propertyValues,
+            replaceDefinition: true,
           },
           { keepStoredSchemaFileId: !propertyFileId, keepEditedRow: true },
         )
@@ -344,8 +346,8 @@ export const addModelsToDb = async (
 /**
  * The models linked to a schema row (model_schemas) with their property rows, in schema-file
  * shape: `{ [modelName]: { id, properties: { [name]: { dataType, schemaFileId, ref, ... } } } }`.
- * Fields only a schema file holds (validation, description, ...) aren't here; see
- * {@link mergeDbModelsIntoSchemaModels}.
+ * Properties carry their row's definition (validation, description, ...); model-level fields only a
+ * schema file holds aren't here, see {@link mergeDbModelsIntoSchemaModels}.
  * @param schemaId - The ID of the schema record in the database
  */
 export const loadModelsFromDbForSchema = async (
@@ -384,14 +386,12 @@ export const loadModelsFromDbForSchema = async (
     for (const { property: prop, refName } of propertyRows as { property: PropertyType; refName: string | null }[]) {
       const modelName = nameById.get(prop.modelId!)
       if (!modelName) continue
+      // The row's definition without its row keys; `required` stays the file's
+      const { id: _id, _dbId, name: _name, modelId: _modelId, refModelId: _refModelId, refModelName: _refModelName, required: _required, ...definition } =
+        propertyDefinitionFromRow(prop, refName)
       models[modelName].properties[prop.name] = {
-        dataType: normalizeDataType(prop.dataType ?? undefined),
+        ...definition,
         ...(prop.schemaFileId ? { schemaFileId: prop.schemaFileId } : {}),
-        ...(refName ? { ref: refName } : {}),
-        ...(prop.refValueType ? { refValueType: normalizeDataType(prop.refValueType) } : {}),
-        ...(prop.storageType ? { storageType: prop.storageType } : {}),
-        ...(prop.localStorageDir ? { localStorageDir: prop.localStorageDir } : {}),
-        ...(prop.filenameSuffix ? { filenameSuffix: prop.filenameSuffix } : {}),
       }
     }
 
@@ -503,6 +503,7 @@ export const savePropertyToDb = async (
       required: property.required,
       storage: hasStorageSettings(storage) ? storage : undefined,
       isEdited: true,
+      definition: property,
     })
   })
   logger(`Saved property ${property.modelName}:${property.name}`)
@@ -631,6 +632,7 @@ export async function writeModelToDb(
           refValueType: propData.refValueType ?? null,
           required: propData.required,
           storage: hasStorageSettings(storage) ? storage : undefined,
+          definition: propData,
         },
         { keepStoredSchemaFileId: true },
       )
@@ -681,6 +683,7 @@ export async function writePropertyToDb(
       required: data.required,
       storage: hasStorageSettings(storage) ? storage : undefined,
       isEdited,
+      definition: data,
     }),
   )
   logger(`Wrote property ${data.name} (${propertyFileId})`)

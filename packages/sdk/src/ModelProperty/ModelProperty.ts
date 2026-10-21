@@ -23,9 +23,18 @@ import { isActorStopped, sameEntity } from '@/helpers/entity/entityCommon'
 import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import { setCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
+import {
+  definitionOnlyFields,
+  getPropertyDefinition,
+  persistDefinitionFields,
+  propertyDefinitionFromRow,
+} from '@/helpers/propertyDefinition'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
+
+/** Property objects createById built from a row: their rules are already stored, nothing to persist. */
+const definitionsReadFromRow = new WeakSet<object>()
 
 type ModelPropertyService = ActorRefFrom<typeof modelPropertyMachine>
 type ModelPropertySnapshot = SnapshotFrom<typeof modelPropertyMachine>
@@ -648,13 +657,19 @@ export class ModelProperty {
       if (propertyWithId.refModelId && !cachedContext.refModelId) {
         needsUpdate.refModelId = propertyWithId.refModelId
       }
-      // Rules defined in code exist only on the instance: an instance cached from the DB row first
-      // (which has no column for them) must still take them.
+      // Rules defined in code: an instance cached from a row that doesn't have them takes them,
+      // and so does the row's definition.
       if (propertyWithId.validation && !cachedContext.validation) {
         needsUpdate.validation = propertyWithId.validation
       }
       if (propertyWithId.htmlEmbeddedDataUriPolicy && !cachedContext.htmlEmbeddedDataUriPolicy) {
         needsUpdate.htmlEmbeddedDataUriPolicy = propertyWithId.htmlEmbeddedDataUriPolicy
+      }
+      const codeDefined = definitionOnlyFields(propertyWithId)
+      if (Object.keys(codeDefined).length > 0 && typeof propertyWithId.id === 'string') {
+        void persistDefinitionFields({ schemaFileId: propertyWithId.id }, codeDefined).catch((error) =>
+          logger(`Could not store the definition of property "${property.name}": ${error}`),
+        )
       }
       
       if (Object.keys(needsUpdate).length > 0) {
@@ -720,6 +735,14 @@ export class ModelProperty {
     // Settles when the row write finishes; create() waits for it when waitForReady is on, so a
     // failed write rejects create() instead of resolving with nothing in the DB.
     let writeDone: Promise<void> = Promise.resolve()
+    const codeDefined = definitionOnlyFields(propertyWithId)
+    if (isPersisted && Object.keys(codeDefined).length > 0 && !definitionsReadFromRow.has(property)) {
+      // The row exists (a schema file's, or an earlier run's); rules defined in code go into its
+      // definition now rather than at the next saveNewVersion.
+      writeDone = persistDefinitionFields({ id: (propertyWithId as { _dbId: number })._dbId }, codeDefined).catch(
+        (error) => logger(`Could not store the definition of property "${property.name}": ${error}`),
+      )
+    }
     if (hasModelId && propertyFileId && !isPersisted) {
       let resolveWrite!: () => void
       let rejectWrite!: (error: Error) => void
@@ -845,6 +868,8 @@ export class ModelProperty {
             storageType: property.storageType,
             localStorageDir: property.localStorageDir,
             filenameSuffix: property.filenameSuffix,
+            // Stored in the row's definition column with the rest
+            ...definitionOnlyFields(propertyWithId),
           }
           
           service.send({
@@ -1012,39 +1037,19 @@ export class ModelProperty {
 
     const modelName = modelRecords[0].name
 
-    // Build property data
-    // id is now the schemaFileId (string), _dbId is the database integer ID
-    const propertyData: Static<typeof TProperty> = {
-      id: propertyFileId, // schemaFileId (string) - public ID
-      _dbId: propertyRecord.id ?? undefined, // Database integer ID - internal only
-      name: propertyRecord.name,
-      dataType: propertyRecord.dataType as ModelPropertyDataTypes,
-      modelId: propertyRecord.modelId,
+    // id is the schemaFileId (string), _dbId the row id
+    const definition = await getPropertyDefinition(propertyRecord.id, db)
+    if (!definition) return undefined
+    const propertyData = {
+      ...definition,
+      id: propertyFileId,
       modelName,
-      refModelId: propertyRecord.refModelId || undefined,
-      refValueType: propertyRecord.refValueType ? (propertyRecord.refValueType as ModelPropertyDataTypes) : undefined,
-      required: propertyRecord.required ?? false,
-      storageType: (propertyRecord.storageType as StorageType | null) ?? undefined,
-      localStorageDir: propertyRecord.localStorageDir ?? undefined,
-      filenameSuffix: propertyRecord.filenameSuffix ?? undefined,
-    }
+      required: definition.required ?? false,
+    } as Static<typeof TProperty>
+    definitionsReadFromRow.add(propertyData)
 
     // Load isEdited from database
     const isEditedFromDb = propertyRecord.isEdited ?? false
-
-    // Get ref model name if applicable
-    if (propertyRecord.refModelId) {
-      const refModelRecords = await db
-        .select({ name: modelsTable.name })
-        .from(modelsTable)
-        .where(eq(modelsTable.id, propertyRecord.refModelId))
-        .limit(1)
-
-      if (refModelRecords.length > 0) {
-        propertyData.refModelName = refModelRecords[0].name
-        propertyData.ref = refModelRecords[0].name
-      }
-    }
 
     // Its model's schema was evicted while we read the rows (e.g. a model's property lookup in flight
     // during Schema.destroy or test cleanup): don't bring the property back.
@@ -1092,37 +1097,29 @@ export class ModelProperty {
     if (!db) return
 
     const rows = await db
-      .select({
-        schemaFileId: propertiesTable.schemaFileId,
-        name: propertiesTable.name,
-        dataType: propertiesTable.dataType,
-        refModelId: propertiesTable.refModelId,
-        refModelName: modelsTable.name,
-        refValueType: propertiesTable.refValueType,
-        required: propertiesTable.required,
-        storageType: propertiesTable.storageType,
-        localStorageDir: propertiesTable.localStorageDir,
-        filenameSuffix: propertiesTable.filenameSuffix,
-      })
+      .select({ property: propertiesTable, refModelName: modelsTable.name })
       .from(propertiesTable)
       .leftJoin(modelsTable, eq(modelsTable.id, propertiesTable.refModelId))
       .where(inArray(propertiesTable.schemaFileId, [...ids]))
 
     for (const row of rows) {
-      const propertyFileId = row.schemaFileId
-      if (!propertyFileId || !row.name) continue
-      const dataType = row.dataType as ModelPropertyDataTypes
+      const propertyFileId = row.property.schemaFileId
+      if (!propertyFileId || !row.property.name) continue
+      const definition = propertyDefinitionFromRow(row.property, row.refModelName)
+      const dataType = definition.dataType as ModelPropertyDataTypes
       const rowValues: Partial<Static<typeof TProperty>> = {
-        name: row.name,
+        name: definition.name,
         dataType,
-        refValueType: (row.refValueType as ModelPropertyDataTypes | null) ?? undefined,
-        required: row.required ?? false,
-        storageType: (row.storageType as StorageType | null) ?? undefined,
-        localStorageDir: row.localStorageDir ?? undefined,
-        filenameSuffix: row.filenameSuffix ?? undefined,
+        refValueType: definition.refValueType,
+        required: definition.required ?? false,
+        storageType: definition.storageType,
+        localStorageDir: definition.localStorageDir,
+        filenameSuffix: definition.filenameSuffix,
+        // Only when the row has them: rules code just set may not be stored yet
+        ...definitionOnlyFields(definition),
       }
-      if (row.refModelId) {
-        rowValues.refModelId = row.refModelId
+      if (definition.refModelId) {
+        rowValues.refModelId = definition.refModelId
         if (row.refModelName) {
           rowValues.ref = row.refModelName
           rowValues.refModelName = row.refModelName
@@ -1143,7 +1140,10 @@ export class ModelProperty {
 
         const changed = Object.fromEntries(
           Object.entries(rowValues).filter(
-            ([key, value]) => (context as Record<string, unknown>)[key] !== value,
+            ([key, value]) =>
+              typeof value === 'object' && value !== null
+                ? JSON.stringify((context as Record<string, unknown>)[key]) !== JSON.stringify(value)
+                : (context as Record<string, unknown>)[key] !== value,
           ),
         ) as Partial<Static<typeof TProperty>>
         if (Object.keys(changed).length === 0) continue

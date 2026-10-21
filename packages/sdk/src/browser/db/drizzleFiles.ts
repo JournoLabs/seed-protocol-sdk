@@ -553,6 +553,25 @@ WHERE \`property_id\` IS NULL AND (
 ) = 1;
 `
 
+export const migrationSql_0028_add_definition_to_properties = `ALTER TABLE \`properties\` ADD \`definition\` text;
+--> statement-breakpoint
+-- Backfill from the stored schema files: a property row takes the property object whose \`id\` is
+-- its schema_file_id, from the newest schema version that has one. Rows no stored file names by id
+-- keep NULL and read their definition from the columns alone.
+UPDATE \`properties\` SET \`definition\` = (
+	SELECT \`p\`.\`value\`
+	FROM \`schemas\` \`s\`,
+		json_each(CASE WHEN json_valid(\`s\`.\`schema_data\`) THEN \`s\`.\`schema_data\` ELSE '{}' END, '$.models') \`m\`,
+		json_each(\`m\`.\`value\`, '$.properties') \`p\`
+	WHERE \`m\`.\`type\` = 'object'
+		AND json_type(\`m\`.\`value\`, '$.properties') = 'object'
+		AND \`p\`.\`type\` = 'object'
+		AND json_extract(\`p\`.\`value\`, '$.id') = \`properties\`.\`schema_file_id\`
+	ORDER BY \`s\`.\`version\` DESC, \`s\`.\`id\` DESC
+	LIMIT 1
+) WHERE \`definition\` IS NULL AND \`schema_file_id\` IS NOT NULL;
+`
+
 export const migrationSql_0029_dedupe_chain_uids_add_unique_indexes = `-- Unique keys the writers already assume (SDK audit T9): one model_schemas link per model and
 -- schema, and one seeds / versions row per attested uid (placeholder uids are left out, see
 -- seedSchema/attestedUid.ts). Duplicates are merged first. The survivor is the row with local
@@ -879,12 +898,20 @@ export const journalJson = `{
     {
       "idx": 28,
       "version": "6",
+      "when": 1792596417502,
+      "tag": "0028_add_definition_to_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
       "when": 1792596480144,
       "tag": "0029_dedupe_chain_uids_add_unique_indexes",
       "breakpoints": true
     }
   ]
-}`
+}
+`
 
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
@@ -892,7 +919,7 @@ export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
   "id": "0937d0b1-f4ea-4ae1-885b-7173e7b786b9",
-  "prevId": "c7851baa-6148-4738-9db2-28c46948b66c",
+  "prevId": "083c3909-4feb-4b61-bf23-fa806a60b826",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1653,6 +1680,13 @@ export const snapshotJson = `{
         },
         "filename_suffix": {
           "name": "filename_suffix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "definition": {
+          "name": "definition",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

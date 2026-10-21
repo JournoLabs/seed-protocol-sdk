@@ -19,6 +19,7 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { resolveModelRecord, resolveRefModelRecord, type ResolvedModelRecord } from '@/db/read/resolveModelRecord'
 import { AmbiguousModelError } from '@/Model/errors'
 import { normalizeDataType } from '@/helpers/property'
+import { propertyDefinitionColumn } from '@/helpers/propertyDefinition'
 import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 
 const logger = debug('seedSdk:db:write:definitions')
@@ -368,6 +369,14 @@ export type PropertyRowInput = {
   storage?: PropertyStorageColumns
   /** Left out: an existing row keeps its flag, a new row stores false. */
   isEdited?: boolean
+  /**
+   * The property's definition in any accepted shape, for the `definition` column. Merged over the
+   * stored one (fields it lacks are kept: a payload without validation must not drop stored rules)
+   * unless `replaceDefinition`. Left out: an existing row keeps its definition.
+   */
+  definition?: Record<string, any>
+  /** The definition is the whole truth (a schema file's property): it replaces the stored one. */
+  replaceDefinition?: boolean
 }
 
 export type PropertyRowOptions = {
@@ -395,6 +404,7 @@ const propertyRowFields = [
   'storageType',
   'localStorageDir',
   'filenameSuffix',
+  'definition',
 ] as const
 
 /**
@@ -448,6 +458,9 @@ export async function upsertPropertyRow(
     storageType: input.storage ? (input.storage.storageType ?? null) : (existing?.storageType ?? null),
     localStorageDir: input.storage ? (input.storage.localStorageDir ?? null) : (existing?.localStorageDir ?? null),
     filenameSuffix: input.storage ? (input.storage.filenameSuffix ?? null) : (existing?.filenameSuffix ?? null),
+    definition: input.definition
+      ? propertyDefinitionColumn(input.definition, input.replaceDefinition ? null : existing?.definition)
+      : (existing?.definition ?? null),
   }
 
   if (existing) {

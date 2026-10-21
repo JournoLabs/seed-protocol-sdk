@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "0937d0b1-f4ea-4ae1-885b-7173e7b786b9",
-  "prevId": "c7851baa-6148-4738-9db2-28c46948b66c",
+  "prevId": "083c3909-4feb-4b61-bf23-fa806a60b826",
   "tables": {
     "appState": {
       "name": "appState",
@@ -763,6 +763,13 @@
         },
         "filename_suffix": {
           "name": "filename_suffix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "definition": {
+          "name": "definition",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

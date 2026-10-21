@@ -414,10 +414,15 @@ async function prepareHtmlEmbeddedImagesOfItem(
   deferred: Set<string>,
 ): Promise<void> {
   await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
+  const { resolveItemPropertyDefinition } = await import('./getSegmentedItemProperties')
 
   for (const p of item.properties) {
-    const def = p.propertyDef
-    if (!def || normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
+    const contextDef = p.propertyDef
+    if (contextDef && normalizeDataTypeLocal(contextDef.dataType) !== ModelPropertyDataTypes.Html) continue
+    // The policy is the row's (a schema file's htmlEmbeddedDataUriPolicy or a code-defined one); a
+    // context definition built elsewhere may not carry it
+    const def = await resolveItemPropertyDefinition(item, p)
+    if (normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
 
     const snap = p.getService().getSnapshot()
     const ctx = 'context' in snap ? snap.context : null
