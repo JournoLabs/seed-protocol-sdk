@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import type { Dispatcher } from 'undici'
 
 /**
@@ -50,6 +49,9 @@ export function createEasNodeDispatcher({
   if (hostSetGlobalDispatcher()) return undefined
   // The Agent module alone: undici's index installs a global dispatcher when none is set yet,
   // which would move every other fetch in the process onto this copy of undici.
+  // getBuiltinModule rather than a static `node:module` import keeps this entry loadable in a
+  // browser (some browser tests import NodeQueryClient from it).
+  const { createRequire } = process.getBuiltinModule('node:module') as typeof import('node:module')
   const Agent = createRequire(import.meta.url)('undici/lib/dispatcher/agent.js') as typeof import('undici').Agent
   return new Agent({ connect: { ecdhCurve }, keepAliveTimeout: keepAliveTimeoutMs })
 }
