@@ -6,6 +6,8 @@ All notable changes to this package are documented in this file.
 
 - New `fetchEasModelSchemas(models)` asks EAS in one request for the model schemas (`bytes32 <name>`) every `{ name, level }` can match at its nameMatch level, and `matchEasModelSchemas(schemas, models)` says which model each is for and at which tier. `getEasModelSchemasForNames` does both. `modelSchemaDefinition(name)` is `bytes32 <easName>`.
 - `getEasSchemaUidForSchemaDefinition` looks the exact definition up (`getEasSchemaUidForExactDefinition`) after its cache. It asked for a schema whose definition ended with the snake-cased text.
+- `getItemVersionsFromEas` returns only Version attestations (`schemaId` is `VERSION_SCHEMA_UID`). It returned every attestation whose `refUID` was one of the seeds, and PublishedBy sidecars use seed uids as `refUID`: a sidecar from the seed's own attester, being newer, was taken as the seed's latest version, and `@seedprotocol/query` assembled the record with no properties. `getCanonicalItemPropertiesFromEas` applies the same filter when it fetches the versions of the properties it checks, so a property on a non-version attestation no longer counts.
+- New exports `VERSION_SCHEMA_UID` and `VERSION_SCHEMA_DEF`, moved from `@seedprotocol/sdk`, which re-exports both (and the deprecated `VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA`) unchanged.
 
 ### Breaking
 

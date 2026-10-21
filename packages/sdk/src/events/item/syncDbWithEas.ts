@@ -24,7 +24,6 @@ import {
 import {
   metadata,
   MetadataType,
-  seeds,
   SeedType,
   versions,
   VersionsType,
@@ -308,7 +307,6 @@ type SaveEasSeedsToDb = (
 
 const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
   const { seedUidToLocalId, seedUidToModelType } = state
-  const appDb = BaseDb.getAppDb()
 
   const seedUids = itemSeeds.map((seed) => seed.id)
 

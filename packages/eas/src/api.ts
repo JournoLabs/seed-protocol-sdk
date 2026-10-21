@@ -5,6 +5,7 @@ import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { getEasEndpoint } from './easEndpoint.js'
+import { VERSION_SCHEMA_UID } from './constants.js'
 import {
   GET_PROPERTIES,
   GET_SCHEMAS,
@@ -17,6 +18,11 @@ import type { Attestation } from './graphql/gql/graphql.js'
 
 export type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 
+/**
+ * Version attestations of the given seeds, newest first. Filters on {@link VERSION_SCHEMA_UID}:
+ * other attestations use seed uids as `refUID` too (PublishedBy sidecars, for one), and one from
+ * the seed's own attester would otherwise be taken as its newest version.
+ */
 export const getItemVersionsFromEas = async ({
   seedUids,
   excludeRevoked = true,
@@ -27,9 +33,8 @@ export const getItemVersionsFromEas = async ({
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const where = excludeRevoked
-    ? withExcludeRevokedFilter({ refUID: { in: seedUids } })
-    : { refUID: { in: seedUids } }
+  const versionsOfSeeds = { refUID: { in: seedUids }, schemaId: { equals: VERSION_SCHEMA_UID } }
+  const where = excludeRevoked ? withExcludeRevokedFilter(versionsOfSeeds) : versionsOfSeeds
 
   const { itemVersions } = (await queryClient.fetchQuery({
     queryKey: [`getVersionsForAllModels`, [...seedUids].sort(), excludeRevoked],
@@ -92,7 +97,10 @@ export const getCanonicalItemPropertiesFromEas = async ({
 
   const easClient = BaseEasClient.getEasClient()
   const { itemVersions } = (await easClient.request(GET_VERSIONS, {
-    where: { id: { in: [...new Set(itemProperties.map((p) => p.refUID))] } },
+    where: {
+      id: { in: [...new Set(itemProperties.map((p) => p.refUID))] },
+      schemaId: { equals: VERSION_SCHEMA_UID },
+    },
   })) as { itemVersions: Attestation[] }
   const seedUids = [...new Set(itemVersions.map((v) => v.refUID))]
   const { itemSeeds } = (await easClient.request(GET_SEEDS_LEAN, {

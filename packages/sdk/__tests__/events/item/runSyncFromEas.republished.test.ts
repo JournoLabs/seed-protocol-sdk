@@ -4,6 +4,7 @@ import {
   teardownTestEnvironment,
   SETUP_HOOK_TIMEOUT_MS,
 } from '../../test-utils/client-init'
+import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 
 /**
  * Sync after an unpublish and republish (SDK audit 1.7). EAS returns the revoked old seed and the
@@ -52,7 +53,6 @@ vi.mock('@/events/files/download', () => ({
 }))
 
 const ZERO = '0x' + '0'.repeat(64)
-const VERSION_SCHEMA_UID = '0x' + 'cf'.repeat(32)
 
 let uidCounter = 0
 const nextUid = (): string => {
