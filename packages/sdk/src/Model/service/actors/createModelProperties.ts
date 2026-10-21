@@ -119,8 +119,7 @@ export const createModelProperties = fromCallback<
         localStorageDir: propData.localStorageDir ?? propertyRecord?.localStorageDir ?? undefined,
         filenameSuffix: propData.filenameSuffix ?? propertyRecord?.filenameSuffix ?? undefined,
         required: propData.required,
-        // Rules defined in code live only on the instance (the properties table has no column
-        // for them); getPropertySchema reads them from here when no schema file has them.
+        // Rules defined in code; ModelProperty.create stores them in the row's definition.
         validation: propData.validation,
         htmlEmbeddedDataUriPolicy: propData.htmlEmbeddedDataUriPolicy,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups

@@ -35,6 +35,7 @@ import {
 } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
+import { propertyDefinitionColumn } from '@/helpers/propertyDefinition'
 import { insertModelSchemaLink, linkModelToSchema } from '@/db/write/linkModelToSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 
@@ -553,6 +554,11 @@ export const addModelsToDb = async (
     modelFileIds?: Map<string, string>
     propertyFileIds?: Map<string, Map<string, string>>
     propertyDefinitions?: Map<string, { [propertyName: string]: any }>
+    /**
+     * The schema file's property objects as the file states them, by model name; stored in the
+     * `definition` column (description and other fields propertyDefinitions leaves out).
+     */
+    propertyFileDefinitions?: Map<string, { [propertyName: string]: any }>
   },
   options: { db?: AppDb } = {},
 ): Promise<string[]> => {
@@ -708,6 +714,9 @@ export const addModelsToDb = async (
         required: propertyValues.required ?? false,
         // The schema file is the source of truth here: no storage config means none.
         ...propertyStorageColumns(propertyValues),
+        definition: propertyDefinitionColumn(
+          schemaFileData?.propertyFileDefinitions?.get(modelName)?.[propertyName] ?? propertyValues,
+        ),
       }
 
       // Handle ref property - create ref model if needed
@@ -780,6 +789,7 @@ export const addModelsToDb = async (
           (existingProperty.storageType ?? null) === (updateData.storageType ?? null) &&
           (existingProperty.localStorageDir ?? null) === (updateData.localStorageDir ?? null) &&
           (existingProperty.filenameSuffix ?? null) === (updateData.filenameSuffix ?? null) &&
+          (existingProperty.definition ?? null) === (updateData.definition ?? null) &&
           existingProperty.isEdited === (updateData.isEdited ?? false)
         if (!unchanged) {
           await db
@@ -1122,6 +1132,7 @@ export const savePropertyToDb = async (
       .update(properties)
       .set({
         ...propertyData,
+        definition: propertyDefinitionColumn(property, existingProperty.definition),
         isEdited: true, // Mark as edited when saving changes
       })
       .where(eq(properties.id, existingProperty.id!))
@@ -1134,6 +1145,7 @@ export const savePropertyToDb = async (
       .insert(properties)
       .values({
         ...propertyData,
+        definition: propertyDefinitionColumn(property),
         isEdited: true, // Runtime-created properties are edited
       })
       .onConflictDoNothing()
@@ -1526,7 +1538,7 @@ export async function writePropertyToDb(
     const existing = existingProperties[0]
     await db
       .update(properties)
-      .set(propertyData)
+      .set({ ...propertyData, definition: propertyDefinitionColumn(data, existing.definition) })
       .where(eq(properties.id, existing.id!))
     logger(`Updated property ${data.name} (${propertyFileId}) in database`)
   } else {
@@ -1542,7 +1554,7 @@ export async function writePropertyToDb(
       // Another process created it, update it instead
       await db
         .update(properties)
-        .set(propertyData)
+        .set({ ...propertyData, definition: propertyDefinitionColumn(data, doubleCheck[0].definition) })
         .where(eq(properties.id, doubleCheck[0].id!))
       logger(`Property with schemaFileId "${propertyFileId}" was created by another process, updated existing record`)
     } else {
@@ -1550,7 +1562,7 @@ export async function writePropertyToDb(
       // insert is logged by sqlite-wasm even when caught.
       const inserted = await db
         .insert(properties)
-        .values({ required: false, isEdited: false, ...propertyData })
+        .values({ required: false, isEdited: false, ...propertyData, definition: propertyDefinitionColumn(data) })
         .onConflictDoNothing()
         .returning({ id: properties.id })
       if (inserted.length > 0) {
@@ -1566,7 +1578,7 @@ export async function writePropertyToDb(
         }
         await db
           .update(properties)
-          .set(propertyData)
+          .set({ ...propertyData, definition: propertyDefinitionColumn(data, existing[0].definition) })
           .where(eq(properties.id, existing[0].id!))
         logger(`Found existing property with schemaFileId "${propertyFileId}" (id: ${existing[0].id}) after insert conflict, updated it`)
       }
