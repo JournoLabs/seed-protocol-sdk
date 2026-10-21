@@ -1,7 +1,8 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { versionNotRevoked } from '@/db/read/subqueries/liveVersion'
+import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 
 export type LatestVersionRow = {
   localId: string | null
@@ -11,7 +12,7 @@ export type LatestVersionRow = {
 }
 
 /**
- * The seed's head version row: newest by (created_at DESC, local_id DESC), attested or not, skipping
+ * The seed's head version row: first by `LATEST_VERSION_ORDER_SQL`, attested or not, skipping
  * revoked versions. Null when the seed has no version or every version is revoked (a fully
  * unpublished item). Same choice as `latestVersionLocalId` in the `getVersionData` subquery.
  */
@@ -28,7 +29,7 @@ export async function getLatestVersionRow(seedLocalId: string): Promise<LatestVe
     })
     .from(versions)
     .where(and(eq(versions.seedLocalId, seedLocalId), versionNotRevoked()))
-    .orderBy(desc(versions.createdAt), desc(versions.localId))
+    .orderBy(latestVersionOrder())
     .limit(1)
 
   return rows[0] ?? null
