@@ -2,7 +2,7 @@
 /**
  * Fail if browser-reachable Seed entries statically import Node builtins,
  * import @seedprotocol/eas/node or @seedprotocol/arweave/node (statically or dynamically),
- * drizzle-orm/migrator, or js-sha3.
+ * drizzle-orm/migrator, js-sha3, or undici.
  *
  * Walks source entries (and published dist when present).
  * Usage: node scripts/check-browser-entry-graph.js [--fail]
@@ -24,6 +24,8 @@ const FORBIDDEN = [
   { name: 'node:crypto', re: /(?:from|import)\s+['"]node:crypto['"]/ },
   { name: 'drizzle-orm/migrator', re: /(?:from|import)\s+['"]drizzle-orm\/migrator['"]/ },
   { name: 'js-sha3', re: /(?:from|import)\s+['"]js-sha3['"]/ },
+  // Node-only EAS dispatcher (@seedprotocol/eas/node), loaded with createRequire.
+  { name: 'undici', re: /['"]undici['"]/ },
   // Loading these registers Node clients over the page's own (SDK) clients.
   {
     name: '@seedprotocol/*/node',
