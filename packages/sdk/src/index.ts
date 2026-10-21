@@ -313,9 +313,7 @@ export type {
   GetAdditionalSyncAddresses,
 } from './helpers/publishConfig'
 
-export { 
-  createSchema, 
-  readSchema, 
+export {
   listCompleteSchemaFiles as listSchemas,
   getSchemaNameFromId,
 } from './helpers/schema'
@@ -391,8 +389,6 @@ export type {
 export {
   updateModelProperties,
   renameModelProperty,
-  deletePropertyFromModel,
-  deleteModelFromSchema,
 } from './helpers/updateSchema'
 // Types - Type-only exports cause issues with Rollup's parser
 // SchemaPropertyUpdate and SchemaModelUpdate types are available from './helpers/updateSchema'

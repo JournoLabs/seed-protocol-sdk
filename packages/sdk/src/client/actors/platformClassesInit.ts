@@ -24,7 +24,6 @@ type InitEvent = {
   options: SeedConstructorOptions
 }
 
-export { isUnderDotSeed } from '@/helpers/dotSeedPath'
 
 export const platformClassesInit = fromCallback<
 EventObject, 

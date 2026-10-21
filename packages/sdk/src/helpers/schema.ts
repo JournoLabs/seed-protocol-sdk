@@ -1,189 +1,13 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
-import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { isInternalSchema } from '@/helpers/constants'
-import { desc, eq } from 'drizzle-orm'
+import { desc } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schema')
-/**
- * 
- * Schema type definition
- * A Schema is a collection of Models with a name and version
- */
-export type Schema = {
-  id?: string
-  name?: string
-  metadata?: {
-    name: string
-    createdAt: string
-    updatedAt: string
-  }
-  version: number
-  models: Model[]
-}
-
-
-/**
- * Sanitize a schema name to be filesystem-safe
- * Replaces all special characters (except alphanumeric, hyphens, underscores) with underscores
- * Converts spaces to underscores
- * Removes leading/trailing underscores
- * 
- * @param name - Schema name to sanitize
- * @returns Sanitized name safe for use in filenames
- */
-const sanitizeSchemaName = (name: string): string => {
-  return name
-    .replace(/[^a-zA-Z0-9\s_-]/g, '_') // Replace special chars (except spaces, hyphens, underscores) with underscore
-    .replace(/\s+/g, '_') // Convert spaces to underscores
-    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
-    .replace(/_+/g, '_') // Collapse multiple underscores to single
-}
-
-/**
- * Generate filename for a schema
- * Format: {schemaFileId}_{schemaName}_v{version}.json
- * 
- * The ID-first format ensures all files for a schema group together when sorted alphabetically.
- * 
- * @param name - Schema name
- * @param version - Schema version
- * @param schemaFileId - Schema file ID (required)
- */
-const getSchemaFilename = (name: string, version: number, schemaFileId: string): string => {
-  const sanitizedName = sanitizeSchemaName(name)
-  return `${schemaFileId}_${sanitizedName}_v${version}.json`
-}
-
-/**
- * Get the full file path for a schema
- * Format: {schemaFileId}_{schemaName}_v{version}.json
- * 
- * The ID-first format ensures all files for a schema group together when sorted alphabetically.
- * 
- * @param name - Schema name
- * @param version - Schema version
- * @param schemaFileId - Schema file ID (required)
- */
-const getSchemaFilePath = (name: string, version: number, schemaFileId: string): string => {
-  const path = BaseFileManager.getPathModule()
-  const filename = getSchemaFilename(name, version, schemaFileId)
-  const workingDir = BaseFileManager.getWorkingDir()
-  return path.join(workingDir, filename)
-}
-
-/**
- * Create a new schema file
- * @param schema - The schema object to save
- * @param schemaFileId - Schema file ID (required)
- * @throws Error if schema already exists or if workingDir is invalid
- */
-export const createSchema = async (schema: Schema, schemaFileId: string): Promise<void> => {
-  if (!schema.name || !schema.version) {
-    throw new Error('Schema must have a name and version')
-  }
-
-  const filePath = getSchemaFilePath(schema.name, schema.version, schemaFileId)
-
-  // Check if schema already exists
-  const exists = await BaseFileManager.pathExists(filePath)
-  if (exists) {
-    throw new Error(`Schema ${schema.name} v${schema.version} already exists`)
-  }
-
-  // Ensure working directory exists
-  const workingDir = BaseFileManager.getWorkingDir()
-  await BaseFileManager.createDirIfNotExists(workingDir)
-
-  // Write schema to file
-  const content = JSON.stringify(schema, null, 2)
-  await BaseFileManager.saveFile(filePath, content)
-}
-
-/**
- * Read a schema file by name and version
- * @param name - The name of the schema
- * @param version - The version of the schema
- * @param schemaFileId - Schema file ID (required)
- * @returns The schema object, or null if not found
- */
-export const readSchema = async (
-  name: string,
-  version: number,
-  schemaFileId: string,
-): Promise<Schema | null> => {
-  const filePath = getSchemaFilePath(name, version, schemaFileId)
-
-  const exists = await BaseFileManager.pathExists(filePath)
-  if (!exists) {
-    return null
-  }
-
-  try {
-    const content = await BaseFileManager.readFileAsString(filePath)
-    return JSON.parse(content) as Schema
-  } catch (error) {
-    throw new Error(`Failed to read schema ${name} v${version}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
-/**
- * Update an existing schema file
- * @param schema - The updated schema object (must have same name and version as existing)
- * @param schemaFileId - Schema file ID (required)
- * @throws Error if schema doesn't exist
- */
-export async function updateSchema(schema: Schema, schemaFileId: string): Promise<void> {
-  if (!schema.name || !schema.version) {
-    throw new Error('Schema must have a name and version')
-  }
-
-  const filePath = getSchemaFilePath(schema.name, schema.version, schemaFileId)
-
-  // Check if schema exists
-  const exists = await BaseFileManager.pathExists(filePath)
-  if (!exists) {
-    throw new Error(`Schema ${schema.name} v${schema.version} does not exist`)
-  }
-
-  // Write updated schema to file
-  const content = JSON.stringify(schema, null, 2)
-  await BaseFileManager.saveFile(filePath, content)
-}
-
-/**
- * Delete a schema file
- * @param name - The name of the schema
- * @param version - The version of the schema
- * @param schemaFileId - Schema file ID (required)
- * @throws Error if schema doesn't exist
- */
-export async function deleteSchema(
-  name: string,
-  version: number,
-  schemaFileId: string,
-): Promise<void> {
-  const filePath = getSchemaFilePath(name, version, schemaFileId)
-
-  // Check if schema exists
-  const exists = await BaseFileManager.pathExists(filePath)
-  if (!exists) {
-    throw new Error(`Schema ${name} v${version} does not exist`)
-  }
-
-  // Delete the file
-  const fs = await BaseFileManager.getFs()
-  
-  try {
-    await fs.promises.unlink(filePath)
-  } catch (error) {
-    throw new Error(`Failed to delete schema ${name} v${version}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
 
 /**
  * List all schema files in the working directory
@@ -314,33 +138,6 @@ export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[
 }
 
 /**
- * Find a schema by name (returns the latest version if multiple versions exist)
- * @param name - The name of the schema
- * @returns The schema with the highest version, or null if not found
- */
-export async function findSchemaByName(
-  name: string,
-): Promise<Schema | null> {
-  const schemas = await listCompleteSchemaFiles()
-  const matchingSchemas = schemas.filter((s) => s.name === name)
-
-  if (matchingSchemas.length === 0) {
-    return null
-  }
-
-  // Find the schema with the highest version
-  const latest = matchingSchemas.reduce((prev, current) =>
-    current.version > prev.version ? current : prev,
-  )
-
-  if (!latest.schemaFileId) {
-    throw new Error(`Schema ${latest.name} v${latest.version} is missing schemaFileId`)
-  }
-
-  return readSchema(latest.name, latest.version, latest.schemaFileId)
-}
-
-/**
  * Get the latest version number for a schema by name
  * Only considers complete schema files (with $schema field)
  * @param name - The name of the schema
@@ -378,31 +175,6 @@ export async function listLatestSchemaFiles(): Promise<Array<{ name: string; ver
     const existing = schemaMap.get(schema.name)
     if (!existing || schema.version > existing.version) {
       schemaMap.set(schema.name, schema)
-    }
-  }
-  
-  return Array.from(schemaMap.values())
-}
-
-/**
- * Filter an array of schemas to only include the latest version for each schema name
- * Works with any object that has a name (via metadata.name or name property) and a version property
- * @param schemas - Array of schema objects
- * @returns Array containing only the latest version of each schema
- */
-export function filterLatestSchemas<T extends { name?: string; metadata?: { name: string }; version: number }>(schemas: T[]): T[] {
-  // Group by schema name and keep only the latest version of each
-  const schemaMap = new Map<string, T>()
-  
-  for (const schema of schemas) {
-    const schemaName = schema.metadata?.name || schema.name
-    if (!schemaName) {
-      continue // Skip schemas without a name
-    }
-    
-    const existing = schemaMap.get(schemaName)
-    if (!existing || schema.version > existing.version) {
-      schemaMap.set(schemaName, schema)
     }
   }
   
@@ -663,73 +435,6 @@ export async function loadAllSchemasFromDb(): Promise<LoadedSchema[]> {
   }
 
   return result
-}
-
-/**
- * Migration helper: Migrate existing file-based schemas to the database
- * This function should be called once to migrate existing schema files to the new database-first approach
- * All existing schemas will be marked as published (isDraft = false) since they already exist in files
- * @returns Number of schemas migrated
- */
-export async function migrateFileSchemasToDb(): Promise<number> {
-  const db = BaseDb.getAppDb()
-  if (!db) {
-    throw new Error('Database not found')
-  }
-
-  logger('Starting migration of file-based schemas to database')
-
-  // Get all complete schema files
-  const completeSchemas = await listCompleteSchemaFiles()
-  let migratedCount = 0
-
-  for (const schemaFileInfo of completeSchemas) {
-    try {
-      // Read the schema file
-      const content = await BaseFileManager.readFileAsString(schemaFileInfo.filePath)
-      const schemaFile = JSON.parse(content) as SchemaFileFormat
-
-      if (!schemaFile.$schema || !schemaFile.metadata?.name) {
-        logger(`Skipping invalid schema file: ${schemaFileInfo.filePath}`)
-        continue
-      }
-
-      const schemaName = schemaFile.metadata.name
-
-      // Check if schema already exists in database
-      const existingSchemas = await db
-        .select()
-        .from(schemasTable)
-        .where(eq(schemasTable.name, schemaName))
-        .limit(1)
-
-      // Only migrate if it doesn't exist or if existing record doesn't have schemaFileId
-      if (existingSchemas.length === 0 || !existingSchemas[0].schemaFileId) {
-        // Add schema to database as published (isDraft = false)
-        await addSchemaToDb(
-          {
-            name: schemaName,
-            version: schemaFile.version,
-            createdAt: new Date(schemaFile.metadata.createdAt).getTime(),
-            updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
-          },
-          schemaFile.id, // schemaFileId
-          JSON.stringify(schemaFile, null, 2), // schemaData
-          false, // isDraft = false (it's in a file, so it's published)
-        )
-
-        migratedCount++
-        logger(`Migrated schema: ${schemaName} v${schemaFile.version}`)
-      } else {
-        logger(`Schema ${schemaName} already exists in database, skipping`)
-      }
-    } catch (error) {
-      logger(`Error migrating schema file ${schemaFileInfo.filePath}:`, error)
-    }
-  }
-
-  logger(`Migration complete: ${migratedCount} schemas migrated`)
-  return migratedCount
 }
 
 /**
