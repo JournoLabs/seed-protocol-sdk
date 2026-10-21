@@ -16,10 +16,9 @@ export async function executeCreateArweaveDataItemsPhase2(
   context: PublishMachineContext,
 ): Promise<CreateArweaveDataItemsResult> {
   let { item } = context
-
-  if (!item.getPublishUploads) {
-    item = await waitForItem(item.seedLocalId)
-  }
+  // A restored publish record carries the item as plain data: load it, and drop that hold after
+  const loaded = !item.getPublishUploads ? await waitForItem(item.seedLocalId) : undefined
+  if (loaded) item = loaded
 
   const uploadDataOpts: GetPublishUploadDataOptions = {}
   if (context.arweaveUploadTags?.length) {
@@ -35,7 +34,7 @@ export async function executeCreateArweaveDataItemsPhase2(
     [],
     undefined,
     Object.keys(uploadDataOpts).length ? uploadDataOpts : undefined,
-  )
+  ).finally(() => loaded?.unload())
 
   const config = getPublishConfig()
   const signDataItems = context.signDataItems ?? config.signDataItems
