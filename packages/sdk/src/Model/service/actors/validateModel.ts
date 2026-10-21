@@ -64,7 +64,8 @@ export const validateModel = fromCallback<
       if (isActorStopped(self)) return
       if (context.schemaName) {
         try {
-          const schema = Schema.create(context.schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+          const schema = await Schema.find({ schemaName: context.schemaName, waitForReady: false, hold: false })
+          if (!schema) throw new Error(`No schema named "${context.schemaName}"`)
           const schemaSnapshot = schema.getService().getSnapshot()
           const schemaStatus = schemaSnapshot.value
           

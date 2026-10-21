@@ -2087,9 +2087,9 @@ export class Model {
         if (schemaName && modelName) {
           // Imported here, not at module load: Model and Schema import each other.
           const { Schema } = await import('@/Schema/Schema')
-          const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-          const schemaContext = schema.getService().getSnapshot().context
-          if (schemaContext.models?.[modelName]) {
+          const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+          const schemaContext = schema?.getService().getSnapshot().context
+          if (schema && schemaContext?.models?.[modelName]) {
             const updatedModels = { ...schemaContext.models }
             delete updatedModels[modelName]
             schema.getService().send({ type: 'updateContext', models: updatedModels })

@@ -596,20 +596,29 @@ export class Schema {
   }
 
   /**
-   * Find schema instance by schemaFileId
-   * Waits for the schema to be fully loaded (idle state) by default
-   * @param options - Find options including schemaFileId and wait configuration
+   * Find a schema by schemaFileId or by name. Read-only: a name with no schema row gives undefined
+   * and creates nothing (`Schema.create` creates a draft for an unknown name). By name, the cached
+   * instance is used, else the stored schema is loaded. Waits for the schema to be fully loaded
+   * (idle state) by default. Takes a hold unless `hold: false`.
    * @returns Schema instance if found, undefined otherwise
    */
   static async find({
     schemaFileId,
+    schemaName,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold,
   }: {
-    schemaFileId: string
     waitForReady?: boolean
     readyTimeout?: number
-  }): Promise<Schema | undefined> {
+    /** @internal `hold: false` as for `create` */
+    hold?: false
+  } & ({ schemaFileId: string; schemaName?: undefined } | { schemaName: string; schemaFileId?: undefined })): Promise<
+    Schema | undefined
+  > {
+    if (schemaName) {
+      return this.findByName(schemaName, { waitForReady, readyTimeout, hold })
+    }
     if (!schemaFileId) {
       return undefined
     }
@@ -617,8 +626,8 @@ export class Schema {
     try {
       return await findEntity<Schema>(
         {
-          getById: (id) => Schema.getById(id) ?? undefined,
-          createById: (id) => Schema.createById(id),
+          getById: (id) => (hold === false ? Schema.peek(id) : (Schema.getById(id) ?? undefined)),
+          createById: (id) => Schema.createById(id, hold === false ? { hold: false } : undefined),
         },
         { id: schemaFileId },
         {
@@ -629,6 +638,28 @@ export class Schema {
     } catch {
       return undefined
     }
+  }
+
+  private static async findByName(
+    schemaName: string,
+    options: { waitForReady: boolean; readyTimeout: number; hold?: false },
+  ): Promise<Schema | undefined> {
+    const createOptions = { readyTimeout: options.readyTimeout, ...(options.hold === false && { hold: false as const }) }
+    const loadOrCached = () =>
+      options.waitForReady
+        ? this.create(schemaName, { ...createOptions, waitForReady: true })
+        : this.create(schemaName, { ...createOptions, waitForReady: false })
+    if (this.instanceCacheByName.has(schemaName)) return loadOrCached()
+
+    const db = BaseDb.getAppDb()
+    if (!db) return undefined
+    const rows = await db
+      .select({ id: schemasTable.id })
+      .from(schemasTable)
+      .where(eq(schemasTable.name, schemaName))
+      .limit(1)
+    if (rows.length === 0) return undefined
+    return loadOrCached()
   }
 
   /**

@@ -1529,10 +1529,9 @@ export class ModelProperty {
         }
 
         if (schemaName) {
-          const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-          const snapshot = schema.getService().getSnapshot()
-          const schemaContext = snapshot.context
-          if (schemaContext.models?.[modelName]?.properties?.[propertyName]) {
+          const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+          const schemaContext = schema?.getService().getSnapshot().context
+          if (schema && schemaContext?.models?.[modelName]?.properties?.[propertyName]) {
             const updatedModels = { ...schemaContext.models }
             const updatedProperties = { ...updatedModels[modelName].properties }
             delete updatedProperties[propertyName]

@@ -125,9 +125,9 @@ const createItemPropertyInstances = async (
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
-          const schemaInstance = Schema.create(schemaNameToTry, { waitForReady: false, hold: false }) as import('../../../Schema/Schema').Schema
-          const schemaContext = schemaInstance.getService().getSnapshot().context
-          if (schemaContext.models?.[modelName]?.properties) {
+          const schemaInstance = await Schema.find({ schemaName: schemaNameToTry, waitForReady: false, hold: false })
+          const schemaContext = schemaInstance?.getService().getSnapshot().context
+          if (schemaContext?.models?.[modelName]?.properties) {
             propertySchemas = schemaContext.models[modelName].properties as Record<string, any>
             logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from Schema context for ${modelName}`)
           }
