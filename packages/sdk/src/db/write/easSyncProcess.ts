@@ -17,7 +17,6 @@ const MAX_ERROR_DETAILS_LENGTH = 2000
 
 /** `retry`: an automatic sync that failed (probably offline), run again (see retryWhenOnline). */
 export type EasSyncRequestSource =
-  | 'event_bus'
   | 'address_change'
   | 'client_api'
   | 'models_init'

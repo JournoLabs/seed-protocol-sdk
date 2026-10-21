@@ -413,13 +413,11 @@ export {
   startEasSyncActor,
   sendEasSyncClientRequest,
   requestEasSyncFromAddressChange,
-  requestEasSyncFromEventBus,
   requestEasSyncFromModelsInit,
 } from './events/item/easSyncManager'
 export type {
   EasSyncMachineContext,
   EasSyncRequestEvent,
-  EasSyncRequestSource,
 } from './events/item/easSyncManager'
 export { mergeEasSyncRequestIntents } from './events/item/mergeEasSyncOptions'
 

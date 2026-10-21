@@ -119,7 +119,7 @@ export interface SeedConstructorOptions {
   readonly addresses?: AddressConfiguration
   /**
    * When true, after `setAddresses` persists to app_state, the SDK runs `runSyncFromEas`
-   * immediately via the EAS sync orchestrator (not only the `syncDbWithEas` event listener). Defaults to true so local
+   * immediately via the EAS sync orchestrator. Defaults to true so local
    * metadata hydrates after connect or an empty DB; set false to opt out or if you call
    * `syncFromEas` yourself.
    */

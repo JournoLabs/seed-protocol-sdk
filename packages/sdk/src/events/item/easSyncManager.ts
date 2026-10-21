@@ -126,7 +126,8 @@ const syncRetry = createRetryWhenOnline(() => {
 const initialContext: EasSyncMachineContext = {
   runOptions: {},
   activeCorrelationIds: [],
-  activePrimarySource: 'event_bus',
+  // Replaced by the first request's source before any run.
+  activePrimarySource: 'models_init',
   pendingMergedOptions: undefined,
   pendingCorrelationIds: [],
   pendingPrimarySource: null,
@@ -256,7 +257,7 @@ export const easSyncMachine = setup({
               ...context.pendingCorrelationIds,
             ],
             activePrimarySource: ({ context }) =>
-              context.pendingPrimarySource ?? 'event_bus',
+              context.pendingPrimarySource ?? 'models_init',
             pendingMergedOptions: () => undefined,
             pendingCorrelationIds: () => [],
             pendingPrimarySource: () => null,
@@ -319,19 +320,6 @@ export function listenForEasSyncRequestsFromOtherTabs(): void {
     if (message.type === 'eas-sync-address-change' && isLeaderTab()) {
       requestEasSyncFromAddressChange(message.addresses)
     }
-  })
-}
-
-export function requestEasSyncFromEventBus(): void {
-  runInLeaderTab('event_bus', sendEventBusRequest)
-}
-
-function sendEventBusRequest(): void {
-  startEasSyncActor()
-  easSyncActor.send({
-    type: 'REQUEST',
-    correlationId: newCorrelationId(),
-    source: 'event_bus',
   })
 }
 
