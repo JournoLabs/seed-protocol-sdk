@@ -1,4 +1,5 @@
 import { GraphQLClient } from 'graphql-request'
+import { timedEasFetch } from '../easTiming.js'
 
 /**
  * How long one EAS indexer request may take before it is aborted. Without a limit a stalled
@@ -22,6 +23,7 @@ function withTimeout(init: FetchInit, timeoutMs: number): FetchInit {
 export function createEasGraphQLClient(url: string, timeoutMs = EAS_REQUEST_TIMEOUT_MS): GraphQLClient {
   return new GraphQLClient(url, {
     // Resolved per call, so a fetch replaced after construction (tests, polyfills) is used.
-    fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) => fetch(input, withTimeout(init, timeoutMs)),
+    fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) =>
+      timedEasFetch(() => fetch(input, withTimeout(init, timeoutMs)), init),
   })
 }
