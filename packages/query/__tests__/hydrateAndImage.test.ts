@@ -29,6 +29,22 @@ describe('enrichImageSeedClone', () => {
       'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk',
     )
   })
+
+  it('falls back to storage_transaction_id', () => {
+    const clone: Record<string, unknown> = {
+      storage_transaction_id: '05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
+    }
+    enrichImageSeedClone(clone)
+    expect(clone.arweaveUrl).toBe(
+      'https://arweave.net/05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
+    )
+  })
+
+  it('leaves arweaveUrl unset without a storage transaction', () => {
+    const clone: Record<string, unknown> = { seedUid: '0xabc' }
+    enrichImageSeedClone(clone)
+    expect(clone.arweaveUrl).toBeUndefined()
+  })
 })
 
 describe('hydrateArweaveRichTextInItems', () => {
@@ -139,5 +155,52 @@ describe('hydrateArweaveRichTextInItems', () => {
     expect(items.map((item) => item.html)).toEqual(
       Array.from({ length: 20 }, (_, n) => `<p>${100 + n}</p>`),
     )
+  })
+})
+
+describe('hydrateArweaveRichTextInItems field selection', () => {
+  const url = 'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk'
+
+  beforeEach(() => {
+    BaseArweaveClient.setHost('arweave.net')
+    vi.restoreAllMocks()
+    resetArweaveBodyCache()
+  })
+
+  it('isArweaveTransactionGatewayUrl rejects non-tx paths', () => {
+    expect(isArweaveTransactionGatewayUrl('https://arweave.net/raw/abc')).toBe(false)
+    expect(isArweaveTransactionGatewayUrl('https://example.com/tx')).toBe(false)
+  })
+
+  it('leaves the URL in place when the gateway returns an image', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'image/jpeg' },
+        arrayBuffer: async () => new ArrayBuffer(10),
+      }),
+    )
+    const items = [{ html: url }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe(url)
+  })
+
+  it('hydrates a field whose storage model is html, whatever its name', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(htmlResponse('<main>typed</main>')))
+    const items = [
+      { article_html: url, _feedFieldStorageModels: { article_html: 'html' } },
+    ] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.article_html).toBe('<main>typed</main>')
+  })
+
+  it('hydrates only the list elements whose storage model is html', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(htmlResponse('<section>list</section>')))
+    const items = [
+      { blocks: ['skip', url], _feedListElementStorageModels: { blocks: ['image', 'html'] } },
+    ] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.blocks).toEqual(['skip', '<section>list</section>'])
   })
 })

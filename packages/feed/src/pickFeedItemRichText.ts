@@ -4,11 +4,11 @@
  */
 
 import {
-  feedRichBodyModelPriority,
-  getFeedFieldStorageModels,
-  getFeedListElementStorageModels,
-  isFeedRichBodyStorageSchema,
-} from './feedFieldStorageModel'
+  richBodyModelPriority,
+  getFieldStorageModels,
+  getListElementStorageModels,
+  isRichBodyStorageSchema,
+} from '@seedprotocol/query'
 
 function firstNonEmptyString(item: Record<string, unknown>, keys: readonly string[]): string {
   for (const k of keys) {
@@ -38,7 +38,7 @@ type RichBodyCandidate = {
 }
 
 function compareRichBodyCandidates(a: RichBodyCandidate, b: RichBodyCandidate): number {
-  const d = feedRichBodyModelPriority(a.model) - feedRichBodyModelPriority(b.model)
+  const d = richBodyModelPriority(a.model) - richBodyModelPriority(b.model)
   if (d !== 0) return d
   const k = a.key.localeCompare(b.key)
   if (k !== 0) return k
@@ -46,13 +46,13 @@ function compareRichBodyCandidates(a: RichBodyCandidate, b: RichBodyCandidate): 
 }
 
 function pickTypedRichBodyContent(item: Record<string, unknown>): string {
-  const fieldModels = getFeedFieldStorageModels(item)
-  const listModels = getFeedListElementStorageModels(item)
+  const fieldModels = getFieldStorageModels(item)
+  const listModels = getListElementStorageModels(item)
   let best: RichBodyCandidate | null = null
 
   if (fieldModels) {
     for (const [key, model] of Object.entries(fieldModels)) {
-      if (!isFeedRichBodyStorageSchema(model)) continue
+      if (!isRichBodyStorageSchema(model)) continue
       const v = item[key]
       if (typeof v !== 'string' || v.trim() === '') continue
       const cand: RichBodyCandidate = { model, key, index: 0, value: v }
@@ -67,7 +67,7 @@ function pickTypedRichBodyContent(item: Record<string, unknown>): string {
       const n = Math.min(models.length, arr.length)
       for (let i = 0; i < n; i++) {
         const model = models[i]!
-        if (!isFeedRichBodyStorageSchema(model)) continue
+        if (!isRichBodyStorageSchema(model)) continue
         const el = arr[i]
         if (typeof el !== 'string' || el.trim() === '') continue
         const cand: RichBodyCandidate = { model, key: listKey, index: i, value: el }
@@ -97,21 +97,21 @@ function stringFieldContainsDataUriImage(value: unknown): boolean {
 }
 
 function feedItemTypedRichFieldsContainDataUriImage(item: Record<string, unknown>): boolean {
-  const fieldModels = getFeedFieldStorageModels(item)
+  const fieldModels = getFieldStorageModels(item)
   if (fieldModels) {
     for (const [key, model] of Object.entries(fieldModels)) {
-      if (!isFeedRichBodyStorageSchema(model)) continue
+      if (!isRichBodyStorageSchema(model)) continue
       if (stringFieldContainsDataUriImage(item[key])) return true
     }
   }
-  const listModels = getFeedListElementStorageModels(item)
+  const listModels = getListElementStorageModels(item)
   if (listModels) {
     for (const [listKey, models] of Object.entries(listModels)) {
       const arr = item[listKey]
       if (!Array.isArray(arr)) continue
       const n = Math.min(models.length, arr.length)
       for (let i = 0; i < n; i++) {
-        if (!isFeedRichBodyStorageSchema(models[i]!)) continue
+        if (!isRichBodyStorageSchema(models[i]!)) continue
         if (stringFieldContainsDataUriImage(arr[i])) return true
       }
     }

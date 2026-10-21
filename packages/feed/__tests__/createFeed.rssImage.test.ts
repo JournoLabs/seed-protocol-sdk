@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createFeed } from '../src/index'
-import { getArweaveUrlForTransaction } from '../src/utils/arweaveUrl'
+import { getArweaveUrlForTransaction } from '@seedprotocol/query'
 
 describe('createFeed rss image tags', () => {
   it('emits enclosure, media:content, and media:thumbnail from _imageMetadata', async () => {

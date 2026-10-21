@@ -13,7 +13,6 @@ Shared with `@seedprotocol/query` for enablement and TTL:
 - `CACHE_ENABLED` - Enable/disable caching. In development (`NODE_ENV=development`), cache is disabled by default. Set to `true` to enable in dev, or `false` to disable in production.
 - `CACHE_PAGE_TTL` - TTL for paginated content keys page > 1 (default: 300)
 - `CACHE_ARCHIVE_TTL` - TTL for monthly archive content (default: 86400)
-- `CACHE_BACKGROUND_REFRESH` / `CACHE_REFRESH_INTERVAL` - Reserved (unused)
 
 Image metadata:
 

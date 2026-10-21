@@ -55,8 +55,10 @@ export type QueryCacheConfig = {
   ttl: number
   cacheDir: string
   enabled: boolean
-  backgroundRefresh: boolean
-  refreshInterval: number
+  /** @deprecated Never used; ignored. */
+  backgroundRefresh?: boolean
+  /** @deprecated Never used; ignored. */
+  refreshInterval?: number
   /**
    * Seconds after a collection was last checked during which `queryBySchema` returns it without
    * any request (see QueryBySchemaOptions.maxAge). 0 (the default) checks on every read.

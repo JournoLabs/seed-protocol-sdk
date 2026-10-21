@@ -120,24 +120,6 @@ export class FileCache {
     }
   }
 
-  async clearAllContentCache(schemaName: string): Promise<void> {
-    try {
-      const files = await fs.readdir(this.cacheDir);
-      const prefix = `${schemaName}-`;
-      const suffix = '.json';
-
-      for (const file of files) {
-        // Content keys are schema-format[-page|archive]; skip bare schema.json
-        // (owned by @seedprotocol/query collection cache).
-        if (file.startsWith(prefix) && file.endsWith(suffix) && file !== `${schemaName}.json`) {
-          await fs.unlink(join(this.cacheDir, file));
-        }
-      }
-    } catch (error) {
-      console.error(`Error clearing all content cache for ${schemaName}:`, error);
-    }
-  }
-
   async getImageMetadata(transactionId: string): Promise<ImageMetadata | null> {
     try {
       const filePath = this.getImageMetadataPath(transactionId);
@@ -191,28 +173,4 @@ export class FileCache {
     }
   }
 
-  async clearAll(): Promise<void> {
-    try {
-      const files = await fs.readdir(this.cacheDir);
-      for (const file of files) {
-        // Skips bare {schema}.json: query kept collection files there before moving them to collections/
-        if (file.endsWith('.json') && file.includes('-')) {
-          await fs.unlink(join(this.cacheDir, file));
-        }
-      }
-      const imageMetadataDir = join(this.cacheDir, 'image-metadata');
-      try {
-        const imageFiles = await fs.readdir(imageMetadataDir);
-        for (const file of imageFiles) {
-          if (file.endsWith('.json')) {
-            await fs.unlink(join(imageMetadataDir, file));
-          }
-        }
-      } catch {
-        // Directory might not exist
-      }
-    } catch (error) {
-      console.error('Error clearing all caches:', error);
-    }
-  }
 }

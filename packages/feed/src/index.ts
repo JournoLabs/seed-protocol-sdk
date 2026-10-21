@@ -11,7 +11,7 @@ export {
   type SiteConfigOverrides,
 } from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
-export type { FeedConfig, FeedFormat, GraphQLItem } from './types';
+export type { FeedConfig, FeedFormat, FeedItem, GraphQLItem } from './types';
 export {
   initializeFeedPlatform,
   initializeSeedClient,
@@ -43,7 +43,7 @@ export type {
   SeedRssImageRelationRef,
 } from '@seedprotocol/arweave';
 import pluralize from 'pluralize';
-import type { FeedFormat, GraphQLItem, TransformOptions, FeedConfig, ImageMetadata } from './types';
+import type { FeedFormat, FeedItem, TransformOptions, FeedConfig, ImageMetadata } from './types';
 
 export type { TransformOptions } from './types';
 import { generateAtomFeed, generateJsonFeed } from 'feedsmith';
@@ -60,17 +60,19 @@ import {
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
 
-export { enrichImageSeedCloneForFeed } from './imageRelationEnrichment';
+/** @deprecated Use `enrichImageSeedClone` from `@seedprotocol/query`. */
+export { enrichImageSeedCloneForFeed } from '@seedprotocol/query';
 export {
   pickFeedItemContent,
   pickFeedItemDescription,
   feedItemRichTextContainsDataUriImage,
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
+/** @deprecated Use `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`. */
 export {
   FEED_RICH_BODY_STORAGE_SCHEMAS,
   isFeedRichBodyStorageSchema,
-} from './feedFieldStorageModel';
+} from '@seedprotocol/query';
 
 /** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
 function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
@@ -288,10 +290,10 @@ export function resetCacheManager(): void {
  * Enriches feed items with media properties from Arweave storageTransactionId
  */
 async function enrichFeedItemsWithMedia(
-  items: GraphQLItem[],
+  items: FeedItem[],
   imageService: ArweaveImageService,
   cache: CacheManager
-): Promise<GraphQLItem[]> {
+): Promise<FeedItem[]> {
   // Filter items that have storageTransactionId
   const itemsToProcess = items.filter(
     (item: any) => item.storageTransactionId || item.storage_transaction_id
@@ -338,7 +340,7 @@ async function enrichFeedItemsWithMedia(
   const enrichedItems = await Promise.all(enrichmentPromises)
 
   // Create a map of enriched items by their ID
-  const enrichedMap = new Map<string, GraphQLItem>()
+  const enrichedMap = new Map<string, FeedItem>()
   enrichedItems.forEach(item => {
     const itemId = item.id || (item as any).seedUid || (item as any).SeedUid || ''
     if (itemId) {
@@ -359,7 +361,7 @@ async function enrichFeedItemsWithMedia(
  * This function preserves all dynamic properties from the items.
  */
 function transformToFeedItems(
-  items: GraphQLItem[],
+  items: FeedItem[],
   options: TransformOptions
 ): any[] {
   const { schemaName, siteUrl, itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
@@ -367,7 +369,7 @@ function transformToFeedItems(
   const filtered = filterItemsByRichTextDataUriImagePolicy(
     items as Record<string, unknown>[],
     richTextDataUriImages,
-  ) as GraphQLItem[]
+  ) as FeedItem[]
 
   return filtered.map((item: any) => {
     // Determine item ID - try multiple possible fields
@@ -468,7 +470,7 @@ export interface FeedArchiveLink {
 }
 
 export const createFeed = (
-  items: GraphQLItem[],
+  items: FeedItem[],
   schemaName: string,
   format: FeedFormat,
   cacheBust?: string,
@@ -854,11 +856,11 @@ export async function handleFeedRequest(
     // Content cache miss or disabled — fetch items via query (owns collection cache)
     console.log(`Cache miss for ${schemaName}:${format} - fetching items`);
 
-    const feedItems = await (async (): Promise<GraphQLItem[]> => {
+    const feedItems = await (async (): Promise<FeedItem[]> => {
       const items = await getFeedItemsBySchemaName(schemaName, {
         limit: pageSize,
         skip,
-      }) as GraphQLItem[];
+      }) as FeedItem[];
       console.log(`Found ${items.length} feed items for schema ${schemaName}`);
       if (config.imageMetadata?.enabled) {
         const imageService = new ArweaveImageService({
@@ -1045,7 +1047,7 @@ export async function handleArchiveFeedRequest(
       }
     }
 
-    const items = await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as GraphQLItem[];
+    const items = await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as FeedItem[];
 
     const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
     const archiveBase = `${siteConfig.feedUrl}/${collectionName}/archive`;

@@ -1,4 +1,4 @@
-import type { GraphQLItem, ImageMetadata } from '../types';
+import type { FeedItem, ImageMetadata } from '../types';
 
 /**
  * Cached image metadata for an Arweave transaction ID
@@ -38,8 +38,6 @@ export interface CacheConfig {
   ttl: number;                    // Time to live in seconds
   cacheDir: string;               // Directory for persistent cache
   enabled: boolean;               // Enable/disable caching
-  backgroundRefresh: boolean;     // Enable background refresh job (unused)
-  refreshInterval: number;        // Background refresh interval in seconds
   imageMetadata?: ImageMetadataConfig
   pageTtl?: number;                // TTL for page > 1 (default: 300)
   archiveTtl?: number;            // TTL for archives (default: 86400)
@@ -67,15 +65,4 @@ export function buildContentKey(
   return `${schemaName}:${format}`;
 }
 
-/**
- * Cache statistics for monitoring
- */
-export interface CacheStats {
-  hits: number;
-  misses: number;
-  refreshes: number;
-  errors: number;
-}
-
-// Re-export for callers that imported GraphQLItem from cache types historically
-export type { GraphQLItem };
+export type { FeedItem };

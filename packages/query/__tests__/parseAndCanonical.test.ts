@@ -15,13 +15,23 @@ describe('parseEasPropertyMetadata', () => {
   })
 
   it('rejects empty', () => {
-    expect(parseEasPropertyMetadata('').ok).toBe(false)
-    expect(parseEasPropertyMetadata(null).ok).toBe(false)
+    for (const raw of ['', '   \t\n', null, undefined, 123 as unknown as string]) {
+      expect(parseEasPropertyMetadata(raw)).toEqual({ ok: false, reason: 'empty' })
+    }
   })
 
   it('rejects bad shape', () => {
-    expect(parseEasPropertyMetadata('{}').ok).toBe(false)
-    expect(parseEasPropertyMetadata('[]').ok).toBe(false)
+    for (const raw of ['{}', '[]', '[{}]', '[{"value":null}]', '[{"name":"x"}]']) {
+      expect(parseEasPropertyMetadata(raw)).toEqual({ ok: false, reason: 'shape' })
+    }
+  })
+
+  it('trims outer whitespace before parsing', () => {
+    const inner = JSON.stringify([{ value: { name: 'x', value: 'y' } }])
+    expect(parseEasPropertyMetadata(`  ${inner}  `)).toEqual({
+      ok: true,
+      metadata: { name: 'x', value: 'y' },
+    })
   })
 
   it('rejects invalid JSON', () => {
