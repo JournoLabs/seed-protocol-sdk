@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A property whose attestation is a removal (`''` for a `string`, a zero `bytes32`; ADR 0021) is left out of the assembled seed, and a zero `bytes32` is never fetched as a related seed. Before, query kept `''` and the zero uid as values and looked the zero uid up. The changelog reports a removal as a change to `undefined`, and version snapshots leave the property out.
+
 ## 0.7.6 (2026-10-17)
 
 - `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.

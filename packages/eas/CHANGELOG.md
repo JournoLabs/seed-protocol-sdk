@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `isEasEmptyValue(easType, value)` says whether an attested value is the empty value Seed attests for a removed property: `''` for a `string`, a zero `bytes32` (ADR 0021).
+
 ## 0.7.8 (2026-10-20)
 
 - `DefaultEasClient` requests abort after `EAS_REQUEST_TIMEOUT_MS` (30 s). `createEasGraphQLClient(url, timeoutMs?)` builds a client with that limit.

@@ -106,6 +106,36 @@ export const analyzeInput = fromCallback<
       throw new Error('propertyName is required')
     }
 
+    // A clear (ADR 0021): a null value with no file reference, written like a plain value. The old
+    // storage seed and its file stay, as when a value is replaced.
+    if (event?.clear) {
+      const written = await timed(`${label} write`, () => writePlainValue({
+        localId,
+        newValue: null,
+        versionLocalId,
+        versionUid,
+        modelName,
+        schemaUid,
+        dataType: propertyRecordSchema.dataType,
+        refValueType: propertyRecordSchema.refValueType,
+        clear: event.clear,
+      }))
+      if (written.skipped) return true
+      sendBack({
+        type: 'updateContext',
+        propertyValue: null,
+        renderValue: null,
+        refResolvedValue: undefined,
+        refResolvedDisplayValue: undefined,
+        localStorageDir: undefined,
+        storageTransactionId: undefined,
+        retract: event.clear.retract || undefined,
+        conflict: written.conflict ?? null,
+        ...rowContext(written.result),
+      })
+      return true
+    }
+
     if (
       normalizeDataType(propertyRecordSchema.dataType) === ModelPropertyDataTypes.List &&
       typeof newValue === 'string' &&
@@ -130,9 +160,8 @@ export const analyzeInput = fromCallback<
     const normalizedDataType = normalizeDataType(propertyRecordSchema.dataType)
     const normalizedRefValueType = normalizeDataType(propertyRecordSchema.refValueType)
 
-    // An Image, File or Html value is stored as a seed holding the content, so an empty value has
-    // nothing to store. Refused rather than saved: '' passed saveImage's existing-file check (the
-    // images folder itself) and wrote an image seed for a file that doesn't exist.
+    // An empty Image, File or Html value is a clear (ItemProperty.setValue sends one). Refused when
+    // it arrives as a value: saveImage would take '' for the images folder itself.
     const isStorageSeedValue =
       normalizedRefValueType === ModelPropertyDataTypes.Image ||
       normalizedDataType === ModelPropertyDataTypes.Image ||
@@ -144,7 +173,7 @@ export const analyzeInput = fromCallback<
         errors: [
           {
             field: 'value',
-            message: `${propertyName} can't be cleared: ${propertyRecordSchema.dataType} properties don't take an empty value`,
+            message: `${propertyName} can't be saved empty: use clear() to remove a ${propertyRecordSchema.dataType} value`,
             code: 'empty_storage_value',
             severity: 'error' as const,
           },

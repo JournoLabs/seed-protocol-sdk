@@ -26,7 +26,11 @@ const isItemStorageOp = (value: unknown): value is ItemStorageValueOp =>
 function overlayOf(op: Pick<OutboxOp, 'kind' | 'value'>): PendingPropertyRow | undefined {
   if (op.kind === 'set') {
     const value = outboxOpValue<SetPropertyValueOp>(op)
-    return value ? { propertyValue: value.newValue ?? null } : undefined
+    if (!value) return undefined
+    // A clear drops the file reference too, so the old image doesn't show while the op waits
+    return value.clear
+      ? { propertyValue: null, refSeedType: null, refResolvedValue: null, refResolvedDisplayValue: null, localStorageDir: null }
+      : { propertyValue: value.newValue ?? null }
   }
   const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
   if (!value) return undefined

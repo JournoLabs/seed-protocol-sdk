@@ -21,6 +21,7 @@ import { getCorrectId } from '@/helpers'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import { emptyEasValue, getPropertyClear } from '@/db/read/getPropertyClear'
 import {
   isStorageSeedRef,
   isPublishedSeedRef,
@@ -495,13 +496,28 @@ const processBasicProperties = async (
         else if (pv && typeof pv === 'object' && typeof pv.seedLocalId === 'string') value = pv.seedLocalId
       }
     }
-    // 0 and false are values (ADR 0010); only a missing or empty value is skipped.
-    if (value == null || value === '') {
-      continue
+    // 0 and false are values (ADR 0010). An empty value publishes only as a removal of a value
+    // attested before (ADR 0021); a retraction attests nothing (publish revokes instead).
+    let isRemoval = false
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+      if (basicProperty.uid && !forceFullSnapshot) continue
+      const clear = await getPropertyClear({
+        seedLocalId: (context as any).seedLocalId,
+        seedUid: (context as any).seedUid,
+        propertyName: basicProperty.propertyName,
+        dataType: propertyDef?.dataType,
+        refValueType: propertyDef?.refValueType,
+      })
+      if (!clear || clear.retract) {
+        // An empty List is a value: it attests [] as before
+        if (!(Array.isArray(value) && !clear)) continue
+      } else {
+        isRemoval = true
+      }
     }
     // Patch mode skips properties that already have an EAS uid. storageTransactionId must still
     // attest after Arweave upload when we have a tx id; metadata uid can be stale or set without a chain attestation.
-    if (basicProperty.uid && !forceFullSnapshot) {
+    if (!isRemoval && basicProperty.uid && !forceFullSnapshot) {
       const allowStorageTxAttestation =
         isStorageTransactionIdProp &&
         typeof value === 'string' &&
@@ -515,7 +531,7 @@ const processBasicProperties = async (
     // save pipeline never ran or failed (e.g. createNewItem with raw html), so it was never uploaded.
     // Relation/image properties are appended to the basic list after processRelationOrImageProperty,
     // so this one check covers both paths.
-    if (isFileImageHtml && typeof value === 'string' && !isStorageSeedRef(value)) {
+    if (!isRemoval && isFileImageHtml && typeof value === 'string' && !isStorageSeedRef(value)) {
       addStorageValueNotSavedError(ctx, basicProperty.propertyName, propertyDef?.dataType, value)
       continue
     }
@@ -525,128 +541,141 @@ const processBasicProperties = async (
     const { schemaUid, easDataType, schemaDef, propertyNameForSchema } = propertyData
     if (!schemaDef) continue
 
-    // Normalize value: string that parses to array (e.g. from browser storage) -> array
-    if (schemaDef.startsWith('bytes32[]') && typeof value === 'string' && value.trim().startsWith('[')) {
-      try {
-        value = JSON.parse(value)
-      } catch {
-        // fall through to array check
-      }
-    }
-
-    // Legacy comma-separated ids (pre-JSON List storage)
-    if (
-      schemaDef.startsWith('bytes32[]') &&
-      typeof value === 'string' &&
-      !value.trim().startsWith('[') &&
-      value.includes(',')
-    ) {
-      value = value
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-
-    // A ref to a published related item attests that item's current uid.
-    if (typeof value === 'string' && (isRelation || isFileImageHtml || isJsonStorage)) {
-      value = currentRelatedRef(ctx, value)
-    }
-
-    if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
-      addValidationError(
-        ctx,
-        `Invalid value for property: ${basicProperty.propertyName}. Expected an array of bytes32, got ${value}.`,
-        basicProperty.propertyName,
-      )
-      continue
-    }
-
-    // Validate against property validation rules (enum, pattern, minLength, maxLength) before encoding
-    if (propertyDef?.validation) {
-      const { SchemaValidationService } = await import(
-        '@/Schema/service/validation/SchemaValidationService'
-      )
-      const validationService = new SchemaValidationService()
-      const validationResult = validationService.validatePropertyValue(
-        value,
-        normalizeDataType(propertyDef.dataType) as ModelPropertyDataTypes,
-        propertyDef.validation,
-        propertyDef.refValueType
-          ? (normalizeDataType(propertyDef.refValueType) as string)
-          : undefined,
-      )
-      if (!validationResult.isValid && validationResult.errors.length > 0) {
-        const firstError = validationResult.errors[0]
+    let rawListIdsForResolve: string[] | undefined
+    if (isRemoval) {
+      const empty = emptyEasValue(easDataType)
+      if (empty === undefined) {
         addValidationError(
           ctx,
-          firstError.message,
+          `${basicProperty.propertyName} can't be published empty: ${propertyDef?.dataType ?? easDataType} properties have no empty value. Clear it with clear({ retract: true }).`,
           basicProperty.propertyName,
-          firstError.code ?? 'publish_validation',
+          'publish_clear_unsupported',
         )
         continue
       }
-    }
-
-    /** Raw id per list slot (nanoid local id or 0x… uid) for resolvePublishPayloadValues after sequential publish */
-    let rawListIdsForResolve: string[] | undefined
-    if (schemaDef.startsWith('bytes32[]')) {
-      const newValues: string[] = []
-      const rawIds: string[] = []
-      const iterableValue =
-        Array.isArray(value) ? value
-        : value != null && typeof value[Symbol.iterator] === 'function' ? value
-        : []
-      for (const seedId of iterableValue) {
-        const idStr =
-          typeof seedId === 'string'
-            ? seedId
-            : seedId &&
-                typeof seedId === 'object' &&
-                (seedId.seedLocalId ?? seedId.seedUid ?? seedId.localId ?? seedId.uid)
-              ? String(
-                  (seedId as { seedLocalId?: string; seedUid?: string }).seedLocalId ??
-                    (seedId as { seedUid?: string }).seedUid ??
-                    '',
-                )
-              : ''
-        if (!idStr) continue
-        const trimmed = currentRelatedRef(ctx, idStr.trim())
-        if (!trimmed) continue
-        rawIds.push(trimmed)
-        if (!isUidRef(trimmed)) {
-          newValues.push(encodeBytes32String(trimmed))
-        } else {
-          newValues.push(trimmed)
+      value = empty
+    } else {
+      // Normalize value: string that parses to array (e.g. from browser storage) -> array
+      if (schemaDef.startsWith('bytes32[]') && typeof value === 'string' && value.trim().startsWith('[')) {
+        try {
+          value = JSON.parse(value)
+        } catch {
+          // fall through to array check
         }
       }
-      value = newValues
-      const needsUidResolve = rawIds.some(
-        (id) => !isUidRef(id),
-      )
-      if (needsUidResolve && rawIds.length > 0) {
-        rawListIdsForResolve = rawIds
+
+      // Legacy comma-separated ids (pre-JSON List storage)
+      if (
+        schemaDef.startsWith('bytes32[]') &&
+        typeof value === 'string' &&
+        !value.trim().startsWith('[') &&
+        value.includes(',')
+      ) {
+        value = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
       }
-    }
 
-    // uint256 (Date) must be numeric/BigInt; normalize ISO strings to Unix seconds
-    if (easDataType === 'uint256' && (typeof value === 'string' || value instanceof Date)) {
-      const ms = value instanceof Date ? value.getTime() : new Date(value).getTime()
-      value = BigInt(Math.floor(ms / 1000))
-    }
+      // A ref to a published related item attests that item's current uid.
+      if (typeof value === 'string' && (isRelation || isFileImageHtml || isJsonStorage)) {
+        value = currentRelatedRef(ctx, value)
+      }
 
-    // ADR 0010: Number attests as its decimal string, in the form readers decode it to.
-    if (matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Number)) {
-      const decimal = decodeEasNumber(value)
-      if (decimal === undefined) {
+      if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
         addValidationError(
           ctx,
-          `Invalid value for property: ${basicProperty.propertyName}. Expected a finite number, got ${JSON.stringify(value)}.`,
+          `Invalid value for property: ${basicProperty.propertyName}. Expected an array of bytes32, got ${value}.`,
           basicProperty.propertyName,
-          'publish_invalid_number',
         )
         continue
       }
-      value = decimal
+
+      // Validate against property validation rules (enum, pattern, minLength, maxLength) before encoding
+      if (propertyDef?.validation) {
+        const { SchemaValidationService } = await import(
+          '@/Schema/service/validation/SchemaValidationService'
+        )
+        const validationService = new SchemaValidationService()
+        const validationResult = validationService.validatePropertyValue(
+          value,
+          normalizeDataType(propertyDef.dataType) as ModelPropertyDataTypes,
+          propertyDef.validation,
+          propertyDef.refValueType
+            ? (normalizeDataType(propertyDef.refValueType) as string)
+            : undefined,
+        )
+        if (!validationResult.isValid && validationResult.errors.length > 0) {
+          const firstError = validationResult.errors[0]
+          addValidationError(
+            ctx,
+            firstError.message,
+            basicProperty.propertyName,
+            firstError.code ?? 'publish_validation',
+          )
+          continue
+        }
+      }
+
+      if (schemaDef.startsWith('bytes32[]')) {
+        const newValues: string[] = []
+        const rawIds: string[] = []
+        const iterableValue =
+          Array.isArray(value) ? value
+          : value != null && typeof value[Symbol.iterator] === 'function' ? value
+          : []
+        for (const seedId of iterableValue) {
+          const idStr =
+            typeof seedId === 'string'
+              ? seedId
+              : seedId &&
+                  typeof seedId === 'object' &&
+                  (seedId.seedLocalId ?? seedId.seedUid ?? seedId.localId ?? seedId.uid)
+                ? String(
+                    (seedId as { seedLocalId?: string; seedUid?: string }).seedLocalId ??
+                      (seedId as { seedUid?: string }).seedUid ??
+                      '',
+                  )
+                : ''
+          if (!idStr) continue
+          const trimmed = currentRelatedRef(ctx, idStr.trim())
+          if (!trimmed) continue
+          rawIds.push(trimmed)
+          if (!isUidRef(trimmed)) {
+            newValues.push(encodeBytes32String(trimmed))
+          } else {
+            newValues.push(trimmed)
+          }
+        }
+        value = newValues
+        const needsUidResolve = rawIds.some(
+          (id) => !isUidRef(id),
+        )
+        if (needsUidResolve && rawIds.length > 0) {
+          rawListIdsForResolve = rawIds
+        }
+      }
+
+      // uint256 (Date) must be numeric/BigInt; normalize ISO strings to Unix seconds
+      if (easDataType === 'uint256' && (typeof value === 'string' || value instanceof Date)) {
+        const ms = value instanceof Date ? value.getTime() : new Date(value).getTime()
+        value = BigInt(Math.floor(ms / 1000))
+      }
+
+      // ADR 0010: Number attests as its decimal string, in the form readers decode it to.
+      if (matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Number)) {
+        const decimal = decodeEasNumber(value)
+        if (decimal === undefined) {
+          addValidationError(
+            ctx,
+            `Invalid value for property: ${basicProperty.propertyName}. Expected a finite number, got ${JSON.stringify(value)}.`,
+            basicProperty.propertyName,
+            'publish_invalid_number',
+          )
+          continue
+        }
+        value = decimal
+      }
     }
 
     const data = [

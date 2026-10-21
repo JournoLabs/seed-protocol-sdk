@@ -89,17 +89,31 @@ Control this with **`publishMode`** when building payloads or starting publish.
 
 ### Limitations
 
-- **`new_version`** only includes properties that have a **publishable value** in the payload pipeline (same rules as patch). Optional fields that are empty are still skipped; filling “every column” from DB for empty fields is not automatic.
+- **`new_version`** only includes properties that have a **publishable value** in the payload pipeline (same rules as patch). An empty property is skipped unless it was attested before, in which case its removal is attested (see [Clearing a property](#clearing-a-property)); filling “every column” from DB for empty fields is not automatic.
 - **`patch`** relies on local metadata: edited properties get new rows without an attestation `uid` until published.
 
 ## Pending changes (diff UI)
 
 Use **`getPublishPendingDiff`** from `@seedprotocol/sdk` with `{ seedLocalId }` / `{ seedUid }` or an **`Item`**. It returns:
 
-- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
+- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists, and a **`change`**: `'set'`, `'removed'` or `'retracted'`. An empty value with nothing on chain to remove is not listed. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
 - **`lastPublishedVersionUid`** / **`lastVersionPublishedAt`** — From the local `versions` table when available.
 
 Use this to show “what will publish” or badges before calling publish.
+
+## Clearing a property
+
+`await property.clear()` removes a property's value and `await property.clear({ retract: true })` retracts it ([ADR 0021](./adr/0021-clearing-a-property.md)). Both show the property empty at once and resolve when the cleared row is stored. `setValue(null)` and `setValue('')` on an Image, File or Html property clear it too. The old image seed and file stay on the device, as when an image is replaced.
+
+A **removal** publishes as an attestation of the EAS type's empty value, in `patch` and `new_version` mode: `''` for Text and Number, a zero `bytes32` for Image, File, Html, Json and Relation, `[]` for List. The property's history shows the removal, reads pinned to an earlier Version still see the old value, and assigning the old value again restores it. A property that was never attested publishes nothing.
+
+A **retraction** attests nothing. After the attestations, Publish revokes every live attestation of the property on the Version of its newest live one (the current Version, unless the property was attested only on an earlier one), and every live attestation of it on other Versions that holds one of those values, from the seed's attester (state `revokingRetractedProperties`). An EOA publisher signs that as a second transaction. Reads of earlier Versions then stop showing the value. Revocation is permanent. A failed revocation leaves the publish in `retractionFailureRecoverable` (send `retry`), and the next Publish sends whatever is still live. Publish fails in `checking`, before attesting, when the wallet can't revoke: an automation session key, or a seed attested by the executor module.
+
+Boolean and Date have no empty value. `clear()` without `retract` rejects with `ClearNotSupportedError`, and a published Boolean or Date with an empty draft fails publish validation with `publish_clear_unsupported`.
+
+`summarizePublishWork` counts removals in `attestationCount` and retracted attestations in `revocationCount`. `getPendingRetractions({ seedLocalId, seedUid })` lists each retracted property and the attestations publish revokes for it.
+
+Readers treat both as absent: query leaves the property out of the seed, EAS sync stores it with no value, and local reads show no value.
 
 ## Reading canonical values from EAS
 

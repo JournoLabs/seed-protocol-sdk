@@ -5,7 +5,7 @@ export { Model, Property } from '../Schema'
 
 // Core classes
 export { Item } from '../Item/Item'
-export { ItemProperty, ItemPropertySaveValidationError } from '../ItemProperty/ItemProperty'
+export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from '../ItemProperty/ItemProperty'
 export type { IItem, IItemProperty } from '../interfaces'
 
 // Errors

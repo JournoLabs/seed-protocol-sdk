@@ -13,7 +13,7 @@ import type { SchemaFileFormat } from '@/types/import'
 import type { Item as ItemClass } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq, and } from 'drizzle-orm'
-import { models as modelsTable, modelUids, metadata, seeds, modelSchemas, schemas as schemasTable } from '@/seedSchema'
+import { models as modelsTable, modelUids, metadata, seeds, versions, modelSchemas, schemas as schemasTable } from '@/seedSchema'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { INTERNAL_DATA_TYPES, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { normalizeDataType } from '@/helpers/property'
@@ -665,4 +665,42 @@ export async function createPublishedItemForUnpublish(
   item.getService().send({ type: 'updateContext', seedUid, schemaUid })
 
   return { item, seedLocalId, seedUid, publisher }
+}
+
+export const randomUid = () =>
+  '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+
+/**
+ * Marks the item, its version and every metadata row attested by an owned address, and gives each property its row's
+ * uid, as a reload (or the browser's metadata live query) does after a publish.
+ */
+export async function markPublished(item: ItemClass<any>, related: ItemClass<any>[] = []): Promise<void> {
+  const db = BaseDb.getAppDb()
+  for (const other of related) {
+    const uid = randomUid()
+    await db.update(seeds).set({ uid }).where(eq(seeds.localId, other.seedLocalId!))
+    other.getService().send({ type: 'updateContext', seedUid: uid })
+  }
+  const seedUid = randomUid()
+  const versionUid = randomUid()
+  const attestedAt = Date.now() - 10_000
+  // Published by an owned address, so the item stays editable.
+  await db
+    .update(seeds)
+    .set({ uid: seedUid, publisher: UNPUBLISH_TEST_PUBLISHER })
+    .where(eq(seeds.localId, item.seedLocalId!))
+  await db.update(versions).set({ uid: versionUid, seedUid }).where(eq(versions.seedLocalId, item.seedLocalId!))
+  const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
+  for (const row of rows) {
+    await db
+      .update(metadata)
+      .set({ uid: randomUid(), seedUid, versionUid, attestationCreatedAt: attestedAt, createdAt: attestedAt })
+      .where(eq(metadata.localId, row.localId!))
+  }
+  item.getService().send({ type: 'updateContext', seedUid, latestVersionUid: versionUid })
+  const attested = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
+  for (const property of item.properties) {
+    const row = attested.find((r) => r.localId === property.localId)
+    if (row) property.getService().send({ type: 'updateContext', uid: row.uid, versionUid })
+  }
 }

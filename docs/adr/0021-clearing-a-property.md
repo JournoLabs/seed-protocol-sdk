@@ -62,7 +62,8 @@ earlier Version or time still sees the old value, and assigning the old value ag
 ### Retraction revokes
 
 A retracted property publishes no attestation. Publish revokes every live attestation of the
-property on the seed's current Version, and every live attestation of the property on its other
+property on the Version of its newest live one (the seed's current Version, unless the property
+was attested only on an earlier one), and every live attestation of the property on its other
 Versions whose value is one of those. Revocation goes to EAS `multiRevoke` from the attester, as a
 transaction after the attestations; an EOA publisher signs it separately. Automation session keys
 and executor-attested seeds can't revoke (`ATTESTATION_REVOCATION.md`), so Publish fails for a
@@ -78,10 +79,14 @@ so a failed or interrupted revocation is sent again by the next Publish.
   reports the property as removed.
 - EAS sync stores a `''` or zero `bytes32` attestation as a row with a `NULL` value, keeping its
   uid. A revoked property attestation on a live seed is stored with a `NULL` value. A revoked seed
-  keeps its last values, as before (`ATTESTATION_REVOCATION.md`).
+  keeps its last values, as before (`ATTESTATION_REVOCATION.md`). `item.unpublish()` revokes the
+  seed first, so a sync between its batches sees a revoked seed, not retracted properties.
 - Local reads show a `NULL` newest row as no value and don't fall back to an older row.
-- The SDK's local reads follow query on Versions: a property reads from the seed's current
-  Version, plus local edits made after it, and isn't inherited from an earlier Version.
+- Local reads take each property's newest row whether or not it is revoked. Readers used to prefer
+  any live row, so a property retracted on the current Version showed an earlier Version's
+  value (`ATTESTATION_REVOCATION.md` described that preference). Sync keeps one attestation per
+  Version and property schema (ADR 0006), so a revoked row is newest only when its Version has
+  none live.
 
 `0x0000…0020` stays excluded where it is today. It is most likely the ABI offset word of a dynamic
 value decoded as `bytes32`; nothing in this repository writes it.
@@ -98,8 +103,10 @@ value decoded as `bytes32`; nothing in this repository writes it.
 - Retraction is permanent: EAS can't undo a revocation. Setting the value again attests it anew.
 - The cleared value's old image seed and file stay on this device, as they do when an image is
   replaced.
-- Local reads stop inheriting a property from an earlier Version. A seed published with
-  `new_version` while a property was empty reads that property as empty, as query already does.
+- A property removed or retracted on the current Version no longer reads an earlier Version's
+  value locally. A property the current Version doesn't attest at all still does, where query
+  reads it as absent: a `new_version` publish from an SDK before this one skipped empty
+  properties. Reading strictly from the current Version would close that, and is left for later.
 - Readers built on other SDKs see `''`, a zero uid, or a missing attestation, depending on the
   mode. Seed's convention is documented in `ATTESTATION_REVOCATION.md`.
 
