@@ -1,8 +1,10 @@
-import type {
-  ChangelogInclude,
-  GetSeedOptions,
-  GetSeedResult,
-  SeedRecord,
+import {
+  relationsModeOf,
+  type ChangelogInclude,
+  type GetSeedOptions,
+  type GetSeedResult,
+  type RelationsMode,
+  type SeedRecord,
 } from '../types.js'
 import type { SeedDependencies } from '../assembleSeeds.js'
 
@@ -87,11 +89,15 @@ function includeCode(include?: ChangelogInclude): string {
   return 'i2' // changelog
 }
 
+const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e1', urls: 'e0', uids: 'e2' }
+
 /**
  * Build a stable key for assemble options that affect cached payloads.
- * Default latest-only (`include: 'data'`) keeps Phase 2 key `e1-h1`.
+ * Default latest-only (`include: 'data'`) keeps Phase 2 key `e1-h1`. Relations modes map to
+ * `e1` (expand), `e0` (urls) and `e2` (uids), so keys from `expandRelations` are unchanged.
  */
 export function buildAssembleOptionsKey(options?: {
+  relations?: RelationsMode
   expandRelations?: boolean
   hydrateStorage?: boolean
   include?: ChangelogInclude
@@ -99,9 +105,8 @@ export function buildAssembleOptionsKey(options?: {
   versionUid?: string
   asOf?: number
 }): string {
-  const expand = options?.expandRelations !== false
   const hydrate = options?.hydrateStorage !== false
-  let base = `e${expand ? 1 : 0}-h${hydrate ? 1 : 0}`
+  let base = `${RELATIONS_CODES[relationsModeOf(options)]}-h${hydrate ? 1 : 0}`
   if (options?.versionUid !== undefined) base += `-v${options.versionUid.toLowerCase()}`
   if (options?.asOf !== undefined) base += `-a${options.asOf}`
 

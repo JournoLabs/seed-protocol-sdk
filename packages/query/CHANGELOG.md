@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `relations: 'expand' | 'urls' | 'uids'` on every assemble option set (default `'expand'`) replaces `expandRelations`, which still works: `true` is `'expand'`, `false` is `'urls'`, and `relations` wins when both are given. `'uids'` is new: relation values stay seed UIDs under their stored keys and no related seeds, versions or properties are fetched, so a cold `queryBySchema` makes three indexer requests instead of up to seven. A `'uids'` record's cache entry depends only on its seed and head version, so a change to a related seed doesn't invalidate it. Its cache key is `e2-…`; `'expand'` and `'urls'` keep `e1-…` and `e0-…`.
+
 ## 0.7.6 (2026-10-17)
 
 - `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.
