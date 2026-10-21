@@ -13,6 +13,7 @@ function env(): Record<string, string | undefined> {
  * - CACHE_ENABLED
  * - CACHE_TTL (default 3600)
  * - CACHE_DIR (default ./cache)
+ * - CACHE_MAX_AGE (default 0): seconds a checked collection is served without a request
  * - CACHE_BACKGROUND_REFRESH / CACHE_REFRESH_INTERVAL (unused stubs)
  *
  * In development (NODE_ENV=development), cache is disabled unless
@@ -59,6 +60,7 @@ export function loadQueryCacheConfig(): QueryCacheConfig {
 
   const backgroundRefresh = e.CACHE_BACKGROUND_REFRESH === 'true'
   const refreshInterval = parseInt(e.CACHE_REFRESH_INTERVAL || '300', 10)
+  const maxAge = Math.max(0, parseInt(e.CACHE_MAX_AGE || '0', 10) || 0)
 
   return {
     ttl,
@@ -66,6 +68,7 @@ export function loadQueryCacheConfig(): QueryCacheConfig {
     enabled,
     backgroundRefresh,
     refreshInterval,
+    maxAge,
     freezeRecords: defaultFreezeRecords(),
   }
 }

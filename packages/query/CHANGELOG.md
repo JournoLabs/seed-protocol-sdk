@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - A warm `queryBySchema` read is one round of indexer requests instead of two: the change check on the cached collection goes out alongside the seed list rather than after it. It checks every cached seed, listed or not, and no longer asks whether the listed seeds themselves were revoked, since the seed list already leaves revoked seeds out. Related seeds are still checked for revocation.
+- `queryBySchema(schemaName, { maxAge })` returns a collection checked less than `maxAge` seconds ago in this process without any request. Off by default; `CACHE_MAX_AGE` sets a default for every call. New, changed and revoked seeds show up to `maxAge` seconds late. Applies where the collection cache does (remote, `skip` 0, no `uidPrefix`).
 
 ## 0.7.6 (2026-10-17)
 

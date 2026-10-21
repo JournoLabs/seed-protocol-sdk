@@ -487,6 +487,76 @@ describe('queryBySchema / getSeed caching', () => {
     ).not.toBeNull()
   })
 
+  describe('maxAge', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-21T12:00:00Z'))
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      delete process.env.CACHE_MAX_AGE
+    })
+
+    it('serves a collection checked within maxAge without a request, then checks again', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+      const opts = { ...uncachedOpts, maxAge: 60 }
+      const first = await queryBySchema('post', opts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
+
+      vi.setSystemTime(new Date('2026-10-21T12:00:59Z'))
+      const second = await queryBySchema('post', opts)
+      expect(second.items[0]!.data.title).toBe('One')
+      expect(second.etag).toBe(first.etag)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
+      expect(mockGetAttestationChangesSince).not.toHaveBeenCalled()
+
+      vi.setSystemTime(new Date('2026-10-21T12:01:00Z'))
+      await queryBySchema('post', opts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+      expect(mockGetAttestationChangesSince).toHaveBeenCalledTimes(1)
+    })
+
+    it('checks every read by default', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+      await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', uncachedOpts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+    })
+
+    it('takes its default from CACHE_MAX_AGE, and a per-call 0 overrides it', async () => {
+      process.env.CACHE_MAX_AGE = '60'
+      resetQueryCacheManager()
+      mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+      await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', uncachedOpts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
+      await queryBySchema('post', { ...uncachedOpts, maxAge: 0 })
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+    })
+
+    it('checks again when a read with another limit rewrote the collection', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+      const opts = { ...uncachedOpts, maxAge: 60 }
+      await queryBySchema('post', opts)
+      mockAssembledPost('0xseed2', '0xver2', 'Two', 200)
+      await queryBySchema('post', { ...opts, limit: 1 })
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+
+      const third = await queryBySchema('post', opts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(3)
+      expect(third.items.map((r) => r.seedUid)).toEqual(['0xseed2'])
+    })
+
+    it('forgets checks when the collection is cleared', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'One', 100)
+      const opts = { ...uncachedOpts, maxAge: 60 }
+      await queryBySchema('post', opts)
+      await getQueryCacheManager().clearCollection('post')
+      await queryBySchema('post', opts)
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it('cache:false bypasses collection cache', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'A', 100)
     await queryBySchema('post', { ...uncachedOpts, cache: false })

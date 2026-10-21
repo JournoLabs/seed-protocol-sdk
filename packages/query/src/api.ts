@@ -259,10 +259,24 @@ export async function queryBySchema(
     skip === 0 &&
     resolved.dataSource.kind === 'remote'
   ) {
+    const cache = getQueryCacheManager()
     const lockKey = `${schemaName}\n${optionsKey}\n${limit}`
-    return getQueryCacheManager().withRefreshLock(lockKey, () =>
-      refreshCollection(schemaName, limit, options, optionsKey, resolved.dataSource),
-    )
+    const maxAge = options?.maxAge ?? cache.getConfig().maxAge ?? 0
+    return cache.withRefreshLock(lockKey, async () => {
+      if (maxAge > 0) {
+        const recent = await cache.getCheckedCollection(lockKey, schemaName, optionsKey, maxAge)
+        if (recent) return { items: [...recent.items], limit, skip: 0, etag: recent.etag }
+      }
+      const result = await refreshCollection(
+        schemaName,
+        limit,
+        options,
+        optionsKey,
+        resolved.dataSource,
+      )
+      if (result.etag) cache.markCollectionChecked(lockKey, result.etag)
+      return result
+    })
   }
 
   const startedAt = nowSeconds()
