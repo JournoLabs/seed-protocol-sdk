@@ -14,9 +14,7 @@ export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
 export type { FeedConfig, FeedFormat, FeedItem } from './types';
 export {
   initializeFeedPlatform,
-  initializeSeedClient,
-  getClient,
-  teardownSeedClient,
+  teardownFeedPlatform,
   DEFAULT_ARWEAVE_HOST,
 } from './bootstrap';
 export {
