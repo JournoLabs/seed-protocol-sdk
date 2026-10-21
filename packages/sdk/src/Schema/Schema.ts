@@ -2,7 +2,7 @@ import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
-import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
+import { mergeSchemaFiles, writeNextSchemaVersion } from '@/helpers/schemaApply'
 import { Model } from '@/Model/Model'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
@@ -1147,7 +1147,18 @@ export class Schema {
       ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
     }
 
-    // Update draft in database with current state
+    // Check we have something to save: schema:models (new models) or modelName:propertyName (property edits)
+    const hasSchemaModels = context._editedProperties.has('schema:models')
+    const hasPropertyEdits = [...context._editedProperties].some((key) => {
+      const [modelName, propertyName] = key.split(':')
+      return modelName && propertyName && key !== 'schema:name'
+    })
+    if (!hasSchemaModels && !hasPropertyEdits) {
+      logger('No valid property updates to save')
+      return ''
+    }
+
+    // The draft row holds the current state until the version file is written
     await addSchemaToDb(
       {
         name: this.schemaName,
@@ -1160,63 +1171,21 @@ export class Schema {
       true, // isDraft = true (still a draft until file is written)
     )
 
-    const dbSchema = await db
-      .select()
-      .from(schemasTable)
-      .where(eq(schemasTable.name, this.schemaName))
-      .limit(1)
-
-    // Check we have something to save: schema:models (new models) or modelName:propertyName (property edits)
-    const hasSchemaModels = context._editedProperties.has('schema:models')
-    const hasPropertyEdits = [...context._editedProperties].some((key) => {
-      const [modelName, propertyName] = key.split(':')
-      return modelName && propertyName && key !== 'schema:name'
-    })
-    if (!hasSchemaModels && !hasPropertyEdits) {
-      logger('No valid property updates to save')
-      return ''
-    }
-
-    // Use writeFullSchemaNewVersion for all edits - handles renames, new models, property updates.
-    // Model instances have the correct (current) structure including renamed properties.
-
-    // STEP 2: Save to new schema version (writes file)
-    const newFilePath = await writeFullSchemaNewVersion(this.schemaName, currentSchema)
-
-    // STEP 3: After file is written, update database to mark as published (isDraft = false)
-    // Load the file to get the final schema with IDs
-    const fileContent = await BaseFileManager.readFileAsString(newFilePath)
-    const publishedSchema = JSON.parse(fileContent) as SchemaFileFormat
-
-    // Update database record: set isDraft = false and update schemaFileId
-    if (dbSchema.length > 0) {
-      clearNameMatchLevels() // the stored schema file changes (ADR 0009)
-      await db
-        .update(schemasTable)
-        .set({
-          isDraft: false,
-          isEdited: false, // Clear isEdited flag after saving to file
-          schemaFileId: publishedSchema.id,
-          schemaData: JSON.stringify(publishedSchema, null, 2),
-          version: publishedSchema.version,
-          updatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
-        })
-        .where(eq(schemasTable.id, dbSchema[0].id!))
-    } else {
-      // Create new record if it doesn't exist (shouldn't happen, but safety)
-      await addSchemaToDb(
-        {
-          name: this.schemaName,
-          version: publishedSchema.version,
-          createdAt: new Date(publishedSchema.metadata.createdAt).getTime(),
-          updatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
-        },
-        publishedSchema.id,
-        JSON.stringify(publishedSchema, null, 2),
-        false, // isDraft = false (published)
-        false, // isEdited = false (published)
-      )
-    }
+    // The next version file: the previous one with the instances' models merged in by id, so
+    // fields the instances don't carry (validation, descriptions, ...) stay. Applying it publishes
+    // the row.
+    const { schemaFile: publishedSchema, filePath: newFilePath } = await writeNextSchemaVersion(
+      currentSchema.id ?? this.schemaName,
+      (previous) => mergeSchemaFiles(previous, currentSchema),
+      {
+        description: 'New schema version (e.g. new models added)',
+        changes: [{ type: 'full_schema_write' as const }],
+      },
+    )
+    await db
+      .update(schemasTable)
+      .set({ isEdited: false })
+      .where(eq(schemasTable.schemaFileId, publishedSchema.id!))
 
     // Clear draft flags on Schema and update conflict detection metadata
     this._service.send({ 
@@ -1577,6 +1546,44 @@ export class Schema {
         logger(`Using existing record (id: ${existingSchemaRecord.id}, name: ${existingSchemaRecord.name}, isDraft: ${existingSchemaRecord.isDraft}, schemaFileId: ${existingSchemaRecord.schemaFileId || 'none'})`)
       } else {
         logger(`No existing record found`)
+      }
+
+      // A published schema's rename is its next version file, under the new name (ADR 0016).
+      // A row-only rename was undone at the next init, which matched the files by their old name.
+      if (
+        oldName &&
+        oldName !== finalNewName &&
+        existingSchemaRecord?.schemaFileId &&
+        existingSchemaRecord.isDraft !== true
+      ) {
+        const { schemaFile } = await writeNextSchemaVersion(
+          existingSchemaRecord.schemaFileId,
+          (previous) => ({ ...previous, metadata: { ...previous.metadata, name: finalNewName } }),
+          {
+            description: `Renamed schema ${oldName} to ${finalNewName}`,
+            changes: [{ type: 'schema_rename', oldName, newName: finalNewName }],
+          },
+        )
+        const savedAt = new Date(schemaFile.metadata.updatedAt).getTime()
+        this._service.send({
+          type: 'updateContext',
+          id: schemaFile.id,
+          version: schemaFile.version,
+          _dbUpdatedAt: savedAt,
+          _dbVersion: schemaFile.version,
+        })
+        const otherEdits = [...(context._editedProperties ?? [])].some((key) => key !== 'schema:name')
+        if (!otherEdits) {
+          saveDraftLogger(`Renamed schema "${oldName}" to "${finalNewName}" in v${schemaFile.version}`)
+          return
+        }
+        // Other edits stay a draft of the new version
+        context = this._getSnapshotContext()
+        ;[existingSchemaRecord] = await db
+          .select()
+          .from(schemasTable)
+          .where(eq(schemasTable.schemaFileId, existingSchemaRecord.schemaFileId))
+          .limit(1)
       }
 
       // Build current schema state from context

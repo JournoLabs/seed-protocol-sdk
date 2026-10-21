@@ -8,11 +8,10 @@ import { generateId } from '@/helpers'
 import { savePropertyToDb, writeModelToDb, writePropertyToDb } from '@/helpers/db'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { cleanupTestSchemaData } from '../../test-utils/cleanupTestDb'
+import { wrapDbDriver } from '../../test-utils/wrapDbDriver'
 
-type Driver = (sql: string, params: unknown[], method: string) => Promise<unknown>
-
-// The schema import writes each model and property twice at once (addModelsToDb and the Model
-// instances' own write), so an insert can find its row already there. A failed statement is logged by
+// Another writer (a Model instance's own write, another tab) can insert a model or property row
+// between a writer's lookup and its insert, so an insert can find its row already there. A failed statement is logged by
 // sqlite-wasm in the DB worker even when the SDK catches it ("sqlite3_step() rc= 2067
 // SQLITE_CONSTRAINT_UNIQUE"), so these inserts must not fail. The driver below runs the matching
 // insert once before the SDK's own (standing in for the other writer) and records failed statements.
@@ -20,28 +19,22 @@ describe('inserts that find their row already written', () => {
   const failures: string[] = []
   let preempt: ((sql: string, params: unknown[]) => boolean) | undefined
   let preempted = false
-  let originalClient: Driver
 
   beforeAll(async () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
-    const session = (BaseDb.getAppDb() as any).session as { client: Driver }
-    originalClient = session.client
-    session.client = async (sql, params, method) => {
+    return wrapDbDriver((client) => async (sql, params, method) => {
       if (preempt?.(sql, params)) {
         preempt = undefined
         preempted = true
-        await originalClient(sql, params, method)
+        await client(sql, params, method)
       }
       try {
-        return await originalClient(sql, params, method)
+        return await client(sql, params, method)
       } catch (error) {
         failures.push(`${error instanceof Error ? error.message : String(error)}: ${sql}`)
         throw error
       }
-    }
-    return () => {
-      session.client = originalClient
-    }
+    })
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {

@@ -1,5 +1,4 @@
 export {
-  getRefValueType,
   importJsonSchema,
   loadSchemaFromFile,
   readJsonImportFile,
