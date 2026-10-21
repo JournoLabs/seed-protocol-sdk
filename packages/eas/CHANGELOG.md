@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - `getItemVersionsFromEas` returns only Version attestations (`schemaId` is `VERSION_SCHEMA_UID`). It returned every attestation whose `refUID` was one of the seeds, and PublishedBy sidecars use seed uids as `refUID`: a sidecar from the seed's own attester, being newer, was taken as the seed's latest version, and `@seedprotocol/query` assembled the record with no properties. `getCanonicalItemPropertiesFromEas` applies the same filter when it fetches the versions of the properties it checks, so a property on a non-version attestation no longer counts.
 - New exports `VERSION_SCHEMA_UID` and `VERSION_SCHEMA_DEF`, moved from `@seedprotocol/sdk`, which re-exports both (and the deprecated `VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA`) unchanged.
+- Per-request timing log under the `debug` namespace `seedEas:timing`, off by default: set `DEBUG=seedEas:timing` (Node) or `localStorage.debug = 'seedEas:timing'` (browser), alongside `seedSdk:timing` if you use it. Each indexer request through `createEasGraphQLClient` or `DefaultEasClient` logs `request <operation> <id.in/refUID.in lengths> rows=<n> bytes=<n> <ms>ms`, timed from send until the body is parsed. Each query-client lookup in the api helpers (`getItemVersionsFromEas`, `getSeedsBySchemaName` and the rest) logs `fetchQuery <key> network|deduped|cache <ms>ms`: `deduped` means it waited on the same request already in flight, `cache` that the query client answered without a request.
 
 ## 0.7.8 (2026-10-20)
 
