@@ -50,6 +50,7 @@ export class FileDownloader {
     excludedTransactions,
     expectedContentHashes,
     compositeChildPaths,
+    skipExisting,
   }: DownloadAllFilesParams): Promise<DownloadAllFilesResult> => {
     // One download per instance at a time: a newer call replaces the older one, which rejects
     // instead of waiting forever on a terminated worker.
@@ -212,6 +213,7 @@ export class FileDownloader {
           arweaveBaseUrls,
           expectedContentHashes,
           compositeChildPaths,
+          skipExisting,
           debug: logger.enabled,
           filesRoot: BaseFileManager.getWorkingDir(),
         });

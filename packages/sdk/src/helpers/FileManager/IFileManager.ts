@@ -15,6 +15,11 @@ export type DownloadAllFilesParams = {
    * `getCompositeChildPaths`. Children without one use the legacy html / json layout.
    */
   compositeChildPaths?: Record<string, Record<string, string>>
+  /**
+   * Leave out transactions that already have a file on disk (under images/, html/, json/ or files/,
+   * or every routed composite child): they are not fetched, written or announced.
+   */
+  skipExisting?: boolean
 }
 
 /** What a browser download run did, by transaction id. */
@@ -37,6 +42,8 @@ export type DownloadSingleFileParams = {
   expectedContentHash?: string
   /** Where this transaction's composite children go, by child name; see {@link DownloadAllFilesParams}. */
   compositeChildPaths?: Record<string, string>
+  /** See {@link DownloadAllFilesParams}. */
+  skipExisting?: boolean
 }
 
 export type ResizeAllImagesParams = {

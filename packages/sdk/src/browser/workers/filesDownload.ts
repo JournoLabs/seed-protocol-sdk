@@ -390,6 +390,76 @@ const safeRelativePath = (path: unknown): string | undefined => {
   return path
 }
 
+/** The OPFS directory at `path`, or undefined when it does not exist. Creates nothing. */
+const getExistingDirectory = async (path: string): Promise<FileSystemDirectoryHandle | undefined> => {
+  let dir = await navigator.storage.getDirectory()
+  for (const segment of path.split('/').filter(Boolean)) {
+    try {
+      dir = await dir.getDirectoryHandle(segment)
+    } catch {
+      return undefined
+    }
+  }
+  return dir
+}
+
+const isNonEmptyFile = async (filePath: string): Promise<boolean> => {
+  const segments = filePath.split('/').filter(Boolean)
+  const fileName = segments.pop()
+  const dir = fileName ? await getExistingDirectory(segments.join('/')) : undefined
+  if (!dir || !fileName) return false
+  try {
+    return (await (await dir.getFileHandle(fileName)).getFile()).size > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Which of `transactionIds` already have a non-empty file where a download would put them:
+ * `<txId>` or `<txId>.<ext>` in images/, html/, json/ or files/. Each directory is listed once.
+ */
+const listStoredTransactionIds = async (filesRoot: string, transactionIds: string[]): Promise<Set<string>> => {
+  const wanted = new Set(transactionIds)
+  const stored = new Set<string>()
+  for (const dirName of ['images', 'html', 'json', 'files']) {
+    const dir = await getExistingDirectory(getFilesPath(filesRoot, dirName))
+    if (!dir) continue
+    for await (const handle of (dir as any).values() as AsyncIterable<FileSystemHandle>) {
+      if (handle.kind !== 'file') continue
+      // Transaction ids never contain a dot.
+      const transactionId = handle.name.split('.')[0]
+      if (!wanted.has(transactionId) || stored.has(transactionId)) continue
+      try {
+        if ((await (handle as FileSystemFileHandle).getFile()).size > 0) stored.add(transactionId)
+      } catch {
+        /* unreadable: download it again */
+      }
+    }
+  }
+  return stored
+}
+
+/**
+ * True when a transaction needs no download. A composite with child paths counts as stored only
+ * when every routed child is on disk, so a child that got its path after an earlier run is placed.
+ */
+const isAlreadyStored = async (
+  transactionId: string,
+  stored: Set<string>,
+  filesRoot: string,
+  childPaths: Record<string, string> | undefined,
+): Promise<boolean> => {
+  const routed = Object.values(childPaths ?? {})
+    .map(safeRelativePath)
+    .filter((path): path is string => !!path)
+  if (routed.length === 0) return stored.has(transactionId)
+  for (const path of routed) {
+    if (!(await isNonEmptyFile(getFilesPath(filesRoot, path)))) return false
+  }
+  return true
+}
+
 const downloadFiles = async ({
   transactionIds,
   arweaveHost,
@@ -397,6 +467,7 @@ const downloadFiles = async ({
   filesRoot = '/files',
   expectedContentHashes,
   compositeChildPaths,
+  skipExisting,
 }: {
   transactionIds: string[],
   arweaveHost: string,
@@ -410,7 +481,13 @@ const downloadFiles = async ({
    * (`<storage dir>/<txId><extension>`). Children without one fall back to the html / json layout.
    */
   compositeChildPaths?: Record<string, Record<string, string>>,
+  /** Leave out transactions whose files are already on disk: no fetch, no write, no `fileSaved`. */
+  skipExisting?: boolean,
 }) => {
+
+  const stored = skipExisting
+    ? await listStoredTransactionIds(filesRoot, transactionIds).catch(() => new Set<string>())
+    : new Set<string>()
 
   // Preferred / resolved gateways first, then the configured host; deduped.
   const baseUrls: string[] = []
@@ -424,7 +501,10 @@ const downloadFiles = async ({
   for (const transactionId of transactionIds) {
     // One bad file (failed OPFS write, quota, malformed content) must not stall or abort the batch.
     try {
-      await downloadFile(
+      const skip =
+        skipExisting &&
+        (await isAlreadyStored(transactionId, stored, filesRoot, compositeChildPaths?.[transactionId]))
+      if (!skip) await downloadFile(
         transactionId,
         baseUrls,
         filesRoot,

@@ -102,6 +102,7 @@ export abstract class BaseFileManager {
     excludedTransactions,
     expectedContentHash,
     compositeChildPaths,
+    skipExisting,
   }: DownloadSingleFileParams): Promise<DownloadAllFilesResult | void> {
     return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds: [transactionId],
@@ -110,6 +111,7 @@ export abstract class BaseFileManager {
       excludedTransactions,
       expectedContentHashes: expectedContentHash ? { [transactionId]: expectedContentHash } : undefined,
       compositeChildPaths: compositeChildPaths ? { [transactionId]: compositeChildPaths } : undefined,
+      skipExisting,
     })
   }
 

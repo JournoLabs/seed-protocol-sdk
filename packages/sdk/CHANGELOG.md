@@ -4,6 +4,9 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The bulk file download after each EAS sync skips transactions whose file is already on disk (a non-empty `<txId>` or `<txId>.<ext>` under `images/`, `html/`, `json/` or `files/`, or, for a composite with known child paths, every routed child). Before, every run fetched every known file from the gateway again, rewrote it in OPFS and announced it as changed in every tab. Lazy downloads of one file (`ensureImageLocal`, hydration) still always download.
+- The bulk download no longer writes `metadata.content_hash` (nothing read it) and no longer runs a bulk 480 px resize afterward, which never resized anything. Image saves and `ensureImageLocal` still create the size variants.
+
 ### Breaking
 
 - **A local database written by an SDK older than 0.7.7 is recreated.** On the first start with this version, `prepareDb` drops every table of such a database before migrations run (browser and Node), and logs a `console.warn` saying so. Items that were never published are gone; published items come back with the next EAS sync. A database 0.7.7 or later opened is kept as it is. Files under `filesDir` are not deleted. The SDK tells the two apart by the last applied migration (0020 or later means 0.7.8+ opened it) and, for databases on migration 0019, by the `storedDisplayUrlsCleared` appState key that 0.7.7's first start wrote.
