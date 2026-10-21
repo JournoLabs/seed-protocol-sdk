@@ -88,6 +88,7 @@ When the item's seed is revoked (`seeds.revoked_at` set), the publish payload as
 - `item.seedUid` is the new uid, `item.revokedAt` is cleared (`item.isRevoked` is `false`), and the item instance cache's uid alias moves from the old uid to the new one.
 - The new version attestation is recorded on the local draft version, or on a new version row when there is no draft. `item.latestVersionUid` / `item.latestVersionLocalId` and the published version helpers report it.
 - The old version and property rows keep their old uids and `revoked_at`. They are history of the old seed. Readers prefer live rows, and EAS sync stores the new property attestations.
+- EAS sync still returns the old, revoked seed attestation. Sync matches it to this item through the old version rows (`versions.seed_uid`) and stores no seed row for it; its revocation doesn't touch the item's `revoked_at`.
 
 Other items' relations to this item aren't rewritten. When a referring item is published, each relation, list member and image/file ref it attests is checked against the local seed it points at:
 
