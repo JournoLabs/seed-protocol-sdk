@@ -74,7 +74,9 @@ const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', 
 }
 ```
 
-Options on every API: `expandRelations` (default `true`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass), `source` (default `'remote'`).
+Options on every API: `relations` (default `'expand'`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass), `source` (default `'remote'`).
+
+`relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'urls'` resolves Html/File relations to URLs and leaves the rest as seed UIDs. `'uids'` leaves every relation as a seed UID under its stored key (`author_id`, `author_ids`) and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields. `expandRelations` is deprecated: `true` is `'expand'`, `false` is `'urls'`, and `relations` wins when both are given.
 
 ## Many seeds (`getSeeds`)
 
@@ -166,13 +168,15 @@ Controlled by the same env vars as feed content cache (ops compatibility):
 |----------|---------|--------|
 | `CACHE_ENABLED` | on in prod; **off** when `NODE_ENV=development` | Set `true`/`false` to force |
 | `CACHE_TTL` | `3600` | Seconds from an entry's last full assembly until it is rebuilt from scratch |
+| `CACHE_MAX_AGE` | `0` | Seconds after a collection was last checked during which `queryBySchema` returns it with no request; per call, `maxAge` |
 | `CACHE_DIR` | `./cache` | Collections: `collections/{schema}.{opts}.json`; items: `items/{seedUid}-{opts}.json` |
 
 Behavior:
 
 - **Change checks** — every cache hit asks EAS, in one request, for attestations created or revoked since the entry was last checked that touch what it was built from: the seed, its head Version, and the seeds it relates to (and their head Versions). New Versions, property edits on the same Version (the default `patch` publish), and revocations are all seen. Only changed seeds are assembled again; a cached seed that was revoked drops out. The TTL is a backstop for anything a check can't see (e.g. relations of related seeds).
-- **Collection cache** — only for **remote** `queryBySchema` with `skip === 0`, per schema and options fingerprint. Each hit fetches the seed list (cheap; shows new and revoked seeds), checks cached seeds for changes, and assembles only new or changed ones.
-- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters / `versionUid` / `asOf`). Default latest-only key remains `e1-h1`. Filled by remote `getSeed` and `getSeeds` and write-through from collection/month queries; a `getSeed` or `getSeeds` hit is checked for changes first.
+- **Collection cache** — only for **remote** `queryBySchema` with `skip === 0`, per schema and options fingerprint. Each hit fetches the seed list (shows new and revoked seeds) and, in the same round, checks every cached seed for changes; then it assembles only new or changed ones.
+- **`maxAge`** — off by default. With `maxAge: 60` (or `CACHE_MAX_AGE=60`), a collection checked less than 60 seconds ago in this process is returned with no request, so new, changed and revoked seeds show up to 60 seconds late. The time is kept in memory per schema, options and `limit`.
+- **Item cache** — keyed by `seedUid` + options fingerprint (`relations` / `hydrateStorage` / `include` / changelog filters / `versionUid` / `asOf`). Default latest-only key remains `e1-h1`; `relations` maps to `e1` (`'expand'`), `e0` (`'urls'`) and `e2` (`'uids'`), so keys written with `expandRelations` still match. Filled by remote `getSeed` and `getSeeds` and write-through from collection/month queries; a `getSeed` or `getSeeds` hit is checked for changes first.
 - **ETags** — from content, so they change with any edit (not only a new `versionUid`).
 - **Arweave bodies** — cached in memory by transaction id (their content never changes), whether or not the query cache is enabled.
 - **Read-only results** — records from a cached read are the cache's own objects, shared with every later caller, so `SeedRecord` is typed read-only (`data: SeedData`, `changelog: readonly ChangelogEntry[]`). Outside `NODE_ENV=production`, records are also deep-frozen as they enter the memory cache (stored, or loaded from disk), so a write throws a `TypeError` instead of silently changing what later callers see and leaving the ETag stale. Production skips the freeze. Copy before changing anything, nested values included (copy-on-write, as feed's `applyFeedDefaultsDeep` does). `queryBySchema`'s `items` array is the caller's own. Set `freezeRecords` on the cache config to override.

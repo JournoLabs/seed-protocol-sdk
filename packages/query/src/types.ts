@@ -18,8 +18,21 @@ export type SeedRecord = {
 /** Where to load Seed/Version/property attestations from. Default `'remote'`. */
 export type QuerySourceMode = 'local' | 'remote' | 'auto'
 
+/**
+ * How relation properties are returned. `'expand'`: Html/File relations become Arweave URLs and
+ * other related seeds nested objects. `'urls'`: storage relations become URLs, the rest stay seed
+ * UIDs. `'uids'`: every relation stays a seed UID under its stored key, and related seeds aren't
+ * fetched at all (no related seed, version or property requests).
+ */
+export type RelationsMode = 'expand' | 'urls' | 'uids'
+
 export type AssembleOptions = {
-  /** Expand relation UIDs to nested objects when possible. Default true. */
+  /** Default `'expand'`. Takes precedence over `expandRelations`. */
+  relations?: RelationsMode
+  /**
+   * @deprecated Use `relations`: `true` is `'expand'`, `false` is `'urls'`. Ignored when
+   * `relations` is given.
+   */
   expandRelations?: boolean
   /** Fetch Arweave gateway bodies into html/body/content (and marked storage fields). Default true. */
   hydrateStorage?: boolean
@@ -35,6 +48,15 @@ export type AssembleOptions = {
    * Default `'remote'`.
    */
   source?: QuerySourceMode
+}
+
+/** The relations mode `options` ask for, with `expandRelations` as its fallback. */
+export function relationsModeOf(options?: {
+  relations?: RelationsMode
+  expandRelations?: boolean
+}): RelationsMode {
+  if (options?.relations) return options.relations
+  return options?.expandRelations === false ? 'urls' : 'expand'
 }
 
 export type ChangelogInclude = 'data' | 'data+changelog' | 'changelog'
@@ -108,6 +130,13 @@ export type QueryBySchemaOptions = AssembleOptions & {
    * cache is written through as usual. An invalid prefix returns no items.
    */
   uidPrefix?: string
+  /**
+   * Seconds after this collection was last checked against the indexer during which it is
+   * returned from the collection cache with no request at all. New, changed and revoked seeds
+   * show up to this many seconds late. Applies only where the collection cache does (remote,
+   * `skip` 0, no `uidPrefix`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
+   */
+  maxAge?: number
 }
 
 export type QueryBySchemaResult = {

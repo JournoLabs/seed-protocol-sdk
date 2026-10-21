@@ -17,7 +17,7 @@ import {
   nowSeconds,
   type ItemChangeCheck,
 } from './cache/changes.js'
-import type { CachedItemData, CachedRecordMeta } from './cache/types.js'
+import type { CachedCollectionData, CachedItemData, CachedRecordMeta } from './cache/types.js'
 import {
   normalizeSourceMode,
   resolveQuerySource,
@@ -117,10 +117,28 @@ async function writeThroughAssembled(
 }
 
 /**
+ * What to check for changes on a cached collection: every cached seed's dependencies, minus the
+ * seed's own uid in `ids`. The seed list leaves out revoked seeds, so a revoked listed seed drops
+ * out of the list without a check; a revoked related seed is still checked through its parent.
+ */
+function collectionChangeChecks(cached: CachedCollectionData): Map<string, SeedDependencies> {
+  const checks = new Map<string, SeedDependencies>()
+  for (const item of cached.items) {
+    const deps = cached.meta[item.seedUid]?.dependencies ?? NO_DEPENDENCIES
+    checks.set(item.seedUid, {
+      refUIDs: deps.refUIDs,
+      ids: deps.ids.filter((uid) => uid !== item.seedUid),
+    })
+  }
+  return checks
+}
+
+/**
  * The schema's first `limit` seeds, newest first, from the collection cache where they haven't
- * changed. The seed list itself is always fetched (it's cheap, and shows new and revoked seeds);
- * cached seeds are checked for changes in one request (see findChangedSeeds), and only new or
- * changed seeds are assembled. The TTL counts from the last full assembly.
+ * changed. The seed list itself is always fetched (it shows new and revoked seeds). Cached seeds
+ * are checked for changes alongside it (see findChangedSeeds), all of them rather than only the
+ * listed ones, so a warm read is one round; only new or changed seeds are assembled. The TTL
+ * counts from the last full assembly.
  */
 async function refreshCollection(
   schemaName: string,
@@ -132,23 +150,21 @@ async function refreshCollection(
   const cache = getQueryCacheManager()
   const startedAt = nowSeconds()
   const cached = await cache.getCollection(schemaName, optionsKey)
-  const listed = await dataSource.listSeedsBySchemaName(schemaName, { limit, skip: 0 })
+  const checks = cached ? collectionChangeChecks(cached) : undefined
+  const [listed, found] = await Promise.all([
+    dataSource.listSeedsBySchemaName(schemaName, { limit, skip: 0 }),
+    cached && checks ? findChangedSeeds(dataSource, checks, cached) : undefined,
+  ])
 
   const cachedBySeedUid = new Map(cached?.items.map((item) => [item.seedUid, item]) ?? [])
   let changed = new Set<string>()
   let seenChangeKeys: string[] = []
-  if (cached) {
-    const toCheck = new Map<string, SeedDependencies>()
-    for (const seed of listed) {
-      const meta = cached.meta[seed.id]
-      if (cachedBySeedUid.has(seed.id)) toCheck.set(seed.id, meta?.dependencies ?? NO_DEPENDENCIES)
-    }
-    const found = await findChangedSeeds(dataSource, toCheck, cached)
+  if (cached && checks) {
     if (found) {
       changed = found.changed
       seenChangeKeys = found.seenChangeKeys
     } else {
-      changed = new Set(toCheck.keys())
+      changed = new Set(checks.keys())
     }
   }
 
@@ -243,10 +259,24 @@ export async function queryBySchema(
     skip === 0 &&
     resolved.dataSource.kind === 'remote'
   ) {
+    const cache = getQueryCacheManager()
     const lockKey = `${schemaName}\n${optionsKey}\n${limit}`
-    return getQueryCacheManager().withRefreshLock(lockKey, () =>
-      refreshCollection(schemaName, limit, options, optionsKey, resolved.dataSource),
-    )
+    const maxAge = options?.maxAge ?? cache.getConfig().maxAge ?? 0
+    return cache.withRefreshLock(lockKey, async () => {
+      if (maxAge > 0) {
+        const recent = await cache.getCheckedCollection(lockKey, schemaName, optionsKey, maxAge)
+        if (recent) return { items: [...recent.items], limit, skip: 0, etag: recent.etag }
+      }
+      const result = await refreshCollection(
+        schemaName,
+        limit,
+        options,
+        optionsKey,
+        resolved.dataSource,
+      )
+      if (result.etag) cache.markCollectionChecked(lockKey, result.etag)
+      return result
+    })
   }
 
   const startedAt = nowSeconds()

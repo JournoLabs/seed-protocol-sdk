@@ -41,6 +41,7 @@ export type {
   SeedData,
   SeedRecord,
   AssembleOptions,
+  RelationsMode,
   QuerySourceMode,
   GetSeedOptions,
   GetSeedResult,

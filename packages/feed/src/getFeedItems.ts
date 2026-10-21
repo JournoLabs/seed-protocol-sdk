@@ -320,7 +320,7 @@ export const getFeedItemsBySchemaName = async (
   const { items } = await queryBySchema(schemaName, {
     limit,
     skip,
-    expandRelations: feedConfig.expandRelations !== false,
+    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
     hydrateStorage: true,
   })
   return seedRecordsToFeedItems(schemaName, items)
@@ -335,7 +335,7 @@ export const getFeedItemsBySchemaNameForMonth = async (
   const feedConfig = loadFeedConfig()
 
   const records = await queryBySchemaForMonth(schemaName, year, month, {
-    expandRelations: feedConfig.expandRelations !== false,
+    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
     hydrateStorage: true,
   })
   return seedRecordsToFeedItems(schemaName, records)
