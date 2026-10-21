@@ -5,7 +5,7 @@ import {
   getSchemaUidForSchemaDefinitionFromCache,
   isValidEasAttestationUid,
 } from '@seedprotocol/eas'
-import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
+import { getItemModelScope, type ModelScope } from '@/db/read/resolveModelRecord'
 import { ItemLoads } from '@/db/read/itemLoads'
 import {
   defaultAttestationData,
@@ -28,7 +28,7 @@ import { emptyEasValue, getPropertyClear } from '@/db/read/getPropertyClear'
 import { isStorageSeedRef, isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
-import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { getSegmentedItemProperties, resolveItemPropertyDefinition } from '@/helpers/getSegmentedItemProperties'
 import { draftWalkProperties } from '@/db/read/publishDraftGraph'
 import { getPropertySchema } from '@/helpers/property'
 import {
@@ -36,13 +36,10 @@ import {
   listRelationEasPropertyName,
   type PropertySchemaEntry,
 } from '@/helpers/metadataPropertyNames'
-import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
-import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models, properties } from '@/seedSchema'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import { encodeBytes32String } from '@/helpers/ethereumUtils'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
@@ -359,86 +356,19 @@ const getPropertyData = async (
   }
 }
 
-/** Resolve propertyDef from Model for properties that lack it (e.g. cached instances
- * created before loadOrCreateProperty was fixed). Ensures both new and existing items get property attestations.
- * Also ensures Relation/Image properties have required from schema when missing (for publish validation). */
+/**
+ * Gives every property of the item without a definition in its context the one its row has
+ * (resolveItemPropertyDefinition), before segmentation and the required checks read them. Throws
+ * for a property with no row.
+ */
 const ensurePropertyDefs = async (targetItem: IItem<any>) => {
-  let schema: any
   // Model names are only unique per schema: resolve definitions from this item's own model.
-  const targetScope = await getItemModelScope(targetItem as any)
+  let targetScope: ModelScope | undefined
   for (const itemProperty of targetItem.properties) {
-    if (!itemProperty.propertyDef && targetItem.modelName) {
-      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName, targetScope)
-      if (!schema) {
-        try {
-          const { Model } = await import('@/Model/Model')
-          const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-          let model = Model.resolve(normalizedModelName, targetScope)
-          if (!model?.properties?.length && !targetScope.modelFileId) {
-            model = Model.findByModelType(easName(targetItem.modelName))
-          }
-          const schemaKeys: string[] = []
-          if (model?.properties?.length) {
-            const schemas = modelPropertiesToObject(model.properties)
-            schemaKeys.push(...Object.keys(schemas))
-            schema = schemas[itemProperty.propertyName]
-          }
-        } catch {
-          schema = undefined
-        }
-      }
-      if (!schema) {
-        const db = BaseDb.getAppDb()
-        if (db) {
-          try {
-            const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-            const modelRecord = await resolveModelRecord(normalizedModelName, targetScope, db)
-            const modelRecords = modelRecord ? [modelRecord] : []
-            if (modelRecords.length > 0 && modelRecords[0].id) {
-              const propertyRecords = await db
-                .select()
-                .from(properties)
-                .where(
-                  and(
-                    eq(properties.modelId, modelRecords[0].id),
-                    eq(properties.name, itemProperty.propertyName),
-                  ),
-                )
-                .limit(1)
-              if (propertyRecords.length > 0) {
-                const propRecord = propertyRecords[0]
-                let refModelName: string | undefined
-                if (propRecord.refModelId != null) {
-                  const refModelRows = await db
-                    .select({ name: models.name })
-                    .from(models)
-                    .where(eq(models.id, propRecord.refModelId))
-                    .limit(1)
-                  refModelName = refModelRows[0]?.name ?? undefined
-                }
-                schema = {
-                  dataType: propRecord.dataType,
-                  ref: refModelName ?? undefined,
-                  refValueType: propRecord.refValueType || undefined,
-                  storageType: propRecord.storageType || undefined,
-                  localStorageDir: propRecord.localStorageDir || undefined,
-                  filenameSuffix: propRecord.filenameSuffix || undefined,
-                  required: propRecord.required ?? undefined,
-                }
-              }
-            }
-          } catch {
-            schema = undefined
-          }
-        }
-      }
-      if (schema) {
-        itemProperty.getService().send({
-          type: 'updateContext',
-          propertyRecordSchema: schema,
-        })
-      }
-    }
+    if (itemProperty.propertyDef) continue
+    targetScope ??= targetItem.modelName ? await getItemModelScope(targetItem as any) : {}
+    const definition = await resolveItemPropertyDefinition(targetItem, itemProperty, targetScope)
+    itemProperty.getService().send({ type: 'updateContext', propertyRecordSchema: definition })
   }
 }
 
@@ -829,44 +759,9 @@ const processRelationOrImageProperty = async (
       }
     }
   }
+  // getSegmentedItemProperties gave every property its row's definition
   const propertyDef = relationOrImageProperty.propertyDef
-  let isRequired = propertyDef?.required === true
-  // Resolve required from schema/DB when propertyDef lacks it
-  if (!isRequired && relationOrImageProperty.modelName) {
-    const propertyScope = await getItemModelScope(relationOrImageProperty as any)
-    let schema = await getPropertySchema(
-      relationOrImageProperty.modelName,
-      relationOrImageProperty.propertyName,
-      propertyScope,
-    )
-    if (!schema && BaseDb.getAppDb()) {
-      const normalizedModelName = upperFirst(camelCase(relationOrImageProperty.modelName))
-      const modelRecord = await resolveModelRecord(normalizedModelName, propertyScope)
-      const modelRecords = modelRecord ? [modelRecord] : []
-      if (modelRecords.length > 0 && modelRecords[0].id) {
-        const propertyRecords = await BaseDb.getAppDb()!
-          .select()
-          .from(properties)
-          .where(
-            and(
-              eq(properties.modelId, modelRecords[0].id),
-              eq(properties.name, relationOrImageProperty.propertyName),
-            ),
-          )
-          .limit(1)
-        if (propertyRecords.length > 0) {
-          schema = {
-            dataType: propertyRecords[0].dataType,
-            ref: undefined,
-            required: propertyRecords[0].required ?? undefined,
-          } as any
-        }
-      }
-    }
-    if (schema?.required === true || (schema as any)?.required === 1) {
-      isRequired = true
-    }
-  }
+  const isRequired = propertyDef?.required === true
 
   // Required relation/image/file/html/json with no value: cannot publish
   if (isRequired && !value) {
@@ -1799,29 +1694,8 @@ const buildPublishPayload = async (
     const ctx = 'context' in snapshot ? snapshot.context : null
     const val = ctx ? (ctx as any).renderValue ?? (ctx as any).propertyValue : undefined
     if (val != null && typeof val === 'string' && val.trim() !== '') continue
-    // No value - check if required from propertyDef or DB
-    let isRequired = relProp.propertyDef?.required === true
-    if (!isRequired && BaseDb.getAppDb() && item.modelName) {
-      const normalizedModelName = upperFirst(camelCase(item.modelName))
-      const modelRecord = await resolveModelRecord(normalizedModelName, await getItemModelScope(item as any))
-      const modelRows = modelRecord ? [modelRecord] : []
-      if (modelRows.length > 0) {
-        const propRows = await BaseDb.getAppDb()!
-          .select({ required: properties.required, refModelId: properties.refModelId })
-          .from(properties)
-          .where(
-            and(
-              eq(properties.modelId, modelRows[0].id),
-              eq(properties.name, relProp.propertyName),
-              sql`lower(${properties.dataType}) = 'relation'`,
-            ),
-          )
-          .limit(1)
-        if (propRows.length > 0 && (propRows[0].required === true || propRows[0].required === 1)) {
-          isRequired = true
-        }
-      }
-    }
+    // No value: an error when the definition (its row's, from ensurePropertyDefs) requires one
+    const isRequired = relProp.propertyDef?.required === true
     if (isRequired) {
       const refModel = relProp.propertyDef?.ref ?? relProp.propertyDef?.refModelName ?? 'related'
       addValidationError(

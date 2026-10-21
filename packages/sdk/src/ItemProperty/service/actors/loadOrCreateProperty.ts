@@ -14,6 +14,7 @@ import {
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
+import { getPropertyDefinition } from '@/helpers/propertyDefinition'
 import { timingMarks } from '@/helpers/timing'
 import { ensureImageLocal } from '@/helpers/ensureImageLocal'
 import { ImageSize } from '@/helpers/constants'
@@ -95,8 +96,6 @@ export const loadOrCreateProperty = fromCallback<
       const modelNameForNew = context.modelName
       if (modelNameForNew) {
         try {
-          const { Model } = await import('../../../Model/Model')
-          const { modelPropertiesToObject } = await import('../../../helpers/model')
           const { resolveItemModelFileId, modelNameForType } = await import('../../../db/read/resolveModelRecord')
           const itemModelFileId = await resolveItemModelFileId({
             modelFileId: context.modelFileId,
@@ -106,19 +105,13 @@ export const loadOrCreateProperty = fromCallback<
           const normalizedModelName =
             (await modelNameForType(modelNameForNew, { modelFileId: itemModelFileId }).catch(() => undefined)) ??
             modelNameForNew
-          let model = await Model.resolveAsync(normalizedModelName, { modelFileId: itemModelFileId })
-          if (!model?.properties?.length && !itemModelFileId) {
-            model = Model.findByModelType(easName(modelNameForNew))
-          }
-          if (model?.properties?.length) {
-            const schemas = modelPropertiesToObject(model.properties)
-            propertyRecordSchema = schemas[propertyName]
-            if (propertyRecordSchema) {
-              logger(`Metadata not found: loaded propertyRecordSchema from Model for propertyName "${propertyName}"`)
-            }
-          }
+          propertyRecordSchema = await loadPropertyDefinition(db, {
+            modelName: normalizedModelName,
+            modelFileId: itemModelFileId,
+            propertyName,
+          })
         } catch (error) {
-          logger(`Metadata not found: Model fallback failed for propertyName "${propertyName}": ${error}`)
+          logger(`Metadata not found: no definition for propertyName "${propertyName}": ${error}`)
         }
       }
       logger(`Metadata not found in database for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
@@ -173,39 +166,17 @@ export const loadOrCreateProperty = fromCallback<
     const modelName = modelNameOrType
       ? ((await modelNameForType(modelNameOrType, { modelFileId }).catch(() => undefined)) ?? modelNameOrType)
       : undefined
-    if (modelName) {
-      try {
-        // One read for the whole model, shared by the item's other properties loading now
-        const { loadModelPropertyRecordSchemas } = await import('./modelPropertyRecordSchemas')
-        const schemas = await loadModelPropertyRecordSchemas(modelName, modelFileId, db)
-        propertyRecordSchema = schemas.get(propertyName)
-        timing.mark('model schema')
-      } catch (error) {
-        logger(`Error loading propertyRecordSchema from database: ${error}`)
-        // Continue without propertyRecordSchema
-      }
-    }
-
-    // Fix 1: Fallback to in-memory Model when DB doesn't have model/properties yet (e.g. runtime-created model)
-    if (!propertyRecordSchema && modelName) {
-      try {
-        const { Model } = await import('../../../Model/Model')
-        const { modelPropertiesToObject } = await import('../../../helpers/model')
-        // Try the name first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
-        let model = Model.resolve(modelName, { modelFileId })
-        if (!model?.properties?.length && !modelFileId) {
-          model = Model.findByModelType(easName(modelName))
-        }
-        if (model?.properties?.length) {
-          const schemas = modelPropertiesToObject(model.properties)
-          propertyRecordSchema = schemas[propertyName]
-          if (propertyRecordSchema) {
-            logger(`Fallback: loaded propertyRecordSchema from Model for propertyName "${propertyName}"`)
-          }
-        }
-      } catch (error) {
-        logger(`Fallback Model lookup failed for propertyName "${propertyName}": ${error}`)
-      }
+    try {
+      propertyRecordSchema = await loadPropertyDefinition(db, {
+        propertyId: metadataRecord.propertyId,
+        modelName,
+        modelFileId,
+        propertyName,
+      })
+      timing.mark('model schema')
+    } catch (error) {
+      logger(`Error loading the definition of "${propertyName}": ${error}`)
+      // Continue without propertyRecordSchema
     }
 
     // For Html: read file content for renderValue (propertyValue is seed ID; blob URLs in DB are invalid after reload)
@@ -416,3 +387,38 @@ export const loadOrCreateProperty = fromCallback<
     })
   })
 })
+
+/**
+ * A property's definition from its row: by the metadata row's property_id when it has one, else
+ * from its model's rows (one read per model, shared by the item's properties loading together).
+ * A model created in this session whose rows aren't written yet gives its in-memory definition.
+ */
+async function loadPropertyDefinition(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  {
+    propertyId,
+    modelName,
+    modelFileId,
+    propertyName,
+  }: { propertyId?: number | null; modelName?: string; modelFileId?: string; propertyName: string },
+): Promise<Record<string, any> | undefined> {
+  if (propertyId != null) {
+    const definition = await getPropertyDefinition(propertyId, db)
+    if (definition) return definition
+  }
+  if (!modelName) return undefined
+  const { loadModelPropertyRecordSchemas } = await import('./modelPropertyRecordSchemas')
+  const definition = (await loadModelPropertyRecordSchemas(modelName, modelFileId, db)).get(propertyName)
+  if (definition) return definition
+
+  const { Model } = await import('../../../Model/Model')
+  const { modelPropertiesToObject } = await import('../../../helpers/model')
+  // Try the name first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
+  let model = Model.resolve(modelName, { modelFileId })
+  if (!model?.properties?.length && !modelFileId) {
+    model = Model.findByModelType(easName(modelName))
+  }
+  const unwritten = model?.properties?.length ? modelPropertiesToObject(model.properties)[propertyName] : undefined
+  if (unwritten) logger(`No row yet: in-memory definition of "${propertyName}" from Model ${modelName}`)
+  return unwritten
+}

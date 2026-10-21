@@ -2,11 +2,9 @@ import { UploadProperty } from '@/db/read/getPublishUploads'
 import { IItem } from '@/interfaces'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
 import { getPropertySchema, TProperty } from '@/helpers/property'
-import { getItemModelScope, resolveModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
+import { getPropertyDefinition, type PropertyDefinition } from '@/helpers/propertyDefinition'
+import { getItemModelScope, type ModelScope } from '@/db/read/resolveModelRecord'
 import type { Static } from '@sinclair/typebox'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { models, properties } from '@/seedSchema'
-import { eq, and } from 'drizzle-orm'
 import { camelCase, upperFirst } from 'lodash-es'
 import { reconcilePropertyDraftRows } from '@/helpers/reconcilePropertyDraftRows'
 
@@ -14,53 +12,33 @@ const matchesDataType = (
   actual: string | undefined,
   expected: ModelPropertyDataTypes | string,
 ): boolean => normalizeDataType(actual) === expected
-async function resolvePropertyDef(
-  modelName: string,
-  propertyName: string,
-  scope: ModelScope,
-): Promise<{ dataType?: string; ref?: string; refValueType?: string; storageType?: string; localStorageDir?: string; filenameSuffix?: string; required?: boolean } | undefined> {
-  const schema = await getPropertySchema(modelName, propertyName, scope)
-  if (schema) return schema
-  const db = BaseDb.getAppDb()
-  if (!db) return undefined
-  try {
-    const normalizedModelName = upperFirst(camelCase(modelName))
-    const modelRecord = await resolveModelRecord(normalizedModelName, scope, db)
-    const modelRecords = modelRecord ? [modelRecord] : []
-    if (modelRecords.length === 0 || !modelRecords[0].id) return undefined
-    const propertyRecords = await db
-      .select()
-      .from(properties)
-      .where(
-        and(
-          eq(properties.modelId, modelRecords[0].id),
-          eq(properties.name, propertyName),
-        ),
-      )
-      .limit(1)
-    if (propertyRecords.length === 0) return undefined
-    const propRecord = propertyRecords[0]
-    let refModelName: string | undefined
-    if (propRecord.refModelId != null) {
-      const refModelRows = await db
-        .select({ name: models.name })
-        .from(models)
-        .where(eq(models.id, propRecord.refModelId))
-        .limit(1)
-      refModelName = refModelRows[0]?.name ?? undefined
-    }
-    return {
-      dataType: propRecord.dataType,
-      ref: refModelName ?? undefined,
-      refValueType: propRecord.refValueType || undefined,
-      storageType: propRecord.storageType || undefined,
-      localStorageDir: propRecord.localStorageDir || undefined,
-      filenameSuffix: propRecord.filenameSuffix || undefined,
-      required: propRecord.required ?? undefined,
-    }
-  } catch {
-    return undefined
+
+/**
+ * The definition of an item property that has none in its context, from its row: by property_id
+ * when the context has one, else by the item's model and the property name. Publish can't route or
+ * attest a property without one, so a property with no row throws.
+ */
+export async function resolveItemPropertyDefinition(
+  item: IItem<any>,
+  itemProperty: IItem<any>['properties'][number],
+  scope?: ModelScope,
+): Promise<PropertyDefinition> {
+  const context = (itemProperty.getService().getSnapshot() as { context?: { propertyId?: number | null } }).context ?? {}
+  if (context.propertyId != null) {
+    const definition = await getPropertyDefinition(context.propertyId)
+    if (definition) return definition
   }
+  if (item.modelName) {
+    // getItem's modelName can be the display form ("Blog Post")
+    for (const modelName of new Set([item.modelName, upperFirst(camelCase(item.modelName))])) {
+      const definition = await getPropertySchema(modelName, itemProperty.propertyName, scope ?? (await getItemModelScope(item as any)))
+      if (definition) return definition
+    }
+  }
+  throw new Error(
+    `Property "${itemProperty.propertyName}" of ${item.modelName ?? 'an item'} (${item.seedLocalId}) has no definition: ` +
+      `its model has no properties row by that name`,
+  )
 }
 
 export const getSegmentedItemProperties = async (item: IItem<any>) => {
@@ -78,24 +56,13 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
 
   for (const itemProperty of item.properties) {
     let propertyDef = itemProperty.propertyDef
-    // When propertyDef is missing (e.g. external app, Model not registered), resolve inline
-    // so properties are not skipped and metadata attestations can be created
-    if (!propertyDef && item.modelName) {
-      itemScope ??= await getItemModelScope(item as any)
-      const resolved = await resolvePropertyDef(item.modelName, itemProperty.propertyName, itemScope)
-      if (resolved) {
-        itemProperty.getService().send({ type: 'updateContext', propertyRecordSchema: resolved })
-        propertyDef = resolved as Static<typeof TProperty>
-      } else {
-        // Last resort: Model and DB don't have schema. Use Text so property routes to
-        // itemBasicProperties and can be attested (covers title, description, etc.)
-        const fallbackDef = { dataType: 'Text' as const }
-        itemProperty.getService().send({ type: 'updateContext', propertyRecordSchema: fallbackDef })
-        propertyDef = fallbackDef as Static<typeof TProperty>
-      }
-    }
+    // No definition in the context (e.g. an external app's item whose Model isn't loaded): read it
+    // so the property is routed and attested
     if (!propertyDef) {
-      continue
+      itemScope ??= item.modelName ? await getItemModelScope(item as any) : {}
+      const resolved = await resolveItemPropertyDefinition(item, itemProperty, itemScope)
+      itemProperty.getService().send({ type: 'updateContext', propertyRecordSchema: resolved })
+      propertyDef = resolved as unknown as Static<typeof TProperty>
     }
 
     const isItemStorage =
