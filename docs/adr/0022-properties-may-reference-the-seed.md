@@ -37,8 +37,8 @@ With `'versionOrSeed'`:
   in the same request.
 - **Who counts.** A Seed-referencing property counts only when its attester attested the Seed,
   the rule Version-referencing properties already follow for their Version. Only attestations of
-  the model's own property schemas count, so sidecars that reference the Seed (PublishedBy,
-  DomainOwnership) are never read as properties.
+  the model's own property schemas count, so sidecars that reference the Seed (PublishedBy)
+  are never read as properties.
 - **Precedence.** A Seed-referencing property attestation counts as a patch to the Version that
   was the seed's latest when it was made (by `timeCreated`): the newest attestation of that
   property on that Version wins, whichever it references. So a later Version's attestation
