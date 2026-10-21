@@ -10,6 +10,7 @@ import { generateId } from '@/helpers'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:model:actors:loadOrCreateModel')
 
@@ -17,8 +18,9 @@ const logger = debug('seedSdk:model:actors:loadOrCreateModel')
  * Create ModelProperty instances for all property IDs to ensure they're cached
  * This ensures that ModelProperty.getById() in Model.properties getter will find the instances
  * @param propertyFileIds - Array of property file IDs to create instances for
+ * @param evictionEpoch - When the model's load started: a schema eviction since then creates none
  */
-const createPropertyInstances = async (propertyFileIds: string[]): Promise<void> => {
+const createPropertyInstances = async (propertyFileIds: string[], evictionEpoch: number): Promise<void> => {
   if (propertyFileIds.length === 0) {
     return
   }
@@ -35,7 +37,7 @@ const createPropertyInstances = async (propertyFileIds: string[]): Promise<void>
     // ModelProperty.createById() will check cache first, then query DB and create if needed
     const createPromises = propertyFileIds.map(async (propertyFileId) => {
       try {
-        const property = await ModelProperty.createById(propertyFileId)
+        const property = await ModelProperty.createById(propertyFileId, { evictionEpoch })
         if (property) {
           logger(`Created/cached ModelProperty instance for propertyFileId "${propertyFileId}"`)
         } else {
@@ -59,6 +61,7 @@ export const loadOrCreateModel = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext>
 >(({ sendBack, input: { context }, self }) => {
+  const evictionEpoch = currentEvictionEpoch()
   const _loadOrCreateModel = async (): Promise<void> => {
     const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
 
@@ -207,7 +210,7 @@ export const loadOrCreateModel = fromCallback<
 
           if (propertyFileIds.length > 0) {
             // Not for a model stopped meanwhile (unloaded, or evicted with its schema)
-            if (!isActorStopped(self)) await createPropertyInstances(propertyFileIds)
+            if (!isActorStopped(self)) await createPropertyInstances(propertyFileIds, evictionEpoch)
           }
 
           // Generate schemaFileId if not set
