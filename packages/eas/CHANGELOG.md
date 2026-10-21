@@ -2,6 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `fetchEasModelSchemas(models)` asks EAS in one request for the model schemas (`bytes32 <name>`) every `{ name, level }` can match at its nameMatch level, and `matchEasModelSchemas(schemas, models)` says which model each is for and at which tier. `getEasModelSchemasForNames` does both. `modelSchemaDefinition(name)` is `bytes32 <easName>`.
+- `getEasSchemaUidForSchemaDefinition` looks the exact definition up (`getEasSchemaUidForExactDefinition`) after its cache. It asked for a schema whose definition ended with the snake-cased text.
+
+### Breaking
+
+- Removed `fetchEasSchemaUidBySchemaName` and `getEasSchemaUidBySchemaName`. Look a property schema up by its full definition with `getEasSchemaUidForExactDefinition`, and model schemas with `fetchEasModelSchemas`.
+
 ## 0.7.8 (2026-10-20)
 
 - `DefaultEasClient` requests abort after `EAS_REQUEST_TIMEOUT_MS` (30 s). `createEasGraphQLClient(url, timeoutMs?)` builds a client with that limit.

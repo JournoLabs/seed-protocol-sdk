@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Before registering a property schema, publish looks for one with the exact definition (`getEasSchemaUidForExactDefinition`). It looked List properties up by name and others through the SDK's `getEasSchemaForItemProperty`, which is removed.
+
 ### Breaking
 
 - **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed, so the upload server can drop its reimbursement route. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
