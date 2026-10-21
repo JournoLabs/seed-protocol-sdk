@@ -131,6 +131,17 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           return
         }
 
+        // ADR 0021: retracted properties are revoked after attesting, from the attester. Fail now,
+        // before anything is attested, when this wallet can't revoke.
+        if (item.seedUid) {
+          const { getPendingRetractions } = await import('@seedprotocol/sdk')
+          const retractions = await getPendingRetractions({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          if (retractions.length > 0) {
+            const { assertCanRevokeSeedAttestations } = await import('../../revoke/revokeAttestations')
+            await assertCanRevokeSeedAttestations({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          }
+        }
+
         if (!address || typeof address !== 'string' || !address.trim()) {
           activePublishProcesses.delete(item.seedLocalId)
           sendBack({

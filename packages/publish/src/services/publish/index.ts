@@ -15,6 +15,7 @@ import {
   authorizing,
   preparingHtmlEmbedded,
   rewritingHtmlEmbedded,
+  revokeRetractedProperties,
 } from './actors'
 import {
   PublishMachineStates,
@@ -63,6 +64,7 @@ export const publishMachine = setup({
     authorizing,
     preparingHtmlEmbedded,
     rewritingHtmlEmbedded,
+    revokeRetractedProperties,
   },
   actions : {
     /** Log error; error/errorStep are assigned per transition. Supports both event.error (custom events) and event.data (XState fromPromise invoke errors). */
@@ -105,6 +107,10 @@ export const publishMachine = setup({
     assignErrorCreatingAttestationsDirectToEas : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingAttestationsDirectToEas',
+    },),
+    assignErrorRevokingRetractedProperties : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'revokingRetractedProperties',
     },),
     assignAccountFromRetry : assign({
       wallet : ( { event, }, ) => {
@@ -400,7 +406,7 @@ export const publishMachine = setup({
         src    : 'createAttestations',
         input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
-          target : SUCCESS,
+          target : 'revokingRetractedProperties',
           actions : assign({
             easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
             publishedBatch : ( { event, }, ) =>
@@ -427,7 +433,7 @@ export const publishMachine = setup({
         src    : 'createAttestationsDirectToEas',
         input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
-          target : SUCCESS,
+          target : 'revokingRetractedProperties',
           actions : assign({
             easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
             publishedBatch : ( { event, }, ) =>
@@ -445,6 +451,26 @@ export const publishMachine = setup({
       on : {
         retry : {
           target  : 'creatingAttestationsDirectToEas',
+          actions : [ 'assignAccountFromRetry', ],
+        },
+      },
+    },
+    // ADR 0021: retracted properties revoke their attestations once the rest is attested
+    revokingRetractedProperties : {
+      invoke : {
+        src     : 'revokeRetractedProperties',
+        input   : ( { context } ) => ({ context } as { context: PublishMachineContext }),
+        onDone  : { target : SUCCESS },
+        onError : {
+          target  : 'retractionFailureRecoverable',
+          actions : [ 'assignErrorRevokingRetractedProperties', 'handleError', ],
+        },
+      },
+    },
+    retractionFailureRecoverable : {
+      on : {
+        retry : {
+          target  : 'revokingRetractedProperties',
           actions : [ 'assignAccountFromRetry', ],
         },
       },
