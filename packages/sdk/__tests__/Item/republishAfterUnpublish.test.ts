@@ -160,9 +160,10 @@ testDescribe('republish after unpublish', () => {
       propertyName: a._propertyName as string,
       schemaUid: a.schema as string,
       attestationUid: nextUid(),
+      metadataLocalId: a._metadataLocalId as string | undefined,
     }))
     const at = Date.now()
-    await updateVersionUid({ seedLocalId, versionUid: newVersionUid, publisher, attestationCreatedAt: at })
+    await updateVersionUid({ seedLocalId, versionUid: newVersionUid, versionLocalId: own.versionLocalId, publisher, attestationCreatedAt: at })
     await applyPropertyAttestationUidsFromPublish({
       seedLocalId,
       attestationCreatedAtMs: at,

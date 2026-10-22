@@ -10,6 +10,11 @@ import { mergeVersionRowInto, otherVersionRowsWithUid } from '@/db/write/mergeCh
 type UpdateVersionUidProps = {
   seedLocalId: string
   versionUid: string
+  /**
+   * The version row the publish request was built from (the payload's `versionLocalId`). When the
+   * seed has it as a draft, it takes the uid; otherwise the attestation is a new version row.
+   */
+  versionLocalId?: string
   publisher?: string
   /** Unix ms when the version attestation was created (EAS / chain time). */
   attestationCreatedAt?: number
@@ -17,8 +22,9 @@ type UpdateVersionUidProps = {
 
 /**
  * Updates the version record with the attestation UID after a Version attestation is created, in
- * one transaction. Targets the first version without a uid yet in head-version order (the one
- * being published). A uid one of the seed's version rows already has is ignored. A version row
+ * one transaction. Targets `versionLocalId` when given, else the first version without a uid yet
+ * in head-version order (the one being published). A uid one of the seed's version rows already
+ * has is ignored. A version row
  * another writer inserted for the same uid (a sync that ran during the publish) is merged into the
  * target first, since versions.uid is unique.
  * Publisher is immutable once set: we never overwrite an existing publisher.
@@ -26,6 +32,7 @@ type UpdateVersionUidProps = {
 export const updateVersionUid = async ({
   seedLocalId,
   versionUid,
+  versionLocalId,
   publisher,
   attestationCreatedAt,
 }: UpdateVersionUidProps): Promise<void> => {
@@ -50,7 +57,8 @@ export const updateVersionUid = async ({
     if (rows.some((r: { uid: string | null }) => r.uid?.toLowerCase() === wanted)) return
 
     const toUpdate = rows.find(
-      (r: { localId: string | null; uid: string | null }) => r.localId && isPlaceholderUid(r.uid),
+      (r: { localId: string | null; uid: string | null }) =>
+        r.localId && isPlaceholderUid(r.uid) && (!versionLocalId || r.localId === versionLocalId),
     )
     if (!toUpdate?.localId) {
       // No local draft version took this attestation (e.g. a republish after unpublish, where every

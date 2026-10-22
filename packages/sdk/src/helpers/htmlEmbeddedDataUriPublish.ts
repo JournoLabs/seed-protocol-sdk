@@ -7,11 +7,18 @@ import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPubl
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getPublicArweaveRawUrl, normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import { getContentHash } from '@/helpers/crypto'
-import type { IItem } from '@/interfaces'
+import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { Item } from '@/Item/Item'
-import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
+import { ModelPropertyDataTypes, normalizeDataType, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
+import { findSeedRow } from '@/db/read/findSeedRow'
+import { storageSeedTransactionId } from '@/storageValue/resolve'
+import {
+  getPublishGraph,
+  publishGraphItemNodes,
+  type EmbeddedImageRow,
+  type PublishGraphNode,
+} from '@/db/read/publishGraph'
 import { getExtensionForMimeType } from '@/helpers/mimeTypes'
 
 export const HTML_EMBEDDED_MAX_IMAGES_PER_DOC = 50
@@ -249,34 +256,29 @@ const SEED_PROPERTY_REF_DATA_TYPES = [
 ] as string[]
 
 /**
- * The storage property of `item` a `seed:property/<name>` placeholder names, and the seed it holds.
+ * The storage property of `node` a `seed:property/<name>` placeholder names, and the seed it holds.
  * Html properties are refused: an Html seed may itself be deferred to after the rewrite.
  */
 function resolveSeedPropertyRefTarget(
-  item: IItem<any>,
+  node: PublishGraphNode,
   propertyName: string,
 ): { seedLocalId?: string; seedUid?: string } {
-  const property = item.properties.find(
-    (p) => p.propertyName === propertyName || p.propertyName === `${propertyName}Id`,
-  )
-  const def = property?.propertyDef
-  if (!property || !def) {
+  const property = node.properties.find((p) => p.key === propertyName)
+  if (!property) {
     throw new HtmlSeedPropertyRefError(
-      `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${item.modelName} has no property ${propertyName}`,
+      `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${node.modelName} has no property ${propertyName}`,
     )
   }
-  const dataType = normalizeDataTypeLocal(def.dataType)
-  const storageType =
-    dataType === ModelPropertyDataTypes.Relation ? normalizeDataTypeLocal(def.refValueType) : dataType
+  const def = property.definition
+  const dataType = normalizeDataType(def.dataType)
+  const storageType = dataType === ModelPropertyDataTypes.Relation ? normalizeDataType(def.refValueType) : dataType
   if (!SEED_PROPERTY_REF_DATA_TYPES.includes(storageType)) {
     throw new HtmlSeedPropertyRefError(
       `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} is ${def.dataType}; ` +
         `only Image, File and Json properties can be referenced`,
     )
   }
-  const snap = property.getService().getSnapshot()
-  const ctx = 'context' in snap ? snap.context : null
-  const ids = resolveSeedIdsFromRefString(normalizeRelationPropertyValue((ctx as any)?.propertyValue) ?? '')
+  const ids = resolveSeedIdsFromRefString(normalizeRelationPropertyValue(property.row?.propertyValue) ?? '')
   if (!ids.seedLocalId && !ids.seedUid) {
     throw new HtmlSeedPropertyRefError(
       `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} has no value`,
@@ -289,25 +291,19 @@ const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
 
 /**
  * The Arweave tx of the storage seed a placeholder names: uploaded in this publish's phase 1, or,
- * when not uploaded now, the transaction it was published with (its storageTransactionId).
+ * when not uploaded now, the transaction it was published with (its storageTransactionId row).
  */
 async function resolveSeedPropertyRefTxId(
-  item: IItem<any>,
+  node: PublishGraphNode,
   propertyName: string,
   txBySeedLocalId: Map<string, string>,
-  loads: ItemLoads,
 ): Promise<string> {
-  const { seedLocalId, seedUid } = resolveSeedPropertyRefTarget(item, propertyName)
-  const uploaded = seedLocalId ? txBySeedLocalId.get(seedLocalId) : undefined
+  const target = resolveSeedPropertyRefTarget(node, propertyName)
+  const uploaded = target.seedLocalId ? txBySeedLocalId.get(target.seedLocalId) : undefined
   if (uploaded) return uploaded
 
-  const storageItem = await loads.find({ seedLocalId, seedUid })
-  const st =
-    storageItem?.internalProperties['storageTransactionId'] ??
-    storageItem?.allProperties['storageTransactionId']
-  const stSnap = st?.getService().getSnapshot()
-  const stValue = stSnap && 'context' in stSnap ? (stSnap.context as any).propertyValue : undefined
-  if (typeof stValue === 'string' && ARWEAVE_TX_ID.test(stValue.trim())) return stValue.trim()
+  const recorded = await storageSeedTransactionId(target)
+  if (recorded && ARWEAVE_TX_ID.test(recorded)) return recorded
 
   throw new HtmlSeedPropertyRefError(
     `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} was not uploaded ` +
@@ -318,11 +314,6 @@ async function resolveSeedPropertyRefTxId(
 export type PrepareHtmlEmbeddedImagesResult = {
   /** Html storage seed local ids that must be uploaded in phase 2 (after image txs + rewrite). */
   deferredHtmlSeedLocalIds: string[]
-}
-
-async function deleteCoPublishRowsForParent(appDb: ReturnType<typeof BaseDb.getAppDb>, parentSeedLocalId: string) {
-  if (!appDb) return
-  await appDb.delete(htmlEmbeddedImageCoPublish).where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentSeedLocalId))
 }
 
 /**
@@ -366,124 +357,110 @@ export async function createImageItemFromBytes(
     fs.writeFileSync(filePath, bytes)
   }
   const { seedLocalId } = imageItem
-  // Publish loads the image again when it uploads and attests it
+  // Publish reads the image from its rows when it uploads and attests it
   imageItem.unload()
   return { seedLocalId }
 }
+
+/** The Html properties of a node with a stored Html seed and file name. */
+const htmlValuesOf = (node: PublishGraphNode) =>
+  node.properties.flatMap((property) => {
+    if (normalizeDataType(property.definition.dataType) !== ModelPropertyDataTypes.Html) return []
+    const htmlSeedLocalId = property.row?.propertyValue?.trim()
+    const fileName = property.row?.refResolvedValue
+    return htmlSeedLocalId && fileName ? [{ property, htmlSeedLocalId, filePath: `${BaseFileManager.getFilesPath('html')}/${fileName}` }] : []
+  })
 
 /**
  * Scan Html storage properties, materialize embedded images as Image items, insert co-publish rows.
  * Call before phase-1 Arweave tx build. Does not rewrite Html files yet.
  */
 export async function prepareHtmlEmbeddedImagesForPublish(
-  item: IItem<any>,
+  item: { seedLocalId: string; modelName?: string },
   publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
 ): Promise<PrepareHtmlEmbeddedImagesResult> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) {
     return { deferredHtmlSeedLocalIds: [] }
   }
+  const { waitForPendingOutboxOps } = await import('@/outbox')
+  await waitForPendingOutboxOps()
 
   const deferred = new Set<string>()
   // The item's own Html, and the Html of the draft items published with it: each gets its embedded
   // images materialized and co-published (rows keyed by the item owning the Html property).
-  await withItemLoads(undefined, async (loads) => {
-    for (const parent of [item, ...(await getRelatedDraftsCoPublishedWith(item, loads))]) {
-      await prepareHtmlEmbeddedImagesOfItem(appDb, parent, publishPolicy, deferred)
-    }
-  })
+  const graph = await getPublishGraph(item)
+  for (const node of publishGraphItemNodes(graph)) {
+    await prepareHtmlEmbeddedImagesOfNode(appDb, node, publishPolicy, deferred)
+  }
 
   return { deferredHtmlSeedLocalIds: [...deferred] }
 }
 
 /**
- * Draft items (no seed uid yet) that a publish of `item` publishes with it: every draft reachable
- * through relation and list properties, as getPublishPayload and getPublishUploads walk them
- * (publishDraftGraph.ts). Html-embedded images of these items are co-published with `item` like its own.
+ * An embedded image an earlier attempt materialized for this data URI that can be used again: its
+ * Image seed is still a local draft and its file is there.
  */
-export async function getRelatedDraftsCoPublishedWith(item: IItem<any>, loads: ItemLoads): Promise<IItem<any>[]> {
-  const { getPublishDraftGraph } = await import('@/db/read/publishDraftGraph')
-  const { drafts } = await getPublishDraftGraph(item, { loads })
-  return drafts.map((d) => d.item)
+async function reusableImage(row: EmbeddedImageRow | undefined): Promise<string | undefined> {
+  if (!row) return undefined
+  const seed = await findSeedRow({ localId: row.imageSeedLocalId })
+  if (!seed || isValidEasAttestationUid(seed.uid)) return undefined
+  return (await findEmbeddedImageFilePath(row.imageSeedLocalId)) ? row.imageSeedLocalId : undefined
 }
 
-async function prepareHtmlEmbeddedImagesOfItem(
+async function prepareHtmlEmbeddedImagesOfNode(
   appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  item: IItem<any>,
+  node: PublishGraphNode,
   publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
   deferred: Set<string>,
 ): Promise<void> {
-  await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
-  const { resolveItemPropertyDefinition } = await import('./getSegmentedItemProperties')
+  // An earlier attempt's rows: their images are reused for the same Html and data URI
+  const earlier = node.embeddedImages
+  const kept: EmbeddedImageRow[] = []
 
-  for (const p of item.properties) {
-    const contextDef = p.propertyDef
-    if (contextDef && normalizeDataTypeLocal(contextDef.dataType) !== ModelPropertyDataTypes.Html) continue
-    // The policy is the row's (a schema file's htmlEmbeddedDataUriPolicy or a code-defined one); a
-    // context definition built elsewhere may not carry it
-    const def = await resolveItemPropertyDefinition(item, p)
-    if (normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
-
-    const snap = p.getService().getSnapshot()
-    const ctx = 'context' in snap ? snap.context : null
-    const htmlSeedLocalId = typeof (ctx as any)?.propertyValue === 'string' ? (ctx as any).propertyValue : ''
-    const refResolved = (ctx as any)?.refResolvedValue as string | undefined
-    if (!htmlSeedLocalId?.trim() || !refResolved) continue
-
-    const filePath = `${BaseFileManager.getFilesPath('html')}/${refResolved}`
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) continue
-
-    let html: string
-    try {
-      html = await BaseFileManager.readFileAsString(filePath)
-    } catch {
-      const buf = await BaseFileManager.readFileAsBuffer(filePath)
-      if (typeof Buffer !== 'undefined' && Buffer.isBuffer(buf)) {
-        html = buf.toString('utf-8')
-      } else if (typeof Blob !== 'undefined' && buf instanceof Blob) {
-        html = await buf.text()
-      } else if (buf instanceof ArrayBuffer) {
-        html = new TextDecoder('utf-8', { fatal: false }).decode(buf)
-      } else {
-        const v = buf as ArrayBufferView
-        html = new TextDecoder('utf-8', { fatal: false }).decode(
-          new Uint8Array(v.buffer, v.byteOffset, v.byteLength),
-        )
-      }
-    }
+  for (const { property, htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
+    if (!(await BaseFileManager.pathExists(filePath))) continue
+    const html = await BaseFileManager.readFileAsString(filePath)
 
     // seed:property/ placeholders are filled in after phase 1 whatever the data URI policy. A
     // placeholder naming no usable property fails here, before anything is uploaded.
     const refs = findSeedPropertyRefsInHtml(html)
-    for (const name of refs) resolveSeedPropertyRefTarget(item, name)
-    if (refs.length > 0) deferred.add(htmlSeedLocalId.trim())
+    for (const name of refs) resolveSeedPropertyRefTarget(node, name)
+    if (refs.length > 0) deferred.add(htmlSeedLocalId)
 
-    const policy = resolveEffectiveHtmlEmbeddedDataUriPolicy(def, publishPolicy)
+    // The policy is the row's definition (a schema file's htmlEmbeddedDataUriPolicy or a code-defined one)
+    const policy = resolveEffectiveHtmlEmbeddedDataUriPolicy(property.definition, publishPolicy)
     if (policy !== 'materialize') continue
 
     const extracted = await extractDataUriImagesFromHtml(html)
     if (extracted.length === 0) continue
 
-    deferred.add(htmlSeedLocalId.trim())
+    deferred.add(htmlSeedLocalId)
 
     for (const ent of extracted) {
+      const previous = earlier.find((r) => r.htmlSeedLocalId.trim() === htmlSeedLocalId && r.stableKey === ent.stableKey)
+      const reused = await reusableImage(previous)
+      if (reused) {
+        kept.push(previous!)
+        continue
+      }
       const { seedLocalId: imageSeedLocalId } = await createImageItemFromBytes(ent.bytes, ent.mimeType)
-      const now = Date.now()
+      if (previous) await appDb.delete(htmlEmbeddedImageCoPublish).where(eq(htmlEmbeddedImageCoPublish.id, previous.id))
       await appDb.insert(htmlEmbeddedImageCoPublish).values({
-        parentSeedLocalId: item.seedLocalId,
-        htmlSeedLocalId: htmlSeedLocalId.trim(),
+        parentSeedLocalId: node.seedLocalId,
+        htmlSeedLocalId,
         imageSeedLocalId,
         stableKey: ent.stableKey,
-        createdAt: now,
+        createdAt: Date.now(),
       }).onConflictDoNothing()
     }
   }
-}
 
-function normalizeDataTypeLocal(dt: string | undefined): string {
-  if (!dt) return ''
-  return dt.charAt(0).toUpperCase() + dt.slice(1).toLowerCase()
+  // Rows for Html or data URIs no longer there
+  for (const row of earlier) {
+    if (kept.includes(row)) continue
+    await appDb.delete(htmlEmbeddedImageCoPublish).where(eq(htmlEmbeddedImageCoPublish.id, row.id))
+  }
 }
 
 export type UploadedTx = { txId: string; seedLocalId?: string; versionLocalId?: string }
@@ -504,20 +481,6 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
 
-  await withItemLoads(undefined, async (loads) => {
-    const parentItem = await loads.find({ seedLocalId: parentSeedLocalId })
-    if (!parentItem) return
-    await rewriteHtmlEmbeddedImagesOfItemAndDrafts(appDb, parentItem, uploadedTransactions, deferredHtmlSeedLocalIds, loads)
-  })
-}
-
-async function rewriteHtmlEmbeddedImagesOfItemAndDrafts(
-  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  parentItem: IItem<any>,
-  uploadedTransactions: UploadedTx[],
-  deferredHtmlSeedLocalIds: string[] | undefined,
-  loads: ItemLoads,
-): Promise<void> {
   const txBySeedLocalId = new Map<string, string>()
   for (const u of uploadedTransactions) {
     if (u.seedLocalId && u.txId) {
@@ -529,50 +492,35 @@ async function rewriteHtmlEmbeddedImagesOfItemAndDrafts(
     : undefined
 
   // The parent's Html and that of the draft items published with it (see prepareHtmlEmbeddedImagesForPublish).
-  for (const item of [parentItem, ...(await getRelatedDraftsCoPublishedWith(parentItem, loads))]) {
-    await rewriteHtmlEmbeddedImagesOfItem(appDb, item, txBySeedLocalId, deferred, loads)
+  const graph = await getPublishGraph({ seedLocalId: parentSeedLocalId })
+  for (const node of publishGraphItemNodes(graph)) {
+    await rewriteHtmlEmbeddedImagesOfNode(node, txBySeedLocalId, deferred)
   }
 }
 
-async function rewriteHtmlEmbeddedImagesOfItem(
-  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  parentItem: IItem<any>,
+async function rewriteHtmlEmbeddedImagesOfNode(
+  node: PublishGraphNode,
   txBySeedLocalId: Map<string, string>,
   deferred: Set<string> | undefined,
-  loads: ItemLoads,
 ): Promise<void> {
-  const rows = await appDb
-    .select()
-    .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentItem.seedLocalId))
-
-  for (const p of parentItem.properties) {
-    const def = p.propertyDef
-    if (!def || normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
-    const snap = p.getService().getSnapshot()
-    const ctx = 'context' in snap ? snap.context : null
-    const htmlSeedLocalId = typeof (ctx as any)?.propertyValue === 'string' ? (ctx as any).propertyValue.trim() : ''
-    const refResolved = (ctx as any)?.refResolvedValue as string | undefined
-    if (!htmlSeedLocalId || !refResolved) continue
+  for (const { htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
     if (deferred && !deferred.has(htmlSeedLocalId)) continue
-
-    const htmlRows = rows.filter((r: (typeof rows)[number]) => String(r.htmlSeedLocalId).trim() === htmlSeedLocalId)
-    const filePath = `${BaseFileManager.getFilesPath('html')}/${refResolved}`
     if (!(await BaseFileManager.pathExists(filePath))) continue
 
     const html = await BaseFileManager.readFileAsString(filePath)
 
     const replacements = new Map<string, string>()
-    for (const r of htmlRows) {
+    const entries = await extractDataUriImagesFromHtml(html)
+    for (const r of node.embeddedImages) {
+      if (r.htmlSeedLocalId.trim() !== htmlSeedLocalId) continue
       const txId = txBySeedLocalId.get(r.imageSeedLocalId.trim())
-      if (!txId) continue
-      const dataUri = await findDataUriForStableKey(html, r.stableKey)
-      if (dataUri) replacements.set(dataUri, getPublicArweaveRawUrl(txId))
+      const dataUri = entries.find((e) => e.stableKey === r.stableKey)?.dataUri
+      if (txId && dataUri) replacements.set(dataUri, getPublicArweaveRawUrl(txId))
     }
 
     const urlByPropertyName = new Map<string, string>()
     for (const name of findSeedPropertyRefsInHtml(html)) {
-      const txId = await resolveSeedPropertyRefTxId(parentItem, name, txBySeedLocalId, loads)
+      const txId = await resolveSeedPropertyRefTxId(node, name, txBySeedLocalId)
       urlByPropertyName.set(name, getPublicArweaveRawUrl(txId))
     }
 
@@ -585,18 +533,7 @@ async function rewriteHtmlEmbeddedImagesOfItem(
       const fs = await BaseFileManager.getFs()
       fs.writeFileSync(filePath, newHtml)
     }
-
-    p.getService().send({
-      type: 'updateContext',
-      renderValue: newHtml,
-    })
   }
-}
-
-async function findDataUriForStableKey(html: string, stableKey: string): Promise<string | undefined> {
-  const entries = await extractDataUriImagesFromHtml(html)
-  const hit = entries.find((e) => e.stableKey === stableKey)
-  return hit?.dataUri
 }
 
 /**

@@ -134,6 +134,8 @@ type PublishInput = { input: { context: PublishMachineContext; event: unknown } 
 
 type NormalizedRequest = {
   localId: string
+  /** The version row this request's Version attestation is recorded on. */
+  versionLocalId?: string
   seedUid: string
   seedSchemaUid: string
   versionUid: string
@@ -152,6 +154,8 @@ type NormalizedRequest = {
     _propertyName?: string
     /** Metadata row the attested value was read from; the uid is recorded on it. */
     _metadataLocalId?: string
+    /** A value the attestation carries that the row doesn't hold yet; recorded with the uid. */
+    _attestedValue?: string
     _propertyNameForSchema?: string
     /** A List (bytes32[]) attestation: filled by resolving its slots, never by propertiesToUpdate. */
     _isList?: boolean
@@ -258,6 +262,7 @@ async function executeCreateAttestationsDirectToEas(
           ...(typeof att?._metadataLocalId === 'string' && att._metadataLocalId !== ''
             ? { _metadataLocalId: att._metadataLocalId }
             : {}),
+          ...(typeof att?._attestedValue === 'string' ? { _attestedValue: att._attestedValue } : {}),
           ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
             ? { _propertyNameForSchema: att._propertyNameForSchema }
             : {}),
@@ -408,6 +413,7 @@ async function executeCreateAttestationsDirectToEas(
         await updateVersionUid({
           seedLocalId: request.localId,
           versionUid: versionUidFromReceipt,
+          ...(request.versionLocalId ? { versionLocalId: request.versionLocalId } : {}),
           publisher: address,
           attestationCreatedAt: lastAttestationMs,
         })
@@ -480,6 +486,7 @@ async function executeCreateAttestationsDirectToEas(
                 ? list[j]!._propertyName
                 : undefined,
             metadataLocalId: sameLen ? list[j]?._metadataLocalId : undefined,
+            value: sameLen ? list[j]?._attestedValue : undefined,
           })),
         })
       }

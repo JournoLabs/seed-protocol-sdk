@@ -8,7 +8,7 @@ import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
 import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
-import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
+import { getPublishGraph, type PublishGraph } from '@/db/read/publishGraph'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
@@ -27,6 +27,9 @@ import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
  * attestation is left pointing at a draft's local id. Uploads, the work summary and the revoked-ref
  * check walk the same graph.
  */
+/** Model drafts of the graph, in the order the walk finishes them. */
+const draftsOf = (graph: PublishGraph) => graph.nodes.filter((n) => n.kind === 'draft').map((n) => n.seedLocalId)
+
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
 const SCHEMA_NAME = 'Test Schema publishDraftGraph'
@@ -170,9 +173,14 @@ testDescribe('publish carries the full graph of related drafts', () => {
     const uploads = await getPublishUploads(root as any)
     expect(uploads.map((u) => u.seedLocalId)).toContain(bHtmlSeed)
 
+    // The estimate counts what that publish attests: root, A, B and B's Html seed, with its upload.
     const summary = await summarizePublishWork(root as any)
-    expect(summary.newSeedCount).toBe(3)
-    expect(summary.attestationCount).toBe(totalAttestations(payload.filter((p) => p.localId !== bHtmlSeed)))
+    expect(summary.newSeedCount).toBe(4)
+    const withUploads = await getPublishPayload(
+      root as any,
+      uploads.map((u, i) => ({ ...u, txId: `draftgraphtx${i}`.padEnd(43, 'x') })),
+    )
+    expect(summary.attestationCount).toBe(totalAttestations(withUploads))
   }, 90000)
 
   it('root → list of drafts, each with a relation to another draft', async () => {
@@ -199,9 +207,10 @@ testDescribe('publish carries the full graph of related drafts', () => {
     const uploads = await getPublishUploads(root as any)
     expect(uploads.map((u) => u.seedLocalId)).toContain(b2HtmlSeed)
 
-    const graph = await getPublishDraftGraph(root as any)
-    expect(graph.drafts.map((d) => d.item.seedLocalId)).toEqual([b1, a1, b2, a2].map((i) => i.seedLocalId))
-    expect((await summarizePublishWork(root as any)).newSeedCount).toBe(5)
+    const graph = await getPublishGraph(root as any)
+    expect(draftsOf(graph)).toEqual([b1, a1, b2, a2].map((i) => i.seedLocalId))
+    // root, A1, B1, A2, B2 and B2's Html seed
+    expect((await summarizePublishWork(root as any)).newSeedCount).toBe(6)
   }, 90000)
 
   it('a cycle (A ↔ B) is walked once; the back reference is left for a later publish', async () => {
@@ -218,9 +227,9 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(linksOf(payload, b.seedLocalId)).toEqual([a.seedLocalId])
     expectNoDanglingLocalRefs(payload)
 
-    const graph = await getPublishDraftGraph(root as any)
-    expect(graph.drafts.map((d) => d.item.seedLocalId)).toEqual([b.seedLocalId, a.seedLocalId])
-    expect([...graph.deferredProperties].map((p) => `${p.seedLocalId}:${p.propertyName}`)).toEqual([
+    const graph = await getPublishGraph(root as any)
+    expect(draftsOf(graph)).toEqual([b.seedLocalId, a.seedLocalId])
+    expect(graph.nodes.flatMap((n) => n.properties.filter((p) => p.deferred).map((p) => `${n.seedLocalId}:${p.key}`))).toEqual([
       `${b.seedLocalId}:next`,
     ])
     await expect(getPublishUploads(root as any)).resolves.toBeDefined()

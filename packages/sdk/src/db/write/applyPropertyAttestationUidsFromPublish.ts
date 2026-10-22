@@ -3,7 +3,6 @@ import { metadata, models, properties, seeds, versions, type MetadataType } from
 import { and, eq, inArray } from 'drizzle-orm'
 import {
   findMetadataPropertyByName,
-  metadataPropertyNameForms,
   readModelMetadataProperties,
   type MetadataProperty,
 } from '@/db/read/metadataProperty'
@@ -16,41 +15,38 @@ import {
   isValidEasAttestationUid,
   normalizeBytes32Hex,
 } from '@seedprotocol/eas'
-import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 
 export type PropertyAttestationApplyPair = {
   schemaUid: string
   attestationUid: string
-  /** When set, match the latest placeholder with this property_name (even if schemaUid is empty). */
+  /** The property's schema key (the payload's `_propertyName`). */
   propertyName?: string | null
-  /**
-   * The metadata row whose value was attested (the payload's `_metadataLocalId`). When the seed has
-   * that row, it is the one recorded: no search by name, which could pick a newer row holding a
-   * value the chain doesn't have.
-   */
+  /** The metadata row whose value was attested (the payload's `_metadataLocalId`): the row recorded. */
   metadataLocalId?: string | null
+  /** A value the attestation carries that the row doesn't hold yet (the payload's `_attestedValue`). */
+  value?: string | null
 }
 
 /**
- * After property attestations succeed, write EAS UIDs onto the latest placeholder metadata row
- * so getPublishPendingDiff stays aligned with on-chain state.
- * When pair.propertyName is set, match that property even if the row has no schemaUid;
- * if the row has a schemaUid it must still match. Pair-only schema match remains for unnamed pairs.
+ * After property attestations succeed, records each one on the metadata row whose value it
+ * attested (`metadataLocalId`, which the payload read), so getPublishPendingDiff and later
+ * publishes stay aligned with on-chain state. No row is searched for by name: a newer row holds a
+ * value the chain doesn't have (audit 1.1, G18-4).
  *
- * A full-snapshot publish (`new_version`, or a republish after unpublish) also attests properties
- * whose rows are already attested (on an older version, or the revoked seed's). With no placeholder
- * to take the uid, the attestation is recorded as a new row for the published version: a copy of
- * the property's latest row with the new uid, so readers show the published version without a
- * sync. Rows keep or get the published version's local id when `versionUid` has a version row.
+ * - A placeholder row (no uid yet) takes the uid, the version, and the schema uid when it has none.
+ * - An attested row (a full-snapshot publish: `new_version`, or a republish after unpublish,
+ *   attests properties attested before) stays as it is, and the attestation is recorded as a new
+ *   row for the published version: a copy with the new uid, so readers show the published version
+ *   without a sync.
+ * - A pair with no row (a property with no row yet, e.g. a storage transaction slot) gets a new
+ *   row when it names its property and carries its value.
+ * Rows keep or get the published version's local id when `versionUid` has a version row.
  *
  * Relations and lists of relations are recorded as attested, the way an EAS sync of the
- * attestation stores them:
- * - a pair names its property by schema key or a stored name; the property's rows are the ones
- *   linked to it by property_id, and rows with none match by any name it is stored under
- *   (`authors`, `authorIdentityIds`; `author`, `authorId`).
- * - a value naming seeds by local id gets the seed uids the attestation encodes: the uid (Relation),
- *   a JSON array of uids in slot order (List). Each uid comes from `resolvedSeedUids` (seeds this
- *   publish created, not recorded on their seed rows yet), else the seed's recorded live uid.
+ * attestation stores them: a value naming seeds by local id gets the seed uids the attestation
+ * encodes, the uid (Relation) or a JSON array of uids in slot order (List). Each uid comes from
+ * `resolvedSeedUids` (seeds this publish created, not recorded on their seed rows yet), else the
+ * seed's recorded live uid.
  */
 export async function applyPropertyAttestationUidsFromPublish(params: {
   seedLocalId: string
@@ -65,8 +61,6 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
   if (!appDb || !seedLocalId || pairs.length === 0) return
 
   const rows = await appDb.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
-  if (rows.length === 0) return
-
   const working: MetadataType[] = rows.map((r: MetadataType) => ({ ...r }))
   const validVersion =
     versionUid != null && versionUid !== '' && isValidEasAttestationUid(versionUid)
@@ -99,11 +93,8 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
   const propertyOfRow = (row: MetadataType): MetadataProperty | undefined =>
     (row.propertyId != null ? props.find((p) => p.id === row.propertyId) : undefined) ??
     (row.propertyName ? findMetadataPropertyByName(props, row.propertyName) : undefined)
-  const attestedRefValue = async (
-    row: MetadataType,
-    property: MetadataProperty | undefined,
-  ): Promise<string | undefined> => {
-    const kind = refKind(property ?? propertyOfRow(row))
+  const attestedRefValue = async (row: Pick<MetadataType, 'propertyValue'>, property: MetadataProperty | undefined) => {
+    const kind = refKind(property)
     if (!kind || row.propertyValue == null) return undefined
     return toAttestedRefValue(appDb, row.propertyValue, kind, resolvedSeedUids ?? {})
   }
@@ -113,99 +104,68 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
     if (!isValidEasAttestationUid(att)) continue
     const wantSchema = normalizeBytes32Hex(pair.schemaUid)
     if (!wantSchema) continue
+    // Already recorded (a replayed receipt)
+    if (working.some((r: MetadataType) => r.uid?.toLowerCase() === att!.toLowerCase())) continue
 
-    const pairName =
-      pair.propertyName != null && pair.propertyName !== '' ? pair.propertyName : undefined
-    // The pair's property: rows linked to it by property_id (decision D4) are its rows, whatever
-    // name they are stored under; rows with no property_id match by any of its stored names.
-    const pairProperty = pairName ? findMetadataPropertyByName(props, pairName) : undefined
-    const pairNames = new Set<string>(
-      pairName ? [pairName, ...(pairProperty ? metadataPropertyNameForms(pairProperty) : [])] : [],
-    )
-    const isPairRow = (r: MetadataType): boolean =>
-      pairProperty && r.propertyId != null
-        ? r.propertyId === pairProperty.id
-        : !!r.propertyName && pairNames.has(r.propertyName)
-    const attestedRow = pair.metadataLocalId
-      ? working.find((r: MetadataType) => r.localId === pair.metadataLocalId)
-      : undefined
-    const candidates = attestedRow
-      ? [attestedRow]
-      : working
-        .filter((r: MetadataType) => {
-          // Rows sync derived for ItemStorage properties aren't placeholders for an attestation.
-          if (r.derivedFromUid != null) return false
-          if (pairName) {
-            if (!isPairRow(r)) return false
-            if (r.schemaUid) {
-              return normalizeBytes32Hex(r.schemaUid) === wantSchema
-            }
-            return true
-          }
-          if (!r.schemaUid) return false
-          return normalizeBytes32Hex(r.schemaUid) === wantSchema
-        })
-        .sort(compareMetadataRowsLatestFirst)
+    const target = pair.metadataLocalId ? working.find((r: MetadataType) => r.localId === pair.metadataLocalId) : undefined
+    const property = target ? propertyOfRow(target) : pair.propertyName ? findMetadataPropertyByName(props, pair.propertyName) : undefined
+    const value = pair.value ?? target?.propertyValue ?? null
+    const attestedValue = await attestedRefValue({ propertyValue: value }, property)
+    const recordedValue = attestedValue ?? value
 
-    const target = candidates.find((r: MetadataType) => isPlaceholderUid(r.uid))
-    if (!target?.localId) {
-      // Full snapshot: the property's rows are all attested. Record this attestation as a new row
-      // for the published version (unless it is already recorded, e.g. a replayed receipt).
-      const source = candidates[0]
-      if (!source || !validVersion) continue
-      if (working.some((r: MetadataType) => r.uid?.toLowerCase() === att!.toLowerCase())) continue
-      const now = Date.now()
-      const attestedValue = await attestedRefValue(source, pairProperty)
-      const row: MetadataType = {
-        ...source,
-        ...(attestedValue !== undefined && { propertyValue: attestedValue }),
-        localId: generateId(),
-        propertyId: source.propertyId ?? propertyOfRow(source)?.id ?? null,
+    if (target?.localId && isPlaceholderUid(target.uid)) {
+      const update = {
         uid: att!,
-        schemaUid: normalizeBytes32Hex(source.schemaUid) ? source.schemaUid : wantSchema,
-        seedUid: liveSeedUid,
-        versionUid: validVersion,
-        versionLocalId: versionLocalId ?? source.versionLocalId,
-        attestationCreatedAt: attestationCreatedAtMs ?? now,
-        attestationRaw: null,
-        revokedAt: null,
-        derivedFromUid: null,
-// Stamped here: the spread copies the source row's times.
-        createdAt: now,
-        updatedAt: now,
-      }
-      await appDb.insert(metadata).values(row)
-      working.push(row)
-      continue
-    }
-
-    const writeSchemaUid = !normalizeBytes32Hex(target.schemaUid)
-    const attestedValue = await attestedRefValue(target, pairProperty)
-
-    await appDb
-      .update(metadata)
-      .set({
-        uid: att!,
-        ...(attestedValue !== undefined && { propertyValue: attestedValue }),
-        ...(writeSchemaUid && { schemaUid: wantSchema }),
+        ...(recordedValue !== target.propertyValue && { propertyValue: recordedValue }),
+        ...(!normalizeBytes32Hex(target.schemaUid) && { schemaUid: wantSchema }),
         ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
         ...(validVersion && { versionUid: validVersion }),
         ...(versionLocalId && { versionLocalId }),
-      })
-      .where(eq(metadata.localId, target.localId))
-
-    const i = working.findIndex((r: MetadataType) => r.localId === target.localId)
-    if (i >= 0) {
-      working[i] = {
-        ...working[i]!,
-        uid: att!,
-        ...(attestedValue !== undefined && { propertyValue: attestedValue }),
-        ...(writeSchemaUid && { schemaUid: wantSchema }),
-        attestationCreatedAt: attestationCreatedAtMs ?? working[i]!.attestationCreatedAt,
-        ...(validVersion && { versionUid: validVersion }),
-        ...(versionLocalId && { versionLocalId }),
       }
+      await appDb.update(metadata).set(update).where(eq(metadata.localId, target.localId))
+      Object.assign(target, update)
+      continue
     }
+
+    // An attested row (full snapshot), or none: record the attestation as a new row for the
+    // published version.
+    if (!validVersion) continue
+    if (!target && (!pair.propertyName || pair.value == null)) continue
+    const now = Date.now()
+    const row: MetadataType = {
+      ...(target ?? {
+        propertyName: property?.storageName ?? pair.propertyName!,
+        seedLocalId,
+        modelType: null,
+        easDataType: null,
+        refValueType: null,
+        refModelUid: null,
+        refSeedType: null,
+        refResolvedValue: null,
+        refResolvedDisplayValue: null,
+        localStorageDir: null,
+        contentHash: null,
+        publisher: null,
+        retract: null,
+      }),
+      propertyValue: recordedValue,
+      localId: generateId(),
+      propertyId: target?.propertyId ?? property?.id ?? null,
+      uid: att!,
+      schemaUid: normalizeBytes32Hex(target?.schemaUid) ? target!.schemaUid : wantSchema,
+      seedUid: liveSeedUid,
+      versionUid: validVersion,
+      versionLocalId: versionLocalId ?? target?.versionLocalId ?? null,
+      attestationCreatedAt: attestationCreatedAtMs ?? now,
+      attestationRaw: null,
+      revokedAt: null,
+      derivedFromUid: null,
+      // Stamped here: the spread copies the source row's times.
+      createdAt: now,
+      updatedAt: now,
+    } as MetadataType
+    await appDb.insert(metadata).values(row)
+    working.push(row)
   }
 }
 

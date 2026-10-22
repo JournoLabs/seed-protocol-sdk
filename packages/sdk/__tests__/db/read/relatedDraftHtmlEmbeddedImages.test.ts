@@ -184,7 +184,7 @@ testDescribe('Html-embedded images of related draft items', () => {
 
     // Phase 1 uploads the embedded image, not the Html that still embeds it.
     const phase1 = withTxIds(
-      await getPublishUploads(article as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      await getPublishUploads(article as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
     expect(phase1.map((u) => u.seedLocalId)).toContain(imageSeedLocalId)
     expect(phase1.map((u) => u.seedLocalId)).not.toContain(noteHtmlSeed)
@@ -205,7 +205,7 @@ testDescribe('Html-embedded images of related draft items', () => {
     expect(html).not.toContain('data:image/')
     expect(html).toContain(phase1.find((u) => u.seedLocalId === imageSeedLocalId)!.txId)
     const phase2 = withTxIds(
-      await getPublishUploads(article as any, [], undefined, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      await getPublishUploads(article as any, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
     expect(phase2.map((u) => u.seedLocalId)).toEqual([noteHtmlSeed])
 
@@ -251,11 +251,11 @@ testDescribe('Html-embedded images of related draft items', () => {
     const imageSeedLocalId = row!.imageSeedLocalId
 
     const phase1 = withTxIds(
-      await getPublishUploads(page as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      await getPublishUploads(page as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
     await rewriteHtmlEmbeddedImagesOnDisk(page.seedLocalId, phase1)
     const phase2 = withTxIds(
-      await getPublishUploads(page as any, [], undefined, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      await getPublishUploads(page as any, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
 
     const payload = (await getPublishPayload(page as any, [...phase1, ...phase2] as any)) as any[]

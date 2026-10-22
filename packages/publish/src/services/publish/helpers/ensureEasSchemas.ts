@@ -1,6 +1,5 @@
 import {
-  getSegmentedItemProperties,
-  getRelatedItemsForPublish,
+  getPublishGraph,
   INTERNAL_DATA_TYPES,
   ModelPropertyDataTypes,
   normalizeDataType,
@@ -11,7 +10,7 @@ import {
   easName,
   easPropertyNameForPublish,
 } from '@seedprotocol/sdk'
-import type { IItem } from '@seedprotocol/sdk'
+import type { IItem, PublishGraphNode } from '@seedprotocol/sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { getSchemaRecord, registerSchema } from '~/helpers/schemaRegistry'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
@@ -43,34 +42,21 @@ export function resetEnsuredBaseSchemas(): void {
 
 
 /**
- * Collects all model names used by the item (item's model + relation refs + list refs + Image).
+ * Model names a node's seed and refs attest under: its own model, its relation and list refs, and
+ * the storage models (File, Html, else Image) of its storage-seed properties.
  */
-async function getModelNamesForItem(item: IItem<any>): Promise<Set<string>> {
-  const { itemRelationProperties, itemImageProperties, itemListProperties } =
-    await getSegmentedItemProperties(item)
-  const modelNames = new Set<string>()
-
-  if (item.modelName) {
-    modelNames.add(item.modelName)
-  }
-
-  for (const prop of itemRelationProperties) {
-    const ref = prop.propertyDef?.ref as string | undefined
-    if (ref) modelNames.add(ref)
-  }
-
-  for (const prop of itemImageProperties) {
-    const dataType = normalizeDataType(prop.propertyDef?.dataType)
+function getModelNamesForNode(node: PublishGraphNode): Set<string> {
+  const modelNames = new Set<string>([node.modelName])
+  for (const { kind, definition } of node.properties) {
+    const dataType = normalizeDataType(definition.dataType)
+    if ((kind === 'relation' || kind === 'list' || (kind === 'storageSeed' && dataType === ModelPropertyDataTypes.Relation)) && definition.ref) {
+      modelNames.add(definition.ref)
+    }
+    if (kind !== 'storageSeed') continue
     if (dataType === ModelPropertyDataTypes.File) modelNames.add('File')
     else if (dataType === ModelPropertyDataTypes.Html) modelNames.add('Html')
     else modelNames.add('Image')
   }
-
-  for (const prop of itemListProperties) {
-    const ref = prop.propertyDef?.ref as string | undefined
-    if (ref) modelNames.add(ref)
-  }
-
   return modelNames
 }
 
@@ -86,10 +72,6 @@ export type EnsureEasSchemasOptions = {
    * SchemaRegistry or EAS).
    */
   managedAddress?: string
-}
-
-type EnsureEasSchemasRunOptions = EnsureEasSchemasOptions & {
-  blockSchemaRegistration?: boolean
 }
 
 function easTypeForDataType(dataType: string | undefined): string {
@@ -141,11 +123,8 @@ async function assertBaseSchemas(): Promise<void> {
 
 async function resolveBlockSchemaRegistration(
   account: PublishWallet | SeedTxSender,
-  options: EnsureEasSchemasRunOptions | undefined,
+  options: EnsureEasSchemasOptions | undefined,
 ): Promise<boolean> {
-  if (typeof options?.blockSchemaRegistration === 'boolean') {
-    return options.blockSchemaRegistration
-  }
   const managedAddress = options?.managedAddress?.trim()
   if (!managedAddress || !isPublishWallet(account)) return false
   const { isAutomationSessionActive } = await import('~/helpers/ensureAutomationSessionKey')
@@ -153,23 +132,16 @@ async function resolveBlockSchemaRegistration(
 }
 
 /**
- * Ensures EAS schemas exist for each item property and each model used by the item.
+ * Ensures EAS schemas exist for each property and each model of every seed a publish of the item
+ * attests (the item and the drafts published with it, see the SDK's getPublishGraph).
  * If a schema is not found on-chain or in the indexer, registers it via SchemaRegistry
  * and creates a name attestation (Schema #1) so EASSCAN displays it.
  * Automation session keys cannot register; a missing schema throws before any UserOp.
  */
 export async function ensureEasSchemasForItem(
-  item: IItem<any>,
+  item: Pick<IItem<any>, 'seedLocalId' | 'modelName'>,
   account: PublishWallet | SeedTxSender,
   options?: EnsureEasSchemasOptions,
-): Promise<void> {
-  await ensureEasSchemasForItemResolved(item, account, options)
-}
-
-async function ensureEasSchemasForItemResolved(
-  item: IItem<any>,
-  account: PublishWallet | SeedTxSender,
-  options?: EnsureEasSchemasRunOptions,
 ): Promise<void> {
   const blockSchemaRegistration = await resolveBlockSchemaRegistration(account, options)
   const sender: SeedTxSender = isPublishWallet(account)
@@ -183,20 +155,25 @@ async function ensureEasSchemasForItemResolved(
         })()
   await assertBaseSchemas()
 
-  const { itemBasicProperties, itemRelationProperties, itemImageProperties, itemListProperties } =
-    await getSegmentedItemProperties(item)
+  const registered = { schemaUids: new Set<string>(), modelSchemaUids: new Set<string>() }
+  const graph = await getPublishGraph(item)
+  for (const node of graph.nodes) {
+    await ensureEasSchemasForNode(node, sender, blockSchemaRegistration, registered)
+  }
+}
 
-  const allProperties = [
-    ...itemBasicProperties,
-    ...itemRelationProperties,
-    ...itemImageProperties,
-    ...itemListProperties,
-  ]
+async function ensureEasSchemasForNode(
+  node: PublishGraphNode,
+  sender: SeedTxSender,
+  blockSchemaRegistration: boolean,
+  registered: { schemaUids: Set<string>; modelSchemaUids: Set<string> },
+): Promise<void> {
+  // The storage transaction slot has its own schema below; ItemStorage files are not attested
+  const allProperties = node.properties.filter((p) => p.kind !== 'storageTransaction' && p.kind !== 'itemStorage')
 
-  const registeredSchemaUids = new Set<string>()
-
-  const modelNames = await getModelNamesForItem(item)
-  const registeredModelSchemaUids = new Set<string>()
+  const registeredSchemaUids = registered.schemaUids
+  const modelNames = getModelNamesForNode(node)
+  const registeredModelSchemaUids = registered.modelSchemaUids
 
   for (const modelName of modelNames) {
     const schemaDef = `bytes32 ${easName(modelName)}`
@@ -291,21 +268,19 @@ async function ensureEasSchemasForItemResolved(
     setSchemaUidForSchemaDefinition({ text: storageSchemaDef, schemaUid: storageSchemaUid })
   }
 
-  for (const property of allProperties) {
-    if (!property.propertyDef) continue
-
-    const easDataTypeRaw = easTypeForDataType(property.propertyDef.dataType)
+  for (const { key: propertyName, definition } of allProperties) {
+    const easDataTypeRaw = easTypeForDataType(definition.dataType)
     // ADR 0008: the same name getPublishPayload attests under (list relations: storage name;
     // single relations: schema key).
-    const listRelationName = listRelationEasPropertyName(property.propertyName, property.propertyDef)
+    const listRelationName = listRelationEasPropertyName(propertyName, definition)
     const propertyNameSnakeCase = easPropertyNameForPublish(
-      property.propertyName,
-      property.propertyDef as Parameters<typeof easPropertyNameForPublish>[1],
+      propertyName,
+      definition as Parameters<typeof easPropertyNameForPublish>[1],
     )
     const schemaDef = `${easDataTypeRaw} ${propertyNameSnakeCase}`
     if (listRelationName && !propertyNameSnakeCase.endsWith('_ids')) {
       throw new Error(
-        `Refusing to register "${schemaDef}" for list-relation property ${property.propertyName}: list relations attest as <singular>_<ref>_ids.`,
+        `Refusing to register "${schemaDef}" for list-relation property ${propertyName}: list relations attest as <singular>_<ref>_ids.`,
       )
     }
 
@@ -349,7 +324,7 @@ async function ensureEasSchemasForItemResolved(
       )
     } catch (err) {
       throw new Error(
-        `Failed to register EAS schema for property ${property.propertyName}: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to register EAS schema for property ${propertyName}: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
 
@@ -363,24 +338,11 @@ async function ensureEasSchemasForItemResolved(
       )
     } catch (err) {
       throw new Error(
-        `Failed to name EAS schema for property ${property.propertyName}: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to name EAS schema for property ${propertyName}: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
 
     registeredSchemaUids.add(schemaUid)
     setSchemaUidForSchemaDefinition({ text: schemaDef, schemaUid })
-  }
-
-  const relatedItems = await getRelatedItemsForPublish(item)
-  try {
-    for (const relatedItem of relatedItems) {
-      await ensureEasSchemasForItemResolved(relatedItem as IItem<any>, account, {
-        managedAddress: options?.managedAddress,
-        blockSchemaRegistration,
-      })
-    }
-  } finally {
-    // getRelatedItemsForPublish holds each item it returns
-    for (const relatedItem of relatedItems) relatedItem.unload()
   }
 }

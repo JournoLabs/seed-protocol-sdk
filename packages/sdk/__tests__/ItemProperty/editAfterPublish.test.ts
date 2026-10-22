@@ -127,9 +127,11 @@ testDescribe('editing a property after its seed is published', () => {
     const [published] = (await rowsFor(postItem.seedLocalId!, 'title')).filter((r) => r.uid)
     title.getService().send({ type: 'updateContext', localId: published!.localId, uid: published!.uid })
 
-    expect(await attestedNames(postItem)).toContain('title')
-    const { context } = title.getService().getSnapshot()
-    expect(context.uid).toBeUndefined()
-    expect(context.localId).not.toBe(published!.localId)
+    // Publish reads rows: the draft row is attested, whatever the context names.
+    const payloads = await getPublishPayload(postItem, [], { publishMode: 'patch' })
+    const own = payloads.find((p) => p.localId === postItem.seedLocalId)!
+    const titleAttestation = own.listOfAttestations.find((a: { _propertyName?: string }) => a._propertyName === 'title')
+    const [draft] = (await rowsFor(postItem.seedLocalId!, 'title')).filter((r) => !r.uid)
+    expect(titleAttestation?._metadataLocalId).toBe(draft!.localId)
   }, 60_000)
 })

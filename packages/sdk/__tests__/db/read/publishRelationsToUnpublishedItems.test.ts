@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds, versions } from '@/seedSchema'
+import { metadata, seeds, versions } from '@/seedSchema'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { Item } from '@/Item/Item'
 import {
@@ -154,9 +154,12 @@ describe.sequential('publish with relations to unpublished items', () => {
     // As prepareHtmlEmbeddedImagesForPublish leaves it: bodyHtml holds its Html seed, and a co-publish
     // row links the embedded image to the post (a row left from an earlier, interrupted publish).
     const htmlSeedLocalId = `html${Date.now().toString(36)}`
-    const bodyHtml = post.allProperties['bodyHtml']
-    expect(bodyHtml).toBeDefined()
-    bodyHtml!.getService().send({ type: 'updateContext', propertyValue: htmlSeedLocalId })
+    const db = BaseDb.getAppDb()
+    const [bodyHtmlRow] = (await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))).filter(
+      (r: { propertyName: string | null }) => r.propertyName === 'bodyHtml' || r.propertyName === 'bodyHtmlId',
+    )
+    expect(bodyHtmlRow).toBeDefined()
+    await db.update(metadata).set({ propertyValue: htmlSeedLocalId }).where(eq(metadata.localId, bodyHtmlRow!.localId!))
     await BaseDb.getAppDb().insert(htmlEmbeddedImageCoPublish).values({
       parentSeedLocalId: post.seedLocalId,
       htmlSeedLocalId,
