@@ -257,6 +257,26 @@ testDescribe('conflicts between a pending edit and sync', () => {
     expect(await shownTitle(item.seedLocalId)).toBe('remote')
   }, 30000)
 
+  // The change feed (browser only) puts the conflict on the loaded property: no rehydrate, and
+  // also when the synced attestation is older than the draft, so the draft row needs no new time.
+  it.skipIf(typeof window === 'undefined').each([
+    ['newer', 5_000],
+    ['older', -5_000],
+  ])('a conflict sync records over a draft shows on the loaded property (%s attestation)', async (_label, offset) => {
+    const { property, baseRow } = await publishedPost('base')
+    property.value = 'local'
+    await property.save()
+    const rehydrate = vi.spyOn(property.getService(), 'send')
+
+    await syncAfterDraft(baseRow, 'remote', Date.now() + offset)
+
+    await vi.waitFor(() => expect(property.conflict).toMatchObject({ remoteValue: 'remote', localValue: 'local' }), {
+      timeout: 5_000,
+    })
+    expect(property.value).toBe('local')
+    expect(rehydrate.mock.calls.some(([event]) => (event as { type: string }).type === 'rehydrateFromDb')).toBe(false)
+  }, 30000)
+
   it('sync over a draft records no conflict when it brings the base value again, and the draft still wins', async () => {
     const { item, property, baseRow } = await publishedPost('base')
     property.value = 'local'
