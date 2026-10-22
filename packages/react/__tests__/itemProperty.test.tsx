@@ -1181,6 +1181,47 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     })
   })
 
+  describe('useItemProperties refetches per save', () => {
+    it('refetches once for a save, driven by the change feed', async () => {
+      if (!testItem) return
+      const seedLocalId = testItem.seedLocalId
+      render(<UseItemPropertiesWithPropsTest seedLocalId={seedLocalId} />, { container, wrapper: SeedProviderWrapper })
+      const scoped = within(container)
+      await waitFor(
+        () => expect(parseInt(scoped.getByTestId('properties-count').textContent || '0')).toBeGreaterThanOrEqual(3),
+        { timeout: WAIT_TIMEOUT_MS },
+      )
+      const qc = queryClientRef.current!
+      const key = ['seed', 'itemProperties', seedLocalId] as const
+      // Let the mount's own reads settle.
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const updatesBefore = qc.getQueryState(key)?.dataUpdateCount ?? 0
+      let fetches = 0
+      const unsubscribe = qc.getQueryCache().subscribe((event) => {
+        if (
+          event.type === 'updated' &&
+          event.action.type === 'fetch' &&
+          JSON.stringify(event.query.queryKey) === JSON.stringify(key)
+        ) {
+          fetches++
+        }
+      })
+      try {
+        const title = await ItemProperty.find({ propertyName: 'title', seedLocalId })
+        title!.value = 'Saved Once'
+        await title!.save()
+        await waitFor(() => expect(qc.getQueryState(key)?.dataUpdateCount ?? 0).toBeGreaterThan(updatesBefore), {
+          timeout: WAIT_TIMEOUT_MS,
+        })
+        // Room for a second refetch, had the save event or a window global started one.
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        expect(fetches).toBe(1)
+      } finally {
+        unsubscribe()
+      }
+    })
+  })
+
   describe('useItemProperties with dynamic property creation', () => {
     it('should display properties list and show updates when properties change', async () => {
       // Import empty schema first

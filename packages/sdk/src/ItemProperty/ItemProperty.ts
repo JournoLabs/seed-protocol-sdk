@@ -1871,12 +1871,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         validationErrors,
       )
     }
-    const canonicalId = ctx?.seedLocalId ?? ctx?.seedUid
-    if (canonicalId) {
+    if (ctx?.seedLocalId || ctx?.seedUid) {
       eventEmitter.emit('itemProperty.saved', { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid })
-      if (typeof window !== 'undefined' && window.__SEED_INVALIDATE_ITEM_PROPERTIES__) {
-        window.__SEED_INVALIDATE_ITEM_PROPERTIES__(canonicalId)
-      }
     }
   }
 

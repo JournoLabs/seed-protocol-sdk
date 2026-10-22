@@ -28,57 +28,29 @@ export type SeedProviderProps = {
   queryClientRef?: React.MutableRefObject<QueryClient | null>
 }
 
-declare global {
-  interface Window {
-    __SEED_INVALIDATE_ITEM_PROPERTIES__?: ((canonicalId: string) => void) | null
-  }
-}
-
 /** Module-level ref so invalidateItemPropertiesForItem works when test and app share the same bundle but not the same window (e.g. iframe). */
-let invalidateItemPropertiesRef: ((canonicalId: string) => void | Promise<void>) | null = null
+let invalidateItemPropertiesRef: ((canonicalId: string) => Promise<void>) | null = null
 
 /**
- * Invalidates and refetches the item-properties query for an item.
- * Call this after updating an ItemProperty (e.g. after save()) so useItemProperties
- * refetches and the UI updates. Returns a Promise that resolves when the refetch has completed (if available).
+ * Invalidates and refetches the item-properties query for an item, and resolves when the refetch
+ * has completed. Saves don't need it: `useItemProperties` refetches when the change feed reports a
+ * write to the item's metadata rows (ADR 0020).
  */
 export function invalidateItemPropertiesForItem(canonicalId: string): Promise<void> {
-  const p1 = invalidateItemPropertiesRef?.(canonicalId)
-  if (typeof window !== 'undefined' && window.__SEED_INVALIDATE_ITEM_PROPERTIES__) {
-    window.__SEED_INVALIDATE_ITEM_PROPERTIES__(canonicalId)
-  }
-  return Promise.resolve(p1).then(() => {})
+  return Promise.resolve(invalidateItemPropertiesRef?.(canonicalId))
 }
 
 function SeedProviderEventSubscriber({ queryClient }: { queryClient: QueryClient }) {
   useEffect(() => {
-    const invalidate = (canonicalId: string) => {
-      const key: readonly [string, string, string] = ['seed', 'itemProperties', canonicalId]
-      queryClient.invalidateQueries({ queryKey: key })
-      return queryClient.refetchQueries({ queryKey: key })
-    }
-    invalidateItemPropertiesRef = invalidate
-    if (typeof window !== 'undefined') {
-      window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = invalidate
-    }
-    const handler = (payload: { seedLocalId?: string; seedUid?: string }) => {
-      const canonicalId = payload?.seedLocalId ?? payload?.seedUid
-      if (canonicalId) {
-        invalidate(canonicalId)
-      }
-    }
+    invalidateItemPropertiesRef = (canonicalId: string) =>
+      queryClient.invalidateQueries({ queryKey: ['seed', 'itemProperties', canonicalId] })
     const onEasSyncedToDb = () => {
       void queryClient.invalidateQueries({ queryKey: ['seed', 'items'], exact: false })
     }
-    eventEmitter.on('itemProperty.saved', handler)
     eventEmitter.on(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSyncedToDb)
     return () => {
-      eventEmitter.off('itemProperty.saved', handler)
       eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSyncedToDb)
       invalidateItemPropertiesRef = null
-      if (typeof window !== 'undefined') {
-        window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = null
-      }
     }
   }, [queryClient])
   return null
