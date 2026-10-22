@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - A schema file's single Relation keeps its `refValueType` on the property row (e.g. `{ type: 'Relation', refValueType: 'Image', model: 'Image' }`). Only List properties kept it, so a schema-file Relation to an Image, File or Html wasn't treated as one; code-defined properties were unaffected. A `data:image/...` URI assigned to such a property failed with `Relation target not found`; it is now saved as an Image.
 - A loaded item property takes its property's new definition when a schema change (`updateModelProperties`, a new schema file version) rewrites the property's row. It kept the definition it loaded with: in Node always, in the browser until the row's live query caught up, so a value assigned right after the change was written by the old definition's rules.
+- `Item.find({ hold: false })` looks an item up, loading it when it isn't cached, without taking a cache hold, and `Item.retain(item)` takes one on a cached, running instance (false when it was stopped). `Item.find` no longer keeps the hold it took when the item isn't ready within `readyTimeout`: it returned `undefined` and left the item held.
 
 ## 0.7.9 (2026-10-22)
 

@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `useItem` holds the Item it shows once per mounted hook and releases it when the hook unmounts or shows another item, so an item no hook or caller holds is unloaded. Before, each lookup that missed the instance cache took a hold that was never released, and no item `useItem` loaded was ever unloaded. Code that keeps an Item from `useItem` after the component unmounts must hold it itself (`Item.find`, then `unload()` when done). `useItems` still holds every item it lists without releasing them.
+- `useItem` looks the item up again when the instance it shows is stopped (dropped by another tab, a local purge or `destroy`). It kept showing the stopped instance until the next sync.
+
 ## 0.7.9 (2026-10-22)
 
 - `isClientReadySnapshot` is the SDK's (re-exported unchanged). `useSchema`, `useItem`, `useItemProperty`, `useCreateItemProperty` and the create hooks (`useCreateSchema`, `useCreateModel`, `useCreateModelProperty`) follow the entity's load `status` (`loading` / `ready` / `error`) instead of its machine reaching `idle`, which the SDK's entity machines now are from the start.

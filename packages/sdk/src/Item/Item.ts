@@ -839,15 +839,23 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }))
   }
 
+  /**
+   * The Item for a seedLocalId or seedUid, loaded from its rows when it isn't cached. Takes a cache
+   * hold the caller releases with `unload()`, unless `hold: false`: then the item stays cached
+   * with whatever holds others have (React hooks hold what they show with `Item.retain`). Returns
+   * undefined, keeping no hold, when there is no such item or it isn't ready in `readyTimeout`.
+   */
   static async find({
     modelName,
     seedLocalId,
     seedUid,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold = true,
   }: ItemFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
+    hold?: boolean
   }): Promise<IItem<any> | undefined> {
     if (!seedLocalId && !seedUid) {
       return undefined
@@ -860,13 +868,20 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
 
     let cached = false
+    let held: Item<any> | undefined
     try {
       return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
         async () => {
-          const held = Item.getById(id) ?? undefined
-          cached = held !== undefined
-          const item = held ?? (await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined))
+          const fromCache = hold ? (Item.getById(id) ?? undefined) : Item.peek(id)
+          cached = fromCache !== undefined
+          let item = fromCache
+          if (!item) {
+            item = await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined)
+            // createById holds what it returns; without a hold the item stays cached, held by no one
+            if (item && !hold) Item.cache.release(item)
+          }
+          if (hold) held = item
           if (item && waitForReady) await waitForEntityReady(item, { timeout: readyTimeout })
           return item
         },
@@ -874,8 +889,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       )
     } catch (error) {
       timingLogger(`find ${modelName ?? '?'} ${id} returned undefined: ${error}`)
+      held?.unload()
       return undefined
     }
+  }
+
+  /**
+   * Takes one more hold on a cached, running instance, released with `unload()`. False (and no
+   * hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: IItem<any>): boolean {
+    const item = instance as Item<any>
+    return item.getService().getSnapshot().status === 'active' && this.cache.holdInstance(item)
   }
 
   static async all(
