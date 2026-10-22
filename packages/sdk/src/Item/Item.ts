@@ -43,13 +43,13 @@ import { orderBy } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
-import { LATEST_VERSION_ORDER_SQL } from '@/db/read/subqueries/latestVersion'
+import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { queryEntityRows, watchEntityRows } from '@/browser/db/changeFeed'
+import { watchEntityRows } from '@/browser/db/changeFeed'
 import { properties as propertiesTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
@@ -1208,9 +1208,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * After EAS sync writes metadata for the latest version, merge new property instances and
-   * re-run DB hydration on cached Items. Item liveQuery watches seeds/versions, not metadata,
-   * and useItems may not invalidate when the seed set is unchanged.
+   * Node only (decision D3): after EAS sync, adds new property instances to cached Items and
+   * re-reads their idle properties. Node has no change feed, so this is how loaded items there see
+   * what sync wrote, including recorded conflicts. The browser's feed watches cover both.
    */
   static async rehydrateCachedItemsFromDbAfterEasSync(): Promise<void> {
     const appDb = BaseDb.getAppDb()
@@ -2028,41 +2028,97 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
         // Only watch for changes in the browser (the change feed is browser-only)
         if (isBrowser) {
+          const { versions } = seedSchemaMod
           // Watch the seed row by local id: its uid changes when an unpublished item is published
           // again (a new seed attestation), and a watch on the uid would stop seeing the row.
-          type SeedRow = {
-            localId: string
-            uid: string | null
-            schemaUid: string | null
-            revokedAt: number | null
-            publisher: string | null
-            attestationCreatedAt: number | null
-          }
-          const seedsQuery = (sql: any) => sql`
-              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher,
-                attestation_created_at as attestationCreatedAt
-              FROM seeds
-              WHERE local_id = ${watchedSeedLocalId}
-            `
+          const readSeedRows = () =>
+            db
+              .select({
+                localId: seeds.localId,
+                uid: seeds.uid,
+                schemaUid: seeds.schemaUid,
+                revokedAt: seeds.revokedAt,
+                publisher: seeds.publisher,
+                attestationCreatedAt: seeds.attestationCreatedAt,
+              })
+              .from(seeds)
+              .where(eq(seeds.localId, watchedSeedLocalId))
+          type SeedRow = Awaited<ReturnType<typeof readSeedRows>>[number]
 
-          // Watch the versions table for this seed
-          type VersionRow = {
-            localId: string
-            uid: string | null
-            seedLocalId: string
-            revokedAt: number | null
-            attestationCreatedAt: number | null
+          const readVersionRows = () =>
+            db
+              .select({
+                localId: versions.localId,
+                uid: versions.uid,
+                seedLocalId: versions.seedLocalId,
+                revokedAt: versions.revokedAt,
+                attestationCreatedAt: versions.attestationCreatedAt,
+              })
+              .from(versions)
+              .where(eq(versions.seedLocalId, watchedSeedLocalId))
+              .orderBy(latestVersionOrder())
+          type VersionRow = Awaited<ReturnType<typeof readVersionRows>>[number]
+
+          // The fields metadataRowPropertyKey needs, for one version's rows. A save changes a
+          // row's value, not these, so it reads back the same rows.
+          const readPropertyKeyRows = (versionLocalId: string) =>
+            db
+              .selectDistinct({
+                propertyKey: metadataPropertyKeyColumn(),
+                propertyName: metadata.propertyName,
+                refSeedType: metadata.refSeedType,
+              })
+              .from(metadata)
+              .where(and(eq(metadata.seedLocalId, watchedSeedLocalId), eq(metadata.versionLocalId, versionLocalId)))
+              .orderBy(metadata.propertyName)
+          type PropertyKeyRow = Awaited<ReturnType<typeof readPropertyKeyRows>>[number]
+
+          // Adds the property instances for `rows` to the item's context; cached ones are reused.
+          const addPropertyInstances = async (rows: PropertyKeyRow[]) => {
+            if (rows.length === 0) return
+            const { context } = this._service.getSnapshot()
+            const itemModelName = context.modelName
+            let propertySchemas: Record<string, any> = {}
+            try {
+              if (itemModelName) {
+                const model = getModel()?.resolve(itemModelName, {
+                  modelFileId: context.modelFileId,
+                  schemaName: context.schemaName,
+                })
+                if (model?.properties?.length) {
+                  propertySchemas = modelPropertiesToObject(model.properties)
+                }
+              }
+            } catch {
+              // Model not loaded
+            }
+            await Promise.all(
+              rows.map(async (row) => {
+                try {
+                  const propertyName = metadataRowPropertyKey(row, propertySchemas)
+                  if (!propertyName) return
+                  const property = await ItemProperty.find({
+                    propertyName,
+                    seedLocalId: watchedSeedLocalId,
+                    seedUid: this._getSnapshotContext().seedUid ?? seedUid,
+                    modelName: itemModelName,
+                    hold: false,
+                  })
+                  // The item stopped while the lookup ran: it can't take its hold, so nothing would
+                  if (property && isActorStopped(this._service)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
+                  if (property) {
+                    sendToItemMachine({
+                      type: 'addPropertyInstance',
+                      propertyName,
+                      propertyInstance: property,
+                    })
+                  }
+                } catch (error) {
+                  logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
+                }
+              }),
+            )
           }
-          // The tag binds every interpolation as a parameter, so the order goes in the strings.
-          const versionsQueryText = [
-            `SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt,
-                attestation_created_at as attestationCreatedAt
-              FROM versions
-              WHERE seed_local_id = `,
-            ` ORDER BY ${LATEST_VERSION_ORDER_SQL}`,
-          ]
-          const versionsQuery = (sql: any) =>
-            sql(Object.assign([...versionsQueryText], { raw: versionsQueryText }), watchedSeedLocalId)
 
           const instanceState = itemInstanceState.get(this)
           if (!instanceState) {
@@ -2074,11 +2130,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           if (isActorStopped(this._service)) return
 
           // Re-read the seed row and the versions on each change to them (ADR 0020). Both run once
-          // now too, as the liveQueries' first emissions did: the versions handler adds the
-          // property instances to the item's context.
+          // now too: the versions handler adds the property instances to the item's context.
           const seedsSubscription = watchEntityRows<SeedRow[]>(
             { seedLocalId: watchedSeedLocalId, tables: ['seeds'] },
-            () => queryEntityRows<SeedRow>(seedsQuery),
+            readSeedRows,
             async (seedRows) => {
               if (seedRows.length === 0) return
               
@@ -2127,7 +2182,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           const versionsSubscribedAt = timingNow()
           const versionsSubscription = watchEntityRows<VersionRow[]>(
             { seedLocalId: watchedSeedLocalId, tables: ['versions'] },
-            () => queryEntityRows<VersionRow>(versionsQuery),
+            readVersionRows,
             async (versionRows) => {
               const versionsRun = ++versionsRuns
               const runStart = timingNow()
@@ -2164,74 +2219,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               
               logger(`[Item._setupLiveQuerySubscription] Versions updated, latest version: ${latestVersionLocalId}`)
               
-              // Query metadata for the latest version
-              const metadataRows = await db
-                .select({ ...getTableColumns(metadata), propertyKey: metadataPropertyKeyColumn() })
-                .from(metadata)
-                .where(
-                  and(
-                    eq(metadata.seedLocalId, watchedSeedLocalId),
-                    eq(metadata.versionLocalId, latestVersionLocalId)
-                  )
+              // The latest version's property rows, so a property synced or created since gets its instance
+              const propertyRows = await readPropertyKeyRows(latestVersionLocalId)
+              await addPropertyInstances(propertyRows)
+              if (timingLogger.enabled) {
+                timingLogger(
+                  `item ${watchedSeedLocalId} versions run ${versionsRun}: metadata read + ${propertyRows.length} ItemProperty.find ${timingSince(runStart)}ms`,
                 )
-
-              // CRITICAL: Create ItemProperty instances BEFORE updating context
-              if (metadataRows.length > 0) {
-                try {
-                  const itemPropertyMod = await import('../ItemProperty/ItemProperty')
-                  const { ItemProperty } = itemPropertyMod
-                  const itemModelName = this._service.getSnapshot().context.modelName
-                  const schemaNameForModel = this._service.getSnapshot().context.schemaName
-                  let propertySchemas: Record<string, any> = {}
-                  try {
-                    if (itemModelName) {
-                      const M = getModel()
-                      const model =
-                        M?.resolve(itemModelName, {
-                            modelFileId: this._service.getSnapshot().context.modelFileId,
-                            schemaName: schemaNameForModel,
-                          })
-                      if (model?.properties?.length) {
-                        propertySchemas = modelPropertiesToObject(model.properties)
-                      }
-                    }
-                  } catch {
-                    // Model not loaded
-                  }
-                  const createPromises = metadataRows.map(async (metaRow: any) => {
-                    try {
-                      const propertyName = metadataRowPropertyKey(metaRow, propertySchemas)
-                      if (!propertyName) return
-                      const property = await ItemProperty.find({
-                        propertyName,
-                        seedLocalId: watchedSeedLocalId,
-                        seedUid: this._getSnapshotContext().seedUid ?? seedUid,
-                        modelName: itemModelName,
-                        hold: false,
-                      })
-                      // The item stopped while the lookup ran: it can't take its hold, so nothing would
-                      if (property && isActorStopped(this._service)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
-                      if (property) {
-                        sendToItemMachine({
-                          type: 'addPropertyInstance',
-                          propertyName,
-                          propertyInstance: property,
-                        })
-                        logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${propertyName}" from liveQuery`)
-                      }
-                    } catch (error) {
-                      logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
-                    }
-                  })
-                  await Promise.all(createPromises)
-                  if (timingLogger.enabled) {
-                    timingLogger(
-                      `item ${watchedSeedLocalId} versions run ${versionsRun}: metadata read + ${metadataRows.length} ItemProperty.find ${timingSince(runStart)}ms`,
-                    )
-                  }
-                } catch (error) {
-                  logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances from liveQuery: ${error}`)
-                }
               }
               
               // Update context with latest version info
@@ -2249,10 +2243,24 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           )
 
           // Store combined subscription
+          // Sync writes property rows on a version the item already has (late or superseding
+          // attestations, derived rows) without touching `versions`: watch the seed's metadata
+          // too, so those properties get their instances. The versions read covers the first run.
+          const propertiesSubscription = watchEntityRows<PropertyKeyRow[]>(
+            { seedLocalId: watchedSeedLocalId, tables: ['metadata'] },
+            async () => {
+              const versionLocalId = this._getSnapshotContext().latestVersionLocalId
+              return versionLocalId ? readPropertyKeyRows(versionLocalId) : []
+            },
+            (rows) => addPropertyInstances(rows),
+            { onError: (error) => logger(`[Item._setupLiveQuerySubscription] Metadata read error: ${error}`) },
+          )
+
           instanceState.liveQuerySubscription = {
             unsubscribe: () => {
               seedsSubscription.unsubscribe()
               versionsSubscription.unsubscribe()
+              propertiesSubscription.unsubscribe()
             }
           }
           

@@ -43,14 +43,12 @@ export const ENTITY_CHANGES_PRUNE_EVERY_MS = 60_000
 
 type FeedDb = SqliteRemoteDatabase<Record<string, unknown>>
 type LiveQuery = <T>(query: (sql: any) => any) => Observable<T[]>
-/** SQLocal's `sql` template tag: runs the statement and resolves to its rows. */
-type SqlTag = (strings: TemplateStringsArray, ...params: unknown[]) => Promise<Record<string, unknown>[]>
 
 const byLocalId = new Map<string, Set<Registration>>()
 const byUid = new Map<string, Set<Registration>>()
 const registrations = new Set<Registration>()
 
-let feed: { db: FeedDb; sql: SqlTag; unsubscribe: () => void } | undefined
+let feed: { db: FeedDb; unsubscribe: () => void } | undefined
 let cursor = 0
 let reading: Promise<void> | undefined
 let readAgain = false
@@ -97,18 +95,13 @@ export function watchEntityChanges(watch: ChangeWatch, listener: () => void): ()
 /**
  * Watches `watch` and runs `read` once per dispatch, handing its result to `onRows` when it differs
  * from the last one handed over. A read that finishes after a newer one started is dropped, so an
- * older result never replaces a newer one.
- *
- * Pass `since` (the `changeFeedCursor()` taken before the caller's own initial read) to run `read`
- * once right away when the feed moved on in between: a change dispatched before this watch was
- * registered would otherwise be missed. Pass `immediate` to run it once right away regardless, as
- * a liveQuery's first emission does.
+ * older result never replaces a newer one. Pass `immediate` to also run it once right away.
  */
 export function watchEntityRows<T>(
   watch: ChangeWatch,
   read: () => Promise<T>,
   onRows: (rows: T) => void,
-  options: { since?: number; immediate?: boolean; onError?: (error: unknown) => void } = {},
+  options: { immediate?: boolean; onError?: (error: unknown) => void } = {},
 ): { unsubscribe: () => void } {
   let latest = 0
   let closed = false
@@ -118,8 +111,8 @@ export function watchEntityRows<T>(
     read().then(
       (rows) => {
         if (closed || token !== latest) return
-        // Like BaseDb.liveQuery's distinctUntilChanged: a write that left these rows as they were
-        // (this entity's own write, read back) doesn't reach the handler again.
+        // A write that left these rows as they were (this entity's own write, read back) doesn't
+        // reach the handler again.
         const json = JSON.stringify(rows)
         if (json === lastJson) return
         lastJson = json
@@ -133,7 +126,7 @@ export function watchEntityRows<T>(
     )
   }
   const unregister = watchEntityChanges(watch, run)
-  if (options.immediate || (options.since !== undefined && cursor > options.since)) run()
+  if (options.immediate) run()
   return {
     unsubscribe: () => {
       closed = true
@@ -142,23 +135,9 @@ export function watchEntityRows<T>(
   }
 }
 
-/**
- * Runs an SQL-tag query once, the way BaseDb.liveQuery's query function is written
- * (`(sql) => sql\`SELECT ...\``), so an entity can keep its liveQuery's text for its feed reads.
- */
-export async function queryEntityRows<T>(query: (sql: any) => any): Promise<T[]> {
-  if (!feed) throw new Error('The change feed has not started')
-  return (await query(feed.sql)) as T[]
-}
-
 /** Whether this tab's feed runs (a browser database is open); Node has none. */
 export function isChangeFeedRunning(): boolean {
   return feed !== undefined
-}
-
-/** The seq of the newest log row this tab has dispatched. */
-export function changeFeedCursor(): number {
-  return cursor
 }
 
 /** Registered watches, for tests. */
@@ -266,7 +245,7 @@ const scheduleRead = (db: FeedDb) => {
  */
 export async function startChangeFeed(
   db: FeedDb,
-  { liveQuery, sql: sqlTag }: { liveQuery: LiveQuery; sql: SqlTag },
+  { liveQuery }: { liveQuery: LiveQuery },
 ): Promise<void> {
   stopChangeFeed()
   // sqlite_sequence keeps the last seq even when pruning emptied the table.
@@ -282,7 +261,7 @@ export async function startChangeFeed(
     },
     error: (error) => logger('feed query failed', error),
   })
-  feed = { db, sql: sqlTag, unsubscribe: () => subscription.unsubscribe() }
+  feed = { db, unsubscribe: () => subscription.unsubscribe() }
   logger(`started at seq ${cursor}`)
 }
 

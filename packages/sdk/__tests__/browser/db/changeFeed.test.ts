@@ -6,7 +6,6 @@ import { entityChanges, metadata, seeds } from '@/seedSchema'
 import { createNewItem } from '@/db/write/createNewItem'
 import {
   ENTITY_CHANGES_RETENTION_MS,
-  changeFeedCursor,
   resetChangeFeedForTests,
   watchEntityChanges,
   watchEntityRows,
@@ -107,12 +106,10 @@ describe.skipIf(typeof window === 'undefined').sequential('change feed', () => {
   })
 
   it('calls a watcher once for a create that logs many rows', async () => {
-    const cursor = changeFeedCursor()
     const { seedLocalId } = await createNewItem({ modelName: MODEL, title: 't', summary: 's' } as never)
     const logged = await db().select().from(entityChanges).where(eq(entityChanges.seedLocalId, seedLocalId))
     expect(logged.length).toBeGreaterThan(3)
     await sleep(SETTLE_MS)
-    expect(changeFeedCursor()).toBeGreaterThan(cursor)
 
     const listener = watch({ seedLocalId, tables: ['seeds', 'versions', 'metadata'] })
     await BaseDb.transaction(async (tx) => {
@@ -160,25 +157,6 @@ describe.skipIf(typeof window === 'undefined').sequential('change feed', () => {
     resolvers[0]!(1)
     await sleep(10)
     expect(results).toEqual([2])
-  })
-
-  it('runs the read at once when the feed moved on since the caller read', async () => {
-    const localId = await insertSeed()
-    await sleep(SETTLE_MS)
-    const since = changeFeedCursor()
-    await touchSeed(localId)
-    await vi.waitFor(() => expect(changeFeedCursor()).toBeGreaterThan(since), { timeout: WAIT_TIMEOUT_MS })
-
-    const read = vi.fn(async () => 1)
-    const subscription = watchEntityRows({ seedLocalId: localId, tables: ['seeds'] }, read, () => {}, { since })
-    unwatch.push(() => subscription.unsubscribe())
-    expect(read).toHaveBeenCalledTimes(1)
-
-    const current = watchEntityRows({ seedLocalId: localId, tables: ['seeds'] }, read, () => {}, {
-      since: changeFeedCursor(),
-    })
-    unwatch.push(() => current.unsubscribe())
-    expect(read).toHaveBeenCalledTimes(1)
   })
 
   it('calls every watcher when log rows it had not read were pruned', async () => {

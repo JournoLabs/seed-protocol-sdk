@@ -64,6 +64,7 @@ import { scheduleBulkFilesDownloadFromEasSync } from '@/events/files/download'
 import { assertLocalDbChain, waitForEasReadChain } from '@/helpers/localDbChain'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 import { emitAcrossTabs } from '@/helpers/tabEvents'
+import { isBrowser } from '@/helpers/environment'
 
 /**
  * Sync stores the newest non-revoked attestation per (version, property schema). When every
@@ -1220,13 +1221,15 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   await getRelatedSeedsAndVersions(state)
   scheduleBulkFilesDownloadFromEasSync(addresses)
 
-  try {
-    const itemMod = await import('../../Item/Item')
-    await itemMod.Item.rehydrateCachedItemsFromDbAfterEasSync()
-  } catch (err) {
-    console.warn('[item/events] [syncDbWithEas] rehydrateCachedItemsFromDbAfterEasSync:', err)
+  // Loaded items in the browser see sync's writes through the change feed (ADR 0020); Node has none.
+  if (!isBrowser()) {
+    try {
+      const itemMod = await import('../../Item/Item')
+      await itemMod.Item.rehydrateCachedItemsFromDbAfterEasSync()
+    } catch (err) {
+      console.warn('[item/events] [syncDbWithEas] rehydrateCachedItemsFromDbAfterEasSync:', err)
+    }
   }
-  // Other tabs reload their cached Items too (docs/MULTI_TAB.md).
   emitAcrossTabs(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
 }
 

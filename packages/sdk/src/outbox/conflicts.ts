@@ -244,11 +244,12 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
 
     const now = Date.now()
     const remoteAt = remote.attestationCreatedAt ?? 0
-    if (remoteAt >= (draft.createdAt ?? 0)) {
-      await db
-        .update(metadata)
-        .set({ createdAt: remoteAt + 1 })
-        .where(eq(metadata.localId, draft.localId))
+    const createdAt = Math.max(draft.createdAt ?? 0, remoteAt + 1)
+    // Written after the conflict: the change feed has no trigger on pending_writes, so this write
+    // is what makes a loaded property re-read and pick the conflict up (ADR 0020).
+    const keepDraftNewest = async (recordedConflict: boolean) => {
+      if (createdAt === draft.createdAt && !recordedConflict) return
+      await db.update(metadata).set({ createdAt }).where(eq(metadata.localId, draft.localId!))
     }
 
     // The attested value the draft replaced: the newest attested row that sync didn't just write
@@ -258,7 +259,10 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
     const baseValue = base?.propertyValue ?? null
     const remoteValue = remote.propertyValue ?? null
     const localValue = draft.propertyValue ?? null
-    if (remoteValue === localValue || remoteValue === baseValue) continue
+    if (remoteValue === localValue || remoteValue === baseValue) {
+      await keepDraftNewest(false)
+      continue
+    }
 
     const opId = generateId()
     const conflict: PropertyConflict = {
@@ -282,6 +286,7 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
       appliedAt: now,
       conflict: JSON.stringify(conflict),
     })
+    await keepDraftNewest(true)
     eventEmitter.emit('itemProperty.conflict', conflict)
   }
 }

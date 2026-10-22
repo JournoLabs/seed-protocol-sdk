@@ -3,8 +3,10 @@
  * under `?filesDir=` and exposes `window.seedTab` for the test to drive through Playwright.
  */
 import { eq, sql } from 'drizzle-orm'
-import { appState, seeds } from '@/seedSchema'
+import { appState, metadata, seeds } from '@/seedSchema'
 import { watchEntityChanges } from '@/browser/db/changeFeed'
+import { Item } from '@/Item/Item'
+import { importJsonSchema } from '@/imports/json'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eventEmitter } from '@/eventBus'
@@ -28,6 +30,17 @@ new BroadcastChannel(`seed:tabs:${filesDir}/db/seed.db`).onmessage = (event) => 
 
 /** Change-feed calls per watched seed local id. */
 const changeCalls = new Map<string, number>()
+
+/** Items this tab loaded, by seed local id. */
+const loadedItems = new Map<string, Item<any>>()
+
+/** Calls to the post-sync rehydrate, which only Node runs (decision D3). */
+let rehydrateCalls = 0
+const rehydrate = Item.rehydrateCachedItemsFromDbAfterEasSync.bind(Item)
+Item.rehydrateCachedItemsFromDbAfterEasSync = async () => {
+  rehydrateCalls++
+  return rehydrate()
+}
 
 const db = () => {
   const appDb = BaseDb.getAppDb()
@@ -132,6 +145,56 @@ const seedTab = {
     )
   },
   changeCalls: (localId: string) => changeCalls.get(localId) ?? 0,
+  async importSchema(contents: string, version: number): Promise<void> {
+    await importJsonSchema({ contents }, version)
+  },
+  /** Creates an item and waits for its version; returns its local ids. */
+  async createItem(
+    modelName: string,
+    schemaName: string,
+    values: Record<string, string>,
+  ): Promise<{ seedLocalId: string; versionLocalId: string }> {
+    const item = (await Item.create({ modelName, schemaName, ...values } as never)) as Item<any>
+    const deadline = Date.now() + 10_000
+    while (!item.latestVersionLocalId && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25))
+    return { seedLocalId: item.seedLocalId, versionLocalId: item.latestVersionLocalId }
+  },
+  /** Loads an item and keeps it loaded. */
+  async loadItem(seedLocalId: string): Promise<void> {
+    const item = (await Item.find({ seedLocalId })) as Item<any> | undefined
+    if (!item) throw new Error(`no item ${seedLocalId}`)
+    loadedItems.set(seedLocalId, item)
+  },
+  /** A loaded item's property values by name. */
+  itemValues(seedLocalId: string): Record<string, unknown> {
+    const item = loadedItems.get(seedLocalId)
+    if (!item) throw new Error(`item ${seedLocalId} not loaded`)
+    return Object.fromEntries(item.properties.map((p) => [p.propertyName, p.value]))
+  },
+  /** Inserts an attested property row on an existing version, as EAS sync does. */
+  async insertSyncedProperty(
+    seedLocalId: string,
+    versionLocalId: string,
+    modelType: string,
+    propertyName: string,
+    propertyValue: string,
+  ): Promise<void> {
+    const now = Date.now()
+    const hex = () => Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+    await db().insert(metadata).values({
+      localId: `tab-meta-${Math.random().toString(36).slice(2, 10)}`,
+      uid: `0x${hex()}`,
+      seedLocalId,
+      versionLocalId,
+      modelType,
+      propertyName,
+      propertyValue,
+      easDataType: 'string',
+      attestationCreatedAt: now,
+      createdAt: now,
+    })
+  },
+  rehydrateCalls: () => rehydrateCalls,
   tabId: () => TAB_ID,
   filesChanged: () => filesChanged,
   filesChangedMessages: () => filesChangedMessages,

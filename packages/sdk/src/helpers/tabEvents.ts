@@ -101,10 +101,7 @@ export function flushFilesChangedNotices(): void {
 
 /** Refreshes this tab's in-memory state for an event another tab emitted, before re-emitting it. */
 async function catchUpOn(name: string, payload: unknown): Promise<void> {
-  if (name === EAS_SEED_DATA_SYNCED_TO_DB_EVENT) {
-    const { Item } = await import('@/Item/Item')
-    await Item.rehydrateCachedItemsFromDbAfterEasSync()
-  } else if (name === LOCAL_COPIES_REMOVED_EVENT) {
+  if (name === LOCAL_COPIES_REMOVED_EVENT) {
     const { removedSeedLocalIds = [], removedSeedUids = [] } = (payload ?? {}) as {
       removedSeedLocalIds?: string[]
       removedSeedUids?: string[]

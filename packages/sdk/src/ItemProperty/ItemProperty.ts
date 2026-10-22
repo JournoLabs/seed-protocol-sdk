@@ -14,6 +14,7 @@ import {
 import debug from 'debug'
 import pluralize from 'pluralize'
 import { currentPropertyRow } from '@/db/read/currentPropertyRow'
+import { getPropertyConflict } from '@/outbox/conflicts'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { watchEntityRows } from '@/browser/db/changeFeed'
@@ -666,13 +667,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const clearedFromRow = (row: { propertyValue?: string | null; refResolvedValue?: string | null }) =>
           row.propertyValue == null && !row.refResolvedValue ? { storageTransactionId: undefined } : {}
 
-        // The current row with the pending outbox value over it (ADR 0019, decision D2). `assignSeq`
-        // marks a read begun before an assignment in this tab: it may predate that op, which the
-        // context already shows, so the feed drops it.
+        // The current row with the pending outbox value over it (ADR 0019, decision D2), and the
+        // property's recorded conflict: sync records one when it writes a row over a local draft.
+        // A pending edit settles the conflict when it applies, so an overlaid row shows none.
+        // `assignSeq` marks a read begun before an assignment in this tab: it may predate that op,
+        // which the context already shows, so the feed drops it.
         const readRow = async () => {
           const assignSeq = this._assignSeq
           const row = await currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
-          return row && { ...row, assignSeq }
+          if (!row) return row
+          const conflict = row.overlaid ? null : await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
+          return { ...row, conflict, assignSeq }
         }
 
         // In the browser the feed watch below reads the row at once, so only Node (no change feed)
@@ -695,6 +700,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             ...displayValueFromRow(initialRow),
             ...clearedFromRow(initialRow),
             localStorageDir: initialRow.localStorageDir || undefined,
+            conflict: initialRow.conflict,
           })
         }
 
@@ -730,6 +736,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 versionLocalId: metaRow.versionLocalId || undefined,
                 versionUid: metaRow.versionUid || undefined,
                 schemaUid: metaRow.schemaUid || undefined,
+                conflict: metaRow.conflict,
               }
               // The value the context shows is the pending one: keep its display (a session URL,
               // Html text), which the row can't give until the op applies
@@ -1871,12 +1878,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         validationErrors,
       )
     }
-    const canonicalId = ctx?.seedLocalId ?? ctx?.seedUid
-    if (canonicalId) {
+    if (ctx?.seedLocalId || ctx?.seedUid) {
       eventEmitter.emit('itemProperty.saved', { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid })
-      if (typeof window !== 'undefined' && window.__SEED_INVALIDATE_ITEM_PROPERTIES__) {
-        window.__SEED_INVALIDATE_ITEM_PROPERTIES__(canonicalId)
-      }
     }
   }
 
