@@ -719,9 +719,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
               if (metaRow.assignSeq !== this._assignSeq) return
               const { context } = this._service.getSnapshot()
-              // This tab's own pending value: the context already shows it, with a display (a session
-              // URL, Html text) the row can't give until the op applies
-              if (metaRow.overlaid && metaRow.propertyValue === context.propertyValue) return
+              const rowIdentity = {
+                localId: metaRow.localId || undefined,
+                uid: metaRow.uid || undefined,
+                versionLocalId: metaRow.versionLocalId || undefined,
+                versionUid: metaRow.versionUid || undefined,
+                schemaUid: metaRow.schemaUid || undefined,
+              }
+              // The value the context shows is the pending one: keep its display (a session URL,
+              // Html text), which the row can't give until the op applies
+              if (metaRow.overlaid && metaRow.propertyValue === context.propertyValue) {
+                this._service.send({ type: 'updateContext', ...rowIdentity })
+                return
+              }
 
               // An ItemStorage row that points at its file holds no content: keep the value shown until
               // the pass this update starts reads the file. Taking renderValue from the row showed null
@@ -743,11 +753,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                   : contentInFile
                     ? {}
                     : { renderValue: metaRow.propertyValue }),
-                localId: metaRow.localId || undefined,
-                uid: metaRow.uid || undefined,
-                versionLocalId: metaRow.versionLocalId || undefined,
-                versionUid: metaRow.versionUid || undefined,
-                schemaUid: metaRow.schemaUid || undefined,
+                ...rowIdentity,
                 refResolvedValue: metaRow.refResolvedValue || undefined,
                 ...displayValueFromRow(metaRow),
                 ...clearedFromRow(metaRow),
