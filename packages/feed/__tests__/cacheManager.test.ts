@@ -28,9 +28,12 @@ describe('feed CacheManager', () => {
   })
 
   it('keeps the ETag and expiry of an entry read back from disk', async () => {
-    await new CacheManager(config).setFeedContent('post', 'rss', '<rss/>', 'application/rss+xml', {
-      page: 2,
-    })
+    await new CacheManager(config).setFeedContent(
+      'post',
+      'rss',
+      { content: '<rss/>', contentType: 'application/rss+xml', etag: '"abc"', fingerprint: 'f1' },
+      { page: 2 },
+    )
     const written = await new CacheManager(config).getFeedContent('post', 'rss', { page: 2 })
 
     vi.setSystemTime(new Date('2026-10-21T12:02:00Z'))
@@ -42,6 +45,19 @@ describe('feed CacheManager', () => {
     expect(fromDisk?.etag).toBe(written?.etag)
     expect(fromMemory?.etag).toBe(written?.etag)
     expect(fromMemory?.expiresAt).toBe(written?.expiresAt)
+  })
+
+  it('returns an entry for a fingerprint only when it was built with that fingerprint', async () => {
+    const cache = new CacheManager(config)
+    await cache.setFeedContent('post', 'rss', {
+      content: '<rss/>',
+      contentType: 'application/rss+xml',
+      etag: '"abc"',
+      fingerprint: 'f1',
+    })
+    expect(await cache.getFeedContent('post', 'rss', undefined, 'f1')).not.toBeNull()
+    expect(await cache.getFeedContent('post', 'rss', undefined, 'f2')).toBeNull()
+    expect(await cache.getFeedContent('post', 'rss')).not.toBeNull()
   })
 
   it('caches image metadata when content caching is off', async () => {

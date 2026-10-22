@@ -27,10 +27,15 @@ export class CacheManager {
     return this.config;
   }
 
+  /**
+   * The cached body for this key, unexpired. With `fingerprint`, only an entry built from the same
+   * inputs (see CachedFeedContent.fingerprint); without, any entry (e.g. a stale fallback).
+   */
   async getFeedContent(
     schemaName: string,
     format: FeedFormat,
-    contentKeyOptions?: CacheContentKeyOptions
+    contentKeyOptions?: CacheContentKeyOptions,
+    fingerprint?: string,
   ): Promise<CachedFeedContent | null> {
     if (!this.config.enabled) {
       return null;
@@ -38,17 +43,13 @@ export class CacheManager {
 
     try {
       let cached = this.memoryCache.getFeedContent(schemaName, format, contentKeyOptions);
-      if (cached) {
-        return cached;
+      if (!cached) {
+        cached = await this.fileCache.getFeedContent(schemaName, format, contentKeyOptions);
+        if (cached) this.memoryCache.putFeedContent(schemaName, format, cached, contentKeyOptions);
       }
-
-      cached = await this.fileCache.getFeedContent(schemaName, format, contentKeyOptions);
-      if (cached) {
-        this.memoryCache.putFeedContent(schemaName, format, cached, contentKeyOptions);
-        return cached;
-      }
-
-      return null;
+      if (!cached) return null;
+      if (fingerprint !== undefined && cached.fingerprint !== fingerprint) return null;
+      return cached;
     } catch (error) {
       console.error(
         `Error getting feed content cache for ${schemaName}:${format}:`,
@@ -58,43 +59,35 @@ export class CacheManager {
     }
   }
 
+  /** Stores a body with the ETag and fingerprint the caller computed; returns the stored entry. */
   async setFeedContent(
     schemaName: string,
     format: FeedFormat,
-    content: string,
-    contentType: string,
-    contentKeyOptions?: CacheContentKeyOptions
-  ): Promise<void> {
+    body: { content: string; contentType: string; etag: string; fingerprint: string },
+    contentKeyOptions?: CacheContentKeyOptions,
+  ): Promise<CachedFeedContent | null> {
     if (!this.config.enabled) {
-      return;
+      return null;
     }
 
     try {
-      let ttlOverride: number | undefined;
+      let ttl = this.config.ttl;
       if (contentKeyOptions?.archive) {
-        ttlOverride = this.config.archiveTtl ?? 86400;
+        ttl = this.config.archiveTtl ?? 86400;
       } else if (contentKeyOptions?.page != null && contentKeyOptions.page > 1) {
-        ttlOverride = this.config.pageTtl ?? 300;
+        ttl = this.config.pageTtl ?? 300;
       }
-
-      this.memoryCache.setFeedContent(
-        schemaName,
-        format,
-        content,
-        contentType,
-        contentKeyOptions,
-        ttlOverride
-      );
-
-      const cached = this.memoryCache.getFeedContent(schemaName, format, contentKeyOptions);
-      if (cached) {
-        await this.fileCache.setFeedContent(schemaName, format, cached, contentKeyOptions);
-      }
+      const now = Math.floor(Date.now() / 1000);
+      const cached: CachedFeedContent = { ...body, lastModified: now, expiresAt: now + ttl };
+      this.memoryCache.putFeedContent(schemaName, format, cached, contentKeyOptions);
+      await this.fileCache.setFeedContent(schemaName, format, cached, contentKeyOptions);
+      return cached;
     } catch (error) {
       console.error(
         `Error setting feed content cache for ${schemaName}:${format}:`,
         error
       );
+      return null;
     }
   }
 

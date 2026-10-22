@@ -287,23 +287,34 @@ function seedRecordsToFeedItems(
   )
 }
 
-export const getFeedItemsBySchemaName = async (
+/**
+ * Feed items for a page of the schema, with query's collection ETag when the collection cache
+ * answered (skip 0, cache enabled): it changes whenever a listed seed or what it was built from
+ * changes, so the feed can tell whether a cached body is still current.
+ */
+export const fetchFeedItemsBySchemaName = async (
   schemaName: string,
   options?: { limit?: number; skip?: number },
-): Promise<Record<string, unknown>[]> => {
+): Promise<{ items: Record<string, unknown>[]; etag?: string }> => {
   await initializeFeedPlatform()
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
 
   // Expanded relations give items their author names and image enclosures.
-  const { items } = await queryBySchema(schemaName, {
+  const { items, etag } = await queryBySchema(schemaName, {
     limit,
     skip,
     relations: 'expand',
     hydrateStorage: true,
   })
-  return seedRecordsToFeedItems(schemaName, items)
+  return { items: seedRecordsToFeedItems(schemaName, items), etag }
 }
+
+export const getFeedItemsBySchemaName = async (
+  schemaName: string,
+  options?: { limit?: number; skip?: number },
+): Promise<Record<string, unknown>[]> =>
+  (await fetchFeedItemsBySchemaName(schemaName, options)).items
 
 export const getFeedItemsBySchemaNameForMonth = async (
   schemaName: string,

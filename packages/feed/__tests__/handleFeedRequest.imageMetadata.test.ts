@@ -8,13 +8,13 @@ import {
   setResolvedSeedGatewayEndpoints,
 } from '@seedprotocol/arweave'
 
-const mockGetFeedItemsBySchemaName = vi.fn()
+const mockFetchFeedItems = vi.fn()
 
 vi.mock('../src/getFeedItems', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/getFeedItems')>()
   return {
     ...actual,
-    getFeedItemsBySchemaName: (...args: unknown[]) => mockGetFeedItemsBySchemaName(...args),
+    fetchFeedItemsBySchemaName: (...args: unknown[]) => mockFetchFeedItems(...args),
   }
 })
 
@@ -63,7 +63,7 @@ describe('handleFeedRequest image metadata', () => {
       return new Response(PNG_1x1, { status: 206, headers: { 'content-type': 'image/png' } })
     })
     vi.stubGlobal('fetch', fetchMock)
-    mockGetFeedItemsBySchemaName.mockResolvedValue([
+    mockFetchFeedItems.mockResolvedValue({ items: [
       {
         id: '0xpost',
         seedUid: '0xpost',
@@ -73,7 +73,7 @@ describe('handleFeedRequest image metadata', () => {
         storageTransactionId: BODY_TX,
         featureImage: { seedUid: '0ximage', arweaveUrl: `https://arweave.net/${FEATURE_TX}` },
       },
-    ])
+    ] })
 
     const rss = await (await handleFeedRequest('posts', 'rss')).text()
 

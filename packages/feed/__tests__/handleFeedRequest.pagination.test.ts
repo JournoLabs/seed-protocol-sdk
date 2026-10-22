@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockGetFeedItemsBySchemaName = vi.fn()
+const mockFetchFeedItems = vi.fn()
 
 vi.mock('../src/getFeedItems', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/getFeedItems')>()
   return {
     ...actual,
-    getFeedItemsBySchemaName: (...args: unknown[]) => mockGetFeedItemsBySchemaName(...args),
+    fetchFeedItemsBySchemaName: (...args: unknown[]) => mockFetchFeedItems(...args),
   }
 })
 
@@ -38,12 +38,12 @@ describe('handleFeedRequest pagination', () => {
   })
 
   it('asks for one item past the page and links next only when it came back', async () => {
-    mockGetFeedItemsBySchemaName.mockResolvedValue(items(2))
+    mockFetchFeedItems.mockResolvedValue({ items: items(2) })
     const full = await (await handleFeedRequest('posts', 'atom')).text()
-    expect(mockGetFeedItemsBySchemaName).toHaveBeenCalledWith('post', { limit: 3, skip: 0 })
+    expect(mockFetchFeedItems).toHaveBeenCalledWith('post', { limit: 3, skip: 0 })
     expect(full).not.toContain('rel="next"')
 
-    mockGetFeedItemsBySchemaName.mockResolvedValue(items(3))
+    mockFetchFeedItems.mockResolvedValue({ items: items(3) })
     const more = await (await handleFeedRequest('posts', 'atom')).text()
     expect(more).toContain('rel="next"')
     expect(more).not.toContain('Post 2')

@@ -4,6 +4,11 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Page 1 of a feed asks `@seedprotocol/query` on every request and rebuilds its cached body only when query's collection ETag changed, so new and changed posts appear on the next request instead of up to `CACHE_TTL` (an hour) later. Each request costs one round of indexer requests when query's collection is cached, none within `CACHE_MAX_AGE`. Page 1's `Cache-Control` max-age and s-maxage are now `CACHE_MAX_AGE` (default 0) instead of 3600, so clients and CDNs revalidate and get a 304 when nothing changed.
+- Feed ETags no longer change when an unchanged feed is rebuilt: page 1's comes from query's collection ETag, later pages' and archives' from the body. Before, every rebuild (each TTL) produced a new ETag.
+- A cached body is only served for the same site config overrides and cache-bust value it was built with. Before, a `handleFeedRequest` call with other `siteConfigOverrides` could get another site's cached body.
+- Archive feeds fall back to their last cached body when building fails, like the main feed; the fallback sends `Warning: 110` and `X-Cache: STALE`.
+- `fetchFeedItemsBySchemaName` returns the items with query's collection ETag.
 - Archive months are UTC, matching `queryBySchemaForMonth`: the main feed's `prev-archive` link and an archive's `next-archive` link are computed in UTC rather than server-local time.
 - Image metadata for items of schemas other than `image` comes from the image their enclosure uses (a feature or cover image whose Arweave URL lacks its size or type), not from the item's own storage transaction, which for a post is its HTML body. `image` items still use their own storage transaction. A cold feed probes one transaction per item with an image instead of one per item.
 - Breaking: `FEED_SITE_URL` is removed. It had no effect: item links always use `FEED_ITEM_URL_BASE` or its default (the chain's EAS explorer, else `https://easscan.org`). `loadFeedConfig()` no longer returns `siteUrl`, and `TransformOptions` drops `siteUrl` and requires `itemUrlBase` and `itemUrlPath`. The site config's `siteUrl` (channel links) is unchanged.
