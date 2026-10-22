@@ -23,6 +23,12 @@ export function usePublishCostEstimate(
   const [isStale, setIsStale] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const refreshRef = useRef<() => void>(() => {})
+  /** The last estimate and what it was for, handed to a watcher that replaces one for the same item. */
+  const lastEstimateRef = useRef<{
+    seedLocalId: string | undefined
+    publishMode: WatchPublishCostOptions['publishMode']
+    estimate: PublishCostEstimate | null
+  } | null>(null)
 
   const publishMode = options?.publishMode
   const priceRefreshMs = options?.priceRefreshMs
@@ -35,19 +41,28 @@ export function usePublishCostEstimate(
       setIsStale(false)
       setError(null)
       refreshRef.current = () => {}
+      lastEstimateRef.current = null
       return
     }
+
+    // A new Item instance for the same record (e.g. after the old one was evicted) keeps showing
+    // the last estimate while the new watcher's first one runs.
+    const seedLocalId = item.seedLocalId
+    const last = lastEstimateRef.current
+    const previousEstimate =
+      last && last.seedLocalId === seedLocalId && last.publishMode === publishMode ? last.estimate : null
 
     const handle = watchPublishCost(
       item,
       (snapshot) => {
+        lastEstimateRef.current = { seedLocalId, publishMode, estimate: snapshot.estimate }
         setEstimate(snapshot.estimate)
         setIsEstimating(snapshot.isEstimating)
         setIsStale(snapshot.isStale)
         setError(snapshot.error)
         refreshRef.current = snapshot.refresh
       },
-      options,
+      { ...options, previousEstimate },
     )
 
     return () => {

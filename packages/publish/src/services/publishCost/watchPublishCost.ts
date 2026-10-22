@@ -17,6 +17,13 @@ export type WatchPublishCostOptions = EstimatePublishCostOptions & {
   itemIdleMs?: number
   estimate?: (item: IItem<any>) => Promise<PublishCostEstimate>
   reprice?: (estimate: PublishCostEstimate) => Promise<PublishCostEstimate>
+  /**
+   * Shown (as stale) until the first estimate arrives, e.g. the last estimate of a watcher this one
+   * replaces for the same item.
+   */
+  previousEstimate?: PublishCostEstimate | null
+  /** Delay before retrying once when the watcher's first estimate fails. 0 = no retry. */
+  firstEstimateRetryMs?: number
 }
 
 export type WatchPublishCostHandle = {
@@ -26,6 +33,7 @@ export type WatchPublishCostHandle = {
 
 const DEFAULT_PRICE_REFRESH_MS = 60_000
 const DEFAULT_ITEM_IDLE_MS = 15_000
+const DEFAULT_FIRST_ESTIMATE_RETRY_MS = 5_000
 
 function propertyFingerprintValue(prop: { propertyName: string; uid?: string; value?: unknown; getService: () => { getSnapshot: () => unknown } }): string {
   const snapshot = prop.getService().getSnapshot()
@@ -56,6 +64,8 @@ function asError(err: unknown): Error {
  * Watches an item and emits USD publish-cost estimates.
  * First estimate is immediate. Later item edits restart a 15s idle timer.
  * Market rates refresh every 60s and reprice the last work without re-summarizing.
+ * If the first estimate fails it is retried once after 5s, and the snapshot stays `isEstimating`
+ * until the retry settles.
  */
 export function watchPublishCost(
   item: IItem<any>,
@@ -64,6 +74,7 @@ export function watchPublishCost(
 ): WatchPublishCostHandle {
   const priceRefreshMs = options?.priceRefreshMs ?? DEFAULT_PRICE_REFRESH_MS
   const itemIdleMs = options?.itemIdleMs ?? DEFAULT_ITEM_IDLE_MS
+  const firstEstimateRetryMs = options?.firstEstimateRetryMs ?? DEFAULT_FIRST_ESTIMATE_RETRY_MS
   const estimateFn =
     options?.estimate ??
     ((target: IItem<any>) => estimatePublishCost(target, options))
@@ -79,13 +90,16 @@ export function watchPublishCost(
 
   let disposed = false
   let lastFingerprint = itemPublishFingerprint(item)
-  let lastEstimate: PublishCostEstimate | null = null
+  let lastEstimate: PublishCostEstimate | null = options?.previousEstimate ?? null
   let isEstimating = false
-  let isStale = false
+  let isStale = lastEstimate !== null
+  let hasEstimated = false
+  let hasRetried = false
   let error: Error | null = null
   let runId = 0
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let priceTimer: ReturnType<typeof setInterval> | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
 
   const emit = () => {
     if (disposed) return
@@ -100,6 +114,10 @@ export function watchPublishCost(
 
   const runEstimate = async () => {
     const id = ++runId
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     isEstimating = true
     error = null
     emit()
@@ -107,6 +125,7 @@ export function watchPublishCost(
       const next = await estimateFn(item)
       if (disposed || id !== runId) return
       lastEstimate = next
+      hasEstimated = true
       lastFingerprint = itemPublishFingerprint(item)
       isStale = false
       isEstimating = false
@@ -114,6 +133,15 @@ export function watchPublishCost(
       emit()
     } catch (err) {
       if (disposed || id !== runId) return
+      if (!hasEstimated && !hasRetried && firstEstimateRetryMs > 0) {
+        // Still estimating: a transient failure shouldn't blank the cost until the next edit.
+        hasRetried = true
+        retryTimer = setTimeout(() => {
+          retryTimer = null
+          void runEstimate()
+        }, firstEstimateRetryMs)
+        return
+      }
       isEstimating = false
       error = asError(err)
       emit()
@@ -177,6 +205,7 @@ export function watchPublishCost(
       subscription.unsubscribe()
       if (idleTimer) clearTimeout(idleTimer)
       if (priceTimer) clearInterval(priceTimer)
+      if (retryTimer) clearTimeout(retryTimer)
     },
   }
 }
