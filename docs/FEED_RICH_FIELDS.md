@@ -192,7 +192,7 @@ For local items and `useItemProperty`, see [GETTING_STARTED.md – Displaying Ht
 
 ### List relation properties (e.g. authors)
 
-With query's default `relations: 'expand'` (feed uses it unless `FEED_EXPAND_RELATIONS=false`, which selects `'urls'`), list-of-relation fields (such as `authorIdentityIds` on the wire) are expanded to the public schema key (`authors`) with an **array of plain objects**—one per related item—so RSS can emit nested elements (for example repeated `<author>` with child fields like `<displayName>`). Storage-style keys that map to the same relation are removed from the serialized item so XML does not duplicate IDs alongside nested content. Related items that only have an Arweave `storageTransactionId` are still surfaced as URL lists instead of full object expansion. Image relations expand to objects with an `arweaveUrl`, which `createFeed` uses for the item's image enclosure.
+With `relations: 'expand'`, which feed always uses, list-of-relation fields (such as `authorIdentityIds` on the wire) are expanded to the public schema key (`authors`) with an **array of plain objects**—one per related item—so RSS can emit nested elements (for example repeated `<author>` with child fields like `<displayName>`). Storage-style keys that map to the same relation are removed from the serialized item so XML does not duplicate IDs alongside nested content. Related items that only have an Arweave `storageTransactionId` are still surfaced as URL lists instead of full object expansion. Image relations expand to objects with an `arweaveUrl`, which `createFeed` uses for the item's image enclosure.
 
 ## `SeedImage` vs `SeedMediaImage`
 

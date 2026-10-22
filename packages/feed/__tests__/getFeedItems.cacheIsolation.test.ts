@@ -113,7 +113,7 @@ describe('getFeedItemsBySchemaName and the query collection cache', () => {
   })
 
   it('feed defaults do not leak into cached SeedRecords', async () => {
-    const options = { expandRelations: true, hydrateStorage: true }
+    const options = { relations: 'expand', hydrateStorage: true } as const
     const now = Math.floor(Date.now() / 1000)
     await getQueryCacheManager().setCollection('post', buildAssembleOptionsKey(options), {
       items: [cachedPost()],

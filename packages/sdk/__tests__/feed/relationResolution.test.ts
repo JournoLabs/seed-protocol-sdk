@@ -5,8 +5,8 @@
  * and legacy naming convention (image_id).
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
-import { createFeed, loadFeedConfig } from '@seedprotocol/feed'
+import { describe, it, expect } from 'vitest'
+import { createFeed } from '@seedprotocol/feed'
 
 describe('Feed relation resolution', () => {
   describe('RSS output with resolved image relation', () => {
@@ -199,36 +199,6 @@ describe('Feed relation resolution', () => {
       expect(rss).toContain('<author:name>Bob</author:name>')
       expect(rss).toContain('<author:seedUid>0xalice123</author:seedUid>')
       expect(rss).toContain('<author:seedUid>0xbob456</author:seedUid>')
-    })
-  })
-
-  describe('expandRelations config', () => {
-    const originalEnv = process.env.FEED_EXPAND_RELATIONS
-
-    afterEach(() => {
-      if (originalEnv !== undefined) {
-        process.env.FEED_EXPAND_RELATIONS = originalEnv
-      } else {
-        delete process.env.FEED_EXPAND_RELATIONS
-      }
-    })
-
-    it('returns expandRelations: true by default', () => {
-      delete process.env.FEED_EXPAND_RELATIONS
-      const config = loadFeedConfig()
-      expect(config.expandRelations).toBe(true)
-    })
-
-    it('returns expandRelations: false when FEED_EXPAND_RELATIONS=false', () => {
-      process.env.FEED_EXPAND_RELATIONS = 'false'
-      const config = loadFeedConfig()
-      expect(config.expandRelations).toBe(false)
-    })
-
-    it('returns expandRelations: true when FEED_EXPAND_RELATIONS=true', () => {
-      process.env.FEED_EXPAND_RELATIONS = 'true'
-      const config = loadFeedConfig()
-      expect(config.expandRelations).toBe(true)
     })
   })
 })

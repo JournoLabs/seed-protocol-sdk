@@ -77,12 +77,10 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 - `EAS_CHAIN_ID` - Chain the feed reads attestations from (e.g. `8453` for Base). Sets both the EAS indexer and the default explorer for item links. Default: `11155420` (Optimism Sepolia).
 - `FEED_ITEM_URL_BASE` - Base URL for attestation links. Item URLs use `{base}/attestation/view/{uid}`. Default: the EAS explorer of `EAS_CHAIN_ID` (e.g. `https://base.easscan.org`), or `https://easscan.org` for chains without a known explorer.
 - `FEED_ITEM_URL_PATH` - Path segment (default: `attestation/view`), used with `FEED_ITEM_URL_BASE` or its default.
-- `FEED_SITE_URL` - Site URL for item links without an item URL base (default: `https://seedprotocol.io`). Item links always have a base today, so this has no effect.
 
 ### Items and pages
 
 - `FEED_PAGE_SIZE` - Items per page (default: `25`).
-- `FEED_EXPAND_RELATIONS` - Default `true`: related seeds come back as nested objects (authors with names, images with `arweaveUrl` for enclosures), and Html/File relations as Arweave URLs. `false` keeps Html/File as URLs but leaves Image and other relations as seed UIDs, so items lose image enclosures and author names. It fetches the same related seeds either way.
 - `FEED_INCLUDE_DATA_URI_HTML_ITEMS` - `true` keeps items whose rich text embeds `data:image/` URIs. Default: such items are left out of the feed.
 - `CACHE_MAX_AGE` - Seconds a checked collection is served by `@seedprotocol/query` with no indexer request (default `0`). See the [query README](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md).
 

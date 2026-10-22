@@ -55,10 +55,6 @@ export type QueryCacheConfig = {
   ttl: number
   cacheDir: string
   enabled: boolean
-  /** @deprecated Never used; ignored. */
-  backgroundRefresh?: boolean
-  /** @deprecated Never used; ignored. */
-  refreshInterval?: number
   /**
    * Seconds after a collection was last checked during which `queryBySchema` returns it without
    * any request (see QueryBySchemaOptions.maxAge). 0 (the default) checks on every read.
@@ -101,11 +97,10 @@ const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e1', urls: 'e0
 /**
  * Build a stable key for assemble options that affect cached payloads.
  * Default latest-only (`include: 'data'`) keeps Phase 2 key `e1-h1`. Relations modes map to
- * `e1` (expand), `e0` (urls) and `e2` (uids), so keys from `expandRelations` are unchanged.
+ * `e1` (expand), `e0` (urls) and `e2` (uids).
  */
 export function buildAssembleOptionsKey(options?: {
   relations?: RelationsMode
-  expandRelations?: boolean
   hydrateStorage?: boolean
   include?: ChangelogInclude
   changelog?: GetSeedOptions['changelog']

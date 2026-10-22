@@ -230,7 +230,7 @@ describe('buildAssembleOptionsKey changelog fingerprint', () => {
     expect(
       buildAssembleOptionsKey({
         include: 'changelog',
-        expandRelations: false,
+        relations: 'urls',
         hydrateStorage: false,
         changelog: {
           granularity: 'property',

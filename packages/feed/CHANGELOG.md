@@ -4,8 +4,20 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- `FeedItem` names the feed entry type. `GraphQLItem` is a deprecated alias for it; `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
-- `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are re-exported from `@seedprotocol/query` and marked deprecated; use `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from query.
+- Archive months are UTC, matching `queryBySchemaForMonth`: the main feed's `prev-archive` link and an archive's `next-archive` link are computed in UTC rather than server-local time.
+- Image metadata for items of schemas other than `image` comes from the image their enclosure uses (a feature or cover image whose Arweave URL lacks its size or type), not from the item's own storage transaction, which for a post is its HTML body. `image` items still use their own storage transaction. A cold feed probes one transaction per item with an image instead of one per item.
+- Breaking: `FEED_SITE_URL` is removed. It had no effect: item links always use `FEED_ITEM_URL_BASE` or its default (the chain's EAS explorer, else `https://easscan.org`). `loadFeedConfig()` no longer returns `siteUrl`, and `TransformOptions` drops `siteUrl` and requires `itemUrlBase` and `itemUrlPath`. The site config's `siteUrl` (channel links) is unchanged.
+- `initializeFeedPlatform` keeps EAS and Arweave clients a host app or the SDK already registered, and goes through `initializeQueryPlatform` (which checks for duplicate package copies). Before, it replaced them with Node clients on every first call. Breaking: `initializeSeedClient`, `getClient` and `teardownSeedClient` are removed; `teardownFeedPlatform` replaces the last.
+- Breaking: `FEED_EXPAND_RELATIONS` is removed and feeds always assemble with `relations: 'expand'`. Setting it to `false` fetched the same related seeds but left Image and author relations as seed UIDs, so items lost their image enclosures and author names. `loadFeedConfig()` no longer returns `expandRelations`.
+- A feed body read back from the disk cache keeps its ETag and expiry. Before, loading it into memory gave it a new ETag (so the next `If-None-Match` missed) and a full `CACHE_TTL`, including page 2+ and archive entries that should expire after `CACHE_PAGE_TTL` / `CACHE_ARCHIVE_TTL`.
+- Image metadata probes stop at the first gateway that answers, image or not; only an error or a non-ok status moves to the next gateway. When no gateway answers, nothing is cached and the next request probes again; before, the transaction was cached as "not an image" for `IMAGE_METADATA_TTL` (7 days). `ArweaveImageService.detectImage` returns null in that case.
+- Image metadata is cached whenever `IMAGE_METADATA_ENABLED` is on, including when content caching is off (the development default), and at most 8 probes run at once.
+- Archive feeds get image metadata (enclosure size and dimensions) like the main feed.
+- A page whose last item fills it exactly no longer links a `next` page that would be empty: the handler fetches one item past the page to tell.
+- `FEED_PAGE_SIZE` that isn't a positive integer gives the default 25 instead of `NaN`.
+- The cache config is read once per process instead of on every request, and per-request logs (cache hits and misses, item counts, image probes) only print under `DEBUG=seedFeed`.
+- Breaking: `GraphQLItem` (use `FeedItem`), `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are no longer exported. Import `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`.
+- `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
 - `express`, `@types/express` and `graphql-request` are no longer dependencies.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read; they never did anything.
 

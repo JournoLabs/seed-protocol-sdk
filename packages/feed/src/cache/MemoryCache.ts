@@ -36,6 +36,16 @@ export class MemoryCache {
     return cached;
   }
 
+  /** Stores an entry as it is (ETag, lastModified and expiry kept), e.g. one read from disk. */
+  putFeedContent(
+    schemaName: string,
+    format: string,
+    cached: CachedFeedContent,
+    contentKeyOptions?: CacheContentKeyOptions,
+  ): void {
+    this.feedContentCache.set(buildContentKey(schemaName, format, contentKeyOptions), cached);
+  }
+
   setFeedContent(
     schemaName: string,
     format: string,
