@@ -42,11 +42,13 @@ export type CurrentPropertyRowOptions = {
 /**
  * A property's current row: the stored row, or a pending op's fields over it. `overlaid` is true
  * when a pending op changed what the stored row says; such a row is an unpublished edit, so its
- * attestation fields are cleared. `stagedPath` is a pending ItemStorage value's staged file.
+ * attestation fields are cleared. `stagedPath` is a pending ItemStorage value's staged file;
+ * `pendingText` a pending Html value's text, shown until its file is written.
  */
 export type CurrentPropertyRow = Partial<MetadataType> & {
   overlaid: boolean
   stagedPath?: string
+  pendingText?: string
 }
 
 const seedWhere = ({ seedLocalId, seedUid }: PropertyRowSeed): SQL | undefined => {
@@ -71,7 +73,12 @@ function overlayRow(
     return { ...base, overlaid: true, stagedPath: pending.stagedPath, ...unattested }
   }
   if (stored && pending.propertyValue === stored.propertyValue) return { ...stored, overlaid: false }
-  return { ...applyPendingRow(base, pending), ...unattested, overlaid: true }
+  return {
+    ...applyPendingRow(base, pending),
+    ...unattested,
+    overlaid: true,
+    ...(pending.pendingText !== undefined && { pendingText: pending.pendingText }),
+  }
 }
 
 async function pendingRowOf(

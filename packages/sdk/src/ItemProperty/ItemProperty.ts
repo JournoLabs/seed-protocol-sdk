@@ -3,7 +3,6 @@ import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { CreatePropertyInstanceProps, PropertyMachineContext, PropertyType as SchemaPropertyType } from '@/types'
-import type { PropertyValueSnapshot } from '@/types/property'
 import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
@@ -45,7 +44,17 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteTickets'
+import type { SetPropertyValueOp } from '@/outbox/itemAppliers'
+import { rowContext } from './rowContext'
+import {
+  CLEARED_CONTEXT,
+  appendPlannedWrite,
+  isValidationLoaded,
+  planPropertyWrite,
+  propertyWriteKind,
+  whenValidationLoaded,
+  type PlannedWrite,
+} from './propertyWrite'
 import { propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import type { PropertyType as PropertyRowType } from '@/seedSchema'
 import {
@@ -144,9 +153,6 @@ const trackHeldObjectUrls = (context: PropertyMachineContext, held: Set<string>)
       context.refResolvedDisplayValue,
       context.renderValue,
       context.propertyValue,
-      // Restored if the pending save is refused.
-      context._valueBeforeSave?.renderValue,
-      context._valueBeforeSave?.propertyValue,
     ].filter(isSessionObjectUrl),
   )
   for (const url of held) {
@@ -206,24 +212,11 @@ export class ClearNotSupportedError extends Error {
 /** Types whose value is a storage seed: an empty value is a clear, not a value to store. */
 const STORAGE_SEED_TYPES = new Set(['Image', 'File', 'Html'])
 
-/** What a clear shows at once: no value and no file. */
-const CLEARED_CONTEXT = {
-  propertyValue: null,
-  renderValue: null,
-  refResolvedValue: undefined,
-  refResolvedDisplayValue: undefined,
-  localStorageDir: undefined,
-  storageTransactionId: undefined,
-} as const
+/** How long a write waits for the client to set up the file system. */
+const FILE_SYSTEM_WAIT_MS = 10_000
 
-const snapshotOf = (context: PropertyMachineContext): PropertyValueSnapshot => ({
-  propertyValue: context.propertyValue,
-  renderValue: context.renderValue,
-  refResolvedValue: context.refResolvedValue,
-  refResolvedDisplayValue: context.refResolvedDisplayValue,
-  localStorageDir: context.localStorageDir,
-  storageTransactionId: context.storageTransactionId,
-})
+/** One assignment's write; `done` resolves once its op settled and the context shows the outcome. */
+type PropertyWrite = { done: Promise<void> }
 
 type ItemPropertyFindProps = {
   propertyName: string
@@ -254,10 +247,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   protected readonly _alias: string | undefined
   protected _subscription: Subscription
   protected _dataType: string | undefined
-  /** Set while the value setter resolves a missing schema before sending `save`; save() awaits it. */
-  protected _pendingSchemaSave: Promise<boolean> | undefined
-  /** What showed before the first `showValue` since the last save; that save rolls back to it. */
-  protected _unsavedBefore: PropertyValueSnapshot | undefined
+  /** The latest assignment's write; save() waits for it. */
+  protected _latestWrite: PropertyWrite | undefined
+  /** Assignments waiting to append (see _assign), in order. */
+  protected _writeQueue: Promise<void> | undefined
+  /** Bumped by every assignment: a change-feed read begun before one is dropped. */
+  protected _assignSeq = 0
   protected _schemaUid: string | undefined
   /** Name passed to the constructor; the public name if the machine later moves to a List-of-relation storage name. */
   protected readonly _constructedPropertyName: string | undefined
@@ -553,6 +548,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
 
     this._service.start()
+    // Assignments check values synchronously (planPropertyWrite)
+    whenValidationLoaded().catch((error) => logger('[ItemProperty] loading validation', error))
 
     // Initialize instance state in WeakMap
     itemPropertyInstanceState.set(this, {
@@ -664,9 +661,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         const clearedFromRow = (row: { propertyValue?: string | null; refResolvedValue?: string | null }) =>
           row.propertyValue == null && !row.refResolvedValue ? { storageTransactionId: undefined } : {}
 
-        // The current row with the pending outbox value over it (ADR 0019, decision D2)
-        const readRow = () =>
-          currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+        // The current row with the pending outbox value over it (ADR 0019, decision D2). `assignSeq`
+        // marks a read begun before an assignment in this tab: it may predate that op, which the
+        // context already shows, so the feed drops it.
+        const readRow = async () => {
+          const assignSeq = this._assignSeq
+          const row = await currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+          return row && { ...row, assignSeq }
+        }
 
         // In the browser the feed watch below reads the row at once, so only Node (no change feed)
         // reads it here.
@@ -715,33 +717,32 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               if (!metaRow) return
               logger(`[ItemProperty._setupLiveQuerySubscription] Metadata updated in database for propertyName: ${propertyName}`)
 
-              // While this property has a save pending, the row is older than the value in memory
-              // (the user may still be typing): showing it would drop keystrokes, and another tab's
-              // write would replace the value being typed. The save sets the context itself.
+              if (metaRow.assignSeq !== this._assignSeq) return
               const { context } = this._service.getSnapshot()
-              if (
-                context.isSaving ||
-                hasPendingPropertyWrite(
-                  propertyWriteKey(context.seedLocalId ?? context.seedUid, context.propertyName),
-                )
-              ) {
-                return
-              }
+              // This tab's own pending value: the context already shows it, with a display (a session
+              // URL, Html text) the row can't give until the op applies
+              if (metaRow.overlaid && metaRow.propertyValue === context.propertyValue) return
 
               // An ItemStorage row that points at its file holds no content: keep the value shown until
               // the pass this update starts reads the file. Taking renderValue from the row showed null
               // in between, e.g. when publish moved a legacy verbatim row's content to its file.
               // An Html row's value is its storage seed's id: the subscriber shows the file's text.
               const kind = storedValueKind(context.propertyRecordSchema, context)
+              // A pending ItemStorage value is in its staged file, which the subscriber reads.
               const contentInFile =
-                ((kind === 'itemStorage' && metaRow.propertyValue == null) || kind === 'html') &&
-                !!metaRow.refResolvedValue
+                (((kind === 'itemStorage' && metaRow.propertyValue == null) || kind === 'html') &&
+                  !!metaRow.refResolvedValue) ||
+                metaRow.stagedPath !== undefined
 
               // Update context with metadata changes
               this._service.send({
                 type: 'updateContext',
                 propertyValue: metaRow.propertyValue,
-                ...(contentInFile ? {} : { renderValue: metaRow.propertyValue }),
+                ...(metaRow.pendingText !== undefined
+                  ? { renderValue: metaRow.pendingText }
+                  : contentInFile
+                    ? {}
+                    : { renderValue: metaRow.propertyValue }),
                 localId: metaRow.localId || undefined,
                 uid: metaRow.uid || undefined,
                 versionLocalId: metaRow.versionLocalId || undefined,
@@ -1550,29 +1551,25 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   /**
-   * Shows `value` at once and saves it; `await property.save()` to wait for the result. Unlike
-   * assigning `property.value`, it saves even when `value` is already in context.
-   *
-   * @param options.before - The values to restore if the save is refused or fails. Defaults to what
-   *   showed before the first `showValue` since the last save, else the current context.
+   * Shows `value` and appends its outbox op before returning (ADR 0019); `await property.save()` to
+   * wait until the op applies. Unlike assigning `property.value`, it writes even when `value` is
+   * already in context. A value that breaks a rule stays shown with its errors and is not written.
+   * A refused or failed write shows the property's current value again: its newest pending op from
+   * any tab, else its stored row.
    */
-  setValue(value: any, options: { before?: PropertyValueSnapshot } = {}): void {
-    const context = this._getSnapshotContext()
-    // Restored if the save is refused (item not owned), breaks a validation rule, or fails.
-    const before = options.before ?? this._unsavedBefore ?? snapshotOf(context)
-    this._unsavedBefore = undefined
+  setValue(value: any): void {
     // An empty Image, File or Html value has nothing to store: it clears the property
-    if ((value == null || (typeof value === 'string' && value.trim() === '')) && this._holdsStorageSeed(context)) {
-      this._sendSave(null, before, { retract: false })
+    if ((value == null || (typeof value === 'string' && value.trim() === '')) && this._holdsStorageSeed(this._getSnapshotContext())) {
+      this._assign(null, { retract: false })
       return
     }
-    this._sendSave(value, before)
+    this._assign(value)
   }
 
   /**
    * Clears the value and resolves once it is stored, like `save()` (ADR 0021). A refused or failed
-   * clear restores the value. Publish then attests the property's empty value, so its history shows
-   * the removal and reads of earlier Versions keep the old value.
+   * clear shows the property's current value again. Publish then attests the property's empty
+   * value, so its history shows the removal and reads of earlier Versions keep the old value.
    *
    * @param options.retract - Publish revokes the property's attestations instead, so reads of earlier
    *   Versions stop showing the value too. Revocation is permanent.
@@ -1586,9 +1583,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (!retract && (dataType === 'Boolean' || dataType === 'Date')) {
       throw new ClearNotSupportedError(this.propertyName, dataType)
     }
-    const before = this._unsavedBefore ?? snapshotOf(context)
-    this._unsavedBefore = undefined
-    this._sendSave(null, before, { retract })
+    this._assign(null, { retract })
     await this.save()
   }
 
@@ -1599,54 +1594,215 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return STORAGE_SEED_TYPES.has(dataType ?? '') || normalizeDataType(schema?.refValueType) === 'Image'
   }
 
-  /** Shows `value` at once and sends the save; `clear` shows and saves a cleared value instead. */
-  private _sendSave(value: any, before: PropertyValueSnapshot, clear?: { retract: boolean }): void {
-    const context = this._getSnapshotContext()
-    // Update context immediately so UI shows the value before save completes. A new edit settles
-    // the property's conflict (ADR 0019).
-    this._service.send({
-      type: 'updateContext',
+  /**
+   * Shows `value` and appends its op. When something it needs isn't there yet (the definition, the
+   * seed's local id, the file system, the validation module), it shows the value now and appends
+   * once it is; later assignments queue behind it, so ops keep assignment order.
+   */
+  private _assign(value: any, clear?: { retract: boolean }): void {
+    this._assignSeq += 1
+    const write: PropertyWrite = { done: Promise.resolve() }
+    this._latestWrite = write
+    // A new edit settles the property's conflict and the last write's errors (ADR 0019)
+    const shown = {
       ...(clear ? CLEARED_CONTEXT : { propertyValue: value, renderValue: value }),
       conflict: null,
+      _saveError: undefined,
+      _saveValidationErrors: undefined,
+      isSaving: true,
+    }
+    if (!this._writeQueue && this._writable(this._getSnapshotContext())) {
+      write.done = this._append(write, value, clear, shown)
+      return
+    }
+    this._service.send({ type: 'updateContext', ...shown })
+    const queued = (this._writeQueue ?? Promise.resolve())
+      .then(() => this._whenWritable())
+      .then(() => this._append(write, value, clear))
+      .catch((error: unknown) => this._settleWrite(write, { error }))
+    this._writeQueue = queued
+    write.done = queued
+    void queued.finally(() => {
+      if (this._writeQueue === queued) this._writeQueue = undefined
     })
-    const saveEvent = { type: 'save' as const, newValue: value, before, ...(clear && { clear }) }
+  }
 
-    // No definition yet: read it before persisting
+  /** Whether planPropertyWrite can run now. */
+  private _writable(context: PropertyMachineContext): boolean {
+    if (!context.propertyRecordSchema || !context.seedLocalId || !isValidationLoaded()) return false
+    if (propertyWriteKind(context.propertyRecordSchema) === 'set') return true
+    try {
+      BaseFileManager.getWorkingDir()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Waits for what _writable needs; throws when the definition or the seed can't be found. */
+  private async _whenWritable(): Promise<void> {
+    await whenValidationLoaded()
+    let context = this._getSnapshotContext()
     if (!context.propertyRecordSchema) {
       const { modelName, propertyName, modelType, modelFileId, seedLocalId, seedUid, propertyId } = context
-      const pending = resolvePropertyDefinition(modelName ?? '', propertyName ?? '', modelType ?? undefined, {
+      const schema = await resolvePropertyDefinition(modelName ?? '', propertyName ?? '', modelType ?? undefined, {
         modelFileId,
         seedLocalId,
         seedUid,
         propertyId,
-      }).then(
-        (schema) => {
-          if (!schema) return false
-          this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
-          this._service.send(saveEvent)
-          return true
-        },
-        () => false,
-      )
-      this._pendingSchemaSave = pending
-      void pending.finally(() => {
-        if (this._pendingSchemaSave === pending) this._pendingSchemaSave = undefined
       })
-    } else {
-      this._service.send(saveEvent)
+      if (!schema) {
+        throw new Error(`Failed to save property ${propertyName}: no schema found for ${modelName}.${propertyName}`)
+      }
+      this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
+    }
+    context = this._getSnapshotContext()
+    if (!context.seedLocalId) {
+      // An item known only by its seed uid: its local seed, if it has one
+      const { findSeedRow } = await import('@/db/read/findSeedRow')
+      const seedLocalId = context.seedUid ? (await findSeedRow({ uid: context.seedUid }))?.localId : undefined
+      if (!seedLocalId) throw new Error(`No local seed for the item to save ${context.propertyName} to`)
+      this._service.send({ type: 'updateContext', seedLocalId })
+    }
+    for (let waited = 0; !this._writable(this._getSnapshotContext()); waited += 100) {
+      if (waited >= FILE_SYSTEM_WAIT_MS) {
+        throw new Error('File system not initialized. Ensure the client has finished loading before saving files.')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
 
   /**
-   * Shows `value` without saving it, for input that saves later (a debounced text field). The next
-   * `setValue` or assignment saves, and if that save is refused or fails, the property goes back to
-   * what showed before the first `showValue`.
+   * Plans the write, shows it and appends its op (with `shown`, the assignment's own fields, in the
+   * same update). Resolves when the op settles; never rejects.
+   */
+  private _append(write: PropertyWrite, value: any, clear?: { retract: boolean }, shown?: object): Promise<void> {
+    const context = this._getSnapshotContext()
+    let plan: ReturnType<typeof planPropertyWrite>
+    try {
+      plan = planPropertyWrite(context, value, clear)
+    } catch (error) {
+      if (shown) this._service.send({ type: 'updateContext', ...shown })
+      return this._settleWrite(write, { error })
+    }
+    if (plan.writeKind === 'invalid') {
+      this._service.send({ type: 'updateContext', ...shown, _saveValidationErrors: plan.errors, isSaving: false })
+      return Promise.resolve()
+    }
+    this._service.send({ type: 'updateContext', ...shown, ...plan.display })
+    return this._followWrite(write, appendPlannedWrite(context.seedLocalId!, plan), plan)
+  }
+
+  /** Waits for an appended op to settle, then shows its row, or the current value if it failed. */
+  private async _followWrite(write: PropertyWrite, appended: Promise<string>, plan: PlannedWrite): Promise<void> {
+    try {
+      const { getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
+      startItemOutbox()
+      const opId = await appended
+      await waitForOutboxOp(opId)
+      const [op] = await getOutboxOps([opId])
+      // A newer op of the property, from another tab, replaced it
+      if (op?.status !== 'applied') return this._settleWrite(write, {})
+      const conflict = op.conflict ? (JSON.parse(op.conflict) as import('@/outbox/conflicts').PropertyConflict) : null
+      if (conflict) eventEmitter.emit('itemProperty.conflict', conflict)
+      return this._settleWrite(write, {
+        applied: { ...(await this._appliedContext(plan, outboxOpResult(op))), conflict },
+      })
+    } catch (error) {
+      return this._settleWrite(write, { error })
+    }
+  }
+
+  /** The context an applied op's row gives: where the value now is, and for a file, its display. */
+  private async _appliedContext(plan: PlannedWrite, result: any): Promise<Partial<PropertyMachineContext>> {
+    const row = rowContext(result ?? undefined)
+    if (plan.writeKind === 'set') {
+      const schemaUid = this._getSnapshotContext().schemaUid || result?.schemaUid || undefined
+      if (plan.op.value && (plan.op.value as SetPropertyValueOp).clear) return { ...row, schemaUid }
+      return { ...row, schemaUid, propertyValue: plan.value as any, renderValue: plan.value }
+    }
+    if (!result) return row
+    if (plan.writeKind === 'itemStorage') {
+      // Where the file is, right away: localStoragePath (and so publish uploads) must not wait for
+      // the browser's change feed, which Node does not have at all.
+      return { ...row, refResolvedValue: result.fileName, localStorageDir: result.localStorageDir }
+    }
+    // Image and File show a session URL (blob: in browsers, file:// in Node), kept in the context
+    // only: stored, it is dead after a reload. Html keeps showing its text.
+    const filePath = BaseFileManager.getFilesPath(storageSubdir(plan.writeKind, result.localStorageDir), result.fileName)
+    const displayUrl = plan.writeKind === 'html' ? undefined : await BaseFileManager.getContentUrlFromPath(filePath)
+    return {
+      ...row,
+      schemaUid: result.schemaUid || undefined,
+      refResolvedValue: result.fileName,
+      localStorageDir: result.localStorageDir,
+      ...(displayUrl && { renderValue: displayUrl, refResolvedDisplayValue: displayUrl }),
+    }
+  }
+
+  /**
+   * Ends a write. Only the property's latest assignment changes the context: an older one's row is
+   * already replaced. A failed write records its error and shows the property's current value: the
+   * overlay's next value (a newer pending op, from any tab), else the stored row (decision D2).
+   */
+  private async _settleWrite(
+    write: PropertyWrite,
+    outcome: { applied?: Partial<PropertyMachineContext>; error?: unknown },
+  ): Promise<void> {
+    if (this._latestWrite !== write || isActorStopped(this._service)) return
+    if (outcome.error === undefined) {
+      this._service.send({ type: 'updateContext', ...outcome.applied, isSaving: false })
+      return
+    }
+    const { throwItemWriteError } = await import('@/outbox')
+    let error: unknown = outcome.error
+    try {
+      throwItemWriteError(outcome.error)
+    } catch (mapped) {
+      error = mapped
+    }
+    await this._showCurrentValue().catch((readError) =>
+      logger(`[ItemProperty] reading ${this.propertyName} after a failed write`, readError),
+    )
+    if (this._latestWrite !== write || isActorStopped(this._service)) return
+    this._service.send({
+      type: 'updateContext',
+      _saveError: error instanceof Error ? error : new Error(String(error)),
+      isSaving: false,
+    })
+  }
+
+  /** Shows the property's current row with the overlay (hydrateFromDb), or no value when it has none. */
+  private async _showCurrentValue(): Promise<void> {
+    const context = this._getSnapshotContext()
+    const row = await currentPropertyRow(
+      { seedLocalId: context.seedLocalId, seedUid: context.seedUid },
+      {
+        propertyId: context.propertyId,
+        propertyName: context.propertyName,
+        modelName: context.modelName,
+        modelFileId: context.modelFileId,
+        dataType: normalizeDataType(context.propertyRecordSchema?.dataType),
+        refValueType: normalizeDataType(context.propertyRecordSchema?.refValueType),
+      },
+    )
+    if (isActorStopped(this._service)) return
+    if (!row) {
+      this._service.send({ type: 'updateContext', ...CLEARED_CONTEXT, localId: undefined, uid: undefined })
+      return
+    }
+    this._service.send({ type: 'rehydrateFromDb' })
+    await waitFor(this._service, (snapshot) => snapshot.value === 'idle' || snapshot.status !== 'active', {
+      timeout: DEFAULT_READY_TIMEOUT_MS,
+    })
+  }
+
+  /**
+   * Shows `value` without writing it, for input that writes later (a debounced text field). The
+   * next `setValue` or assignment writes; if the change feed reads the property first, it shows
+   * the stored value again.
    */
   showValue(value: any): void {
-    if (!this._unsavedBefore) {
-      const context = this._getSnapshotContext()
-      this._unsavedBefore = snapshotOf(context)
-    }
     this._service.send({ type: 'updateContext', propertyValue: value, renderValue: value })
   }
 
@@ -1665,6 +1821,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     })
   }
 
+  /**
+   * Resolves once the latest assignment's op is applied (ADR 0019). Rejects with its error when it
+   * failed (OwnershipError when the item isn't the client's), and with
+   * ItemPropertySaveValidationError when the value broke a rule and was not written.
+   */
   async save(): Promise<void> {
     const ctx = this._getSnapshotContext()
     const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
@@ -1675,19 +1836,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         seedUid: ctx?.seedUid ?? undefined,
       }),
     )
-    // Without this, save() would see `idle` before the deferred `save` event and resolve unsaved.
-    if (this._pendingSchemaSave && !(await this._pendingSchemaSave)) {
-      throw new Error(
-        `Failed to save property ${ctx?.propertyName}: no schema found for ${ctx?.modelName}.${ctx?.propertyName}`,
-      )
-    }
-    const settled = await timed(`${label} until idle`, () =>
-      waitFor(this._service, (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle', {
-        timeout: 10_000,
-      }),
-    )
+    await timed(`${label} until applied`, async () => {
+      // Each await may see a newer assignment start: wait for the latest
+      for (let write = this._latestWrite; write; ) {
+        await write.done
+        if (this._latestWrite === write) break
+        write = this._latestWrite
+      }
+    })
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
-      settled.context
+      this._getSnapshotContext()
     if (saveError) throw saveError
     if (validationErrors?.length) {
       throw new ItemPropertySaveValidationError(
@@ -1702,14 +1860,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         window.__SEED_INVALIDATE_ITEM_PROPERTIES__(canonicalId)
       }
     }
-    // return new Promise((resolve) => {
-    //   const saveSub = this._service.subscribe((snapshot) => {
-    //     if (!snapshot.context.isSaving) {
-    //       saveSub.unsubscribe()
-    //       resolve()
-    //     }
-    //   })
-    // })
   }
 
   /**

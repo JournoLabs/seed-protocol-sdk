@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
-import { createActor, setup } from 'xstate'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, pendingWrites, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { saveItemStorage } from '@/ItemProperty/service/actors/saveValueToDb/saveItemStorage'
+import { appendPlannedWrite, planPropertyWrite, whenValidationLoaded } from '@/ItemProperty/propertyWrite'
+import { startItemOutbox, throwItemWriteError, waitForOutboxOp } from '@/outbox'
 import { itemStorageFileLockName, withItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
@@ -16,9 +16,9 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
  * Writers of one ItemStorage file take turns under `seed:item-storage:<file path>`, so the file and
  * the row always end with the same writer's content. A save stages its content in a file of its
  * own, then its outbox op (ADR 0019) moves it into place and updates the row under the lock. Steps
- * are interleaved deterministically by holding a writer inside BaseFileManager.saveFile (a save's
- * staged write). Runs in both the NodeJS and browser projects; each race also runs without
- * Web Locks (the in-process fallback).
+ * are interleaved deterministically by holding a writer inside BaseFileManager.saveFile (an
+ * assignment's staged write, which runs after its op is appended). Runs in both the NodeJS and
+ * browser projects; each race also runs without Web Locks (the in-process fallback).
  *
  * Later writes are shorter than earlier ones, so a write that left the old tail in place (as
  * @zenfs/dom's WebAccessFS.write did in the browser) would show in the file's content.
@@ -73,30 +73,23 @@ const legacyItem = async (content: string) => {
   }
 }
 
-/** Runs the saveItemStorage actor for one row, as the property machine does, and resolves when it is done. */
-const save = (item: { seedLocalId: string; localId: string }, newValue: string): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const parent = setup({ actors: { saveItemStorage } }).createMachine({
-      invoke: {
-        src: 'saveItemStorage',
-        input: {
-          context: {
-            localId: item.localId,
-            seedLocalId: item.seedLocalId,
-            propertyName: 'html',
-            modelName: MODEL,
-            propertyRecordSchema: HTML_SCHEMA,
-          } as any,
-          event: { type: 'saveValueToDb', newValue },
-        },
-      },
-      on: {
-        saveItemStorageSuccess: { actions: () => resolve() },
-        saveItemStorageError: { actions: ({ event }) => reject((event as any).error) },
-      },
-    })
-    createActor(parent).start()
-  })
+/** Writes `newValue` to one row as an assignment does (planPropertyWrite), and resolves when its op settles. */
+const save = async (item: { seedLocalId: string; localId: string }, newValue: string): Promise<void> => {
+  await whenValidationLoaded()
+  const plan = planPropertyWrite(
+    {
+      localId: item.localId,
+      seedLocalId: item.seedLocalId,
+      propertyName: 'html',
+      modelName: MODEL,
+      propertyRecordSchema: HTML_SCHEMA,
+    } as any,
+    newValue,
+  )
+  if (plan.writeKind === 'invalid') throw new Error(plan.errors.map((e) => e.message).join('; '))
+  startItemOutbox()
+  await waitForOutboxOp(await appendPlannedWrite(item.seedLocalId, plan)).catch(throwItemWriteError)
+}
 
 type Gate = { reached: Promise<void>; release: () => void }
 
@@ -211,7 +204,8 @@ testDescribe('ItemStorage file write lock', () => {
         const { gate } = instrumentWrites()
         useMode(mode)
 
-        // The first save is held while staging its content; the second starts after it.
+        // The first save is held while staging its content; the second starts after it and
+        // supersedes it, so the first op never waits for its staged file.
         const firstStaged = gate('<p>first save, the longer one</p>')
         const first = save(item, '<p>first save, the longer one</p>')
         await firstStaged.reached
@@ -226,10 +220,14 @@ testDescribe('ItemStorage file write lock', () => {
           refResolvedValue: `${item.seedLocalId}.html`,
           propertyValue: null,
         })
+        // The superseded value's staged file landed after its op settled: its writer deletes it
         const stagingDir = BaseFileManager.getFilesPath('staging')
         const fs = await BaseFileManager.getFs()
-        const staged = (await BaseFileManager.pathExists(stagingDir)) ? await fs.promises.readdir(stagingDir) : []
-        expect(staged).toEqual([])
+        await vi.waitFor(
+          async () =>
+            expect((await BaseFileManager.pathExists(stagingDir)) ? await fs.promises.readdir(stagingDir) : []).toEqual([]),
+          { timeout: WAIT_TIMEOUT_MS },
+        )
       }, 60000)
 
       it('locks per file: a held file does not block saves of another file', async () => {

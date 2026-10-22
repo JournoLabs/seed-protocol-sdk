@@ -21,7 +21,7 @@ export const getItemProperties: GetItemProperties = async ({
       ? propertiesData
       : propertiesData.filter((data) => isPublishedMetadataRow(data) !== edited)
 
-  return selected.map(({ overlaid: _overlaid, stagedPath: _stagedPath, ...data }: any) => ({
+  return selected.map(({ overlaid: _overlaid, stagedPath: _stagedPath, pendingText: _pendingText, ...data }: any) => ({
     ...data,
     localId: data.localId || '',
     uid: data.uid || '',
