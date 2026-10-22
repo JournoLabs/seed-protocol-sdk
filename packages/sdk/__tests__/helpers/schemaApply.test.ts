@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { importJsonSchema, syncSchemaFromSource } from '@/imports/json'
 import { updateModelProperties } from '@/helpers/updateSchema'
-import { applySchemaFile, deriveSchemaFileId } from '@/helpers/schemaApply'
+import { applySchemaFile, deriveSchemaFileId, resolveSchemaRow } from '@/helpers/schemaApply'
 import { listLatestSchemaFiles, loadAllSchemasFromDb, readSchemaFile } from '@/helpers/schema'
 import { processSchemaFilesOnce } from '@/client/actors/processSchemaFiles'
 import type { SchemaFileFormat, SchemaFileInput } from '@/types/import'
@@ -250,5 +252,17 @@ testDescribe('applySchemaFile', () => {
     const [row] = await schemaRow({ id: 'apply-sync-replace' })
     expect(row.version).toBe(1)
     expect((await propertyRow(deriveSchemaFileId('Apply Sync Replace', 'SyncNote'), 'title'))?.dataType).toBe('Number')
+  }, 60_000)
+
+  // PermaPress twin: the browser FileManager logged ENOENT for SEEDPROTOCOL_Seed_Protocol_v1.json
+  it('resolves the internal schema from its row without reading a file', async () => {
+    const [row] = await schemaRow({ name: SEED_PROTOCOL_SCHEMA_NAME })
+    expect(row?.schemaFileId).toBeTruthy()
+    const read = vi.spyOn(BaseFileManager, 'readFileAsString')
+    const { schema, filePath } = await resolveSchemaRow(row!)
+    expect(read).not.toHaveBeenCalled()
+    expect(filePath).toBeUndefined()
+    expect(schema.metadata.name).toBe(SEED_PROTOCOL_SCHEMA_NAME)
+    expect(Object.keys(schema.models)).toEqual(expect.arrayContaining(['Seed', 'Version', 'Metadata']))
   }, 60_000)
 })
