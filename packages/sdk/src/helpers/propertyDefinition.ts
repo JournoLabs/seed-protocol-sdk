@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import type { Static } from '@sinclair/typebox'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -143,6 +143,22 @@ export async function getPropertyDefinitions(
   return new Map(
     rows.map((row: { property: PropertyType; refModelName: string | null }) => [
       row.property.name,
+      propertyDefinitionFromRow(row.property, row.refModelName),
+    ]),
+  )
+}
+
+/** {@link getPropertyDefinition} for each of these property file ids that has a row, by file id. */
+export async function getPropertyDefinitionsByFileId(
+  propertyFileIds: string[],
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<Map<string, PropertyDefinition>> {
+  if (!db) throw new Error('Database not available')
+  if (propertyFileIds.length === 0) return new Map()
+  const rows = await selectDefinitionRows(db).where(inArray(properties.schemaFileId, propertyFileIds))
+  return new Map(
+    rows.map((row: { property: PropertyType; refModelName: string | null }) => [
+      row.property.schemaFileId!,
       propertyDefinitionFromRow(row.property, row.refModelName),
     ]),
   )
