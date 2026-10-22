@@ -1,8 +1,7 @@
+import { applyContextUpdate } from '@/helpers/entity/contextUpdate'
 import { assign, setup } from 'xstate'
 import { MachineIds } from '@/client/constants'
 import { ItemMachineContext } from '@/types'
-import { waitForDb } from './actors/waitForDb'
-import { loadOrCreateItem } from './actors/loadOrCreateItem'
 import { runPublish } from './actors/runPublish'
 import type { ItemPublishOptions } from '@/helpers/publishConfig'
 import type { IItem } from '@/interfaces/IItem'
@@ -14,13 +13,12 @@ export const itemMachineSingle = setup({
     input: {},
   },
   actors: {
-    waitForDb,
-    loadOrCreateItem,
     runPublish,
   },
 }).createMachine({
   id: MachineIds.ITEM,
-  initial: 'waitingForDb',
+  // Loading runs outside the machine (Item.load); its result arrives as `loaded`
+  initial: 'idle',
   context: ({ input }) => input as ItemMachineContext<any>,
   on: {
     updatedPropertiesBySchemaUid: {
@@ -83,21 +81,46 @@ export const itemMachineSingle = setup({
         }
       }),
     },
-    updateContext: {
+    loaded: {
       actions: assign(({ context, event }) => {
-        // Every key the event carries: one sent before loading sets it (revokedAt, versionsCount,
-        // createdAt) must not be dropped because the context doesn't have it yet.
-        const updates: any = {}
-        for (const key in event) {
-          if (key !== 'type') {
-            updates[key] = (event as any)[key]
+        const item = (event as any).item
+        const existingPropertyInstances = context.propertyInstances || new Map<string, IItemProperty<any>>()
+        
+        
+        // Merge property instances from loadOrCreateItem (Fix 2: preserve existing when it has propertyRecordSchema and incoming doesn't)
+        if (item.propertyInstances) {
+          for (const [propertyName, propertyInstance] of item.propertyInstances) {
+            const existing = existingPropertyInstances.get(propertyName) as IItemProperty<any> | undefined
+            const existingHasSchema = existing?.propertyDef
+            const incomingHasSchema = (propertyInstance as IItemProperty<any>)?.propertyDef
+
+            if (existingHasSchema && !incomingHasSchema) {
+              continue // Preserve existing instance with schema
+            }
+            existingPropertyInstances.set(propertyName, propertyInstance)
           }
         }
+
         return {
           ...context,
-          ...updates,
+          seedLocalId: item.seedLocalId || context.seedLocalId,
+          seedUid: item.seedUid || context.seedUid,
+          schemaUid: item.schemaUid || context.schemaUid,
+          modelFileId: item.modelFileId || context.modelFileId,
+          latestVersionLocalId: item.latestVersionLocalId || context.latestVersionLocalId,
+          latestVersionUid: item.latestVersionUid || context.latestVersionUid,
+          versionsCount: item.versionsCount || context.versionsCount,
+          lastVersionPublishedAt: item.lastVersionPublishedAt || context.lastVersionPublishedAt,
+          attestationCreatedAt: item.attestationCreatedAt || context.attestationCreatedAt,
+          createdAt: item.createdAt || context.createdAt,
+          publisher: item.publisher ?? context.publisher,
+          revokedAt: item.revokedAt ?? context.revokedAt,
+          propertyInstances: existingPropertyInstances,
         }
       }),
+    },
+    updateContext: {
+      actions: assign(({ context, event }) => applyContextUpdate(context, event)),
     },
     destroyStarted: {
       actions: assign({ _destroyError: null }),
@@ -146,65 +169,5 @@ export const itemMachineSingle = setup({
         }),
       },
     },
-    waitingForDb: {
-      on: {
-        waitForDbSuccess: 'loading',
-      },
-      invoke: {
-        src: 'waitForDb',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    loading: {
-      on: {
-        loadOrCreateItemSuccess: {
-          target: 'idle',
-          actions: assign(({ context, event }) => {
-            const item = (event as any).item
-            const existingPropertyInstances = context.propertyInstances || new Map<string, IItemProperty<any>>()
-            
-            
-            // Merge property instances from loadOrCreateItem (Fix 2: preserve existing when it has propertyRecordSchema and incoming doesn't)
-            if (item.propertyInstances) {
-              for (const [propertyName, propertyInstance] of item.propertyInstances) {
-                const existing = existingPropertyInstances.get(propertyName) as IItemProperty<any> | undefined
-                const existingHasSchema = existing?.propertyDef
-                const incomingHasSchema = (propertyInstance as IItemProperty<any>)?.propertyDef
-
-                if (existingHasSchema && !incomingHasSchema) {
-                  continue // Preserve existing instance with schema
-                }
-                existingPropertyInstances.set(propertyName, propertyInstance)
-              }
-            }
-
-            return {
-              ...context,
-              seedLocalId: item.seedLocalId || context.seedLocalId,
-              seedUid: item.seedUid || context.seedUid,
-              schemaUid: item.schemaUid || context.schemaUid,
-              modelFileId: item.modelFileId || context.modelFileId,
-              latestVersionLocalId: item.latestVersionLocalId || context.latestVersionLocalId,
-              latestVersionUid: item.latestVersionUid || context.latestVersionUid,
-              versionsCount: item.versionsCount || context.versionsCount,
-              lastVersionPublishedAt: item.lastVersionPublishedAt || context.lastVersionPublishedAt,
-              attestationCreatedAt: item.attestationCreatedAt || context.attestationCreatedAt,
-              createdAt: item.createdAt || context.createdAt,
-              publisher: item.publisher ?? context.publisher,
-              revokedAt: item.revokedAt ?? context.revokedAt,
-              propertyInstances: existingPropertyInstances,
-            }
-          }),
-        },
-        loadOrCreateItemError: {
-          target: 'error',
-        },
-      },
-      invoke: {
-        src: 'loadOrCreateItem',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    error: {},
   },
 })

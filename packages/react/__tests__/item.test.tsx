@@ -422,13 +422,13 @@ describe('React Item Hooks Integration Tests', () => {
   /** Three Posts and an Article. */
   async function createTestItems(): Promise<void> {
     const postModel = Model.create('Post', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
-    await xstateWaitFor(postModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await postModel.waitForReady({ timeout: WAIT_TIMEOUT_MS })
     testItem1 = await createTestPost(1)
     testItem2 = await createTestPost(2)
     testItem3 = await createTestPost(3)
 
     const articleModel = Model.create('Article', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
-    await xstateWaitFor(articleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await articleModel.waitForReady({ timeout: WAIT_TIMEOUT_MS })
     const article = { headline: 'Test Article Headline', body: 'Test Article Body' }
     testArticleItem = await Item.create({ modelName: 'Article', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME, ...article } as any)
     await waitForItemIdle(testArticleItem)

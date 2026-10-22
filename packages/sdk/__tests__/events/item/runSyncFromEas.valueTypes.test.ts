@@ -104,11 +104,11 @@ testDescribe('runSyncFromEas: value types (ADR 0010)', () => {
   const publishedDateValue = async (): Promise<{ type: 'BigNumber'; hex: string }> => {
     const { SchemaEncoder } = await import('@ethereum-attestation-service/eas-sdk')
     const { Item } = await import('@/Item/Item')
-    const { waitForEntityIdle } = await import('@/helpers/waitForEntityIdle')
+    const { waitForEntityReady } = await import('@/helpers/entity/entityLifecycle')
     const { WAIT_TIMEOUT_MS } = await import('../../test-utils/timeouts')
     const helpers = await import('../../test-utils/getPublishPayloadIntegrationHelpers')
     const created = await Item.create({ modelName: 'ValueReport', publishedAt: PUBLISHED_AT } as any)
-    await waitForEntityIdle(created, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(created, { timeout: WAIT_TIMEOUT_MS })
     await helpers.waitForPropertyInstances(created)
     const payload: any[] = await created.getPublishPayload([])
     const att = payload.flatMap((p) => p.listOfAttestations ?? []).find((a: any) => a._propertyName === 'publishedAt')

@@ -1,11 +1,8 @@
 import { assign, setup } from 'xstate'
-import { loadOrCreateModel } from './actors/loadOrCreateModel'
 import { validateModel } from './actors/validateModel'
 import { ValidationError } from '@/Schema/validation'
-import debug from 'debug'
-import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
-
-const logger = debug('seedSdk:model:modelMachine')
+import type { LoadedModel } from '../loadModel'
+import { applyContextUpdate, differsFromOriginals, isInternalUpdate } from '@/helpers/entity/contextUpdate'
 
 export type ModelMachineContext = {
   id?: string // schemaFileId (string) - public ID
@@ -37,21 +34,17 @@ export const modelMachine = setup({
     input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions' | '_idFromSchema'>,
     events: {} as
       | { type: 'updateContext'; [key: string]: any }
-      | { type: 'loadOrCreateModel' }
-      | { type: 'loadOrCreateModelSuccess'; model: Omit<ModelMachineContext, 'modelName' | 'schemaName' | '_isEdited' | '_editedProperties' | '_validationErrors' | '_loadedAt' | '_dbVersion' | '_dbUpdatedAt'> & Partial<Pick<ModelMachineContext, '_loadedAt' | '_dbVersion' | '_dbUpdatedAt'>> }
-      | { type: 'loadOrCreateModelError'; error: Error }
+      | { type: 'loaded'; model: LoadedModel }
       | { type: 'initializeOriginalValues'; originalValues: Partial<ModelMachineContext>; isEdited?: boolean }
       | { type: 'markAsDraft'; propertyKey: string }
       | { type: 'clearDraft' }
       | { type: 'validateModel' }
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
-      | { type: 'reloadFromDb' }
       | { type: 'destroyStarted' }
       | { type: 'destroyError'; error: unknown },
   },
   actors: {
-    loadOrCreateModel,
     validateModel,
   },
   guards: {
@@ -72,7 +65,8 @@ export const modelMachine = setup({
   },
 }).createMachine({
   id: 'model',
-  initial: 'loading',
+  // Loading runs outside the machine (Model.load); its result arrives as `loaded`
+  initial: 'idle',
   context: ({ input }) => ({
     id: input.id,
     _dbId: undefined,
@@ -91,97 +85,39 @@ export const modelMachine = setup({
         // Always update context first (no guard, always runs)
         actions: [
           assign(({ context, event }) => {
-          const newContext = { ...context } as any
-
-          // Check if this is only updating internal fields
-          const onlyInternalFields = Object.keys(event).every((key: string) => {
-            return key === 'type' || key.startsWith('_')
-          })
-
-          // Update the context with new values
-          for (let i = 0; i < Object.keys(event).length; i++) {
-            const key = Object.keys(event)[i] as string
-            if (key === 'type') {
-              continue
+            const next = applyContextUpdate(context, event)
+            if (isInternalUpdate(event)) return next
+            // Properties are computed from ModelProperty instances, which track their own edits
+            const edited = differsFromOriginals(context._originalValues as Record<string, unknown>, next, event, ['properties'])
+            return {
+              ...next,
+              ...(edited !== undefined && { _isEdited: edited }),
+              // The validating state this update enters sets them again
+              _validationErrors: undefined,
             }
-            const eventValue = (event as any)[key]
-            // Ensure arrays are properly copied (create new reference)
-            newContext[key] = Array.isArray(eventValue) ? [...eventValue] : eventValue
-          }
-          
-          // Compare with original values and set _isEdited flag (only for non-internal updates)
-          // Note: properties are not in context - they're computed from ModelProperty instances
-          // Property changes are tracked via ModelProperty._isEdited flags
-          if (!onlyInternalFields && context._originalValues) {
-            const hasChanges = Object.keys(event).some((key: string) => {
-              if (key === 'type' || key.startsWith('_') || key === 'properties') return false
-              const newValue = newContext[key]
-              const oldValue = (context._originalValues as any)?.[key]
-              
-              // Deep comparison for objects/arrays
-              if (typeof newValue === 'object' && typeof oldValue === 'object') {
-                return JSON.stringify(newValue) !== JSON.stringify(oldValue)
-              }
-              return newValue !== oldValue
-            })
-            newContext._isEdited = hasChanges
-          }
-
-          // Clear validation errors on context update (will be re-validated if needed)
-          newContext._validationErrors = undefined
-
-          return newContext
-        }),
-        // Verify the context was updated and create property instances if needed
-        ({ event, self }) => {
-          if ((event as any)._liveQueryPropertyIds !== undefined) {
-            const newPropertyIds = (event as any)._liveQueryPropertyIds as string[]
-            // The model can be evicted with its schema (Schema.destroy, test cleanup) before the
-            // timer and import below run: then create nothing, and drop lookups an eviction overtakes.
-            const evictionEpoch = currentEvictionEpoch()
-            // Use setTimeout to check after assign has been applied
-            setTimeout(() => {
-              const snapshot = self.getSnapshot()
-              if (snapshot.status === 'stopped') return
-              
-              // Create ModelProperty instances for any new property IDs
-              if (Array.isArray(newPropertyIds) && newPropertyIds.length > 0) {
-                // Import and create instances asynchronously (fire-and-forget)
-                import('@/ModelProperty/ModelProperty').then(({ ModelProperty }) => {
-                  if (self.getSnapshot().status === 'stopped') return
-                  const createPromises = newPropertyIds.map(async (propertyFileId) => {
-                    try {
-                      const property = await ModelProperty.createById(propertyFileId, { evictionEpoch })
-                      if (property) {
-                        logger(`[modelMachine] Created/cached ModelProperty instance for propertyFileId "${propertyFileId}" after _liveQueryPropertyIds update`)
-                      }
-                    } catch (error) {
-                      logger(`[modelMachine] Error creating ModelProperty instance for propertyFileId "${propertyFileId}": ${error}`)
-                    }
-                  })
-                  Promise.all(createPromises).catch((error) => {
-                    logger(`[modelMachine] Error creating property instances: ${error}`)
-                  })
-                }).catch((error) => {
-                  logger(`[modelMachine] Error importing ModelProperty: ${error}`)
-                })
-              }
-            }, 0)
-          }
-        },
+          }),
         ],
         // Don't transition - stay in current state, context will be updated
       },
       {
         // Conditionally trigger validation for non-internal updates
-        guard: ({ event }: { event: any }) => {
-          return !Object.keys(event).every((key: string) => {
-            return key === 'type' || key.startsWith('_')
-          })
-        },
+        guard: ({ event }) => !isInternalUpdate(event),
         target: '.validating',
       },
     ],
+    loaded: {
+      actions: assign(({ context, event }) => ({
+        ...context,
+        ...event.model,
+        modelName: event.model.modelName ?? context.modelName,
+        _liveQueryPropertyIds: event.model._liveQueryPropertyIds ?? context._liveQueryPropertyIds ?? [],
+        _isEdited: event.model._isEdited ?? false,
+        _editedProperties: new Set<string>(),
+        _validationErrors: undefined,
+        // Properties are computed from ModelProperty instances, not compared here
+        _originalValues: {},
+      })),
+    },
     validateModel: {
       target: '.validating',
     },
@@ -236,62 +172,10 @@ export const modelMachine = setup({
     },
   },
   states: {
-    loading: {
-      on: {
-        loadOrCreateModelSuccess: {
-          target: 'idle',
-          actions: assign(({ context, event }) => {
-            const hasPendingProps = !!(context._pendingPropertyDefinitions && Object.keys(context._pendingPropertyDefinitions).length > 0)
-            logger(`[loadOrCreateModelSuccess] Preserving _pendingPropertyDefinitions: ${hasPendingProps} (${Object.keys(context._pendingPropertyDefinitions || {}).length} properties)`)
-            
-            // Check if there's a pending model name update (set before this event to avoid validation trigger)
-            const finalModelName = (context as any)._pendingModelName || context.modelName
-            if ((context as any)._pendingModelName) {
-              logger(`[loadOrCreateModelSuccess] Applying pending model name: "${context.modelName}" -> "${finalModelName}"`)
-            }
-            
-            return {
-              ...context,
-              id: event.model.id, // schemaFileId (string)
-              _dbId: event.model._dbId, // Database integer ID
-              _isEdited: (event.model as any)._isEdited ?? false, // Load isEdited from database
-              _editedProperties: new Set<string>(),
-              _validationErrors: undefined,
-              // Use final model name (may have been set via _pendingModelName to avoid validation trigger)
-              modelName: finalModelName,
-              // Clear the temporary field
-              _pendingModelName: undefined,
-              // Preserve _pendingPropertyDefinitions if it exists
-              _pendingPropertyDefinitions: context._pendingPropertyDefinitions,
-              // Preserve _liveQueryPropertyIds if provided (set by loadOrCreateModel when loading from DB)
-              _liveQueryPropertyIds: (event.model as any)._liveQueryPropertyIds ?? context._liveQueryPropertyIds ?? [],
-              // Preserve conflict detection metadata if provided
-              _loadedAt: event.model._loadedAt,
-              _dbVersion: event.model._dbVersion,
-              _dbUpdatedAt: event.model._dbUpdatedAt,
-              _originalValues: {
-                // Properties are not stored in context - they're computed from ModelProperty instances
-                // Properties will be loaded via liveQuery after model creation
-              },
-            }
-          }),
-        },
-        loadOrCreateModelError: {
-          target: 'error',
-        },
-      },
-      invoke: {
-        src: 'loadOrCreateModel',
-        input: ({ context }) => ({ context }),
-      },
-    },
     idle: {
       on: {
         validateModel: {
           target: 'validating',
-        },
-        reloadFromDb: {
-          target: 'loading',
         },
       },
       // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
@@ -317,7 +201,6 @@ export const modelMachine = setup({
         input: ({ context }) => ({ context }),
       },
     },
-    error: {},
   },
 })
 

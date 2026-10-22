@@ -1216,7 +1216,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // modelName might be stored in lowercase with underscores in database
         expect(titleProperty.modelName?.toLowerCase().replace(/_/g, '')).toBe('testpost')
         expect(titleProperty.propertyName).toBe('title')
-        expect(titleProperty.status).toBe('idle')
+        expect(titleProperty.status).toBe('ready')
         expect(typeof titleProperty.published).toBe('boolean')
       }
     })

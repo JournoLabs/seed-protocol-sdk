@@ -56,7 +56,7 @@ testDescribe('typing into a property', () => {
   for (const keyDelayMs of [0, 15, 40]) {
     it(`keeps every keystroke at ${keyDelayMs} ms per key`, async () => {
       const model = Model.create('Note', schemaName, { waitForReady: false })
-      await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const item = await Item.create({ modelName: 'Note', schemaName, title: '' })
       await waitForIdle(item as unknown as HasService, 'Item', 10_000)

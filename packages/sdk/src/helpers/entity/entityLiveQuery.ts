@@ -1,7 +1,7 @@
-import { Observable, Subscription } from 'rxjs'
+import { Observable } from 'rxjs'
 import debug from 'debug'
 import { isActorStopped } from './entityCommon'
-import type { InstanceStateStore } from './entityState'
+import { isEntityTornDown, onEntityTeardown } from './entityLifecycle'
 
 /**
  * Configuration for entity liveQuery setup
@@ -34,10 +34,6 @@ export interface LiveQueryConfig<T extends object> {
    */
   createChildInstances?: (ids: string[]) => Promise<void>
   /**
-   * Instance state store (for storing subscription)
-   */
-  instanceState: InstanceStateStore<T, { liveQuerySubscription: Subscription | null }>
-  /**
    * Logger name for debugging
    */
   loggerName: string
@@ -46,21 +42,6 @@ export interface LiveQueryConfig<T extends object> {
    * If provided, this will be called to get initial data before setting up subscription
    */
   queryInitialData?: (entityId: number | string) => Promise<any[]>
-  /**
-   * Optional: Check if entity is ready before setting up subscription
-   * Returns true if ready, false otherwise
-   */
-  isReady?: (instance: T) => boolean
-  /**
-   * Optional: Wait for entity to be ready
-   * Called if isReady returns false
-   */
-  waitForReady?: (instance: T) => Promise<void>
-  /**
-   * Optional: whether the entity id may be retried on the timer now (it always is on snapshot
-   * changes). Return false while the entity is writing its own row, which ends with a snapshot.
-   */
-  canRetryEntityId?: (instance: T) => boolean
 }
 
 /**
@@ -116,21 +97,14 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
         const queryResult = config.buildQuery(entityId)
         const query$ = queryResult instanceof Promise ? await queryResult : queryResult
         
-        const instanceState = config.instanceState.get(instance)
-        if (!instanceState) {
-          logger('Instance state not found')
-          return
-        }
-
         // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
-        if (isActorStopped(instance.getService())) return
+        if (isActorStopped(instance.getService()) || isEntityTornDown(instance)) return
 
         // Subscribe to liveQuery updates
         const subscription = query$.subscribe({
           next: async (rows) => {
             // Check if instance state still exists (hasn't been cleaned up)
-            const currentInstanceState = config.instanceState.get(instance)
-            if (!currentInstanceState) {
+            if (isEntityTornDown(instance)) {
               logger('Instance state was cleaned up, skipping update')
               return
             }
@@ -161,7 +135,8 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
           },
         })
 
-        instanceState.liveQuerySubscription = subscription
+        // Ends when the entity is torn down
+        onEntityTeardown(instance, () => subscription.unsubscribe())
         logger(`LiveQuery subscription set up for entity ID: ${entityId}`)
       } else {
         logger('Skipping liveQuery subscription in Node.js environment')
@@ -172,35 +147,9 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
     }
   }
 
-  // The entity's DB row can be written after the entity goes idle (e.g. a schema import writes its
-  // models' rows after the Model instances loaded from the schema file). Nothing changes the
-  // entity's snapshot then, so an idle entity's id is also retried on a timer until found or the
-  // actor stops. Only while idle and not writing (canRetryEntityId): a busy entity's own snapshots
-  // drive the lookup, and finding its row mid-write handed a Model its _dbId before its write (and
-  // its properties' rows) had finished.
-  let retryIndex = 0
-  let retryTimer: ReturnType<typeof setTimeout> | undefined
-  const scheduleRetry = () => {
-    if (retryTimer !== undefined || retryIndex >= ENTITY_ID_RETRY_DELAYS_MS.length) return
-    retryTimer = setTimeout(() => {
-      retryTimer = undefined
-      // Busy: its next snapshot retries
-      if (instance.getService().getSnapshot().value !== 'idle') return
-      if (config.canRetryEntityId && !config.canRetryEntityId(instance)) return
-      retryIndex++
-      void trySetup()
-    }, ENTITY_ID_RETRY_DELAYS_MS[retryIndex])
-  }
-
+  // Retried on each snapshot until the entity has its row id: its load or its row write sends it
   const trySetup = async () => {
     if (setupState.subscriptionSetUp || isActorStopped(instance.getService())) return
-    if (config.isReady && !config.isReady(instance)) {
-      if (config.waitForReady) {
-        await config.waitForReady(instance)
-      } else {
-        return // Not ready yet, will retry on next snapshot
-      }
-    }
 
     let entityId: number | string | undefined
     try {
@@ -209,34 +158,20 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
       logger(`Error getting entity ID: ${error}`)
     }
 
-    if (!entityId) {
-      scheduleRetry()
-      return
-    }
+    if (!entityId) return
 
     // Once we have entity ID, set up the liveQuery subscription (only once)
     if (!setupState.subscriptionSetUp) {
       await setupLiveQuery(entityId)
     }
-    if (setupState.subscriptionSetUp) {
-      setupSubscription.unsubscribe()
-      if (retryTimer !== undefined) clearTimeout(retryTimer)
-    }
+    if (setupState.subscriptionSetUp) setupSubscription.unsubscribe()
   }
 
   // Set up liveQuery subscription as soon as we have entity ID
-  const setupSubscription = instance.getService().subscribe({
-    next: () => {
-      void trySetup()
-    },
-    complete: () => {
-      if (retryTimer !== undefined) clearTimeout(retryTimer)
-    },
+  const setupSubscription = instance.getService().subscribe(() => {
+    void trySetup()
   })
 
   // Also check current state immediately in case entity ID is already available
   void trySetup()
 }
-
-/** Backoff for retrying an entity's id when its DB row isn't there yet (~60s in total). */
-const ENTITY_ID_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600, ...Array(28).fill(2000)]

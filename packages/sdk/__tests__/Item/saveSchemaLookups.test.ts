@@ -50,7 +50,7 @@ testDescribe('EAS schema lookups when saving', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
     const model = Model.create('Clip', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const online = BaseEasClient.getEasClient()
     BaseEasClient.configure({

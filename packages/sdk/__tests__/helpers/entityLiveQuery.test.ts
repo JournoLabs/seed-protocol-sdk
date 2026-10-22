@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createActor, createMachine } from 'xstate'
-import { of, type Subscription } from 'rxjs'
+import { of } from 'rxjs'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
@@ -20,15 +20,10 @@ const setup = (entity: ReturnType<typeof createIdleEntity>, getEntityId: () => P
     extractEntityIds: (rows) => rows.map((row: { id: string }) => row.id),
     updateContext,
     queryInitialData,
-    instanceState: new WeakMap([[entity, { liveQuerySubscription: null as Subscription | null }]]),
     loggerName: 'seedSdk:test:entityLiveQuery',
   })
   return { queryInitialData, updateContext }
 }
-
-afterEach(() => {
-  vi.useRealTimers()
-})
 
 describe('setupEntityLiveQuery', () => {
   it('sets up when the entity id is available at once', async () => {
@@ -38,48 +33,34 @@ describe('setupEntityLiveQuery', () => {
     expect(queryInitialData).toHaveBeenCalledWith(7)
   })
 
-  it('keeps retrying the entity id while the entity is idle (row written later)', async () => {
-    vi.useFakeTimers()
+  it('retries the entity id on each snapshot until it has one', async () => {
     const entity = createIdleEntity()
     let rowWritten = false
     const getEntityId = vi.fn(async () => (rowWritten ? 7 : undefined))
     const { queryInitialData } = setup(entity, getEntityId)
 
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.waitFor(() => expect(getEntityId).toHaveBeenCalled(), { timeout: WAIT_TIMEOUT_MS })
     expect(queryInitialData).not.toHaveBeenCalled()
 
-    // No snapshot change: only the retry timer can notice the row.
+    // The entity learns its row id from its load or its own row write, both of which change its snapshot
     rowWritten = true
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(queryInitialData).toHaveBeenCalledWith(7)
+    entity.getService().send({ type: 'ping' })
+    await vi.waitFor(() => expect(queryInitialData).toHaveBeenCalledWith(7), { timeout: WAIT_TIMEOUT_MS })
 
     const calls = getEntityId.mock.calls.length
-    await vi.advanceTimersByTimeAsync(10_000)
+    entity.getService().send({ type: 'ping' })
     expect(getEntityId).toHaveBeenCalledTimes(calls)
   })
 
   it('stops retrying once the entity is stopped', async () => {
-    vi.useFakeTimers()
     const entity = createIdleEntity()
     const getEntityId = vi.fn(async () => undefined)
     setup(entity, getEntityId)
 
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.waitFor(() => expect(getEntityId).toHaveBeenCalled(), { timeout: WAIT_TIMEOUT_MS })
     entity.getService().stop()
     const calls = getEntityId.mock.calls.length
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(getEntityId).toHaveBeenCalledTimes(calls)
-  })
-
-  it('gives up after about a minute', async () => {
-    vi.useFakeTimers()
-    const entity = createIdleEntity()
-    const getEntityId = vi.fn(async () => undefined)
-    setup(entity, getEntityId)
-
-    await vi.advanceTimersByTimeAsync(70_000)
-    const calls = getEntityId.mock.calls.length
-    await vi.advanceTimersByTimeAsync(60_000)
+    entity.getService().send({ type: 'ping' })
     expect(getEntityId).toHaveBeenCalledTimes(calls)
   })
 })

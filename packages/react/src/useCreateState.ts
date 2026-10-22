@@ -4,6 +4,8 @@ type CreatedSnapshot = { value: unknown; context: unknown }
 
 /** An entity a create hook returns: Schema, Model or ModelProperty. */
 type CreatedEntity = {
+  /** loading / ready / error; each change also reaches the service's subscribers */
+  readonly status: string
   getService(): {
     getSnapshot(): CreatedSnapshot
     subscribe(listener: (snapshot: CreatedSnapshot) => void): { unsubscribe(): void }
@@ -14,9 +16,8 @@ const toError = (err: unknown): Error => (err instanceof Error ? err : new Error
 
 /**
  * Loading and error state for a create hook. `run(create)` sets `isLoading`, calls `create`, then
- * follows the returned entity's service until it is idle or in error. The current snapshot is read
- * right after subscribing, so an entity that was already loaded (no further state change) clears
- * `isLoading` at once. A throw or rejection from `create` clears it, sets `error` and is rethrown.
+ * follows the returned entity until its `status` is ready or error. The status is read right after
+ * subscribing, so an entity that was already loaded (no further change) clears `isLoading` at once. A throw or rejection from `create` clears it, sets `error` and is rethrown.
  */
 export function useCreateState(failureMessage: string) {
   const subscriptionRef = useRef<{ unsubscribe(): void } | null>(null)
@@ -30,11 +31,11 @@ export function useCreateState(failureMessage: string) {
   const follow = useCallback(
     (entity: CreatedEntity) => {
       const apply = (snapshot: CreatedSnapshot) => {
-        if (snapshot.value === 'error') {
+        if (entity.status === 'error') {
           const err = (snapshot.context as { _loadingError?: { error?: unknown } })?._loadingError?.error
           setError(err instanceof Error ? err : new Error(failureMessage))
           setIsLoading(false)
-        } else if (snapshot.value === 'idle') {
+        } else if (entity.status === 'ready') {
           setError(null)
           setIsLoading(false)
         }

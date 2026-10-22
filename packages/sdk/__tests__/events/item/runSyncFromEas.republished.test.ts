@@ -209,7 +209,7 @@ describe.sequential('runSyncFromEas after a republish', () => {
     const { seeds, versions } = await import('@/seedSchema')
     const { eq, inArray } = await import('drizzle-orm')
     const { Item } = await import('@/Item/Item')
-    const { waitForEntityIdle } = await import('@/helpers/waitForEntityIdle')
+    const { waitForEntityReady } = await import('@/helpers/entity/entityLifecycle')
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
     const db = BaseDb.getAppDb()
 
@@ -252,7 +252,7 @@ describe.sequential('runSyncFromEas after a republish', () => {
       isPublished: true,
       publishedOn: '2025-01-15T00:00:00.000Z',
     } as any)
-    await waitForEntityIdle(post, { timeout: 15000 })
+    await waitForEntityReady(post, { timeout: 15000 })
 
     const authorRefs = async () => {
       const payload = await post.getPublishPayload([])

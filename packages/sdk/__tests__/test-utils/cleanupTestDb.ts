@@ -36,7 +36,7 @@ export type CleanupTestSchemaDataOptions = {
  *
  * 1. Evicts cached Schema / Model / ModelProperty instances for each non-Seed-Protocol schema. That stops
  *    their actors (no new writes) and live queries, makes work still running for them drop its result
- *    (eviction epochs, helpers/entity/evictionEpoch.ts), and makes the next import build fresh instances
+ *    (evictionLog in helpers/entity/entityCache.ts), and makes the next import build fresh instances
  *    instead of reusing ones bound to deleted rows.
  * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null, property_uids,
  *    model_uids, properties, model_schemas, models, schemas.

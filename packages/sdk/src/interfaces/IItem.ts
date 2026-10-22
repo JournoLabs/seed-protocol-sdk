@@ -7,6 +7,9 @@ export interface IItem<_T extends ModelValues<ModelSchema>> {
 
   subscribe(callback: (itemProps: any) => void): Subscription
   getService(): ActorRefFrom<any>
+  /** loading / ready / error */
+  readonly status: 'loading' | 'ready' | 'error'
+  waitForReady(options?: { timeout?: number }): Promise<void>
   getEditedProperties(): Promise<PropertyData[]>
   conflicts(): Promise<import('@/outbox/conflicts').PropertyConflict[]>
   /**

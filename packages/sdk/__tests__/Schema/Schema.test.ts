@@ -1217,15 +1217,15 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       
       // 'loading' until the load finishes, unless it already has
-      expect(['loading', 'idle']).toContain(schema.status)
+      expect(['loading', 'ready']).toContain(schema.status)
       
       await waitForSchemaIdle(schema)
-      expect(schema.status).toBe('idle')
+      expect(schema.status).toBe('ready')
       
-      // Validation is synchronous: the schema stays idle
+      // Validation is synchronous: the schema stays ready and idle
       await schema.validate()
-      expect(schema.status).toBe('idle')
-      expect(schema.status).toBe(schema.getService().getSnapshot().value)
+      expect(schema.status).toBe('ready')
+      expect(schema.getService().getSnapshot().value).toBe('idle')
     })
   })
 

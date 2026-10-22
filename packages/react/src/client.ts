@@ -1,5 +1,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { ClientManagerState, getClient } from '@seedprotocol/sdk'
+import { getClient, isClientReadySnapshot } from '@seedprotocol/sdk'
+
+export { isClientReadySnapshot }
 
 type ClientService = ReturnType<ReturnType<typeof getClient>['getService']>
 type ClientSnapshot = ReturnType<ClientService['getSnapshot']>
@@ -39,10 +41,6 @@ export function useClientSelector<T>(selector: (snapshot: ClientSnapshot) => T):
   const getSnapshot = () => selectorRef.current(service.getSnapshot())
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
-
-/** Whether a clientManager snapshot is a running client that finished init. */
-export const isClientReadySnapshot = (snapshot: ClientSnapshot): boolean =>
-  snapshot.status === 'active' && snapshot.value === ClientManagerState.IDLE
 
 /**
  * Whether `client.init` has finished and the client is ready (idle). False after

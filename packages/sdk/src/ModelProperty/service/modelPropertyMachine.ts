@@ -1,3 +1,4 @@
+import { applyContextUpdate, differsFromOriginals, isInternalUpdate } from '@/helpers/entity/contextUpdate'
 import { assign, setup } from 'xstate'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
@@ -56,6 +57,25 @@ export const modelPropertyMachine = setup({
     },
   },
   actions: {
+    applyUpdate: assign(({ context, event }) => {
+      const next = applyContextUpdate(context, event) as Record<string, unknown>
+      // TypeBox validation expects undefined, not null, for the optional ref fields
+      for (const field of ['refValueType', 'refModelId', 'ref', 'refModelName']) {
+        if (next[field] === null) next[field] = undefined
+      }
+      if (isInternalUpdate(event)) return next as ModelPropertyMachineContext
+      // Validation and the row write need these even when a just-created property is renamed
+      // before its creator's full context arrives
+      const originals = context._originalValues as Record<string, unknown> | undefined
+      if (next.modelName === undefined && originals?.modelName !== undefined) next.modelName = originals.modelName
+      if (next.dataType === undefined && originals?.dataType !== undefined) next.dataType = originals.dataType
+      const edited = differsFromOriginals(originals, next, event)
+      return {
+        ...next,
+        ...(edited !== undefined && { _isEdited: edited }),
+        _validationErrors: undefined,
+      } as ModelPropertyMachineContext
+    }),
     assignValidationErrors: assign(({ context, event }) => {
       if (event.type === 'validationError') {
         return {
@@ -74,72 +94,11 @@ export const modelPropertyMachine = setup({
     return context
   },
   on: {
-    updateContext: {
-      actions: assign(({ context, event }) => {
-        const newContext = Object.assign({}, context) as any
-
-        // Check if this is only updating internal fields
-        const onlyInternalFields = Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
-        
-        // Update the context with new values
-        for (let i = 0; i < Object.keys(event).length; i++) {
-          const key = Object.keys(event)[i] as string
-          if (key === 'type') {
-            continue
-          }
-          let value = (event as any)[key]
-          // Convert null to undefined for optional fields (TypeBox validation expects undefined, not null)
-          // This is especially important for refValueType, refModelId, etc.
-          if (value === null && (key === 'refValueType' || key === 'refModelId' || key === 'ref' || key === 'refModelName')) {
-            value = undefined
-          }
-          newContext[key] = value
-        }
-
-        // Preserve modelName and dataType from context or _originalValues so validation and savePropertyToDb
-        // never run with missing required/needed fields (e.g. when a just-created property is renamed before
-        // the full context is available from the creator).
-        if (newContext.modelName === undefined && (context._originalValues as any)?.modelName !== undefined) {
-          newContext.modelName = (context._originalValues as any).modelName
-        }
-        if (newContext.dataType === undefined && (context._originalValues as any)?.dataType !== undefined) {
-          newContext.dataType = (context._originalValues as any).dataType
-        }
-
-        // Compare with original values and set _isEdited flag (only for non-internal updates)
-        if (!onlyInternalFields && context._originalValues) {
-          const hasChanges = Object.keys(event).some((key: string) => {
-            if (key === 'type' || key.startsWith('_')) return false
-            return newContext[key] !== (context._originalValues as any)?.[key]
-          })
-          newContext._isEdited = hasChanges
-        }
-
-        // Clear validation errors on context update (will be re-validated if needed)
-        newContext._validationErrors = undefined
-
-        // Convert null to undefined for optional fields (TypeBox validation expects undefined, not null)
-        // This is especially important for refValueType, refModelId, etc.
-        const optionalFields = ['refValueType', 'refModelId', 'ref', 'refModelName']
-        for (const field of optionalFields) {
-          if (newContext[field] === null) {
-            newContext[field] = undefined
-          }
-        }
-
-        return newContext
-      }),
-      // Only trigger validation and compareAndMarkDraft if we're updating non-internal fields
-      guard: ({ event }: { event: any }) => {
-        const shouldTransition = !Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
-        return shouldTransition
-      },
-      target: '.validating',
-    },
+    updateContext: [
+      // A public change revalidates (then compareAndMarkDraft); an internal one is only applied
+      { guard: ({ event }) => !isInternalUpdate(event), actions: 'applyUpdate', target: '.validating' },
+      { actions: 'applyUpdate' },
+    ],
     validateProperty: {
       target: '.validating',
     },
@@ -251,66 +210,8 @@ export const modelPropertyMachine = setup({
       on: {
         // Apply updateContext but do not re-invoke saveToSchema actor (avoids infinite loop).
         // Context is updated; in-flight save completes with original context.
-        updateContext: [
-          {
-            guard: ({ context, event }) => {
-              const onlyInternal = Object.keys(event).every((k: string) => k === 'type' || k.startsWith('_'))
-              return !onlyInternal && event.name !== undefined && event.name !== context.name
-            },
-            actions: assign(({ context, event }) => {
-              const newContext = Object.assign({}, context) as any
-              const onlyInternalFields = Object.keys(event).every((key: string) => key === 'type' || key.startsWith('_'))
-              for (const key of Object.keys(event) as string[]) {
-                if (key === 'type') continue
-                let value = (event as any)[key]
-                if (value === null && ['refValueType', 'refModelId', 'ref', 'refModelName'].includes(key)) value = undefined
-                newContext[key] = value
-              }
-              if (newContext.modelName === undefined && (context._originalValues as any)?.modelName !== undefined) {
-                newContext.modelName = (context._originalValues as any).modelName
-              }
-              if (newContext.dataType === undefined && (context._originalValues as any)?.dataType !== undefined) {
-                newContext.dataType = (context._originalValues as any).dataType
-              }
-              if (!onlyInternalFields && context._originalValues) {
-                const hasChanges = Object.keys(event).some((key: string) => {
-                  if (key === 'type' || key.startsWith('_')) return false
-                  return newContext[key] !== (context._originalValues as any)?.[key]
-                })
-                newContext._isEdited = hasChanges
-              }
-              newContext._validationErrors = undefined
-              return newContext
-            }),
-          },
-          {
-            actions: assign(({ context, event }) => {
-              const newContext = Object.assign({}, context) as any
-              const onlyInternalFields = Object.keys(event).every((key: string) => key === 'type' || key.startsWith('_'))
-              for (const key of Object.keys(event) as string[]) {
-                if (key === 'type') continue
-                let value = (event as any)[key]
-                if (value === null && ['refValueType', 'refModelId', 'ref', 'refModelName'].includes(key)) value = undefined
-                newContext[key] = value
-              }
-              if (newContext.modelName === undefined && (context._originalValues as any)?.modelName !== undefined) {
-                newContext.modelName = (context._originalValues as any).modelName
-              }
-              if (newContext.dataType === undefined && (context._originalValues as any)?.dataType !== undefined) {
-                newContext.dataType = (context._originalValues as any).dataType
-              }
-              if (!onlyInternalFields && context._originalValues) {
-                const hasChanges = Object.keys(event).some((key: string) => {
-                  if (key === 'type' || key.startsWith('_')) return false
-                  return newContext[key] !== (context._originalValues as any)?.[key]
-                })
-                newContext._isEdited = hasChanges
-              }
-              newContext._validationErrors = undefined
-              return newContext
-            }),
-          },
-        ],
+        // Applied without re-invoking saveToSchema (that looped); the save in flight keeps its context
+        updateContext: { actions: 'applyUpdate' },
         // validationError: Uses root handler for assignment, but needs state-specific transition
         validationError: {
           target: 'idle',

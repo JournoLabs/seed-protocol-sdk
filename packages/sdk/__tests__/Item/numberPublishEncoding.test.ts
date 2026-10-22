@@ -8,7 +8,7 @@ import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { createNewItem } from '@/db/write/createNewItem'
 import { metadata } from '@/seedSchema/MetadataSchema'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { getEasSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import type { SchemaFileFormat } from '@/types/import'
@@ -49,7 +49,7 @@ testDescribe('Number publish encoding (ADR 0010)', () => {
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
     await ensureModelUidsForGetPublishPayloadTest(['NumberArticle'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
-    await waitForEntityIdle(Model.create('NumberArticle', SCHEMA_NAME, { waitForReady: false }), {
+    await waitForEntityReady(Model.create('NumberArticle', SCHEMA_NAME, { waitForReady: false }), {
       timeout: WAIT_TIMEOUT_MS,
     })
   }, SETUP_HOOK_TIMEOUT_MS)
@@ -60,7 +60,7 @@ testDescribe('Number publish encoding (ADR 0010)', () => {
 
   const loadArticle = async (seedLocalId: string) => {
     const item = (await Item.find({ seedLocalId, modelName: 'NumberArticle' }))!
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     return item
   }
@@ -81,7 +81,7 @@ testDescribe('Number publish encoding (ADR 0010)', () => {
     [1e21, '1e+21'],
   ])('%s attests under string word_count as %s', async (input, expected) => {
     const created = await Item.create({ modelName: 'NumberArticle', title: 't', wordCount: input } as any)
-    await waitForEntityIdle(created, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(created, { timeout: WAIT_TIMEOUT_MS })
     const item = await loadArticle(created.seedLocalId!)
 
     const att = await wordCountAttestation(item)

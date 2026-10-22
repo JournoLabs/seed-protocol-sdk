@@ -1,5 +1,4 @@
-import type { ActorRefFrom } from 'xstate'
-import type { modelMachine } from './service/modelMachine'
+import type { Model } from './Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
@@ -13,9 +12,10 @@ const logger = debug('seedSdk:model:createModelProperties')
  * with its schema): a stopped model's properties would be cached for a model that's gone.
  */
 export async function createModelProperties(
-  service: ActorRefFrom<typeof modelMachine>,
+  model: Model,
   propertyDefinitions: { [name: string]: any },
 ): Promise<void> {
+  const service = model.getService()
   const stopped = () => isActorStopped(service)
   const { id, _dbId, modelName, schemaName } = service.getSnapshot().context
   if (!id || !_dbId || !modelName) {
@@ -139,10 +139,10 @@ export async function createModelProperties(
             ? propertyRecord.id
             : undefined, // Already persisted: skip the write
       } as any,
-      { schemaName },
+      { schemaName, hold: false },
     ) // Use 'as any' because _propertyFileId is not in TProperty type
     // The model keeps its properties; an app's unload of the same instance doesn't stop them.
-    ModelProperty.adoptForModel(property)
+    ModelProperty.holdForModel(property, model)
   }
 
   logger(`Created all properties for model "${modelName}"`)

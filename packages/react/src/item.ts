@@ -110,7 +110,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
   }, [queryClient])
 
-  // Follow the item's machine: busy after a real transition out of idle (reload), or error.
+  // Follow the item: busy after it loaded and its machine left idle (publishing), or a failed load.
   useEffect(() => {
     hasSeenIdleRef.current = false
     setIsMachineBusy(false)
@@ -119,13 +119,13 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 
     const subscription: Subscription = item.getService().subscribe((snapshot: any) => {
       if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
-      if (snapshot.value === 'idle') {
+      if (item.status === 'error') {
+        setMachineError(new Error('Item service error'))
+        setIsMachineBusy(false)
+      } else if (item.status === 'ready' && snapshot.value === 'idle') {
         hasSeenIdleRef.current = true
         setIsMachineBusy(false)
         setMachineError(null)
-      } else if (snapshot.value === 'error') {
-        setMachineError(new Error('Item service error'))
-        setIsMachineBusy(false)
       } else if (hasSeenIdleRef.current) {
         // Only after idle, so the transitions find() already waited out don't count as loading.
         setIsMachineBusy(true)

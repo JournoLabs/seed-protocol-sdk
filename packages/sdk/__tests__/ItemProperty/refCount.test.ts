@@ -43,16 +43,8 @@ function schemaFile(): SchemaFileFormat {
   } as SchemaFileFormat
 }
 
-type CacheEntry = { instance: IItemProperty<any>; refCount: number }
-const instanceCache = () => (ItemProperty as unknown as { instanceCache: Map<string, CacheEntry> }).instanceCache
-
 /** The cache entry holding this instance (one entry, shared by all its keys), if any. */
-const entryFor = (property: IItemProperty<any>): CacheEntry | undefined => {
-  for (const entry of instanceCache().values()) {
-    if (entry.instance.getService() === property.getService()) return entry
-  }
-  return undefined
-}
+const entryFor = (property: IItemProperty<any>) => ItemProperty.cache.entryOf(property as ItemProperty<any>)
 
 const status = (property: IItemProperty<any>) => property.getService().getSnapshot().status
 

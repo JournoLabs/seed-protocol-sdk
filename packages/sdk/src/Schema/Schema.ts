@@ -13,42 +13,33 @@ import { models as modelsTable, properties as propertiesTable } from '@/seedSche
 import { eq, desc, and, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
-import { getClient } from '@/client/ClientManager'
-import { ClientManagerState } from '@/client/constants'
+import { isClientReady } from '@/client/readiness'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { addSchemaToDb, broadcastSchemasInvalidate } from '@/helpers/db'
 import { inDefinitionsTransaction, upsertSchemaRow } from '@/db/write/definitions'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '@/helpers/constants'
-import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
-import { unloadEntity } from '@/helpers/entity/entityUnload'
-import { ActorKeyedState } from '@/helpers/entity/entityState'
+import { EntityCache, evictionLog } from '@/helpers/entity/entityCache'
+import { sameEntity } from '@/helpers/entity/entityCommon'
 import {
-  clearDestroySubscriptions,
-  forceRemoveFromCaches,
-  runDestroyLifecycle,
-} from '@/helpers/entity/entityDestroy'
-import { Subscription } from 'rxjs'
+  DEFAULT_READY_TIMEOUT_MS,
+  destroyEntity,
+  entityStatus,
+  evictEntities,
+  isEntityTornDown,
+  releaseEntity,
+  runEntityLoad,
+  waitForEntityReady,
+} from '@/helpers/entity/entityLifecycle'
+import { loadOrCreateSchema } from './loadOrCreateSchema'
 import debug from 'debug'
-import { currentEvictionEpoch, finishSchemaDestroy, recordSchemaDestroy } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
 
 type SchemaService = ActorRefFrom<typeof schemaMachine>
 type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
-
-// Non-serializable resources per Schema instance (subscriptions, timers, etc.)
-export const schemaInstanceState = new ActorKeyedState<Schema, {
-  liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance model updates
-}>()
-
-// Cache client initialization state globally to avoid repeated checks
-let cachedClientInitialized: boolean | null = null
-let clientCheckTime: number = 0
-const CLIENT_CHECK_CACHE_MS = 50 // Cache for 50ms to avoid excessive checks (reduced from 100ms for faster updates)
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
@@ -91,18 +82,9 @@ export interface SchemaAllOptions {
 }
 
 export class Schema {
-  // Cache by schemaFileId (primary key - doesn't change when name changes)
-  protected static instanceCacheById: Map<
-    string,
-    { instance: Schema; refCount: number }
-  > = new Map()
-  // Temporary cache by schemaName (used until schemaFileId is available)
-  protected static instanceCacheByName: Map<
-    string,
-    { instance: Schema; refCount: number }
-  > = new Map()
-  // Deduplicate concurrent Schema.create(schemaName) calls - prevents many parallel loads for same schema
-  private static pendingSchemaByName: Map<string, Promise<Schema>> = new Map()
+  /** Cached under its file id and its name (ADR 0014). */
+  static readonly cache = new EntityCache<Schema>()
+
   protected readonly _service: SchemaService
 
   $schema?: string
@@ -136,32 +118,32 @@ export class Schema {
 
     this._service.start()
 
-    // Initialize instance state in WeakMap (only non-serializable resources)
-    schemaInstanceState.set(this, {
-      liveQuerySubscription: null,
-    })
-    
-    // Set up liveQuery subscription for cross-instance model updates
-    // This will be initialized once we have the schemaId
+    // Follows the schema's model links once it has loaded
     this._setupLiveQuerySubscription()
+  }
 
-    // Subscribe to schema context changes to update cache keys when schemaFileId becomes available
-    this._service.subscribe((snapshot) => {
-      // Update cache to use id (schemaFileId) as key once we have it (only once)
-      if (snapshot.value === 'idle' && snapshot.context.metadata?.name && snapshot.context.id) {
-        // Use a static Set to track which schemas have had their cache key updated
-        const cacheKeyUpdatedSet = (Schema as any)._cacheKeyUpdatedSet || new Set<string>()
-        if (!(Schema as any)._cacheKeyUpdatedSet) {
-          (Schema as any)._cacheKeyUpdatedSet = cacheKeyUpdatedSet
-        }
-        if (!cacheKeyUpdatedSet.has(snapshot.context.id)) {
-          Schema._updateCacheKey(snapshot.context.schemaName, snapshot.context.id)
-          cacheKeyUpdatedSet.add(snapshot.context.id)
-        }
+  /**
+   * Load the schema (creating a draft for an unknown name), hold its models, and cache it under
+   * its file id and name. Another cached instance that already has the loaded id keeps it.
+   */
+  private static async load(instance: Schema): Promise<void> {
+    let output: Awaited<ReturnType<typeof loadOrCreateSchema>>
+    try {
+      output = await loadOrCreateSchema(instance._getSnapshotContext().schemaName, instance)
+    } catch (error) {
+      // Why it failed, for useSchema
+      if (!isEntityTornDown(instance)) {
+        const loadingError = { stage: 'loading', error: error instanceof Error ? error : new Error(String(error)) }
+        instance._service.send({ type: 'updateContext', _loadingError: loadingError })
       }
-    })
-
-    // Note: Property getters/setters are now handled by the Proxy in create()
+      throw error
+    }
+    if (isEntityTornDown(instance)) return
+    instance._service.send({ type: 'loaded', output })
+    const { id, metadata, schemaName } = instance._getSnapshotContext()
+    const other = id ? Schema.cache.peek(id) : undefined
+    if (other && !sameEntity(other, instance)) return
+    Schema.cache.setKeys(instance, [id, metadata?.name ?? schemaName])
   }
 
   /**
@@ -204,24 +186,12 @@ export class Schema {
 
     const holds = options?.hold === false ? 0 : 1
 
-    // First, check if we have an instance cached by name
-    const cached = this.instanceCacheByName.get(schemaName)
+    // Cached under this name (or file id)
+    const cached = this.cache.peek(schemaName)
     if (cached) {
-      cached.refCount += holds
-      const { instance } = cached
-      if (!waitForReady) return instance
-      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-        () => instance,
-      )
-    }
-
-    // Deduplicate concurrent creates for same schema (prevents many parallel loads).
-    // The name cache is set before a pending load is recorded, so a hold was already taken above.
-    if (waitForReady) {
-      const pending = this.pendingSchemaByName.get(schemaName)
-      if (pending) {
-        return pending
-      }
+      if (holds) this.cache.holdInstance(cached)
+      if (!waitForReady) return cached
+      return waitForEntityReady(cached, { timeout: readyTimeout }).then(() => cached)
     }
 
     // Create new instance
@@ -289,58 +259,27 @@ export class Schema {
           if (oldName !== newName) {
             logger(`Updating schema name from "${oldName}" to "${newName}"`)
             
-            // Check if service is still running before sending events
-            let snapshot = instance._service.getSnapshot()
-            const wasServiceStopped = snapshot.status === 'stopped'
-            
-            if (wasServiceStopped) {
-              // CRITICAL: Update the schemaName in the service context BEFORE restarting
-              // This ensures that when loadOrCreateSchema runs, it looks for the schema with the NEW name
-              // We need to do this by sending updateContext to a running service, but if it's stopped,
-              // we need to restart it first, update, then it will reload with the new name
-              logger(`Service is stopped, will update schemaName to "${newName}" then restart`)
-              
-              // Start the service first
-              instance._service.start()
-              
-              // Immediately update the schemaName so loadOrCreateSchema uses the new name
-              // This must happen before loadOrCreateSchema runs
-              instance._service.send({
-                type: 'updateContext',
-                schemaName: newName,
-              })
-              
-              logger(`Updated schemaName to "${newName}" before loadOrCreateSchema runs`)
-              
-              // Re-check snapshot after restart - service might be loading or already idle
-              snapshot = instance._service.getSnapshot()
-            }
-            
-            // Build the update event with the new name
+            Schema.cache.setKeys(instance, [context.id, newName])
+
             const updateEvent = {
               type: 'updateContext' as const,
               schemaName: newName,
               metadata: {
-                ...(currentMetadata || {
-                  name: newName,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                }),
-                name: newName, // Always use the new name
-                updatedAt: new Date().toISOString(), // Always update timestamp
+                ...currentMetadata,
+                name: newName,
+                updatedAt: new Date().toISOString(),
               },
             }
-            
-            // A schema still loading would overwrite the update with what it loads: send it once idle
-            if (wasServiceStopped || snapshot.value === 'loading') {
-              waitForEntityIdle(instance).then(
+            // A schema still loading would overwrite the update with what it loads: send it once ready
+            if (entityStatus(instance) === 'loading') {
+              waitForEntityReady(instance).then(
                 () => instance._service.send(updateEvent),
                 () => logger(`Schema failed to load, cannot rename it to "${newName}"`),
               )
             } else {
               instance._service.send(updateEvent)
             }
-            
+
             // Mark schema as draft when name changes
             instance._service.send({
               type: 'markAsDraft',
@@ -399,45 +338,10 @@ export class Schema {
       },
     })
     
-    // Cache by name initially (will be moved to id-based cache once schemaFileId is available)
-    this.instanceCacheByName.set(schemaName, {
-      instance: proxiedInstance,
-      refCount: holds,
-    })
-    const schema = proxiedInstance as Schema
-    if (!waitForReady) return schema
-    const readyPromise = waitForEntityIdle(schema, { timeout: readyTimeout }).then(
-      () => schema,
-    )
-    this.pendingSchemaByName.set(schemaName, readyPromise)
-    // Clear on both outcomes without a .finally() chain: that derived promise would reject unhandled
-    // whenever readyPromise does, even when the caller handles the rejection.
-    const clearPending = () => {
-      this.pendingSchemaByName.delete(schemaName)
-    }
-    readyPromise.then(clearPending, clearPending)
-    return readyPromise
-  }
-
-  /**
-   * Update the cache to use schemaFileId as the key instead of schemaName
-   * This should be called once the schema is loaded and we have the schemaFileId
-   * We keep the instance in BOTH caches for efficient lookups by either name or ID
-   */
-  private static _updateCacheKey(schemaName: string, schemaFileId: string): void {
-    // If we already have an entry with this id, skip (already processed)
-    if (this.instanceCacheById.has(schemaFileId)) {
-      return
-    }
-    
-    // If we have an instance cached by name, also add it to id-based cache
-    // Keep it in both caches for efficient lookups, as one entry: one hold count for both keys
-    if (this.instanceCacheByName.has(schemaName)) {
-      const cacheEntry = this.instanceCacheByName.get(schemaName)!
-      // Add to ID cache (don't remove from name cache)
-      this.instanceCacheById.set(schemaFileId, cacheEntry)
-      logger(`Added schema cache entry to id "${schemaFileId}" (kept in name cache: "${schemaName}")`)
-    }
+    this.cache.add(proxiedInstance, [schemaName], { hold: holds === 1 })
+    void runEntityLoad(proxiedInstance, () => Schema.load(proxiedInstance))
+    if (!waitForReady) return proxiedInstance
+    return waitForEntityReady(proxiedInstance, { timeout: readyTimeout }).then(() => proxiedInstance)
   }
 
   /**
@@ -445,10 +349,7 @@ export class Schema {
    * Returns null if not found in cache
    */
   static getById(schemaFileId: string): Schema | null {
-    const entry = this.instanceCacheById.get(schemaFileId)
-    if (!entry) return null
-    entry.refCount += 1
-    return entry.instance
+    return this.cache.hold(schemaFileId) ?? null
   }
 
   /**
@@ -456,44 +357,12 @@ export class Schema {
    * the schema and doesn't hand it to a caller; callers that keep it use `create` or `find`.
    */
   static peek(schemaFileIdOrName: string): Schema | undefined {
-    return (
-      this.instanceCacheById.get(schemaFileIdOrName)?.instance ??
-      this.instanceCacheByName.get(schemaFileIdOrName)?.instance
-    )
+    return this.cache.peek(schemaFileIdOrName)
   }
 
-  /**
-   * Clear all cached Schema instances.
-   * This is primarily useful for test cleanup.
-   * All cached instances will be unloaded and removed from both caches.
-   */
+  /** Stop and drop every cached Schema, whoever holds it (test cleanup). */
   static clearCache(): void {
-    // Collect all unique instances from both caches
-    const instances = new Set<Schema>()
-    
-    // Collect from ID-based cache
-    for (const { instance } of this.instanceCacheById.values()) {
-      instances.add(instance)
-    }
-    
-    // Collect from name-based cache
-    for (const { instance } of this.instanceCacheByName.values()) {
-      instances.add(instance)
-    }
-    
-    // Unload all instances (this will properly clean up services and state)
-    for (const instance of instances) {
-      try {
-        instance.unload()
-      } catch {
-        // Ignore errors during cleanup (instance might already be unloaded)
-      }
-    }
-    
-    // Clear both caches and pending map
-    this.instanceCacheById.clear()
-    this.instanceCacheByName.clear()
-    this.pendingSchemaByName.clear()
+    evictEntities(this.cache, () => true)
   }
 
   /**
@@ -574,17 +443,11 @@ export class Schema {
     }
 
     try {
-      return await findEntity<Schema>(
-        {
-          getById: (id) => (hold === false ? Schema.peek(id) : (Schema.getById(id) ?? undefined)),
-          createById: (id) => Schema.createById(id, hold === false ? { hold: false } : undefined),
-        },
-        { id: schemaFileId },
-        {
-          waitForReady,
-          readyTimeout,
-        }
-      )
+      const schema =
+        (hold === false ? Schema.peek(schemaFileId) : (Schema.getById(schemaFileId) ?? undefined)) ??
+        (await Schema.createById(schemaFileId, hold === false ? { hold: false } : undefined))
+      if (waitForReady) await waitForEntityReady(schema, { timeout: readyTimeout })
+      return schema
     } catch {
       return undefined
     }
@@ -599,7 +462,7 @@ export class Schema {
       options.waitForReady
         ? this.create(schemaName, { ...createOptions, waitForReady: true })
         : this.create(schemaName, { ...createOptions, waitForReady: false })
-    if (this.instanceCacheByName.has(schemaName)) return loadOrCached()
+    if (this.cache.peek(schemaName)) return loadOrCached()
 
     const db = BaseDb.getAppDb()
     if (!db) return undefined
@@ -703,12 +566,12 @@ export class Schema {
       }
       
       // If no cached instance by ID, check by name but verify version
-      const cachedByName = this.instanceCacheByName.get(schemaName)
+      const cachedByName = this.cache.peek(schemaName)
       if (cachedByName) {
-        const cachedContext = cachedByName.instance.getService().getSnapshot().context
+        const cachedContext = cachedByName.getService().getSnapshot().context
         // Only use cached instance if it has the correct version
         if (cachedContext.version === expectedVersion && (!schemaFileId || cachedContext.id === schemaFileId)) {
-          schemaInstances.push(cachedByName.instance)
+          schemaInstances.push(cachedByName)
           continue
         }
       }
@@ -730,13 +593,7 @@ export class Schema {
     }
 
     if (waitForReady && schemaInstances.length > 0) {
-      await Promise.all(
-        schemaInstances.map((s) =>
-          waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
-            timeout: readyTimeout,
-          }),
-        ),
-      )
+      await Promise.all(schemaInstances.map((schema) => waitForEntityReady(schema, { timeout: readyTimeout })))
     }
 
     return schemaInstances
@@ -830,8 +687,14 @@ export class Schema {
     return [...modelInstances]
   }
 
+  /** `loading` until the schema and its models are loaded, then `ready` or `error`. */
   get status() {
-    return this._getSnapshot().value
+    return entityStatus(this)
+  }
+
+  /** Resolves once `status` is `ready`; rejects when the load failed or `timeout` ms pass. */
+  waitForReady(options?: { timeout?: number }): Promise<void> {
+    return waitForEntityReady(this, options)
   }
 
   get isEdited() {
@@ -873,7 +736,7 @@ export class Schema {
    */
   async validate(): Promise<{ isValid: boolean; errors: any[] }> {
     // Validate the loaded schema, not the empty context of one still loading
-    await waitForEntityIdle(this, { throwOnError: false })
+    await waitForEntityReady(this, { throwOnError: false })
     this._service.send({ type: 'validateSchema' })
     const errors = this._getSnapshotContext()._validationErrors || []
     return { isValid: errors.length === 0, errors }
@@ -1053,18 +916,14 @@ export class Schema {
     )
     // Clear edited flags on the cached ModelProperty instances of the edited keys, then on the rows
     // (schema, those properties, the schema's models) in one transaction.
-    const modelPropertyMod = await import('../ModelProperty/ModelProperty')
-    const { ModelProperty } = modelPropertyMod
-    const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-      instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
-    }
+    const { ModelProperty } = await import('../ModelProperty/ModelProperty')
     const thisSchemaName = this.schemaName
     const clearedKeys: Array<{ modelName: string; propertyName: string }> = []
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
       if (!modelName || !propertyName) continue
-      // Model names are only unique per schema: pick this schema's instance, which may be keyed by id.
-      const cachedInstance = [...ModelPropertyClass.instanceCache.values()].find(({ instance }) => {
+      // Model names are only unique per schema: pick this schema's instance
+      const [cachedInstance] = ModelProperty.cache.instances((instance) => {
         const ctx = instance.getService().getSnapshot().context
         return (
           ctx.modelName === modelName &&
@@ -1073,7 +932,7 @@ export class Schema {
         )
       })
       if (!cachedInstance) continue
-      cachedInstance.instance.getService().send({ type: 'clearEdited' })
+      cachedInstance.getService().send({ type: 'clearEdited' })
       clearedKeys.push({ modelName, propertyName })
     }
 
@@ -1173,28 +1032,8 @@ export class Schema {
   async reload(): Promise<void> {
     logger(`Reloading schema ${this.schemaName} from database`)
     
-    // Send reload event to machine
-    this._service.send({ type: 'reloadFromDb' })
-    
-    // Wait for reload to complete
-    return new Promise((resolve, reject) => {
-      // Cleared once the reload settles: a pending timer kept Node scripts alive for 10 s.
-      const timer = setTimeout(() => {
-        subscription.unsubscribe()
-        reject(new Error('Timeout waiting for schema reload'))
-      }, 10000)
-      const subscription = this._service.subscribe((snapshot) => {
-        if (snapshot.value === 'idle') {
-          clearTimeout(timer)
-          subscription.unsubscribe()
-          resolve()
-        } else if (snapshot.value === 'error') {
-          clearTimeout(timer)
-          subscription.unsubscribe()
-          reject(new Error('Failed to reload schema from database'))
-        }
-      })
-    })
+    await runEntityLoad(this, () => Schema.load(this))
+    if (this.status === 'error') throw new Error('Failed to reload schema from database')
   }
 
   /**
@@ -1206,48 +1045,12 @@ export class Schema {
   private async _saveDraftToDb(oldName?: string, newName?: string): Promise<void> {
     saveDraftLogger(`_saveDraftToDb called for schema (oldName: "${oldName}", newName: "${newName}")`)
     
-    // Don't save during initialization - schemas are being loaded from files, not created as drafts
-    // Check this FIRST before doing any expensive work like _getSnapshotContext()
-    if (typeof window !== 'undefined') {
-      const now = Date.now()
-      // Use cached check to avoid expensive operations
-      // Always check if cache is stale or if we previously got false (to allow recovery)
-      const cacheIsStale = cachedClientInitialized === null || (now - clientCheckTime) > CLIENT_CHECK_CACHE_MS
-      const shouldRecheck = cacheIsStale || cachedClientInitialized === false
-      
-      saveDraftLogger(`Client check: cacheIsStale=${cacheIsStale}, shouldRecheck=${shouldRecheck}, cachedValue=${cachedClientInitialized}, timeSinceCheck=${now - clientCheckTime}ms`)
-      
-      if (shouldRecheck) {
-        try {
-          const client = getClient()
-          const clientSnapshot = client.getService().getSnapshot()
-          // Check if state is IDLE (primary check) - isInitialized is set in entry action so should be true
-          // But we check it as a secondary safeguard
-          const isIdle = clientSnapshot.value === ClientManagerState.IDLE
-          const isInitialized = clientSnapshot.context.isInitialized
-          // If state is IDLE, trust it even if isInitialized isn't set yet (entry action should set it)
-          // This aligns with useIsClientReady which only checks the state value
-          cachedClientInitialized = isIdle && (isInitialized !== false)
-          clientCheckTime = now
-          saveDraftLogger(`Client state checked: state=${clientSnapshot.value}, isIdle=${isIdle}, isInitialized=${isInitialized}, result=${cachedClientInitialized}`)
-        } catch (error) {
-          // If we can't check client state, assume not initialized to be safe
-          // But only cache for a short time to allow recovery
-          cachedClientInitialized = false
-          clientCheckTime = now
-          saveDraftLogger(`Error checking client state: ${error instanceof Error ? error.message : String(error)}, setting cachedClientInitialized=false`)
-        }
-      } else {
-        saveDraftLogger(`Using cached client state: cachedClientInitialized=${cachedClientInitialized}`)
-      }
-      
-      if (!cachedClientInitialized) {
-        saveDraftLogger(`Client not initialized, skipping save (oldName: "${oldName}", newName: "${newName}")`)
-        // Skip silently during initialization to avoid log spam and reduce overhead
-        return
-      }
+    // Not during client init in the browser: schemas are being loaded from files then, not edited
+    if (typeof window !== 'undefined' && !isClientReady()) {
+      saveDraftLogger(`Client not ready, skipping save (oldName: "${oldName}", newName: "${newName}")`)
+      return
     }
-    
+
     saveDraftLogger(`Client is initialized, proceeding with save (oldName: "${oldName}", newName: "${newName}")`)
     
     const initialContext = this._getSnapshotContext()
@@ -1407,110 +1210,36 @@ export class Schema {
    * query while their rows are being deleted.
    */
   static evict(schemaName: string): void {
-    const instances = new Set<Schema>()
-    for (const { instance } of Schema.instanceCacheById.values()) instances.add(instance)
-    for (const { instance } of Schema.instanceCacheByName.values()) instances.add(instance)
-    for (const instance of instances) {
-      let context: SchemaMachineContext
-      try {
-        context = instance._getSnapshotContext()
-      } catch {
-        continue
-      }
-      if (context.schemaName !== schemaName) continue
-      clearDestroySubscriptions(instance, {
-        instanceState: schemaInstanceState,
-        onUnload: () => schemaInstanceState.delete(instance),
-      })
-      forceRemoveFromCaches(instance, {
-        getCacheKeys: () => [context.id, context.schemaName].filter((k): k is string => !!k),
-        caches: [
-          Schema.instanceCacheById as Map<string, unknown>,
-          Schema.instanceCacheByName as Map<string, unknown>,
-        ],
-      })
-      try {
-        instance._service.stop()
-      } catch {
-        // Service might already be stopped
-      }
-    }
-  }
-
-  unload(): void {
-    try {
-      const context = this._getSnapshotContext()
-      const cacheKeys: string[] = []
-      
-      if (context.id) {
-        cacheKeys.push(context.id)
-      }
-      if (context.schemaName) {
-        cacheKeys.push(context.schemaName)
-      }
-      
-      unloadEntity(this, {
-        getCacheKeys: () => cacheKeys,
-        caches: [Schema.instanceCacheById, Schema.instanceCacheByName],
-        instanceState: schemaInstanceState,
-        getService: (instance) => instance._service,
-        onUnload: () => {
-          // Clean up WeakMap entry
-          schemaInstanceState.delete(this)
-          if (context.schemaName) Model.releaseSchemaHolds(context.schemaName)
-        },
-      })
-    } catch (error) {
-      // Service might be stopped, can't get context - that's okay
-      logger(`Could not get context during unload: ${error instanceof Error ? error.message : String(error)}`)
-      // Still try to clean up what we can
-      const instanceState = schemaInstanceState.get(this)
-      if (instanceState?.liveQuerySubscription) {
-        instanceState.liveQuerySubscription.unsubscribe()
-        instanceState.liveQuerySubscription = null
-      }
-      schemaInstanceState.delete(this)
-      try {
-        this._service.stop()
-      } catch {
-        // Service might already be stopped
-      }
-    }
+    evictEntities(this.cache, (schema) => schema._getSnapshotContext().schemaName === schemaName)
   }
 
   /**
-   * Destroy the schema instance completely: remove from caches, delete from database (cascade),
-   * and stop the service. Uses shared destroy helpers.
+   * Release this caller's hold. With the last one the schema is stopped, leaves the cache, and
+   * releases its hold on each of its models.
+   */
+  unload(): void {
+    releaseEntity(this, Schema.cache)
+  }
+
+  /**
+   * Destroy the schema: delete its rows (schema, models, properties, links) and its files, and stop
+   * it and its cached models and properties, whoever holds them.
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
     const schemaFileId = context.id
     const schemaName = context.schemaName
-
-    clearDestroySubscriptions(this, {
-      instanceState: schemaInstanceState,
-      onUnload: () => schemaInstanceState.delete(this),
-    })
-
-    const cacheKeys: string[] = []
-    if (schemaFileId) cacheKeys.push(schemaFileId)
-    if (schemaName) cacheKeys.push(schemaName)
-    forceRemoveFromCaches(this, {
-      getCacheKeys: () => cacheKeys,
-      caches: [
-        Schema.instanceCacheById as Map<string, unknown>,
-        Schema.instanceCacheByName as Map<string, unknown>,
-      ],
-    })
+    // Lookups stop finding it now, not once its models are evicted and their writes drained
+    Schema.cache.remove(this)
 
     // Until its rows are gone, nothing may re-create this schema's models. Its own actor stays live
     // till then, and its live query reacting to destroyStarted could read a model row the drained
     // write had just landed and re-create (and re-write) that model after the delete below.
-    if (schemaName) recordSchemaDestroy(schemaName)
+    const finishEviction = evictionLog.evict(schemaName ? [`schema:${schemaName}`] : [])
     try {
       await this._destroyRows(schemaFileId, schemaName, context.metadata?.name)
     } finally {
-      if (schemaName) finishSchemaDestroy(schemaName)
+      finishEviction()
     }
   }
 
@@ -1530,70 +1259,66 @@ export class Schema {
       await waitForInFlightWrites()
     }
 
-    await runDestroyLifecycle(this, {
-      getService: (instance) =>
-        instance._service as { send: (ev: unknown) => void; stop: () => void },
-      doDestroy: async () => {
-        const db = BaseDb.getAppDb()
-        if (!db || !schemaFileId) return
+    await destroyEntity(this, Schema.cache, async () => {
+      const db = BaseDb.getAppDb()
+      if (!db || !schemaFileId) return
 
-        const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
-        // The schema's rows go together or not at all
-        const deleted = await inDefinitionsTransaction(async (tx) => {
-          const schemaRecords = await tx
-            .select({ id: schemasTable.id })
-            .from(schemasTable)
-            .where(eq(schemasTable.schemaFileId, schemaFileId))
+      const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+      // The schema's rows go together or not at all
+      const deleted = await inDefinitionsTransaction(async (tx) => {
+        const schemaRecords = await tx
+          .select({ id: schemasTable.id })
+          .from(schemasTable)
+          .where(eq(schemasTable.schemaFileId, schemaFileId))
 
-          if (schemaRecords.length === 0) return false
+        if (schemaRecords.length === 0) return false
 
-          const schemaIds = schemaRecords
-            .map((r: { id: number | null }) => r.id)
-            .filter((id: number | null): id is number => id != null)
-          if (schemaIds.length === 0) return false
+        const schemaIds = schemaRecords
+          .map((r: { id: number | null }) => r.id)
+          .filter((id: number | null): id is number => id != null)
+        if (schemaIds.length === 0) return false
 
-          const joinRows = await tx
-            .select({ modelId: modelSchemas.modelId })
-            .from(modelSchemas)
-            .where(inArray(modelSchemas.schemaId, schemaIds))
-          const modelIds = [
-            ...new Set(
-              joinRows
-                .map((r: { modelId: number | null }) => r.modelId)
-                .filter((id: number | null): id is number => id != null),
-            ),
-          ] as number[]
+        const joinRows = await tx
+          .select({ modelId: modelSchemas.modelId })
+          .from(modelSchemas)
+          .where(inArray(modelSchemas.schemaId, schemaIds))
+        const modelIds = [
+          ...new Set(
+            joinRows
+              .map((r: { modelId: number | null }) => r.modelId)
+              .filter((id: number | null): id is number => id != null),
+          ),
+        ] as number[]
 
-          await detachModelRows(tx, modelIds)
+        await detachModelRows(tx, modelIds)
 
-          await tx.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
+        await tx.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
 
-          for (const modelId of modelIds) {
-            await tx.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
-          }
-          for (const modelId of modelIds) {
-            await tx.delete(modelsTable).where(eq(modelsTable.id, modelId))
-          }
-          await tx.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
-          return true
-        })
-        if (!deleted) return
-
-        // Delete the SDK's own copies of this schema's files (all versions) in the working dir.
-        // loadAllSchemasFromDb imports any schema file without a DB row, so leaving them brought
-        // the destroyed schema back on the next Schema.all().
-        // Match on name as well as id: versions imported from complete schema files can each
-        // have their own id, and any version left behind would bring the schema back.
-        const { listCompleteSchemaFiles } = await import('@/helpers/schema')
-        const files = await listCompleteSchemaFiles().catch(() => [])
-        const fs = await BaseFileManager.getFs()
-        const names = new Set([schemaName, metadataName].filter(Boolean))
-        for (const file of files) {
-          if (file.schemaFileId === schemaFileId || names.has(file.name)) {
-            await fs.promises.unlink(file.filePath).catch(() => {})
-          }
+        for (const modelId of modelIds) {
+          await tx.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
         }
-      },
+        for (const modelId of modelIds) {
+          await tx.delete(modelsTable).where(eq(modelsTable.id, modelId))
+        }
+        await tx.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+        return true
+      })
+      if (!deleted) return
+
+      // Delete the SDK's own copies of this schema's files (all versions) in the working dir.
+      // loadAllSchemasFromDb imports any schema file without a DB row, so leaving them brought
+      // the destroyed schema back on the next Schema.all().
+      // Match on name as well as id: versions imported from complete schema files can each
+      // have their own id, and any version left behind would bring the schema back.
+      const { listCompleteSchemaFiles } = await import('@/helpers/schema')
+      const files = await listCompleteSchemaFiles().catch(() => [])
+      const fs = await BaseFileManager.getFs()
+      const names = new Set([schemaName, metadataName].filter(Boolean))
+      for (const file of files) {
+        if (file.schemaFileId === schemaFileId || names.has(file.name)) {
+          await fs.promises.unlink(file.filePath).catch(() => {})
+        }
+      }
     })
   }
 
@@ -1608,30 +1333,9 @@ export class Schema {
     }
 
     setupEntityLiveQuery(this, {
-      getEntityId: async (schema) => {
-        const db = BaseDb.getAppDb()
-        if (!db) {
-          return undefined
-        }
-
-        const context = schema._getSnapshotContext()
-        const schemaName = context.metadata?.name
-        if (!schemaName) {
-          return undefined
-        }
-
-        const schemaRecords = await db
-          .select()
-          .from(schemasTable)
-          .where(eq(schemasTable.name, schemaName))
-          .limit(1)
-
-        if (schemaRecords.length === 0 || !schemaRecords[0].id) {
-          return undefined
-        }
-
-        return schemaRecords[0].id
-      },
+      // Its row, once loaded
+      getEntityId: async (schema) =>
+        entityStatus(schema) === 'ready' ? schema._getSnapshotContext()._dbId : undefined,
       buildQuery: async (schemaId) => {
         const db = BaseDb.getAppDb()
         if (!db) {
@@ -1655,68 +1359,13 @@ export class Schema {
       },
       extractEntityIds: (rows) => rows.map(row => row.modelFileId).filter(Boolean) as string[],
       updateContext: (schema, ids) => {
-        // Helper function to send updateContext event with model IDs
-        const sendUpdateContext = () => {
-          // Double-check instance state still exists
-          const verifyInstanceState = schemaInstanceState.get(schema)
-          if (!verifyInstanceState) {
-            logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up before sending updateContext`)
-            return
-          }
-          
-          try {
-            const snapshot = schema._service.getSnapshot()
-            if (snapshot.status === 'stopped') {
-              logger(`[Schema._setupLiveQuerySubscription] Service stopped before sending, skipping`)
-              return
-            }
-            
-            // Send updateContext with liveQueryModelIds in service context for reactive updates
-            schema._service.send({
-              type: 'updateContext',
-              _liveQueryModelIds: ids, // Store in service context for reactivity
-              _modelsUpdated: Date.now(), // Internal field for tracking
-            })
-            logger(`[Schema._setupLiveQuerySubscription] Sent updateContext event with ${ids.length} model IDs`)
-          } catch (error) {
-            logger(`[Schema._setupLiveQuerySubscription] Error sending updateContext: ${error}`)
-          }
-        }
-        
-        // Check if service is stopped before sending events
-        const snapshot = schema._service.getSnapshot()
-        const isServiceStopped = snapshot.status === 'stopped'
-        
-        if (isServiceStopped) {
-          logger(`[Schema._setupLiveQuerySubscription] Service is stopped, restarting before sending updateContext`)
-          // Restart the service first
-          schema._service.start()
-          
-          // Wait for service to be ready (idle state) before sending event
-          setTimeout(() => {
-            const delayedInstanceState = schemaInstanceState.get(schema)
-            if (!delayedInstanceState) {
-              logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up during restart delay`)
-              return
-            }
-            
-            const newSnapshot = schema._service.getSnapshot()
-            if (newSnapshot.status !== 'stopped') {
-              sendUpdateContext()
-            } else {
-              logger(`[Schema._setupLiveQuerySubscription] Service still stopped after restart attempt`)
-            }
-          }, 10)
-        } else {
-          // Service is running, send immediately
-          sendUpdateContext()
-        }
+        schema._service.send({ type: 'updateContext', _liveQueryModelIds: ids, _modelsUpdated: Date.now() })
       },
       createChildInstances: async (ids) => {
         // One at a time: an eviction of this schema part way through stops the rest
-        const evictionEpoch = currentEvictionEpoch()
+        const since = evictionLog.now()
         for (const id of ids) {
-          await Model.createById(id, { evictionEpoch, hold: false })
+          await Model.createById(id, { since, hold: false })
         }
       },
       queryInitialData: async (schemaId) => {
@@ -1741,12 +1390,7 @@ export class Schema {
           modelFileId: row.modelFileId || '',
         }))
       },
-      instanceState: schemaInstanceState,
       loggerName: 'seedSdk:schema:liveQuery',
-      isReady: (schema) => {
-        const snapshot = schema._service.getSnapshot()
-        return snapshot.value === 'idle' && !!snapshot.context.metadata?.name
-      },
     })
   }
 

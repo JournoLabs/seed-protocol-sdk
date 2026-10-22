@@ -45,6 +45,8 @@ export const createNewItem = async ({
   const { Model } = modelMod
   const label = `createNewItem ${modelName}`
   const model = await timed(`${label} model`, () => Model.resolveAsync(modelName, { modelFileId }))
+  // Its properties are listed once it has loaded; a model that failed to load gives none
+  await model?.waitForReady().catch(() => {})
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
   modelFileId ??= model?.id
 

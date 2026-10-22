@@ -89,7 +89,7 @@ testDescribe('Property Rename Metadata Migration', () => {
     await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({
       modelName: 'Post',
