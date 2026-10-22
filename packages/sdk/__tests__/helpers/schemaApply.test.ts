@@ -168,6 +168,7 @@ testDescribe('applySchemaFile', () => {
           id: 'apply-shapes-post',
           properties: {
             publication: { id: 'apply-shapes-pub', dataType: 'Relation', ref: 'ShapePublication' },
+            cover: { id: 'apply-shapes-cover', dataType: 'Relation', refValueType: 'Image', ref: 'Image' },
             tags: { id: 'apply-shapes-tags', dataType: 'List', refValueType: 'Relation', ref: 'ShapePublication' },
             body: { id: 'apply-shapes-body', dataType: 'Html', htmlEmbeddedDataUriPolicy: 'preserve' },
             notes: { id: 'apply-shapes-notes', dataType: 'Text', storageType: 'ItemStorage', localStorageDir: '/notes', filenameSuffix: '.md' },
@@ -184,6 +185,7 @@ testDescribe('applySchemaFile', () => {
 
     const relation = await propertyRow('apply-shapes-post', 'publication')
     expect(relation).toMatchObject({ dataType: 'Relation', refModelId: publication.id })
+    expect(await propertyRow('apply-shapes-post', 'cover')).toMatchObject({ dataType: 'Relation', refValueType: 'Image' })
     expect(await propertyRow('apply-shapes-post', 'tags')).toMatchObject({ dataType: 'List', refValueType: 'Relation', refModelId: publication.id })
     expect(await propertyRow('apply-shapes-post', 'notes')).toMatchObject({ storageType: 'ItemStorage', localStorageDir: '/notes', filenameSuffix: '.md' })
 
@@ -193,6 +195,7 @@ testDescribe('applySchemaFile', () => {
     ])
     expect(await propertyRow('apply-shapes-post', 'publication')).toMatchObject({ dataType: 'Relation', refModelId: publication.id })
     expect(await propertyRow('apply-shapes-post', 'notes')).toMatchObject({ required: true, storageType: 'ItemStorage' })
+    expect(await propertyRow('apply-shapes-post', 'cover')).toMatchObject({ refValueType: 'Image' })
     const latest = (await listLatestSchemaFiles()).find((info) => info.schemaFileId === 'apply-shapes')!
     const saved = await readSchemaFile(latest.filePath)
     expect(saved?.version).toBe(2)

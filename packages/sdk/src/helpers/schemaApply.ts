@@ -150,7 +150,7 @@ export function schemaFilePropertyDefinition(
       dataType: def.dataType,
       ref: hasRef ? def.ref : undefined,
       refModelName: hasRef ? def.refModelName : undefined,
-      refValueType: isList ? def.refValueType : undefined,
+      refValueType: hasRef ? def.refValueType : undefined,
       storageType: def.storageType,
       localStorageDir: def.localStorageDir,
       filenameSuffix: def.filenameSuffix,

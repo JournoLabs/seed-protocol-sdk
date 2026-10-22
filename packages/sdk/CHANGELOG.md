@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A schema file's single Relation keeps its `refValueType` on the property row (e.g. `{ type: 'Relation', refValueType: 'Image', model: 'Image' }`). Only List properties kept it, so a schema-file Relation to an Image, File or Html wasn't treated as one; code-defined properties were unaffected.
+
 ## 0.7.9 (2026-10-22)
 
 - **Breaking:** `status` on `Model`, `Schema` and `ItemProperty` is the load status, `'loading'`, `'ready'` or `'error'`, not the actor's state value. An ItemProperty that was `'idle'` once loaded is `'ready'` (PermaPress `TipTap.tsx` compares `status === 'idle'`). `Item` gains `status`, and every entity has `waitForReady({ timeout })`. The state value is still `getService().getSnapshot().value`, and the entity machines no longer have `loading`, `waitingForDb` or `error` states: an actor is `idle` from the start, so waiting for `idle` no longer means loaded. Ready means loaded: an ItemProperty with a pending save is ready.
