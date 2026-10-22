@@ -2,7 +2,7 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
-import { resolvePublishPayloadValues } from '@seedprotocol/sdk'
+import { resolvePublishPayloadValues, type IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
@@ -103,13 +103,27 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
   }
 }
 
+type CreateAttestationsResult = {
+  easPayload: unknown
+  publishedBatch: PublishMachineContext['publishedBatch']
+}
+
 export const createAttestations = fromPromise(
-  async ({
-    input: { context },
-  }: PublishInput): Promise<{
-    easPayload: unknown
-    publishedBatch: PublishMachineContext['publishedBatch']
-  }> => {
+  async ({ input: { context } }: PublishInput): Promise<CreateAttestationsResult> => {
+    // Items this actor loads itself (a restored publish record carries the item as plain data)
+    const loaded: IItem<any>[] = []
+    try {
+      return await executeCreateAttestations(context, loaded)
+    } finally {
+      for (const item of loaded) item.unload()
+    }
+  },
+)
+
+async function executeCreateAttestations(
+  context: PublishMachineContext,
+  loaded: IItem<any>[],
+): Promise<CreateAttestationsResult> {
     const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
@@ -139,6 +153,7 @@ export const createAttestations = fromPromise(
     const waitForItemUsed = typeof item.getPublishUploads !== 'function'
     if (waitForItemUsed) {
       item = await waitForItem(item.seedLocalId)
+      loaded.push(item)
     }
 
     const txCount = arweaveTransactions.length
@@ -416,5 +431,4 @@ export const createAttestations = fromPromise(
       : null
 
     return { easPayload: requestData, publishedBatch }
-  },
-)
+}
