@@ -449,6 +449,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               const dir = storageSubdir(fileKind, context.localStorageDir)
               found = await BaseFileManager.pathExists(BaseFileManager.getFilesPath(dir, context.refResolvedValue))
               if (found) renderValue = context.refResolvedDisplayValue
+            } else if (fileKind === 'itemStorage' && context.isSaving) {
+              // This tab's assignment shows its content; its staged file may not have landed yet,
+              // and the item's file still holds the previous content
+              found = true
+              renderValue = context.renderValue
             } else {
               // An ItemStorage value whose op is pending is in its staged file (ADR 0019)
               const { getPendingPropertyRow } = await import('@/outbox/pendingValues')
