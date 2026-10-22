@@ -1,6 +1,10 @@
-import { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
+import { fetchFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
 
-export { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
+export {
+  fetchFeedItemsBySchemaName,
+  getFeedItemsBySchemaName,
+  getFeedItemsBySchemaNameForMonth,
+} from './getFeedItems';
 export {
   loadFeedConfig,
   DEFAULT_SITE_CONFIG,
@@ -11,12 +15,10 @@ export {
   type SiteConfigOverrides,
 } from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
-export type { FeedConfig, FeedFormat, FeedItem, GraphQLItem } from './types';
+export type { FeedConfig, FeedFormat, FeedItem } from './types';
 export {
   initializeFeedPlatform,
-  initializeSeedClient,
-  getClient,
-  teardownSeedClient,
+  teardownFeedPlatform,
   DEFAULT_ARWEAVE_HOST,
 } from './bootstrap';
 export {
@@ -51,8 +53,11 @@ import { generateRssXml } from './rss/generateRssXml';
 import { CacheManager } from './cache/CacheManager';
 import { loadCacheConfig } from './cache/config';
 import { loadFeedConfig, resolveSiteConfig, type SiteConfigOverrides } from './config';
-import { checkIfNoneMatch } from './utils/etag';
+import { checkIfNoneMatch, generateETag } from './utils/etag';
+import { buildContentKey, type CachedFeedContent, type CacheContentKeyOptions } from './cache/types';
 import { ArweaveImageService } from './services/arweaveImageService';
+import { feedDebug } from './debug';
+import { getQueryCacheManager, isArweaveTransactionGatewayUrl } from '@seedprotocol/query';
 import { resolveSeedRssImageRelationRef } from '@seedprotocol/arweave';
 import {
   pickFeedItemContent,
@@ -60,19 +65,12 @@ import {
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
 
-/** @deprecated Use `enrichImageSeedClone` from `@seedprotocol/query`. */
-export { enrichImageSeedCloneForFeed } from '@seedprotocol/query';
 export {
   pickFeedItemContent,
   pickFeedItemDescription,
   feedItemRichTextContainsDataUriImage,
   filterItemsByRichTextDataUriImagePolicy,
 } from './pickFeedItemRichText';
-/** @deprecated Use `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`. */
-export {
-  FEED_RICH_BODY_STORAGE_SCHEMAS,
-  isFeedRichBodyStorageSchema,
-} from '@seedprotocol/query';
 
 /** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
 function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
@@ -286,74 +284,108 @@ export function resetCacheManager(): void {
 // Feed Transformation
 // ============================================================================
 
+/** Image probes in flight at once while enriching a page of items. */
+const ENRICH_CONCURRENCY = 8
+
+async function runWithConcurrency(tasks: Array<() => Promise<void>>, limit: number): Promise<void> {
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < tasks.length) {
+      const task = tasks[next++]!
+      await task()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
+}
+
+/** Cached metadata for an Arweave transaction, probing it on a miss. */
+async function imageMetadataFor(
+  transactionId: string,
+  imageService: ArweaveImageService,
+  cache: CacheManager,
+): Promise<ImageMetadata | null> {
+  const cached = await cache.getImageMetadata(transactionId)
+  if (cached) return cached
+  feedDebug('detecting image for transaction %s', transactionId)
+  const metadata = await imageService.detectImage(transactionId)
+  // No gateway answered: leave it uncached so the next request tries again. Otherwise cached even
+  // when it isn't an image, to avoid probing again.
+  if (metadata) await cache.setImageMetadata(transactionId, metadata)
+  return metadata
+}
+
+/** The transaction id in an Arweave gateway URL (`https://<gateway>/<txId>`), else undefined. */
+function arweaveTransactionIdOf(url: string): string | undefined {
+  if (!isArweaveTransactionGatewayUrl(url)) return undefined
+  return new URL(url).pathname.replace(/^\//, '')
+}
+
 /**
- * Enriches feed items with media properties from Arweave storageTransactionId
+ * The Arweave transaction whose metadata fills in an item's image enclosure: an `image` item's
+ * own storage transaction; for other schemas, the image `extractRssImageCandidate` picks (a
+ * feature or cover image), when it is an Arweave transaction URL and lacks its size or type.
  */
+function enclosureTransactionOf(item: FeedItem, schemaName: string): string | undefined {
+  const record = item as Record<string, unknown>
+  if (schemaName === 'image') {
+    return (record.storageTransactionId || record.storage_transaction_id) as string | undefined
+  }
+  const candidate = extractRssImageCandidate(record)
+  if (!candidate || (candidate.width && candidate.height && candidate.mimeType)) return undefined
+  return arweaveTransactionIdOf(candidate.url)
+}
+
+/** Adds `_imageMetadata` / `_hasImage` to an item whose enclosure transaction is an image. */
+async function enrichFeedItemWithMedia(
+  item: FeedItem,
+  schemaName: string,
+  imageService: ArweaveImageService,
+  cache: CacheManager,
+): Promise<void> {
+  const record = item as Record<string, unknown>
+  const transactionId = enclosureTransactionOf(item, schemaName)
+  if (!transactionId) return
+  try {
+    const metadata = await imageMetadataFor(transactionId, imageService, cache)
+    if (!metadata?.isImage) return
+    // For a related image, keep the URL the item already links to.
+    const candidate = schemaName === 'image' ? undefined : extractRssImageCandidate(record)
+    record._imageMetadata = candidate ? { ...metadata, url: candidate.url } : metadata
+    record._hasImage = true
+  } catch (error) {
+    console.warn(`Error enriching item with transaction ${transactionId}:`, error)
+  }
+}
+
+/** Enriches items in place with image metadata (see enclosureTransactionOf). */
 async function enrichFeedItemsWithMedia(
   items: FeedItem[],
+  schemaName: string,
   imageService: ArweaveImageService,
-  cache: CacheManager
+  cache: CacheManager,
 ): Promise<FeedItem[]> {
-  // Filter items that have storageTransactionId
-  const itemsToProcess = items.filter(
-    (item: any) => item.storageTransactionId || item.storage_transaction_id
+  const toEnrich = items.filter((item) => enclosureTransactionOf(item, schemaName))
+  feedDebug('enriching %d items with image metadata', toEnrich.length)
+  await runWithConcurrency(
+    toEnrich.map((item) => () => enrichFeedItemWithMedia(item, schemaName, imageService, cache)),
+    ENRICH_CONCURRENCY,
   )
+  return items
+}
 
-  if (itemsToProcess.length === 0) {
-    return items
-  }
-
-  console.log(`Enriching ${itemsToProcess.length} items with image metadata`)
-
-  // Process all items in parallel
-  const enrichmentPromises = itemsToProcess.map(async (item: any) => {
-    const transactionId = item.storageTransactionId || item.storage_transaction_id
-    if (!transactionId) return item
-
-    try {
-      // Check cache first
-      let imageMetadata = await cache.getImageMetadata(transactionId)
-
-      // If not cached, detect image
-      if (!imageMetadata) {
-        console.log(`Detecting image for transaction ${transactionId}`)
-        imageMetadata = await imageService.detectImage(transactionId)
-        // Cache the result (even if it's not an image, to avoid retries)
-        await cache.setImageMetadata(transactionId, imageMetadata)
-      }
-
-      // If image detected, add media properties
-      if (imageMetadata.isImage) {
-        // Add media properties to the item
-        item._imageMetadata = imageMetadata
-        item._hasImage = true
-      }
-
-      return item
-    } catch (error) {
-      console.warn(`Error enriching item with transaction ${transactionId}:`, error)
-      return item // Return item unchanged on error
-    }
+/** Items with image metadata added when image metadata is enabled (main and archive feeds). */
+async function withImageMetadata(
+  items: FeedItem[],
+  schemaName: string,
+  cache: CacheManager,
+): Promise<FeedItem[]> {
+  const imageMetadata = cache.getConfig().imageMetadata
+  if (!imageMetadata?.enabled) return items
+  const imageService = new ArweaveImageService({
+    gateways: imageMetadata.gateways,
+    timeout: imageMetadata.timeout,
   })
-
-  // Wait for all enrichments to complete
-  const enrichedItems = await Promise.all(enrichmentPromises)
-
-  // Create a map of enriched items by their ID
-  const enrichedMap = new Map<string, FeedItem>()
-  enrichedItems.forEach(item => {
-    const itemId = item.id || (item as any).seedUid || (item as any).SeedUid || ''
-    if (itemId) {
-      enrichedMap.set(itemId, item)
-    }
-  })
-
-  // Merge enriched items back into original array
-  return items.map(item => {
-    const itemId = item.id || (item as any).seedUid || (item as any).SeedUid || ''
-    const enriched = enrichedMap.get(itemId)
-    return enriched || item
-  })
+  return enrichFeedItemsWithMedia(items, schemaName, imageService, cache)
 }
 
 /**
@@ -364,7 +396,7 @@ function transformToFeedItems(
   items: FeedItem[],
   options: TransformOptions
 ): any[] {
-  const { schemaName, siteUrl, itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
+  const { itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
 
   const filtered = filterItemsByRichTextDataUriImagePolicy(
     items as Record<string, unknown>[],
@@ -376,10 +408,7 @@ function transformToFeedItems(
     const itemId = item.id || item.seedUid || item.SeedUid || item.storageTransactionId || item.storage_transaction_id
 
     // Determine item URL - prefer link/Link, then import_url/importUrl, fallback to constructed URL
-    const fallbackUrl =
-      itemUrlBase != null
-        ? `${itemUrlBase.replace(/\/$/, '')}/${(itemUrlPath ?? 'attestation/view').replace(/^\//, '')}/${itemId}`
-        : `${siteUrl}/${pluralize(schemaName)}/${itemId}`
+    const fallbackUrl = `${itemUrlBase.replace(/\/$/, '')}/${itemUrlPath.replace(/^\//, '')}/${itemId}`
     const itemUrl = item.link || item.Link || item.import_url || item.importUrl || fallbackUrl
     
     // Determine publication date - try multiple sources
@@ -512,7 +541,6 @@ export const createFeed = (
   // Transform items to preserve all dynamic properties
   const transformedItems = transformToFeedItems(items, {
     schemaName,
-    siteUrl: siteConfig.siteUrl,
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
     richTextDataUriImages:
@@ -768,15 +796,154 @@ function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+/** Hash of what a feed body is built from besides its items' content (see CachedFeedContent). */
+function feedFingerprint(inputs: {
+  sourceEtag?: string
+  siteConfig: FeedConfig
+  cacheBust?: string
+}): string {
+  return generateETag(
+    JSON.stringify([inputs.sourceEtag ?? null, inputs.siteConfig, inputs.cacheBust ?? null]),
+  )
+}
+
+type FeedRequest = {
+  schemaName: string
+  format: FeedFormat
+  contentKeyOptions?: CacheContentKeyOptions
+  ifNoneMatch?: string | null
+  siteConfig: FeedConfig
+  cacheBust?: string
+  /** Cache-Control max-age / s-maxage in seconds. */
+  maxAge: number
+  /**
+   * Ask query before serving a cached body (page 1): the body is rebuilt when query's collection
+   * ETag changed. Otherwise (later pages, archives) a cached body is served until its TTL ends.
+   */
+  revalidate: boolean
+  /** Items, with query's collection ETag when the collection cache answered. */
+  fetchItems: () => Promise<{ items: FeedItem[]; sourceEtag?: string }>
+  render: (items: FeedItem[]) => Promise<string>
+}
+
+function feedResponse(
+  request: FeedRequest,
+  body: { content: string | null; contentType?: string; etag: string; lastModified: number },
+  status: number,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  const headers: Record<string, string> = {
+    ETag: body.etag,
+    'Last-Modified': new Date(body.lastModified * 1000).toUTCString(),
+    'Cache-Control': `public, max-age=${request.maxAge}, s-maxage=${request.maxAge}, must-revalidate`,
+    ...extraHeaders,
+  }
+  if (status !== 304) {
+    headers['Content-Type'] = body.contentType ?? getContentType(request.format)
+    headers['X-Feed-Schema'] = request.schemaName
+    headers['X-Feed-Format'] = request.format
+  }
+  return new Response(status === 304 ? null : body.content, { status, headers })
+}
+
+/** A cached body, or 304 when the client already has it. */
+function cachedFeedResponse(
+  request: FeedRequest,
+  cached: CachedFeedContent,
+  xCache: string,
+  extraHeaders?: Record<string, string>,
+): Response {
+  if (request.ifNoneMatch && checkIfNoneMatch(request.ifNoneMatch, cached.etag)) {
+    feedDebug('%s for %s:%s, 304', xCache, request.schemaName, request.format)
+    return feedResponse(request, { ...cached, content: null }, 304)
+  }
+  feedDebug('%s for %s:%s', xCache, request.schemaName, request.format)
+  return feedResponse(request, cached, 200, { 'X-Cache': xCache, ...extraHeaders })
+}
+
+/**
+ * The feed body for a request: from the content cache while it was built from the same inputs,
+ * else built from fresh items and cached. The ETag is derived from query's collection ETag when
+ * known (so it survives rebuilds of an unchanged feed), else from the body.
+ */
+async function serveFeed(request: FeedRequest): Promise<Response> {
+  const { schemaName, format, contentKeyOptions } = request
+  const cache = getCacheManager()
+  const cacheEnabled = cache.getConfig().enabled
+
+  try {
+    let fetched: { items: FeedItem[]; sourceEtag?: string } | undefined
+    if (request.revalidate) fetched = await request.fetchItems()
+    const fingerprint = feedFingerprint({
+      sourceEtag: fetched?.sourceEtag,
+      siteConfig: request.siteConfig,
+      cacheBust: request.cacheBust,
+    })
+
+    if (cacheEnabled) {
+      const cached = await cache.getFeedContent(schemaName, format, contentKeyOptions, fingerprint)
+      if (cached) return cachedFeedResponse(request, cached, 'HIT')
+    }
+
+    fetched ??= await request.fetchItems()
+    feedDebug('building %s:%s from %d items', schemaName, format, fetched.items.length)
+    const content = await request.render(fetched.items)
+    const contentType = getContentType(format)
+    const etag = fetched.sourceEtag
+      ? generateETag(`${fingerprint}:${buildContentKey(schemaName, format, contentKeyOptions)}`)
+      : generateETag(content)
+    const stored = cacheEnabled
+      ? await cache.setFeedContent(
+          schemaName,
+          format,
+          { content, contentType, etag, fingerprint },
+          contentKeyOptions,
+        )
+      : null
+    if (stored) return cachedFeedResponse(request, stored, 'MISS')
+    return feedResponse(
+      request,
+      { content, contentType, etag, lastModified: Math.floor(Date.now() / 1000) },
+      200,
+    )
+  } catch (error) {
+    console.error(`Feed generation error for ${schemaName}:${format}:`, error)
+    if (cacheEnabled) {
+      const stale = await cache.getFeedContent(schemaName, format, contentKeyOptions)
+      if (stale) {
+        return cachedFeedResponse(request, stale, 'STALE', { Warning: '110 - "Response is stale"' })
+      }
+    }
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to generate feed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+}
+
+function invalidFormatResponse(formatSegment: string): Response {
+  return new Response(JSON.stringify({ error: `Invalid feed format: ${formatSegment}` }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 /**
  * Main route handler for feed generation.
- * 
+ *
  * URL Pattern: /:collection/:format
  * Examples:
  *   - /posts/rss    → RSS feed of posts
  *   - /posts/atom   → Atom feed of posts
  *   - /identities/json → JSON feed of identities
  *   - /posts/rss?v=1234567890 → RSS feed with cache busting parameter
+ *
+ * Page 1 asks `@seedprotocol/query` on every request (one round when its collection is cached,
+ * none within `CACHE_MAX_AGE`) and rebuilds only when the collection changed; its Cache-Control
+ * max-age is `CACHE_MAX_AGE`. Later pages are cached for `CACHE_PAGE_TTL`.
  */
 export async function handleFeedRequest(
   collectionSegment: string,
@@ -786,191 +953,61 @@ export async function handleFeedRequest(
   page?: number,
   siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<Response> {
-  // Validate format
   const format = parseFormat(formatSegment)
-  if (!format) {
-    return new Response(
-      JSON.stringify({ error: `Invalid feed format: ${formatSegment}` }),
-      {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    )
-  }
+  if (!format) return invalidFormatResponse(formatSegment)
 
   // De-pluralize the collection name to get model type
   const schemaName = pluralize.singular(collectionSegment.toLowerCase())
   const collectionName = pluralize(schemaName)
   const siteConfig = resolveSiteConfig(siteConfigOverrides)
 
-  const feedConfig = loadFeedConfig()
   const pageNum = Math.max(1, page ?? 1)
-  const pageSize = feedConfig.pageSize
-  const skip = (pageNum - 1) * pageSize
+  const pageSize = loadFeedConfig().pageSize
+  const cache = getCacheManager()
+  let hasNext = false
 
-  const contentKeyOptions =
-    pageNum > 1 ? { page: pageNum } : undefined
-
-  console.log(`Schema name: ${schemaName}`);
-  console.log(`Collection name: ${collectionName}`);
-
-  const cache = getCacheManager();
-  const config = loadCacheConfig();
-
-  try {
-    // Check if we have cached feed content
-    if (config.enabled) {
-      const cachedContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-
-      if (cachedContent) {
-        // Check ETag for conditional request
-        if (ifNoneMatch && checkIfNoneMatch(ifNoneMatch, cachedContent.etag)) {
-          console.log(`Cache hit with ETag match for ${schemaName}:${format} - returning 304`);
-          return new Response(null, {
-            status: 304,
-            headers: {
-              'ETag': cachedContent.etag,
-              'Last-Modified': new Date(cachedContent.lastModified * 1000).toUTCString(),
-              'Cache-Control': 'public, max-age=3600, s-maxage=3600, must-revalidate',
-            },
-          });
-        }
-
-        // Return cached content
-        console.log(`Cache hit for ${schemaName}:${format}`);
-        return new Response(cachedContent.content, {
-          status: 200,
-          headers: {
-            'Content-Type': cachedContent.contentType,
-            'ETag': cachedContent.etag,
-            'Last-Modified': new Date(cachedContent.lastModified * 1000).toUTCString(),
-            'Cache-Control': 'public, max-age=3600, s-maxage=3600, must-revalidate',
-            'X-Feed-Schema': schemaName,
-            'X-Feed-Format': format,
-            'X-Cache': 'HIT',
-          },
-        });
+  return serveFeed({
+    schemaName,
+    format,
+    contentKeyOptions: pageNum > 1 ? { page: pageNum } : undefined,
+    ifNoneMatch,
+    siteConfig,
+    cacheBust,
+    maxAge: pageNum === 1 ? (getQueryCacheManager().getConfig().maxAge ?? 0) : 3600,
+    revalidate: pageNum === 1,
+    fetchItems: async () => {
+      // One item past the page tells whether there is a next page.
+      const { items, etag } = await fetchFeedItemsBySchemaName(schemaName, {
+        limit: pageSize + 1,
+        skip: (pageNum - 1) * pageSize,
+      })
+      hasNext = items.length > pageSize
+      return { items: items.slice(0, pageSize) as FeedItem[], sourceEtag: etag }
+    },
+    render: async (items) => {
+      const archiveLinks: FeedArchiveLink[] = []
+      if (pageNum === 1) {
+        // Archive months are UTC, like queryBySchemaForMonth's bounds.
+        const now = new Date()
+        const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+        archiveLinks.push({
+          rel: 'prev-archive',
+          href: `${siteConfig.feedUrl}/${collectionName}/archive/${prevMonth.getUTCFullYear()}/${prevMonth.getUTCMonth() + 1}/${format}`,
+        })
       }
-    }
-
-    // Content cache miss or disabled — fetch items via query (owns collection cache)
-    console.log(`Cache miss for ${schemaName}:${format} - fetching items`);
-
-    const feedItems = await (async (): Promise<FeedItem[]> => {
-      const items = await getFeedItemsBySchemaName(schemaName, {
-        limit: pageSize,
-        skip,
-      }) as FeedItem[];
-      console.log(`Found ${items.length} feed items for schema ${schemaName}`);
-      if (config.imageMetadata?.enabled) {
-        const imageService = new ArweaveImageService({
-          gateways: config.imageMetadata.gateways,
-          timeout: config.imageMetadata.timeout,
-        });
-        return enrichFeedItemsWithMedia(items, imageService, cache);
-      }
-      return items;
-    })();
-
-    const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
-    const hasNext = feedItems.length === pageSize;
-    const archiveLinksForMain: FeedArchiveLink[] = [];
-    if (pageNum === 1) {
-      const now = new Date();
-      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      archiveLinksForMain.push({
-        rel: 'prev-archive',
-        href: `${siteConfig.feedUrl}/${collectionName}/archive/${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}/${format}`,
-      });
-    }
-
-    const paginationOptions: FeedPaginationOptions | undefined = {
-      page: pageNum,
-      pageSize,
-      hasNext,
-      baseUrl,
-    };
-
-    const feedContent = await createFeed(
-      feedItems,
-      schemaName,
-      format,
-      cacheBust,
-      paginationOptions,
-      archiveLinksForMain.length ? archiveLinksForMain : undefined,
-      false,
-      undefined,
-      siteConfigOverrides,
-    );
-    const contentType = getContentType(format);
-
-    // Cache the generated feed content
-    if (config.enabled) {
-      await cache.setFeedContent(schemaName, format, feedContent, contentType, contentKeyOptions);
-      
-      // Get the cached content to retrieve ETag
-      const cachedContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-      const etag = cachedContent?.etag || '';
-      const lastModified = cachedContent?.lastModified || Math.floor(Date.now() / 1000);
-
-      return new Response(feedContent, {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'ETag': etag,
-          'Last-Modified': new Date(lastModified * 1000).toUTCString(),
-          'Cache-Control': 'public, max-age=3600, s-maxage=3600, must-revalidate',
-          'X-Feed-Schema': schemaName,
-          'X-Feed-Format': format,
-          'X-Cache': 'MISS',
-        },
-      });
-    }
-
-    // Cache disabled - return without caching
-    return new Response(feedContent, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-        'X-Feed-Schema': schemaName,
-        'X-Feed-Format': format,
-      },
-    });
-  } catch (error) {
-    console.error('Feed generation error:', error);
-    
-    // Try to serve stale cache on error if available
-    if (config.enabled) {
-      const staleContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-      if (staleContent) {
-        console.log(`Serving stale cache due to error`);
-        return new Response(staleContent.content, {
-          status: 200,
-          headers: {
-            'Content-Type': staleContent.contentType,
-            'ETag': staleContent.etag,
-            'Cache-Control': 'public, max-age=3600, s-maxage=3600, must-revalidate',
-            'X-Feed-Schema': schemaName,
-            'X-Feed-Format': format,
-            'X-Cache': 'STALE',
-            'Warning': '299 - "Cache is stale"',
-          },
-        });
-      }
-    }
-    
-    return new Response(
-      JSON.stringify({
-        error: 'Failed to generate feed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    )
-  }
+      return createFeed(
+        await withImageMetadata(items, schemaName, cache),
+        schemaName,
+        format,
+        cacheBust,
+        { page: pageNum, pageSize, hasNext, baseUrl: `${siteConfig.feedUrl}/${collectionName}/${format}` },
+        archiveLinks.length ? archiveLinks : undefined,
+        false,
+        undefined,
+        siteConfigOverrides,
+      )
+    },
+  })
 }
 
 /**
@@ -978,7 +1015,7 @@ export async function handleFeedRequest(
  *
  * URL Pattern: /:collection/archive/:year/:month/:format
  * Examples:
- *   - /posts/archive/2024/02/rss → RSS feed of posts from February 2024
+ *   - /posts/archive/2024/02/rss → RSS feed of posts from February 2024 (UTC)
  */
 export async function handleArchiveFeedRequest(
   collectionSegment: string,
@@ -1002,119 +1039,50 @@ export async function handleArchiveFeedRequest(
     );
   }
 
-  const format = parseFormat(formatSegment);
-  if (!format) {
-    return new Response(
-      JSON.stringify({ error: `Invalid feed format: ${formatSegment}` }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+  const format = parseFormat(formatSegment)
+  if (!format) return invalidFormatResponse(formatSegment)
 
-  const schemaName = pluralize.singular(collectionSegment.toLowerCase());
-  const collectionName = pluralize(schemaName);
-  const siteConfig = resolveSiteConfig(siteConfigOverrides);
+  const schemaName = pluralize.singular(collectionSegment.toLowerCase())
+  const collectionName = pluralize(schemaName)
+  const siteConfig = resolveSiteConfig(siteConfigOverrides)
+  const cache = getCacheManager()
 
-  const contentKeyOptions = { archive: { year, month } };
-  const cache = getCacheManager();
-  const config = loadCacheConfig();
-
-  try {
-    if (config.enabled) {
-      const cachedContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-      if (cachedContent) {
-        if (ifNoneMatch && checkIfNoneMatch(ifNoneMatch, cachedContent.etag)) {
-          return new Response(null, {
-            status: 304,
-            headers: {
-              ETag: cachedContent.etag,
-              'Last-Modified': new Date(cachedContent.lastModified * 1000).toUTCString(),
-              'Cache-Control': 'public, max-age=86400, s-maxage=86400, must-revalidate',
-            },
-          });
-        }
-        return new Response(cachedContent.content, {
-          status: 200,
-          headers: {
-            'Content-Type': cachedContent.contentType,
-            ETag: cachedContent.etag,
-            'Last-Modified': new Date(cachedContent.lastModified * 1000).toUTCString(),
-            'Cache-Control': 'public, max-age=86400, s-maxage=86400, must-revalidate',
-            'X-Feed-Schema': schemaName,
-            'X-Feed-Format': format,
-            'X-Cache': 'HIT',
-          },
-        });
+  return serveFeed({
+    schemaName,
+    format,
+    contentKeyOptions: { archive: { year, month } },
+    ifNoneMatch,
+    siteConfig,
+    cacheBust,
+    maxAge: 86400,
+    revalidate: false,
+    fetchItems: async () => ({
+      items: (await getFeedItemsBySchemaNameForMonth(schemaName, year, month)) as FeedItem[],
+    }),
+    render: async (items) => {
+      const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`
+      const archiveBase = `${siteConfig.feedUrl}/${collectionName}/archive`
+      const archiveLinks: FeedArchiveLink[] = [
+        { rel: 'prev-archive', href: `${archiveBase}/${month === 1 ? year - 1 : year}/${month === 1 ? 12 : month - 1}/${format}` },
+        { rel: 'current', href: baseUrl },
+      ]
+      const nextYear = month === 12 ? year + 1 : year
+      const nextMonth = month === 12 ? 1 : month + 1
+      const now = new Date()
+      if (nextYear < now.getUTCFullYear() || (nextYear === now.getUTCFullYear() && nextMonth <= now.getUTCMonth() + 1)) {
+        archiveLinks.push({ rel: 'next-archive', href: `${archiveBase}/${nextYear}/${nextMonth}/${format}` })
       }
-    }
-
-    const items = await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as FeedItem[];
-
-    const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
-    const archiveBase = `${siteConfig.feedUrl}/${collectionName}/archive`;
-
-    const archiveLinks: FeedArchiveLink[] = [
-      { rel: 'prev-archive', href: `${archiveBase}/${month === 1 ? year - 1 : year}/${month === 1 ? 12 : month - 1}/${format}` },
-      { rel: 'current', href: baseUrl },
-    ];
-
-    const nextYear = month === 12 ? year + 1 : year;
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const now = new Date();
-    if (nextYear < now.getFullYear() || (nextYear === now.getFullYear() && nextMonth <= now.getMonth() + 1)) {
-      archiveLinks.push({ rel: 'next-archive', href: `${archiveBase}/${nextYear}/${nextMonth}/${format}` });
-    }
-
-    const feedContent = await createFeed(
-      items,
-      schemaName,
-      format,
-      cacheBust,
-      undefined,
-      archiveLinks,
-      true,
-      undefined,
-      siteConfigOverrides,
-    );
-
-    const contentType = getContentType(format);
-
-    if (config.enabled) {
-      await cache.setFeedContent(schemaName, format, feedContent, contentType, contentKeyOptions);
-      const cachedContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-      const etag = cachedContent?.etag || '';
-      const lastModified = cachedContent?.lastModified || Math.floor(Date.now() / 1000);
-
-      return new Response(feedContent, {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          ETag: etag,
-          'Last-Modified': new Date(lastModified * 1000).toUTCString(),
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400, must-revalidate',
-          'X-Feed-Schema': schemaName,
-          'X-Feed-Format': format,
-          'X-Cache': 'MISS',
-        },
-      });
-    }
-
-    return new Response(feedContent, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
-        'X-Feed-Schema': schemaName,
-        'X-Feed-Format': format,
-      },
-    });
-  } catch (error) {
-    console.error('Archive feed generation error:', error);
-    return new Response(
-      JSON.stringify({
-        error: 'Failed to generate archive feed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+      return createFeed(
+        await withImageMetadata(items, schemaName, cache),
+        schemaName,
+        format,
+        cacheBust,
+        undefined,
+        archiveLinks,
+        true,
+        undefined,
+        siteConfigOverrides,
+      )
+    },
+  })
 }

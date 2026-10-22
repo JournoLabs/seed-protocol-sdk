@@ -54,7 +54,7 @@ describe('ArweaveImageService circuit breaker', () => {
 
     const service = new ArweaveImageService({ gateways: ['arweave.net'], timeout: 5_000 })
     const tx = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
-    const meta = await service.detectImage(tx)
+    const meta = (await service.detectImage(tx))!
 
     expect(meta.isImage).toBe(true)
     expect(meta.url).toBe(`https://app.example.com/api/seed-gateway/${tx}`)
@@ -88,7 +88,7 @@ describe('ArweaveImageService circuit breaker', () => {
     })
 
     const tx = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
-    const meta = await service.detectImage(tx)
+    const meta = (await service.detectImage(tx))!
 
     const mediaCalls = fetchMock.mock.calls.filter((c) => !String(c[0]).endsWith('/info'))
     expect(mediaCalls.some((c) => String(c[0]).includes('ar.seedprotocol.io'))).toBe(false)
@@ -128,5 +128,40 @@ describe('ArweaveImageService circuit breaker', () => {
     await service.detectImage(tx)
     const mediaCalls = fetchMock.mock.calls.filter((c) => !String(c[0]).endsWith('/info'))
     expect(mediaCalls.some((c) => String(c[0]).includes('dead.example'))).toBe(false)
+  })
+
+  it('stops at the first gateway that answers, even when it is not an image', async () => {
+    const fetchMock = mockGatewayFetch(async (s) => {
+      if (s.includes('first.example')) {
+        return new Response(null, { status: 200, headers: { 'content-type': 'text/html' } })
+      }
+      throw new Error(`unexpected ${s}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new ArweaveImageService({
+      gateways: ['first.example', 'second.example'],
+      timeout: 5_000,
+    })
+    const meta = await service.detectImage('05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY')
+
+    expect(meta).toMatchObject({ isImage: false, mimeType: 'text/html' })
+    const mediaCalls = fetchMock.mock.calls.filter((c) => !String(c[0]).endsWith('/info'))
+    expect(mediaCalls.some((c) => String(c[0]).includes('second.example'))).toBe(false)
+  })
+
+  it('returns null when no gateway answers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockGatewayFetch(async (s) => {
+        if (s.includes('down.example')) throw new Error('ECONNRESET')
+        return new Response(null, { status: 502 })
+      }),
+    )
+    const service = new ArweaveImageService({
+      gateways: ['down.example', 'bad.example'],
+      timeout: 5_000,
+    })
+    expect(await service.detectImage('05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY')).toBeNull()
   })
 })

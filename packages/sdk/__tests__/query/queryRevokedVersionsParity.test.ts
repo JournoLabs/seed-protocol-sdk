@@ -160,7 +160,7 @@ const fakeEasClient = {
 }
 
 const summarize = async (ds: QueryDataSource, seedList: AttestationLike[]) =>
-  (await assembleSeeds(SCHEMA, seedList, { hydrateStorage: false, expandRelations: false }, ds))
+  (await assembleSeeds(SCHEMA, seedList, { hydrateStorage: false, relations: 'urls' }, ds))
     .map((r) => ({ seedUid: r.seedUid, versionUid: r.versionUid, title: r.data.title }))
     .sort((a, b) => a.seedUid.localeCompare(b.seedUid))
 

@@ -203,15 +203,15 @@ function metadataRowToAttestation(row: {
   )
 }
 
+/** The UTC calendar month as unix seconds: `startTs` inclusive, `endTs` (next month) exclusive. */
 function monthBoundsUnix(year: number, month: number): {
   startTs: number
   endTs: number
 } {
-  const startDate = new Date(year, month - 1, 1)
-  const endDate = new Date(year, month, 0, 23, 59, 59)
-  const startTs = Math.floor(startDate.getTime() / 1000)
-  const endTs = Math.floor(endDate.getTime() / 1000) + 1
-  return { startTs, endTs }
+  return {
+    startTs: Date.UTC(year, month - 1, 1) / 1000,
+    endTs: Date.UTC(year, month, 1) / 1000,
+  }
 }
 
 async function listPublishedSeedRows(

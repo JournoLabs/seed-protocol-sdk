@@ -10,19 +10,6 @@ export function generateETag(value: string): string {
 }
 
 /**
- * Generate an ETag for cached feed content
- */
-export function generateContentETag(
-  schemaName: string,
-  format: string,
-  lastModified: number,
-  contentLength: number
-): string {
-  const etagValue = `${schemaName}-${format}-${lastModified}-${contentLength}`;
-  return generateETag(etagValue);
-}
-
-/**
  * Check if an ETag matches the provided value
  * Handles both quoted and unquoted ETags
  */

@@ -18,6 +18,12 @@ export interface CachedFeedContent {
   etag: string;                   // ETag for this format
   lastModified: number;           // Last modification time (Unix timestamp)
   expiresAt: number;              // Cache expiration timestamp (Unix timestamp)
+  /**
+   * What the body was built from (query's collection ETag when known, site config, cache-bust
+   * value; see feedFingerprint). A read that passes a fingerprint only gets an entry built from
+   * the same inputs. Entries written before fingerprints existed have none and never match.
+   */
+  fingerprint?: string;
 }
 
 /**

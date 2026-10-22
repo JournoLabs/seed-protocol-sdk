@@ -1,5 +1,4 @@
 import {
-  BaseArweaveClient,
   ensureArweaveReadGatewayForFallback,
   getArweaveReadBaseUrls,
   isGatewayHostCircuitOpen,
@@ -25,44 +24,32 @@ export class ArweaveImageService {
   }
 
   /**
-   * Detect if an Arweave transaction ID links to an image and extract metadata
+   * Whether an Arweave transaction is an image, with its metadata. Gateways are tried in order
+   * until one answers (any successful HEAD, image or not); a gateway that errors or returns a
+   * non-ok status is skipped. Null when no gateway answered, so the caller can try again later
+   * instead of recording the transaction as "not an image".
    */
-  async detectImage(transactionId: string): Promise<ImageMetadata> {
+  async detectImage(transactionId: string): Promise<ImageMetadata | null> {
     await ensureArweaveReadGatewayForFallback()
 
     // Preferred gateways first, then resolved / public (this service's own list when unresolved)
     const baseUrls = getArweaveReadBaseUrls({ fallbackHosts: this.config.gateways })
 
-    // Try each gateway until one succeeds (skip hosts with an open circuit)
     for (const base of baseUrls) {
-      if (isGatewayHostCircuitOpen(base)) {
-        continue
-      }
-      try {
-        const url = `${base}/${transactionId}`
-        const metadata = await this.getImageMetadata(url, base)
-        if (metadata.isImage) {
-          return metadata
-        }
-      } catch (error) {
-        recordGatewayHostFailure(base)
-        // Log but continue to next gateway
-        console.warn(`Failed to fetch from gateway ${base} for transaction ${transactionId}:`, error)
-        continue
-      }
+      if (isGatewayHostCircuitOpen(base)) continue
+      const metadata = await this.probe(`${base}/${transactionId}`, base)
+      if (metadata) return metadata
     }
-
-    // If all gateways failed, return non-image result
-    return {
-      isImage: false,
-      url: `${baseUrls[0] ?? BaseArweaveClient.getBaseUrl()}/${transactionId}`,
-    }
+    return null
   }
 
-  /**
-   * Get image metadata from a URL
-   */
+  /** Image metadata for a URL; `isImage: false` when it isn't an image or couldn't be read. */
   async getImageMetadata(url: string, hostHint?: string): Promise<ImageMetadata> {
+    return (await this.probe(url, hostHint)) ?? { isImage: false, url }
+  }
+
+  /** The URL's metadata, or null when the host errored or answered with a non-ok status. */
+  private async probe(url: string, hostHint?: string): Promise<ImageMetadata | null> {
     const host =
       hostHint ??
       (() => {
@@ -79,7 +66,7 @@ export class ArweaveImageService {
 
       if (!headResponse.ok) {
         // HTTP error from a reachable host — do not trip the circuit
-        return { isImage: false, url }
+        return null
       }
 
       recordGatewayHostSuccess(host)
@@ -125,7 +112,7 @@ export class ArweaveImageService {
     } catch (error) {
       recordGatewayHostFailure(host)
       console.warn(`Error fetching image metadata from ${url}:`, error)
-      return { isImage: false, url }
+      return null
     }
   }
 

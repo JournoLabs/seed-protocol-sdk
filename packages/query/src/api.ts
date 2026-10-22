@@ -573,7 +573,7 @@ export async function getSeeds(
 }
 
 /**
- * Query seeds of a schema created within a calendar month (local timezone bounds).
+ * Query seeds of a schema created within a calendar month, in UTC.
  * No collection cache; may write-through to item cache when remote.
  */
 export async function queryBySchemaForMonth(

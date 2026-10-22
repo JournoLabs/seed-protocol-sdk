@@ -16,6 +16,3 @@ export function enrichImageSeedClone(clone: Record<string, unknown>): void {
     }
   }
 }
-
-/** @deprecated Use {@link enrichImageSeedClone} */
-export const enrichImageSeedCloneForFeed = enrichImageSeedClone
