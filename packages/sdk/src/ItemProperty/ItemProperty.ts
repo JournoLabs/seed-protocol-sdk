@@ -1137,12 +1137,15 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // only. Missing it here, an Image, File, Html or Relation would come back from its row under
     // the stored name (`coverImageId`) as a second instance, and the item would swap it in and
     // unload the first one mid-save. Mutate the entry: it is shared by both keys.
-    const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
-    if (cached) {
+    const fromCache = (): ItemProperty<any> | undefined => {
+      const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
+      if (!cached) return undefined
       for (const key of [keyByLocal, keyByUid]) this.cache.addKey(cached, key)
       if (hold !== false) this.cache.holdInstance(cached)
-      foundProperty = cached
-    } else {
+      return cached
+    }
+    foundProperty = fromCache()
+    if (!foundProperty) {
       // Query database
       const row = await currentPropertyRow(
         { seedLocalId, seedUid },
@@ -1178,7 +1181,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         !!storedName &&
         (metadataStoredNameForms(propertyName, propertyRecordSchema as never).includes(storedName) ||
           getMetadataPropertyNamesForQuery(propertyName).includes(storedName))
-      foundProperty = ItemProperty.create(
+      // The item may have made the instance while the reads ran. Under the stored name, `create`
+      // wouldn't match it and would make a second one.
+      foundProperty = fromCache() ?? ItemProperty.create(
         { ...propertyData, propertyName: keepsStoredName ? storedName : propertyName, modelName, propertyRecordSchema },
         { waitForReady: false, hold },
       )

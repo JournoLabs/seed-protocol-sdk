@@ -108,6 +108,30 @@ testDescribe('ItemProperty cache holds', () => {
     other.unload()
   }, 30000)
 
+  it('finds a property made while its row was read, not a second one under the stored name', async () => {
+    const other = await createPost('related, raced')
+    const item = await Item.create({
+      modelName: 'HoldPost',
+      schemaName: SCHEMA_NAME,
+      title: 'with relation, raced',
+      related: other.seedLocalId,
+    } as never)
+    const seedLocalId = item.seedLocalId
+    item.unload()
+    expect(ItemProperty.cache.peek(ItemProperty.cacheKey(seedLocalId!, 'related'))).toBeUndefined()
+
+    // find misses the cache before its first await; the item makes the instance meanwhile
+    const finding = ItemProperty.find({ propertyName: 'related', seedLocalId, hold: false })
+    const made = ItemProperty.create(
+      { propertyName: 'related', seedLocalId, modelName: 'HoldPost' } as never,
+      { waitForReady: false },
+    )!
+
+    expect((await finding)?.getService()).toBe(made.getService())
+    made.unload()
+    other.unload()
+  }, 30000)
+
   it('a held property dropped with its item stays out of the cache when its context changes', async () => {
     const item = await createPost('dropped')
     const seedLocalId = item.seedLocalId
