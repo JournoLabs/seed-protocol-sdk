@@ -182,7 +182,6 @@ async function runDocker(workflow, options) {
     '--ipc=host',
     '-e', 'CI=true',
     '-e', `${STEPS_ENV}=${steps}`,
-    ...(process.env.SEED_GATEWAY_HYPER_KEY ? ['-e', 'SEED_GATEWAY_HYPER_KEY'] : []),
     // Bun's download cache only; node_modules is rebuilt in the container every run.
     '-v', `${IMAGE}-bun-cache:/root/.bun/install/cache`,
     tag, 'bash', '-c', inner,

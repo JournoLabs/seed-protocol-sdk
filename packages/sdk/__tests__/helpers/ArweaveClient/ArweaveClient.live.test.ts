@@ -1,11 +1,9 @@
 /**
- * Integration tests for BaseArweaveClient against real Arweave network
- * 
- * These tests make real network requests to Arweave to verify the implementation
- * works correctly against the actual API.
- * 
- * Note: These tests require network access and may be slow. They are designed
- * to be run less frequently than unit tests. They run only in Node.js environment.
+ * BaseArweaveClient against the real Arweave network: live gateways, so results depend on them
+ * (a slow gateway answers 504). Skipped unless SEED_LIVE_NETWORK_TESTS=1, and Node only.
+ * ArweaveClient.test.ts covers the same methods against a mocked network.
+ *
+ *   SEED_LIVE_NETWORK_TESTS=1 bunx vitest run --project NodeJS packages/sdk/__tests__/helpers/ArweaveClient/ArweaveClient.live.test.ts
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -26,10 +24,9 @@ const KNOWN_TX_ID = 'bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U'
 // This is a small, well-known transaction
 const KNOWN_TEXT_TX_ID = 'Sgmwx-GEq9-k8J_V7VPiX09j_1RTHF-VsQaOMxS7v-4'
 
-// Skip in browser environment - these tests require Node.js for network requests
-const isNodeEnv = typeof window === 'undefined'
+const runLive = typeof window === 'undefined' && process.env.SEED_LIVE_NETWORK_TESTS === '1'
 
-describe.skipIf(!isNodeEnv)('ArweaveClient Integration', () => {
+describe.skipIf(!runLive)('ArweaveClient against live gateways', () => {
   // Increase timeout for network requests
   const NETWORK_TIMEOUT = 30000
 
@@ -52,7 +49,7 @@ describe.skipIf(!isNodeEnv)('ArweaveClient Integration', () => {
       if (!info.ok) throw new Error(`GET /info through the tunnel returned ${info.status}`)
       setPreferredArweaveReadBaseUrls([hyperTunnel.baseUrl])
     } catch (error) {
-      console.warn('[ArweaveClient Integration] Hyper gateway unavailable, using public gateways:', error)
+      console.warn('[ArweaveClient live] Hyper gateway unavailable, using public gateways:', error)
       await hyperTunnel?.close().catch(() => {})
       hyperTunnel = undefined
     }
