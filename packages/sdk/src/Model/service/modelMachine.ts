@@ -1,9 +1,7 @@
-import { assign, setup, ActorRefFrom } from 'xstate'
+import { assign, setup } from 'xstate'
 import { loadOrCreateModel } from './actors/loadOrCreateModel'
 import { validateModel } from './actors/validateModel'
-import { createModelProperties } from './actors/createModelProperties'
 import { ValidationError } from '@/Schema/validation'
-import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import debug from 'debug'
 import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
@@ -21,9 +19,8 @@ export type ModelMachineContext = {
   _originalValues?: {
     properties?: { [propertyName: string]: any } // Serialized snapshot for comparison only
   }
-  writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   _liveQueryPropertyIds?: string[] // Property file IDs from liveQuery (like Schema._liveQueryModelIds)
-  _pendingPropertyDefinitions?: { [propertyName: string]: any } // Temporary storage for properties to create
+  _pendingPropertyDefinitions?: { [propertyName: string]: any } // Properties passed to Model.create, until created
   _modelFileId?: string // Model file ID (string) - used for tracking model instances
   // Conflict detection metadata - track when data was loaded from DB
   _loadedAt?: number // Timestamp when data was loaded from DB
@@ -50,19 +47,12 @@ export const modelMachine = setup({
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      | { type: 'requestWrite'; data: any }
-      | { type: 'writeSuccess'; output: any }
-      | { type: 'createModelPropertiesSuccess' }
-      | { type: 'createModelPropertiesError'; error: Error }
-      | { type: 'refreshProperties' }
       | { type: 'destroyStarted' }
       | { type: 'destroyError'; error: unknown },
   },
   actors: {
     loadOrCreateModel,
     validateModel,
-    createModelProperties,
-    writeProcessMachine,
   },
   guards: {
     isModelValid: ({ context }) => {
@@ -93,7 +83,6 @@ export const modelMachine = setup({
     _isDraft: false,
     _editedProperties: new Set<string>(),
     _validationErrors: undefined,
-    writeProcess: undefined,
     _liveQueryPropertyIds: [], // Initialize empty array
   }),
   on: {
@@ -297,86 +286,13 @@ export const modelMachine = setup({
       },
     },
     idle: {
-      entry: assign({
-        writeProcess: ({ context, spawn }) => {
-          if (!context.writeProcess && context.id) {
-            logger(`[idle entry] Spawning writeProcess for model "${context.modelName}" (${context.id})`)
-            return spawn(writeProcessMachine, {
-              input: {
-                entityType: 'model',
-                entityId: context.id,
-                entityData: {
-                  modelName: context.modelName,
-                  schemaName: context.schemaName,
-                  // Properties are not stored in context - they'll be provided via requestWrite event
-                },
-              },
-            })
-          }
-          return context.writeProcess
-        },
-      }),
       on: {
-        refreshProperties: {
-          actions: () => {
-            // This event will be handled by the Model instance's subscription
-            // The Model will call _refreshPropertiesFromDb when it receives this event
-            logger(`[idle] refreshProperties event received, will be handled by Model instance`)
-          },
-        },
         validateModel: {
           target: 'validating',
         },
         reloadFromDb: {
           target: 'loading',
         },
-        requestWrite: {
-          actions: ({ context, event }) => {
-            if (context.writeProcess) {
-              logger(`[requestWrite] Sending startWrite to writeProcess with data:`, event.data)
-              context.writeProcess.send({
-                type: 'startWrite',
-                data: event.data,
-              })
-            } else {
-              logger(`[requestWrite] ERROR: writeProcess not available for model "${context.modelName}" (${context.id})`)
-            }
-          },
-        },
-        writeSuccess: [
-          {
-            guard: ({ context }) => {
-              // If we have pending property definitions, transition to creatingProperties
-              const hasPending = !!(context._pendingPropertyDefinitions && Object.keys(context._pendingPropertyDefinitions).length > 0)
-              logger(`[writeSuccess guard] hasPending: ${hasPending}, _pendingPropertyDefinitions keys: ${context._pendingPropertyDefinitions ? Object.keys(context._pendingPropertyDefinitions).length : 0}`)
-              return hasPending
-            },
-            target: 'creatingProperties',
-            actions: assign(({ context, event }) => {
-              logger(`[writeSuccess] Transitioning to creatingProperties for model "${context.modelName}"`)
-              // Update _dbId from write output if available (writeToDatabase returns _dbId, not id)
-              const newContext = { ...context }
-              const dbId = event.output?._dbId ?? event.output?.id
-              if (dbId != null) {
-                newContext._dbId = dbId
-                logger(`[writeSuccess] Updated _dbId to ${dbId}`)
-              }
-              return newContext
-            }),
-          },
-          {
-            target: 'idle',
-            actions: assign(({ context, event }) => {
-              // Update _dbId from write output if available (writeToDatabase returns _dbId, not id)
-              const newContext = { ...context }
-              const dbId = event.output?._dbId ?? event.output?.id
-              if (dbId != null) {
-                newContext._dbId = dbId
-              }
-              return newContext
-            }),
-          },
-        ],
       },
       // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
       // (updateContext) or on request (validateModel). Re-entering while errors exist would loop forever on a
@@ -399,49 +315,6 @@ export const modelMachine = setup({
       invoke: {
         src: 'validateModel',
         input: ({ context }) => ({ context }),
-      },
-    },
-    creatingProperties: {
-      entry: ({ context }) => {
-        logger(`[creatingProperties entry] Starting property creation for model "${context.modelName}" with ${Object.keys(context._pendingPropertyDefinitions || {}).length} properties`)
-      },
-      invoke: {
-        src: 'createModelProperties',
-        input: ({ context }) => {
-          logger(`[creatingProperties invoke] Invoking createModelProperties with ${Object.keys(context._pendingPropertyDefinitions || {}).length} property definitions`)
-          return {
-            context,
-            propertyDefinitions: context._pendingPropertyDefinitions || {},
-          }
-        },
-      },
-      on: {
-        createModelPropertiesSuccess: {
-          target: 'idle',
-          actions: [
-            assign(({ context }) => {
-              // Only clear _pendingPropertyDefinitions, preserve everything else including _liveQueryPropertyIds
-              return {
-                ...context,
-                _pendingPropertyDefinitions: undefined,
-              }
-            }),
-            ({ self }) => {
-              // Trigger property refresh after properties are created
-              // This ensures _liveQueryPropertyIds is updated in Node.js where liveQuery isn't available
-              setTimeout(() => {
-                if (self.getSnapshot().status === 'stopped') return
-                self.send({ type: 'refreshProperties' })
-              }, 100) // Small delay to ensure properties are written to DB
-            },
-          ],
-        },
-        createModelPropertiesError: {
-          target: 'error',
-          actions: ({ event }) => {
-            logger('Error creating model properties:', event.error)
-          },
-        },
       },
     },
     error: {},

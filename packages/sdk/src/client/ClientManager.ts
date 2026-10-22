@@ -154,25 +154,12 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
         saveError: undefined,
       }
     })
-    // Wait a moment for the context update to be processed
-    await new Promise(resolve => setTimeout(resolve, 10))
   }
   
-  // Send init event - the root-level handler will transition to PLATFORM_CLASSES_INIT
-  // which will stop any running actors and start fresh with the new options
-  // The platformClassesInit actor will update the context with the correct endpoints from options
+  // The root-level init handler moves to PLATFORM_CLASSES_INIT (stopping any running step) as
+  // send() returns; the platformClassesInit step fills the context from options.
   clientManager.send({ type: 'init', options });
   
-  // Wait for the state machine to transition to PLATFORM_CLASSES_INIT to ensure
-  // any old actors are stopped and the new initialization flow begins
-  try {
-    await waitFor(clientManager, (snapshot) => {
-      return snapshot.value === 'platformClassesInit' || snapshot.context.isInitialized
-    }, { timeout: 1000 })
-  } catch {
-    // If we can't transition, continue anyway - the waitFor below will catch any errors
-    logger('Timeout waiting for state transition, continuing...')
-  }
   try {
     await waitFor(clientManager, (snapshot) => {
       return snapshot.context.isInitialized || snapshot.context.initError != null

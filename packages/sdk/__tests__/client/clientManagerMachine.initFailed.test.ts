@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createActor, fromCallback, waitFor } from 'xstate'
+import { createActor, fromCallback, fromPromise, waitFor } from 'xstate'
 import { clientManagerMachine } from '@/client/clientManagerMachine'
 import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
 import type { ClientManagerContext } from '@/types/machines'
@@ -30,15 +30,20 @@ function sendAndForget(
   })
 }
 
+const succeed = () => fromPromise(async () => ({}))
+const fail = (message: string) =>
+  fromPromise(async () => {
+    throw new Error(message)
+  })
+
 function succeedingActors() {
   return {
-    platformClassesInit: sendAndForget(ClientManagerEvents.PLATFORM_CLASSES_READY),
-    fileSystemInit: sendAndForget(ClientManagerEvents.FILE_SYSTEM_READY),
-    dbInit: sendAndForget(ClientManagerEvents.DB_READY),
-    saveConfig: sendAndForget(ClientManagerEvents.SAVE_CONFIG_SUCCESS),
-    processSchemaFiles: sendAndForget(ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS),
-    addModelsToStore: sendAndForget(ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS),
-    addModelsToDb: sendAndForget(ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS),
+    platformClassesInit: succeed(),
+    fileSystemInit: succeed(),
+    dbInit: succeed(),
+    saveConfig: succeed(),
+    processSchemaFiles: succeed(),
+    addModelsToDb: succeed(),
     saveAppState: sendAndForget(ClientManagerEvents.SAVE_APP_STATE_SUCCESS, {
       key: 'addresses',
       value: { owned: [], watched: [] },
@@ -46,7 +51,7 @@ function succeedingActors() {
   }
 }
 
-function actorWith(overrides: Record<string, ReturnType<typeof fromCallback>>) {
+function actorWith(overrides: Record<string, ReturnType<typeof fromCallback> | ReturnType<typeof fromPromise>>) {
   return createActor(
     clientManagerMachine.provide({
       actors: {
@@ -61,7 +66,7 @@ function actorWith(overrides: Record<string, ReturnType<typeof fromCallback>>) {
 describe('clientManagerMachine init failure', () => {
   it('moves FILE_SYSTEM_INIT errors to initFailed, not idle', async () => {
     const actor = actorWith({
-      fileSystemInit: sendAndForget('error', { error: new Error('fs failed') }),
+      fileSystemInit: fail('fs failed'),
     })
     actor.start()
     actor.send({ type: 'init', options: initOptions })
@@ -74,7 +79,7 @@ describe('clientManagerMachine init failure', () => {
 
   it('moves PROCESS_SCHEMA_FILES errors to initFailed, not idle', async () => {
     const actor = actorWith({
-      processSchemaFiles: sendAndForget('error', { error: new Error('schema failed') }),
+      processSchemaFiles: fail('schema failed'),
     })
     actor.start()
     actor.send({ type: 'init', options: initOptions })
@@ -85,9 +90,9 @@ describe('clientManagerMachine init failure', () => {
     actor.stop()
   })
 
-  it('moves DB_INIT errors (lowercase error) to initFailed', async () => {
+  it('moves DB_INIT errors to initFailed', async () => {
     const actor = actorWith({
-      dbInit: sendAndForget('error', { error: new Error('db failed') }),
+      dbInit: fail('db failed'),
     })
     actor.start()
     actor.send({ type: 'init', options: initOptions })
@@ -112,13 +117,9 @@ describe('clientManagerMachine init failure', () => {
   it('retries from initFailed when init is sent again', async () => {
     let fsAttempts = 0
     const actor = actorWith({
-      fileSystemInit: fromCallback(({ sendBack }) => {
+      fileSystemInit: fromPromise(async () => {
         fsAttempts += 1
-        if (fsAttempts === 1) {
-          sendBack({ type: 'error', error: new Error('first fs fail') })
-          return
-        }
-        sendBack({ type: ClientManagerEvents.FILE_SYSTEM_READY })
+        if (fsAttempts === 1) throw new Error('first fs fail')
       }),
     })
     actor.start()

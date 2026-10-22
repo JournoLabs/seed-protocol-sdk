@@ -111,6 +111,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
     it('should always return validation result for invalid schema (missing metadata)', async () => {
       const schemaName = `test-schema-${generateId()}`
       const schema = Schema.create(schemaName, { waitForReady: false })
+      // Edit the loaded context: the load assigns metadata when it finishes
+      await waitForSchemaIdle(schema)
       
       // Manually set invalid context (missing metadata)
       schema.getService().send({
@@ -182,6 +184,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
     it('should handle validation errors gracefully and always return', async () => {
       const schemaName = `test-schema-${generateId()}`
       const schema = Schema.create(schemaName, { waitForReady: false })
+      // Edit the loaded context: the load assigns models when it finishes
+      await waitForSchemaIdle(schema)
       
       // Set context with invalid model structure
       schema.getService().send({

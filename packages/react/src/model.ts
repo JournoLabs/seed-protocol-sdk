@@ -45,7 +45,7 @@ export const useModels: UseModels = (schemaId) => {
     queryKey,
     queryFn: async () => {
       // Use waitForReady: false so we return models as soon as they exist; waitForReady: true
-      // filters to only idle models and can return [] while a model is in creatingProperties.
+      // waits for every model to be idle.
       const next = await Model.all(schemaId!, { waitForReady: false })
       // Model.all can briefly return [] while models load. Keep the previous list only while the
       // table still has rows; once it is empty (all deleted), [] is the answer.

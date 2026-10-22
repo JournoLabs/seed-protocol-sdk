@@ -263,9 +263,7 @@ export const loadOrCreateModel = fromCallback<
       const schemaSnapshot = schema.getService().getSnapshot()
       
       // Wait for schema to load if it's still loading
-      // Check if state is a loading state object (XState v5 nested states)
-      const isLoading = typeof schemaSnapshot.value === 'object' && 'loading' in schemaSnapshot.value
-      if (isLoading) {
+      if (schemaSnapshot.value === 'loading') {
         await new Promise<void>((resolve, reject) => {
           const subscription = schema.getService().subscribe((snapshot) => {
             if (snapshot.value === 'idle' || snapshot.value === 'error') {

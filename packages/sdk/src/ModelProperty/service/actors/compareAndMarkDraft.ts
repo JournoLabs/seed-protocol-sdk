@@ -24,12 +24,7 @@ export const compareAndMarkDraft = fromCallback<
     if (schemaFileIdForResolve && (fullContext.modelName === undefined || fullContext.dataType === undefined)) {
       try {
         const { resolveModelRecord, resolvePropertyModelRecord } = await import('../../../db/read/resolveModelRecord')
-        let fromDb: { name: string; dataType: string } | undefined
-        for (let attempt = 0; attempt < 6; attempt++) {
-          fromDb = await resolvePropertyModelRecord(schemaFileIdForResolve)
-          if (fromDb) break
-          if (attempt < 5) await new Promise((r) => setTimeout(r, 40))
-        }
+        const fromDb = await resolvePropertyModelRecord(schemaFileIdForResolve)
         if (fromDb) {
           fullContext = {
             ...fullContext,

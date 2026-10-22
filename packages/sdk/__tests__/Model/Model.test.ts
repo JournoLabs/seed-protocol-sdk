@@ -21,7 +21,7 @@ import { waitForModelIdle, waitForModelSettled, waitForSchemaIdle } from '../tes
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // modelMachine's states once loading has finished without error (see src/Model/service/modelMachine.ts)
-const MODEL_STATES_AFTER_LOAD = ['idle', 'validating', 'creatingProperties']
+const MODEL_STATES_AFTER_LOAD = ['idle', 'validating']
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -763,7 +763,7 @@ testDescribe('Model Integration Tests', () => {
       expect(foundModel?.modelName).toBe('TestPost')
 
       // find() should have waited past loading. It resolves on the first idle, and the model can leave idle
-      // again (validating, creatingProperties), so check it got past loading, then that it settles in idle.
+      // again (validating), so check it got past loading, then that it settles in idle.
       const service = foundModel!.getService()
       expect(MODEL_STATES_AFTER_LOAD).toContain(service.getSnapshot().value)
       await waitForModelSettled(foundModel!)
@@ -793,7 +793,7 @@ testDescribe('Model Integration Tests', () => {
       expect(foundModel?.modelName).toBe('TestPost')
       
       // find() should have waited past loading. It resolves on the first idle, and the model can leave idle
-      // again (validating, creatingProperties), so check it got past loading, then that it settles in idle.
+      // again (validating), so check it got past loading, then that it settles in idle.
       const service = foundModel!.getService()
       expect(MODEL_STATES_AFTER_LOAD).toContain(service.getSnapshot().value)
       await waitForModelSettled(foundModel!)
@@ -945,8 +945,8 @@ testDescribe('Model Integration Tests', () => {
 
       const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: WAIT_TIMEOUT_MS })
       expect(allModels.map((m) => m.modelName)).toContain('TestModelWait')
-      // all() resolves once each model has been idle; a model can leave idle again (validating,
-      // creatingProperties), so check each got past loading, then settles in idle
+      // all() resolves once each model has been idle; a model can leave idle again (validating),
+      // so check each got past loading, then settles in idle
       for (const m of allModels) {
         expect(MODEL_STATES_AFTER_LOAD).toContain(m.getService().getSnapshot().value)
       }

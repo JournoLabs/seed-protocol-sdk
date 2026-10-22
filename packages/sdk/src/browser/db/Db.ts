@@ -103,12 +103,6 @@ export class BrowserDb implements IDb {
         }, null, 2))
       }
 
-      // Wait for journal file to be fully written before proceeding with migration
-      // This is critical in browser/OPFS where writes may not be immediately readable
-      logger('[Db.prepareDb] waiting for journal file to be fully written...')
-      await BaseFileManager.waitForFileWithContent(journalFilePath, 100, 5000)
-      logger('[Db.prepareDb] journal file is ready')
-
       // SQLite's OPFS VFS needs SharedArrayBuffer and Atomics. Without them SQLocal quietly
       // opens an in-memory database, so fail before starting the worker.
       if (typeof SharedArrayBuffer === 'undefined' || typeof Atomics === 'undefined') {

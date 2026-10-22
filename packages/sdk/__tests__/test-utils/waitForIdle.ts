@@ -43,7 +43,7 @@ export const waitForModelPropertyIdle = (property: HasService, timeout?: number)
 
 /**
  * Waits for a Model to finish everything Model.create started: the first idle comes before its write,
- * after which writeSuccess moves a model created with properties to creatingProperties.
+ * and a model created with properties keeps them in _pendingPropertyDefinitions until they exist.
  */
 export async function waitForModelSettled(model: HasService, timeout = WAIT_TIMEOUT_MS): Promise<void> {
   await waitForModelIdle(model, timeout)

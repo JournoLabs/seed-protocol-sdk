@@ -14,7 +14,7 @@ import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { publishProcesses } from '@/seedSchema/PublishProcessSchema'
 import { cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
-import { waitForInFlightWrites } from '@/services/write/actors/writeToDatabase'
+import { waitForInFlightWrites } from '@/db/write/saveDefinition'
 import { WAIT_TIMEOUT_MS } from './timeouts'
 
 export type CleanupTestSchemaDataOptions = {

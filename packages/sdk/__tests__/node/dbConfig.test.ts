@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createActor, fromCallback, waitFor } from 'xstate'
+import { createActor, fromPromise, waitFor } from 'xstate'
 import { NodeDb } from '@/node/db/Db'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { clientManagerMachine } from '@/client/clientManagerMachine'
-import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
+import { ClientManagerState } from '@/client/constants'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 describe('config.dbConfig', () => {
@@ -38,16 +38,15 @@ describe('config.dbConfig', () => {
     const prepareDb = vi.spyOn(BaseDb, 'prepareDb').mockResolvedValue(undefined)
     vi.spyOn(BaseDb, 'getAppDb').mockReturnValue({} as ReturnType<typeof BaseDb.getAppDb>)
 
-    const succeed = (type: string) => fromCallback(({ sendBack }) => { sendBack({ type }) })
+    const succeed = () => fromPromise(async () => ({}))
     const actor = createActor(
       clientManagerMachine.provide({
         actors: {
-          platformClassesInit: succeed(ClientManagerEvents.PLATFORM_CLASSES_READY),
-          fileSystemInit: succeed(ClientManagerEvents.FILE_SYSTEM_READY),
-          saveConfig: succeed(ClientManagerEvents.SAVE_CONFIG_SUCCESS),
-          processSchemaFiles: succeed(ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS),
-          addModelsToStore: succeed(ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS),
-          addModelsToDb: succeed(ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS),
+          platformClassesInit: succeed(),
+          fileSystemInit: succeed(),
+          saveConfig: succeed(),
+          processSchemaFiles: succeed(),
+          addModelsToDb: succeed(),
         },
       }),
       {

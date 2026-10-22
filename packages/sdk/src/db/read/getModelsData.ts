@@ -27,32 +27,22 @@ export const getModelsData: GetModelsData = async (
   }
 
   if (schemaIdentifier !== undefined && schemaIdentifier !== '') {
-    const runQuery = () =>
-      appDb
-        .select({
-          id: modelsTable.id,
-          name: modelsTable.name,
-          schemaFileId: modelsTable.schemaFileId,
-          isEdited: modelsTable.isEdited,
-        })
-        .from(modelsTable)
-        .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-        .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(
-          or(
-            eq(schemasTable.name, schemaIdentifier),
-            eq(schemasTable.schemaFileId, schemaIdentifier),
-          ),
-        )
-
-    let rows = await runQuery()
-
-    // Retry when we get 0 rows (read-after-write consistency; SQLocal/async may not see the write immediately).
-    for (let i = 0; i < 4 && rows.length === 0; i++) {
-      await new Promise((r) => setTimeout(r, 150))
-      rows = await runQuery()
-    }
-
+    const rows = await appDb
+      .select({
+        id: modelsTable.id,
+        name: modelsTable.name,
+        schemaFileId: modelsTable.schemaFileId,
+        isEdited: modelsTable.isEdited,
+      })
+      .from(modelsTable)
+      .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+      .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+      .where(
+        or(
+          eq(schemasTable.name, schemaIdentifier),
+          eq(schemasTable.schemaFileId, schemaIdentifier),
+        ),
+      )
     return rows as ModelsDataRow[]
   }
 
