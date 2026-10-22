@@ -20,7 +20,10 @@ export const pendingWrites = sqliteTable(
     kind: text('kind').notNull(),
     /** JSON-encoded value. */
     value: text('value'),
-    /** Unused: a storage op's staged path is in its JSON value. Kept until a migration drops it. */
+    /**
+     * A storage op's staged file: the assigned bytes, written by the tab that appended the op (an
+     * ItemStorage op's staged path is in its JSON value too).
+     */
     valueRef: text('value_ref'),
     /** The stored metadata row the edit was made against, to detect a synced row written since. */
     baseRowId: text('base_row_id'),

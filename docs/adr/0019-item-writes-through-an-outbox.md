@@ -1,6 +1,7 @@
 # 0019. Item edits go through a durable outbox that the leader tab drains
 
-- **Status:** Accepted (being implemented)
+- **Status:** Accepted (being implemented); amended 2026-10-22 (the setter appends at once; see
+  Assignment, Assignment order and Storage values)
 - **Date:** 2026-10-18
 - **Scope:** `@seedprotocol/sdk` (Item, ItemProperty, `db/write`, `BaseDb`, EAS sync, migrations),
   `@seedprotocol/react` (property hooks), `@seedprotocol/publish` (payload, uid stamping)
@@ -29,7 +30,8 @@ conflicts; this decision doesn't cover them.
 `status` (`pending`, `applied`, `superseded`, `failed`), `error`, `attempts`, `applied_at`, and
 `conflict` (JSON, see below). The table also has `group_id`, `value_ref` and `base_uid` columns
 that nothing writes. Ops for one `(seed_local_id, property_name)` apply in append order (the row id), and a
-property waits behind its oldest pending op, including one waiting for a retry. An op on the seed
+property waits behind its oldest pending op, including one waiting for a retry, except that a run
+of value ops waits for its newest op only (the older ones are superseded with it). An op on the seed
 itself (no property: create, delete) is ordered against all of its seed's ops.
 
 **Assignment.** The setter checks the value's type and shape synchronously and throws a
@@ -38,9 +40,10 @@ Number, an ISO string for Date, a JSON array string for List) don't throw. A val
 type that breaks a rule (length, range, enum, pattern, required) is kept in memory with its errors
 on `property.validation` and is not appended; `save()` rejects with
 `ItemPropertySaveValidationError`, and the value is lost on reload. A valid value updates memory
-and appends one op. The setter checks ownership before it appends, so a refusal in the usual case
-appends nothing; the drainer checks it again in the applier's `prepare` step, because the op may
-come from another tab or from before a reload, and the client may have lost the item's wallet since.
+and appends one op before the setter returns. Ownership is checked in the applier's `prepare`
+step (the op may come from another tab or from before a reload, and the client may have lost the
+item's wallet since), so a refused assignment appends an op that fails. `save()` still checks
+ownership before it waits.
 Creates and discards are not checked. A `set` op's Relation value is checked there too: each seed it
 names by local id must exist (an attestation uid passes, since a related seed may have no local
 copy). A target whose create op is still pending defers the op; any other missing target fails it
@@ -61,13 +64,15 @@ value's file is deleted).
 Transient errors (`SQLITE_BUSY` or a busy file) retry
 with backoff; anything else (a broken rule, ownership, a constraint) marks the op `failed` with
 its error and the error's name (`error_name`) at once, so a waiter can rethrow `OwnershipError`, and the in-memory value falls back to the next value in the
-overlay (a newer pending op, else the stored row).
+overlay (a newer pending op, else the stored row). A loaded property's change-feed read shows the
+overlay whether or not a write of it is in flight (decision D2; see ADR 0020's amendment).
 
-**Assignment order.** A save does async work before it appends (the ownership check, writing a
-file), so append order alone could let an older save that finishes last win. A save takes a ticket
-when it starts (`helpers/propertyWriteTickets.ts`) and appends only if no newer save of the
-property has started in its tab; otherwise it drops its value and any file it wrote. Across tabs,
-append order is the order.
+**Assignment order.** The setter does no async work before it appends, so append order is
+assignment order, in a tab and across tabs. (Until 2026-10-22 a save checked ownership and wrote
+its file first, and took a ticket, `propertyWriteTickets`, so an older save that finished last
+couldn't win.) A setter that lacks something to plan the op (the property's definition, the seed's
+local id, the file system) shows the value and appends once it has it; the property's later
+assignments queue behind it.
 
 **Draft history: latest value only.** Coalescing keeps one value per property in `metadata`.
 Superseded and applied ops stay as rows and are pruned on a schedule, so an edit history can be
@@ -94,9 +99,9 @@ of this decision.
 metadata liveQuery's `hasPendingPropertyWrite` check becomes this rule. SDK read helpers that
 build item values apply the same overlay (`getPendingPropertyRows`): an ItemProperty's load and
 hydrate, and `getItemProperties` (so `getItemData` and `getEditedProperties`), where an overlaid
-value counts as an unpublished edit. A pending storage value shows its row: an Html, File or Image
-file is already at its final path, and an ItemStorage value is read from its staged file until the
-op moves it. The local query data source reads published rows only and has no overlay. Raw SQL
+value counts as an unpublished edit. A pending storage value shows its row: an Html value its text,
+which the op carries; an Image or File value its file once the op is prepared; an ItemStorage
+value is read from its staged file until the op moves it. The local query data source reads published rows only and has no overlay. Raw SQL
 and liveQueries over `metadata` see a value once it is applied.
 
 **`await property.save()`** resolves when its op is applied and rejects when it fails. An
@@ -108,11 +113,17 @@ values staged) applied in one transaction, so a failure leaves nothing. When a l
 the draft, in order after its pending ops; it replaces `discardNewDraft`. `Item.destroy` and
 `ItemProperty.destroy` are `delete` ops too.
 
-**Storage values.** An Html, File or Image value is a new storage seed: its id is chosen first and
-its file written at its final path, named after it, so nothing else uses the file before the op
-applies; applying creates the seed, its version and the property row. An ItemStorage value goes in
+**Storage values.** An Html, File or Image value is a new storage seed: its id is chosen when the
+value is assigned. A string value (a URL, a file name, the text) goes in the op; a Blob's or a
+`data:` URL's bytes go to a staged file named in the op's `value_ref`, which the assigning tab
+writes right after appending, holding a lock named for the file. Preparing the op turns the value
+into content, writes the file at its final path, named after the seed so nothing else uses it, and
+deletes the staged file once the op applied; applying creates the seed, its version and the
+property row. A staged file that is missing while nobody holds its lock was never written (the tab
+closed or the write failed): the op fails with `StagedValueMissingError`. An ItemStorage value goes in
 the item's own file, which other writers also touch, so it is written to a staging file; applying
-moves it into place and updates the draft row. That op's applier takes the file's lock (ADR 0012)
+moves it into place and updates the draft row. The op carries a string value too, so a staged file
+its tab never wrote is written again from the op. That op's applier takes the file's lock (ADR 0012)
 around the transaction, the order the file's other writers use, but only when the lock is free:
 when another writer holds it, the op throws `OutboxOpDeferredError` and the drainer sets it aside
 for `OUTBOX_DEFER_MS` without counting an attempt and goes on with other ops, so one held file
@@ -146,8 +157,8 @@ browser's semantics: one transaction at a time, and other statements wait for it
 ## Consequences
 
 An assigned value survives a reload, two tabs editing one draft produce one row, and a refused
-save shows its error and the previous value by one path. `propertyWriteQueue` becomes the
-assignment-order tickets; `_valueBeforeSave`, the separate rollback paths,
+save shows its error and the previous value by one path. `propertyWriteQueue`, its successor the
+assignment-order tickets, `_valueBeforeSave`, the separate rollback paths,
 `reconcilePropertyDraftRows` and `discardNewDraft` go. React's
 `useDebouncedItemProperty` assigns through the setter instead of sending machine events.
 

@@ -32,11 +32,14 @@ import {
 } from './outbox'
 import { findSetConflict, recordPropertyEdit } from './conflicts'
 import { storageValueRowOf } from './storageValueRow'
+import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
+import { afterStorageValueApplied, prepareStorageValue, type PreparedStorageValue } from '@/storageValue/save'
+import { requireStagedFile } from '@/storageValue/stage'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
- * as `updateItemPropertyValue` takes it: the value already in its stored string form, and the
- * schema uid already resolved (applying runs in a transaction and mustn't wait on EAS).
+ * as `updateItemPropertyValue` takes it: the value already in its stored string form. A missing
+ * schema uid is looked up before the transaction (applying mustn't wait on EAS).
  */
 export type SetPropertyValueOp = {
   newValue: string | null
@@ -48,6 +51,8 @@ export type SetPropertyValueOp = {
   schemaUid?: string | null
   dataType?: string
   refValueType?: string
+  /** The property's definition, when `schemaUid` is missing: the lookup reads it. */
+  propertyRecordSchema?: PropertyType
   /**
    * A clear (ADR 0021): `newValue` is null and the row's file reference is dropped. `retract` marks
    * a clear that publish revokes.
@@ -63,19 +68,27 @@ export type SetPropertyValueResult = {
 } | null
 
 /**
- * An Html, File or Image value: a new storage seed whose file is already written (named after the
- * seed, so nothing else uses it), and the property row that points at it. Applying it creates the
- * storage seed and its version and writes the row, all in the op's transaction.
+ * An Html, File or Image value: a new storage seed and the property row that points at it. The
+ * assigned value is in `stage`: preparing the op writes its file, named after the seed so nothing
+ * else uses it (prepareStorageValue). Applying it creates the storage seed and its version and
+ * writes the row, all in the op's transaction. Ops appended by an earlier SDK carry no `stage`:
+ * their file was written first and named in `ownedFilePath`.
  */
 export type StorageValueOp = {
   storageSeed: {
-    /** Chosen when the file was written, so the file could be named after it. */
+    /** Chosen when the value was assigned, so the file can be named after it. */
     localId: string
     type: 'html' | 'file' | 'image'
     modelFileId: string
-    fields: NewSeedFields
+    /** Resolved when the op is prepared; older ops carry them. */
+    fields?: NewSeedFields
   }
-  /** The file written for this value, deleted if the op never applies. Absent for a reference to a file that was already there. */
+  /**
+   * The assigned value: `source` for a string (a URL, a file name, Html or File text), else the
+   * bytes in the op's staged file (`value_ref`) with the type and name the Blob had.
+   */
+  stage?: { source?: string; mimeType?: string; sourceName?: string }
+  /** Older ops: the file written for this value, deleted if the op never applies. Absent for a reference to a file that was already there. */
   ownedFilePath?: string
   /**
    * The row's fields besides the ones the storage seed gives (value, `refSeedType`, EAS type), for
@@ -91,6 +104,7 @@ export type StorageValueOp = {
 }
 
 export type StorageValueRow = {
+  /** The file's name; empty until the op is prepared when the assigned value didn't tell it. */
   refResolvedValue: string
   localStorageDir: string
   schemaUid?: string | null
@@ -104,31 +118,42 @@ export type StorageValueRow = {
 
 const STORAGE_DATA_TYPE = { image: 'Image', file: 'File', html: 'Html' } as const
 
+/** The row a storage op wrote, and its file. */
+export type StorageValueResult = (NonNullable<SetPropertyValueResult> & { fileName: string; localStorageDir: string }) | null
+
 /**
  * Writes a storage value's rows on `db`. The property's row is looked up here, on `db`, rather than
  * taken from the edit: two quick edits of a property that had no row would otherwise both create one.
+ * `prepared` is what prepareStorageValue found (the file's name, the seed's fields); older ops
+ * carry those themselves.
  */
 export async function applyStorageValue(
   seedLocalId: string,
   propertyName: string,
   value: StorageValueOp,
   db: ReturnType<typeof BaseDb.getAppDb>,
-): Promise<SetPropertyValueResult> {
+  prepared?: PreparedStorageValue,
+): Promise<StorageValueResult> {
   const { storageSeed } = value
+  const seedFields = prepared?.fields ?? storageSeed.fields
+  if (!seedFields) throw new Error(`Storage value ${storageSeed.localId} was applied without being prepared`)
   // The item's publisher as it is now: a draft claimed while the op waited passes it on
   const parentPublisher = await getSeedPublisher(seedLocalId, db)
   await createSeed(
     { type: storageSeed.type, modelFileId: storageSeed.modelFileId },
     {
       db,
-      fields: { ...storageSeed.fields, publisher: parentPublisher ?? storageSeed.fields.publisher },
+      fields: { ...seedFields, publisher: parentPublisher ?? seedFields.publisher },
       localId: storageSeed.localId,
     },
   )
   await createVersion({ seedLocalId: storageSeed.localId, seedType: storageSeed.type }, { db })
 
   // The property's current row (decision D4); the op's own value isn't stored yet, so no overlay
-  const row = storageValueRowOf(value)
+  const stored = storageValueRowOf(value)
+  const row = prepared
+    ? { ...stored, refResolvedValue: prepared.fileName, schemaUid: prepared.schemaUid, refModelUid: prepared.refModelUid }
+    : stored
   const { currentPropertyRow } = await import('@/db/read/currentPropertyRow')
   const existing = await currentPropertyRow(
     { seedLocalId },
@@ -147,6 +172,7 @@ export async function applyStorageValue(
     localStorageDir: row.localStorageDir,
     easDataType: 'bytes32',
   }
+  const file = { fileName: row.refResolvedValue, localStorageDir: row.localStorageDir }
   if (existing?.localId) {
     const result = await updateItemPropertyValue(
       {
@@ -161,7 +187,7 @@ export async function applyStorageValue(
       } as never,
       { db },
     )
-    return result ?? null
+    return result ? { ...result, ...file } : null
   }
   const created = await createMetadata(
     {
@@ -177,7 +203,9 @@ export async function applyStorageValue(
     row.propertyRecordSchema,
     { db },
   )
-  return created.localId ? { localId: created.localId, uid: created.uid ?? null, schemaUid: created.schemaUid ?? '' } : null
+  return created.localId
+    ? { localId: created.localId, uid: created.uid ?? null, schemaUid: created.schemaUid ?? '', ...file }
+    : null
 }
 
 /**
@@ -187,7 +215,10 @@ export async function applyStorageValue(
  */
 export type ItemStorageValueOp = {
   itemStorage: {
+    /** Also the op's `value_ref`. */
     stagedPath: string
+    /** A string value as assigned, so the op can be staged again if its tab closed before writing it. */
+    source?: string
     seedUid?: string | null
     versionLocalId?: string | null
     versionUid?: string | null
@@ -239,8 +270,12 @@ export async function applyItemStorageValue(
   propertyName: string,
   op: ItemStorageValueOp,
   db: ReturnType<typeof BaseDb.getAppDb>,
+  /** The item's head version when the op was prepared; the op's own when not given. */
+  head?: { versionLocalId?: string | null; versionUid?: string | null },
 ): Promise<ItemStorageValueResult> {
-  const value = op.itemStorage
+  const value = head?.versionLocalId
+    ? { ...op.itemStorage, versionLocalId: head.versionLocalId, versionUid: head.versionUid }
+    : op.itemStorage
   const schema = value.propertyRecordSchema
   const property = await matchMetadataProperty(
     {
@@ -451,14 +486,14 @@ export async function deleteFiles(filePaths: string[]): Promise<void> {
 const isItemStorageOp = (value: unknown): value is ItemStorageValueOp =>
   typeof value === 'object' && value !== null && 'itemStorage' in value
 
-/** Deletes the file a storage op wrote, once the op will never apply. */
-async function discardStorageValue(op: OutboxOp): Promise<void> {
+/** Deletes the files a storage op wrote (staged, and its file when it was prepared), once the op will never apply. */
+async function discardStorageValue(op: OutboxOp, prepared: unknown): Promise<void> {
   const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
-  const path = value && (isItemStorageOp(value) ? value.itemStorage.stagedPath : value.ownedFilePath)
-  if (!path || !(await BaseFileManager.pathExists(path))) return
-  const fs = await BaseFileManager.getFs()
-  if (fs?.promises?.unlink) await fs.promises.unlink(path)
-  else fs?.unlinkSync?.(path)
+  const owned = value && !isItemStorageOp(value)
+    ? (prepared as PreparedStorageValue | undefined)?.ownedFilePath ?? value.ownedFilePath
+    : undefined
+  const staged = op.valueRef ?? (value && isItemStorageOp(value) ? value.itemStorage.stagedPath : undefined)
+  await deleteFiles([owned, staged].filter((path): path is string => !!path))
 }
 
 /**
@@ -527,25 +562,47 @@ export function throwItemWriteError(error: unknown): never {
   throw error
 }
 
+/** The item's head version, read when an ItemStorage op is prepared (a publish may have added one since it was appended). */
+type ItemStorageHead = { versionLocalId?: string | null; versionUid?: string | null }
+
+/** Stages an ItemStorage op's file again from its source if the appending tab didn't write it; reads the head version. */
+async function prepareItemStorageValue(op: OutboxOp, value: ItemStorageValueOp): Promise<ItemStorageHead> {
+  await requireStagedFile(op.valueRef ?? value.itemStorage.stagedPath, value.itemStorage.source)
+  const head = await getLatestVersionRow(op.seedLocalId)
+  return { versionLocalId: head?.localId ?? undefined, versionUid: head?.uid ?? undefined }
+}
+
 let registered = false
 
 /** Registers the item appliers and starts draining. Safe to call more than once. */
 export function startItemOutbox(): void {
   if (!registered) {
     registered = true
-    registerOutboxApplier('set', {
+    registerOutboxApplier<{ schemaUid?: string }>('set', {
       prepare: async (op) => {
         await requireOwned(op)
         await requireRelationTargets(op)
+        const value = outboxOpValue<SetPropertyValueOp>(op)
+        if (value?.schemaUid || !value?.propertyRecordSchema || !op.propertyName) return {}
+        // Cached, shared with item creation, so a save doesn't wait on the EAS indexer each time.
+        // Not required for the row; publish resolves the schema again.
+        const { lookupPropertySchemaUid } = await import('@/helpers/propertySchemaUid')
+        return {
+          schemaUid: await lookupPropertySchemaUid(
+            op.propertyName,
+            value.propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+          ),
+        }
       },
-      apply: async (op, tx): Promise<SetPropertyValueResult> => {
+      apply: async (op, tx, prepared): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         // Before the write, which makes the edit the newest row
         const conflict = await findSetConflict(op, value, tx)
-        const { clear, ...props } = value
+        const { clear, propertyRecordSchema: _definition, ...props } = value
         const result = await updateItemPropertyValue(
           {
             ...props,
+            schemaUid: props.schemaUid || prepared?.schemaUid,
             ...(clear && {
               newValue: null,
               refSeedType: null,
@@ -563,16 +620,27 @@ export function startItemOutbox(): void {
         return result ?? null
       },
     })
-    registerOutboxApplier('storage', {
-      prepare: requireOwned,
+    registerOutboxApplier<PreparedStorageValue | ItemStorageHead | undefined>('storage', {
+      prepare: async (op) => {
+        await requireOwned(op)
+        const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)!
+        if (isItemStorageOp(value)) return prepareItemStorageValue(op, value)
+        return value.stage ? prepareStorageValue(op, value) : undefined
+      },
       // Storage values record no conflicts: their ops carry no base row (ADR 0019)
-      apply: async (op, tx): Promise<SetPropertyValueResult> => {
+      apply: async (op, tx, prepared): Promise<SetPropertyValueResult> => {
         const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)!
         const result = isItemStorageOp(value)
-          ? await applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx)
-          : await applyStorageValue(op.seedLocalId, op.propertyName!, value, tx)
+          ? await applyItemStorageValue(op.seedLocalId, op.propertyName!, value, tx, prepared as ItemStorageHead | undefined)
+          : await applyStorageValue(op.seedLocalId, op.propertyName!, value, tx, prepared as PreparedStorageValue | undefined)
         await recordPropertyEdit(op, null, tx)
         return result
+      },
+      afterApply: async (op, prepared) => {
+        const value = outboxOpValue<StorageValueOp | ItemStorageValueOp>(op)
+        if (value && !isItemStorageOp(value)) {
+          await afterStorageValueApplied(op, value, prepared as PreparedStorageValue | undefined)
+        }
       },
       // ItemStorage: the file's lock before the transaction, the order its other writers use. Taken
       // only when free: another writer holding it would otherwise hold up every other op.

@@ -7,7 +7,7 @@ import { setGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata } from '@/seedSchema'
+import { metadata, pendingWrites } from '@/seedSchema'
 import { Model } from '@/Model/Model'
 import { Schema } from '@/Schema/Schema'
 import type { SchemaFileFormat } from '@/types/import'
@@ -15,7 +15,7 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 import { waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 /**
- * The property save path: what a rejected save leaves behind, which error save() throws, and
+ * The property save path: what a rejected write leaves behind, which error save() throws, and
  * Relation values whose schema sets a refValueType.
  */
 
@@ -76,22 +76,30 @@ testDescribe('ItemProperty save path', () => {
     await teardownTestEnvironment()
   })
 
-  it('a value that breaks its rule is rolled back everywhere in the process', async () => {
+  it('a value that breaks its rule stays shown with its errors and is not written (ADR 0019)', async () => {
     const item = await createNote('Original title')
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
+    const tooLong = 'x'.repeat(300)
 
-    property!.value = 'x'.repeat(300)
+    property!.value = tooLong
     const error = await property!.save().catch((e: unknown) => e)
 
     expect(error).toBeInstanceOf(ItemPropertySaveValidationError)
-    expect(property!.value).toBe('Original title')
+    expect(property!.value).toBe(tooLong)
+    expect(item.title).toBe(tooLong)
     expect(property!.saveValidationErrors.map((e) => e.code)).toContain('max_length_exceeded')
-    expect(item.title).toBe('Original title')
-    const found = (await Item.find({ seedLocalId: item.seedLocalId })) as any
-    expect(found.title).toBe('Original title')
-    const all = (await Item.all('SavePathNote')) as any[]
-    expect(all.find((i) => i.seedLocalId === item.seedLocalId)?.title).toBe('Original title')
     expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Original title'])
+    const ops = await BaseDb.getAppDb()!
+      .select()
+      .from(pendingWrites)
+      .where(and(eq(pendingWrites.seedLocalId, item.seedLocalId), eq(pendingWrites.kind, 'set')))
+    expect(ops).toEqual([])
+
+    // The next valid value clears the errors and is written
+    property!.value = 'Fixed title'
+    await property!.save()
+    expect(property!.saveValidationErrors).toEqual([])
+    expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Fixed title'])
   }, 30000)
 
   it('save() rethrows an ownership refusal as an OwnershipError', async () => {
@@ -103,7 +111,8 @@ testDescribe('ItemProperty save path', () => {
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
     await client.setAddresses({ owned: [MINE], watched: [] })
 
-    // Assignment skips save()'s up-front ownership check; the machine refuses it instead.
+    // Assignment skips save()'s up-front ownership check; the drainer refuses its op instead, and
+    // the property shows its stored value again.
     property!.value = 'Overwritten'
     await vi.waitFor(() => expect(property!.getService().getSnapshot().context._saveError).toBeTruthy())
     expect(property!.getService().getSnapshot().context._saveError).toBeInstanceOf(OwnershipError)
@@ -113,7 +122,6 @@ testDescribe('ItemProperty save path', () => {
   it('setValue saves a value that is already in context', async () => {
     const item = await createNote('Before debounce')
     const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
-    const before = { propertyValue: 'Before debounce', renderValue: 'Before debounce' }
 
     // What a debounced input does: show the typed value first, save later.
     property!.getService().send({ type: 'updateContext', propertyValue: 'Typed', renderValue: 'Typed' })
@@ -121,23 +129,9 @@ testDescribe('ItemProperty save path', () => {
     await property!.save()
     expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Before debounce'])
 
-    property!.setValue('Typed', { before })
+    property!.setValue('Typed')
     await property!.save()
     expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Typed'])
-  }, 30000)
-
-  it('setValue rolls a rejected value back to the given before', async () => {
-    const item = await createNote('Shown before typing')
-    const property = await ItemProperty.find({ seedLocalId: item.seedLocalId, propertyName: 'title' })
-    const before = { propertyValue: 'Shown before typing', renderValue: 'Shown before typing' }
-    const tooLong = 'y'.repeat(300)
-
-    property!.getService().send({ type: 'updateContext', propertyValue: tooLong, renderValue: tooLong })
-    property!.setValue(tooLong, { before })
-
-    await expect(property!.save()).rejects.toBeInstanceOf(ItemPropertySaveValidationError)
-    expect(property!.value).toBe('Shown before typing')
-    expect(await storedValues(item.seedLocalId, 'title')).toEqual(['Shown before typing'])
   }, 30000)
 
   it('a Relation whose schema sets refValueType saves and survives a reload', async () => {

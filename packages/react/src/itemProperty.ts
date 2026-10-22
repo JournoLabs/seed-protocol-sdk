@@ -270,8 +270,8 @@ export function useDebouncedItemProperty(
   const debouncedPersist = useMemo(
     () =>
       debounce((prop: IItemProperty) => {
-        // setValue looks up a missing propertyRecordSchema and, when the save is refused (item not
-        // owned) or breaks a rule, rolls back to what showed before the first keystroke.
+        // setValue appends the op (looking up a missing propertyRecordSchema first). A refused or
+        // failed write shows the stored value again; a value that breaks a rule stays with its errors.
         prop.setValue(latestValueRef.current)
       }, debounceMs),
     [debounceMs]

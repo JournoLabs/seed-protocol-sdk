@@ -1,6 +1,7 @@
 # 0020. Loaded entities learn about row changes from one trigger-fed change log
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-10-22 (the property handler's pending-write skip is gone, see
+  Decision)
 - **Date:** 2026-10-19
 - **Scope:** `@seedprotocol/sdk` (`browser/db`, migrations, Item, ItemProperty), `@seedprotocol/react`
   (indirectly); amends ADR 0015 for Item and ItemProperty
@@ -48,8 +49,15 @@ called several times in one read runs once. The feed starts at the last seq SQLi
 `seeds` and `versions` changes and, when called, runs the same seeds and versions queries once and
 feeds the rows to today's handlers. An ItemProperty registers for its seed and its 1–3 metadata
 property names and runs its metadata query once. The handlers stay as they are, including the
-`hasPendingPropertyWrite` skip and the superseded-uid check, and a newer read discards an older
-one's result, as SQLocal's `updateOrder` did. Each read also runs once when the entity registers,
+superseded-uid check, and a newer read discards an older one's result, as SQLocal's `updateOrder`
+did.
+
+*Amended 2026-10-22 (decision D2 of the SDK audit):* ADR 0019's overlay rule holds for the
+ItemProperty handler. It no longer skips rows while a write of the property is in flight
+(`isSaving`, `hasPendingPropertyWrite`): it reads the property's current row with its newest
+pending op over it (`currentPropertyRow`), which is the value an assignment shows, since the
+setter appends its op before it returns. A read begun before an assignment in the same tab is
+dropped, and a row whose value is the one the context shows keeps the context's display. Each read also runs once when the entity registers,
 as a liveQuery's first emission did, and a read that returns the rows already handed over doesn't
 reach the handler, as `BaseDb.liveQuery`'s `distinctUntilChanged` did.
 

@@ -49,7 +49,10 @@ export const hydrateFromDb = fromCallback<
     // A stored display value is a stale session URL for Image, File and Html (see resolveStorageDisplay)
     let refResolvedDisplayValue = kind ? undefined : row.refResolvedDisplayValue
     let renderValue: string | string[] | undefined = refResolvedDisplayValue ?? undefined
-    if (kind && kind !== 'itemStorage') {
+    if (row.pendingText !== undefined) {
+      // A pending Html value: its file isn't written until its op is prepared
+      renderValue = row.pendingText
+    } else if (kind && kind !== 'itemStorage') {
       try {
         const display = await resolveStorageDisplay(kind, row, { fetch: true })
         refResolvedValue = display.ref.refResolvedValue

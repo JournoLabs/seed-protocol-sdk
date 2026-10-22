@@ -151,7 +151,7 @@ describe('useDebouncedItemProperty', () => {
     expect(await storedTitles(item.seedLocalId)).toEqual(['Not mine'])
   })
 
-  it('rolls back a value that breaks its rule and reports the validation error', async () => {
+  it('keeps a value that breaks its rule shown, unwritten, with its validation error (ADR 0019)', async () => {
     const item = await createNote('Shown before typing')
     const { result } = renderHook(
       () => useDebouncedItemProperty({ seedLocalId: item.seedLocalId, propertyName: 'title' }, 20),
@@ -167,7 +167,7 @@ describe('useDebouncedItemProperty', () => {
     await waitFor(() => expect(result.current.error).toBeInstanceOf(ItemPropertySaveValidationError), {
       timeout: WAIT_TIMEOUT_MS,
     })
-    expect(result.current.property!.value).toBe('Shown before typing')
+    expect(result.current.property!.value).toBe('y'.repeat(300))
     expect(await storedTitles(item.seedLocalId)).toEqual(['Shown before typing'])
 
     // The next save clears it.

@@ -20,6 +20,8 @@ export type PendingPropertyRow = Partial<
 > & {
   /** An ItemStorage value's staged file, which holds the content until the op moves it into place. */
   stagedPath?: string
+  /** An Html value's text, which the op carries until preparing it writes the file. */
+  pendingText?: string
 }
 
 const isItemStorageOp = (value: unknown): value is ItemStorageValueOp =>
@@ -40,6 +42,7 @@ function overlayOf(op: Pick<OutboxOp, 'kind' | 'value'>): PendingPropertyRow | u
   const row = storageValueRowOf(value)
   // A storage value's display value is a session URL its readers mint from the file
   return {
+    ...(value.storageSeed.type === 'html' && value.stage?.source !== undefined && { pendingText: value.stage.source }),
     propertyValue: value.storageSeed.localId,
     refSeedType: value.storageSeed.type,
     refResolvedValue: row.refResolvedValue || null,
@@ -139,9 +142,9 @@ export function pendingSetValueOf(row: PendingPropertyRow | undefined): string |
   return row.propertyValue
 }
 
-/** Puts a pending row's fields over a stored row (not `stagedPath`, which isn't a column). */
+/** Puts a pending row's fields over a stored row (not `stagedPath` or `pendingText`, which aren't columns). */
 export function applyPendingRow<Row extends Partial<MetadataType>>(row: Row, pending: PendingPropertyRow): Row {
-  const { stagedPath: _stagedPath, ...fields } = pending
+  const { stagedPath: _stagedPath, pendingText: _pendingText, ...fields } = pending
   return { ...row, ...fields }
 }
 
