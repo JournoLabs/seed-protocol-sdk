@@ -1,9 +1,9 @@
 import { textElement, XML_DECLARATION } from './xml'
 
 /**
- * Simple Dublin Core (the 15 DCMI elements), written as an OAI-PMH `oai_dc:dc` record, which
- * repository software (DSpace, Archivematica, Fedora) reads without configuration.
- * Each element may repeat; leave a field out rather than guessing a value.
+ * Simple Dublin Core (the 15 DCMI elements), written as an `oai_dc:dc` record, the format every
+ * OAI-PMH repository must support. Each element may repeat; leave a field out rather than
+ * guessing a value.
  */
 export type DublinCore = Partial<
   Record<
