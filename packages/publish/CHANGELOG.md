@@ -4,12 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `ensureEasSchemasForItem` registers the schemas of every seed the publish attests from the SDK's `getPublishGraph`, each definition once. It walked each related item's subtree again for every item that referred to it.
+- Recording passes each request's `versionLocalId` to `updateVersionUid` and each attestation's `_attestedValue` to `applyPropertyAttestationUidsFromPublish`, so both update the rows the payload was built from.
+- The data-item steps and `itemNeedsArweaveUpload` read uploads from rows: a publish restored from its saved record no longer loads the item first.
 - Before registering a property schema, publish looks for one with the exact definition (`getEasSchemaUidForExactDefinition`). It looked List properties up by name and others through the SDK's `getEasSchemaForItemProperty`, which is removed.
 - Publish revokes the attestations of retracted properties (`property.clear({ retract: true })`, ADR 0021) in a new `revokingRetractedProperties` state after the attestations, from the seed's attester. An EOA publisher signs a second transaction. A failed revocation leaves the publish in `retractionFailureRecoverable`, where `retry` sends it again; the next Publish also sends whatever is still live. `checking` fails before anything is attested when the wallet can't revoke (an automation session key, or a seed attested by the executor module).
 - `item.unpublish()` revokes the seed attestation before its versions and properties. A sync that runs between the batches then sees the seed revoked and keeps the item's last values, instead of storing its revoked properties as retracted.
 
 ### Breaking
 
+- `getPublishUploadData(item, options)` takes the options second, as the SDK's does.
 - **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed, so the upload server can drop its reimbursement route. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
 - `useArweaveBundler` is deprecated. `true` changes nothing; `false` makes `initPublish` throw `PublishPaymentConfigError`. Apps that left it unset now upload data items and need `signDataItems` or a `dataItemSigner` (at `createPublish` or in the config).
 - Removed: the `signArweaveTransactions` and `arweaveJwk` options (config and `createPublish`), the `SerializedPublishUpload` and `ArweaveTransactionInfoResult` types, and the context fields `reimbursementTransactionId`, `reimbursementConfirmed`, `requestResponse`, `transactionKeys`, `uploaderState` and `currentTransactionIndex`.

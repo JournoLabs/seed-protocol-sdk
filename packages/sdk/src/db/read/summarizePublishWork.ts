@@ -3,33 +3,11 @@
  * without building transactions or requiring a valid payload.
  */
 import { BaseFileManager } from '@/helpers'
-import { storageUploadPath } from '@/storageValue/resolve'
-import { INTERNAL_PROPERTY_NAMES, ZERO_BYTES32 } from '@/helpers/constants'
-import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
-import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
-import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
-import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import { findEmbeddedImageFilePath, getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
-import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'
-import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
-
-/** The parts of the publish's draft graph that decide which refs a publish leaves for later. */
-type DraftGraphRefs = Pick<PublishDraftGraph, 'deferredProperties' | 'backReferences'>
-import { IItem, IItemProperty } from '@/interfaces'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
-import { eq } from 'drizzle-orm'
-import type { UploadProperty } from '@/db/read/getPublishUploads'
-import type { PublishMode } from '@/db/read/getPublishPayload'
-import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { getPropertyClear } from '@/db/read/getPropertyClear'
 import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
-import {
-  findRelatedSeedRow,
-  htmlPropertyNameForHtmlSeed,
-  isUnpublishedSeed,
-  relatedModelNameFromDef,
-} from '@/db/read/resolveRelatedSeedRef'
+import { getPublishGraph, type PublishGraphNode, type PublishGraphProperty, type PublishMode } from '@/db/read/publishGraph'
+import { getPublishUploadSources, type PublishUploadSource } from '@/db/read/getPublishUploads'
 
 export type { PublishMode }
 
@@ -61,19 +39,6 @@ export type PublishWorkSummary = {
 
 const DATA_URI = /^data:[^;]+;base64,([\s\S]*)$/i
 
-const matchesDataType = (
-  actual: string | undefined,
-  expected: ModelPropertyDataTypes | string,
-): boolean => normalizeDataType(actual) === expected
-
-function isZeroUid(uid: string | undefined | null): boolean {
-  return !uid || uid === ZERO_BYTES32
-}
-
-function isStorageTransactionPropertyName(name: string | undefined): boolean {
-  return name === 'storageTransactionId' || name === 'storage_transaction_id'
-}
-
 /** Decoded byte length of a data-URI, or null if the string is not a base64 data URI. */
 export function estimateDataUriByteLength(dataUri: string): number | null {
   const m = DATA_URI.exec((dataUri ?? '').trim())
@@ -84,427 +49,47 @@ export function estimateDataUriByteLength(dataUri: string): number | null {
   return Math.max(0, Math.floor((b64.length * 3) / 4) - padding)
 }
 
-function propertyContext(prop: IItemProperty<any>): Record<string, unknown> | null {
-  const snapshot = prop.getService().getSnapshot()
-  return snapshot && 'context' in snapshot
-    ? ((snapshot as { context?: Record<string, unknown> }).context ?? null)
-    : null
-}
-
-function getPublishValue(prop: IItemProperty<any>, context: Record<string, unknown>): unknown {
-  const propertyDef =
-    prop.propertyDef ?? (context.propertyRecordSchema as { dataType?: string; refValueType?: string } | undefined)
-  const isFileImageHtml =
-    matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.File) ||
-    matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Image) ||
-    matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Html)
-  const isJsonStorage =
-    matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Json) ||
-    matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.Json)
-  const isRelation = matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Relation)
-  const isStorageTransactionIdProp = isStorageTransactionPropertyName(prop.propertyName)
-  const preferPropertyValue =
-    isFileImageHtml || isRelation || isJsonStorage || isStorageTransactionIdProp
-  let value = preferPropertyValue
-    ? context.propertyValue
-    : (prop.value ?? context.propertyValue)
-
-  if (isRelation || isFileImageHtml || isJsonStorage) {
-    const pv = context.propertyValue
-    if (typeof value === 'object' || value == null) {
-      if (typeof pv === 'string' && pv.trim()) value = pv.trim()
-      else if (pv && typeof pv === 'object' && typeof (pv as { seedLocalId?: string }).seedLocalId === 'string') {
-        value = (pv as { seedLocalId: string }).seedLocalId
-      }
-    }
+/** Bytes an upload carries (a composite's children summed, as before framing). */
+async function sourceBytes(source: PublishUploadSource): Promise<number> {
+  let total = 0
+  for (const filePath of source.children ? source.children.map((c) => c.filePath) : [source.filePath!]) {
+    total += (await BaseFileManager.getFileSize(filePath)) ?? 0
   }
-  return value
-}
-
-export function shouldAttestProperty(
-  prop: IItemProperty<any>,
-  forceFullSnapshot: boolean,
-): boolean {
-  if (INTERNAL_PROPERTY_NAMES.includes(prop.propertyName)) return false
-  const context = propertyContext(prop)
-  if (!context) return false
-  const value = getPublishValue(prop, context)
-  if (value == null || value === '') return false
-  if (prop.uid && !forceFullSnapshot) {
-    const allowStorageTx =
-      isStorageTransactionPropertyName(prop.propertyName) &&
-      typeof value === 'string' &&
-      value.trim() !== ''
-    if (!allowStorageTx) return false
-  }
-  return true
-}
-
-
-async function addUpload(
-  acc: PublishWorkSummary,
-  seen: Set<string>,
-  key: string,
-  bytes: number,
-): Promise<void> {
-  if (bytes <= 0 || seen.has(key)) return
-  seen.add(key)
-  acc.uploadCount += 1
-  acc.uploadBytes += bytes
-  acc.uploadSizes.push(bytes)
-}
-
-async function addUploadFromPath(
-  acc: PublishWorkSummary,
-  seen: Set<string>,
-  filePath: string,
-  key: string,
-): Promise<void> {
-  if (!filePath || filePath.endsWith('undefined')) return
-  const size = await BaseFileManager.getFileSize(filePath)
-  if (size == null || size <= 0) return
-  await addUpload(acc, seen, key, size)
-}
-
-async function collectUploadBytes(
-  item: IItem<any>,
-  itemUploadProperties: UploadProperty[],
-  itemImageProperties: IItemProperty<any>[],
-  relatedItemProperty: IItemProperty<any> | undefined,
-  acc: PublishWorkSummary,
-  seen: Set<string>,
-): Promise<void> {
-  for (const uploadProperty of itemUploadProperties) {
-    let childBytes = 0
-    let childCount = 0
-    for (const childProperty of uploadProperty.childProperties) {
-      const filePath = childProperty.localStoragePath
-      if (!filePath || filePath.endsWith('undefined')) continue
-      const size = await BaseFileManager.getFileSize(filePath)
-      if (size == null || size <= 0) continue
-      childBytes += size
-      childCount += 1
-    }
-    if (childCount > 0) {
-      await addUpload(acc, seen, `upload:${item.seedLocalId}:${uploadProperty.itemProperty.localId}`, childBytes)
-      continue
-    }
-    const relatedPath = relatedItemProperty?.localStoragePath
-    if (relatedPath) {
-      await addUploadFromPath(
-        acc,
-        seen,
-        relatedPath,
-        `path:${relatedPath}`,
-      )
-    }
-  }
-
-  for (const itemProperty of itemImageProperties) {
-    const context = propertyContext(itemProperty)
-    if (!context) continue
-    const refResolvedValue =
-      (typeof context.refResolvedValue === 'string' && context.refResolvedValue) ||
-      itemProperty.refResolvedValue
-    if (typeof refResolvedValue !== 'string' || !refResolvedValue) continue
-    const propertyValue = context.propertyValue
-    const { seedLocalId } = resolveSeedIdsFromRefString(
-      normalizeRelationPropertyValue(propertyValue) ?? '',
-    )
-    const dataType =
-      itemProperty.propertyDef?.refValueType ??
-      itemProperty.propertyDef?.dataType ??
-      'Image'
-    const filePath = storageUploadPath({
-      dataType: String(dataType),
-      refResolvedValue,
-      localStorageDir: (context.localStorageDir as string | undefined) ?? (itemProperty.localStorageDir || undefined),
-    })
-    await addUploadFromPath(
-      acc,
-      seen,
-      filePath,
-      seedLocalId ? `seed:${seedLocalId}` : `path:${filePath}`,
-    )
-  }
-}
-
-async function loadRelatedItem(
-  value: unknown,
-  loads: ItemLoads,
-): Promise<IItem<any> | undefined> {
-  const normalized = normalizeRelationPropertyValue(value)
-  if (!normalized) return undefined
-  const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
-  if (!seedLocalId && !seedUid) return undefined
-  try {
-    return await loads.getItem({ seedLocalId, seedUid })
-  } catch {
-    return undefined
-  }
-}
-
-async function relatedIfUnpublished(
-  prop: IItemProperty<any>,
-  loads: ItemLoads,
-): Promise<IItem<any> | undefined> {
-  const context = propertyContext(prop)
-  if (!context) return undefined
-  const related = await loadRelatedItem(context.propertyValue, loads)
-  if (!related || !isZeroUid(related.seedUid)) return undefined
-  return related
-}
-
-/** Seed refs held by a relation/image property (one) or a list property (each member). */
-function seedRefsOf(prop: IItemProperty<any>, isList: boolean): string[] {
-  const context = propertyContext(prop)
-  if (!context) return []
-  let value = context.propertyValue
-  if (isList) {
-    if (typeof value === 'string') value = parseListPropertyValueFromStorage(value)
-    return (Array.isArray(value) ? value : [])
-      .map((v) => normalizeRelationPropertyValue(v))
-      .filter((v): v is string => !!v)
-  }
-  const ref = normalizeRelationPropertyValue(value)
-  return ref ? [ref] : []
-}
-
-/** Like getPublishPayload: attested refs to revoked seeds block the publish. */
-async function collectUnpublishedRelatedItems(
-  props: IItemProperty<any>[],
-  isList: boolean,
-  forceFullSnapshot: boolean,
-  out: UnpublishedRelatedItem[],
-  loads: ItemLoads,
-  backReferences?: Map<IItemProperty<any>, Set<string>>,
-): Promise<void> {
-  for (const prop of props) {
-    if (!shouldAttestProperty(prop, forceFullSnapshot)) continue
-    for (const ref of seedRefsOf(prop, isList)) {
-      const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(ref)
-      if (!seedLocalId && !seedUid) continue
-      const row = await findRelatedSeedRow({ seedLocalId, seedUid })
-      // A back reference to a seed this publish creates (e.g. a revoked root published again) is
-      // left for a later publish, not attested (publishDraftGraph.ts)
-      if (row && backReferences?.get(prop)?.has(row.seedLocalId)) continue
-      if (!isUnpublishedSeed(row)) continue
-      if (
-        out.some(
-          (r) => r.propertyName === prop.propertyName && r.seedLocalId === row.seedLocalId,
-        )
-      ) {
-        continue
-      }
-      const related = await loadRelatedItem(row.seedLocalId, loads)
-      out.push({
-        propertyName: prop.propertyName,
-        modelName: related?.modelName ?? relatedModelNameFromDef(prop.propertyDef) ?? row.type ?? 'unknown',
-        seedLocalId: row.seedLocalId,
-        seedUid: row.seedUid,
-      })
-    }
-  }
+  return total
 }
 
 /**
- * Images embedded in Html properties (co-published) whose seed was revoked: getPublishPayload rejects
- * them like image properties pointing at revoked seeds. Like getPublishPayload, checks the published
- * item's co-publish rows and those of the draft items published with it.
+ * What one property adds to the publish, by the payload's rules: one attestation, the
+ * revocations of a retraction, or nothing.
  */
-async function collectUnpublishedEmbeddedImages(
-  item: IItem<any>,
-  out: UnpublishedRelatedItem[],
-  loads: ItemLoads,
-): Promise<void> {
-  const appDb = BaseDb.getAppDb()
-  if (!appDb || !item.seedLocalId) return
-  for (const owner of [item, ...(await getRelatedDraftsCoPublishedWith(item, loads))]) {
-    const rows = await appDb
-      .select()
-      .from(htmlEmbeddedImageCoPublish)
-      .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, owner.seedLocalId))
-    for (const row of rows) {
-      const seed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
-      if (!isUnpublishedSeed(seed)) continue
-      const propertyName = htmlPropertyNameForHtmlSeed(owner, row.htmlSeedLocalId)
-      if (out.some((r) => r.propertyName === propertyName && r.seedLocalId === seed.seedLocalId)) continue
-      out.push({ propertyName, modelName: 'Image', seedLocalId: seed.seedLocalId, seedUid: seed.seedUid })
-    }
-  }
-}
-
-async function appendCoPublishImages(
-  item: IItem<any>,
-  acc: PublishWorkSummary,
-  seen: Set<string>,
-  visited: Set<string>,
+async function propertyWork(
+  node: PublishGraphNode,
+  property: PublishGraphProperty,
   forceFullSnapshot: boolean,
-  publishMode: PublishMode,
-  graph: DraftGraphRefs,
-  loads: ItemLoads,
-): Promise<void> {
-  const appDb = BaseDb.getAppDb()
-  if (!appDb) return
-  const rows = await appDb
-    .select()
-    .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
-
-  for (const row of rows) {
-    const imageItem = await loads.find({
-      seedLocalId: row.imageSeedLocalId,
-      modelName: 'Image',
-    })
-    // Like getPublishPayload: an embedded image that already has a seed (published, or unpublished
-    // and reported by collectUnpublishedEmbeddedImages) is not co-published.
-    if (!imageItem || !isZeroUid(imageItem.seedUid)) continue
-
-    const filePath = await findEmbeddedImageFilePath(imageItem.seedLocalId)
-    if (filePath) await addUploadFromPath(acc, seen, filePath, `seed:${imageItem.seedLocalId}`)
-
-    await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph, loads)
-  }
-}
-
-async function summarizeItem(
-  item: IItem<any>,
-  publishMode: PublishMode,
-  forceFullSnapshot: boolean,
-  acc: PublishWorkSummary,
-  seenUploads: Set<string>,
-  visited: Set<string>,
-  graph: DraftGraphRefs,
-  loads: ItemLoads,
-): Promise<void> {
-  const seedLocalId = item.seedLocalId
-  if (!seedLocalId || visited.has(seedLocalId)) return
-  visited.add(seedLocalId)
-
-  acc.seedCount += 1
-  if (isZeroUid(item.seedUid)) acc.newSeedCount += 1
-  if (isZeroUid(item.seedUid) || forceFullSnapshot) acc.newVersionCount += 1
-
-  const {
-    itemBasicProperties,
-    itemRelationProperties,
-    itemListProperties,
-    itemUploadProperties,
-    itemImageProperties,
-  } = await getSegmentedItemProperties(item)
-
-  await collectUploadBytes(
-    item,
-    itemUploadProperties,
-    itemImageProperties,
-    undefined,
-    acc,
-    seenUploads,
-  )
-
-  await collectUnpublishedRelatedItems(
-    [...itemRelationProperties, ...itemImageProperties],
-    false,
-    forceFullSnapshot,
-    acc.unpublishedRelatedItems,
-    loads,
-    graph.backReferences,
-  )
-  await collectUnpublishedRelatedItems(
-    itemListProperties,
-    true,
-    forceFullSnapshot,
-    acc.unpublishedRelatedItems,
-    loads,
-    graph.backReferences,
-  )
-
-  // Draft Image/File/Html/Json items its storage relations point at. Draft model items its relations
-  // and lists reach are summarized by summarizePublishWork from the publish's draft graph.
-  const storageProperties = new Set(itemImageProperties)
-  for (const rel of itemRelationProperties) {
-    if (!storageProperties.has(rel)) continue
-    const related = await relatedIfUnpublished(rel, loads)
-    if (related) {
-      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph, loads)
-    }
-  }
-
-  await appendCoPublishImages(item, acc, seenUploads, visited, forceFullSnapshot, publishMode, graph, loads)
-
-  const attestable: IItemProperty<any>[] = [
-    ...itemBasicProperties,
-    ...itemRelationProperties,
-    ...itemListProperties,
-    ...itemImageProperties,
-    ...itemUploadProperties.map((u) => u.itemProperty),
-  ]
-  const seenProps = new Set<string>()
-  for (const prop of attestable) {
-    const key = prop.localId || `${prop.propertyName}:${prop.seedLocalId}`
-    if (seenProps.has(key)) continue
-    seenProps.add(key)
-    // A ref back to an item this publish creates is left for a later publish (publishDraftGraph.ts).
-    if (graph.deferredProperties.has(prop)) continue
-    if (shouldAttestProperty(prop, forceFullSnapshot)) {
-      acc.attestationCount += 1
-      continue
-    }
-    // An empty value attests a removal, or revokes for a retraction (ADR 0021)
-    const context = propertyContext(prop)
-    if (!context || INTERNAL_PROPERTY_NAMES.includes(prop.propertyName)) continue
-    const value = getPublishValue(prop, context)
-    if (!(value == null || value === '' || (Array.isArray(value) && value.length === 0))) continue
-    if (prop.uid && !forceFullSnapshot) continue
-    const propertyDef =
-      prop.propertyDef ?? (context.propertyRecordSchema as { dataType?: string; refValueType?: string } | undefined)
-    const clear = await getPropertyClear({
-      seedLocalId: context.seedLocalId as string | undefined,
-      seedUid: context.seedUid as string | undefined,
-      propertyId: context.propertyId as number | undefined,
-      modelName: context.modelName as string | undefined,
-      propertyName: prop.propertyName,
-      dataType: propertyDef?.dataType,
-      refValueType: propertyDef?.refValueType,
-    })
-    if (!clear) continue
-    if (clear.retract) acc.revocationCount += clear.retractScope.length
-    else acc.attestationCount += 1
-  }
-}
-
-/**
- * Local measurement of what a publish would do: seed/version/attestation counts
- * and Arweave upload byte totals. Does not hit the network or create transactions.
- */
-const publishForcesFullSnapshot = async (
-  item: IItem<any>,
-  publishMode: PublishMode,
-): Promise<{ republishRevokedSeed: boolean; forceFullSnapshot: boolean }> => {
-  // Like getPublishPayload: an item whose seed was revoked republishes as a new seed with a full
-  // snapshot.
-  const republishRevokedSeed = !isZeroUid(item.seedUid) && (await isSeedRevoked(item.seedLocalId))
-  return { republishRevokedSeed, forceFullSnapshot: publishMode === 'new_version' || republishRevokedSeed }
-}
-
-async function collectUnpublishedRelatedItemsOf(
-  item: IItem<any>,
-  forceFullSnapshot: boolean,
-  out: UnpublishedRelatedItem[],
-  backReferences: DraftGraphRefs['backReferences'],
-  loads: ItemLoads,
-): Promise<void> {
-  const { itemRelationProperties, itemListProperties, itemImageProperties } =
-    await getSegmentedItemProperties(item)
-  await collectUnpublishedRelatedItems(
-    [...itemRelationProperties, ...itemImageProperties],
-    false,
-    forceFullSnapshot,
-    out,
-    loads,
-    backReferences,
-  )
-  await collectUnpublishedRelatedItems(itemListProperties, true, forceFullSnapshot, out, loads, backReferences)
+  uploaded: boolean,
+): Promise<{ attestations: number; revocations: number }> {
+  const none = { attestations: 0, revocations: 0 }
+  const full = node.kind === 'root' || node.kind === 'draft'
+  if (INTERNAL_PROPERTY_NAMES.includes(property.key) || property.deferred) return none
+  if (property.kind === 'itemStorage') return none
+  // The storage transaction slot attests this publish's upload of the node's file(s).
+  if (property.kind === 'storageTransaction') return uploaded ? { attestations: 1, revocations: 0 } : none
+  if (!full && property.kind !== 'basic') return none
+  const value = property.row?.propertyValue
+  if (value != null && value !== '') return property.uid && !forceFullSnapshot ? none : { attestations: 1, revocations: 0 }
+  // An empty value attests a removal, or revokes for a retraction (ADR 0021)
+  if (property.uid && !forceFullSnapshot) return none
+  const clear = await getPropertyClear({
+    seedLocalId: node.seedLocalId,
+    seedUid: node.seedUid,
+    propertyId: property.definition._dbId,
+    modelName: node.modelName,
+    propertyName: property.key,
+    dataType: property.definition.dataType,
+    refValueType: property.definition.refValueType,
+  })
+  if (!clear) return none
+  return clear.retract ? { attestations: 0, revocations: clear.retractScope.length } : { attestations: 1, revocations: 0 }
 }
 
 /**
@@ -513,31 +98,25 @@ async function collectUnpublishedRelatedItemsOf(
  * publish package checks this before registering schemas or uploading anything.
  */
 export const getUnpublishedRelatedItems = async (
-  item: IItem<any>,
+  item: { seedLocalId: string; modelName?: string },
   options?: SummarizePublishWorkOptions,
-): Promise<UnpublishedRelatedItem[]> => {
-  const { forceFullSnapshot } = await publishForcesFullSnapshot(item, options?.publishMode ?? 'patch')
-  const out: UnpublishedRelatedItem[] = []
-  await withItemLoads(undefined, async (loads) => {
-    // The item and every draft its publish carries along (publishDraftGraph.ts).
-    const { drafts, backReferences } = await getPublishDraftGraph(item, { forceFullSnapshot, loads })
-    for (const owner of [item, ...drafts.map((d) => d.item)]) {
-      await collectUnpublishedRelatedItemsOf(owner, forceFullSnapshot, out, backReferences, loads)
-    }
-    await collectUnpublishedEmbeddedImages(item, out, loads)
-  })
-  return out
-}
+): Promise<UnpublishedRelatedItem[]> =>
+  (await getPublishGraph(item, { publishMode: options?.publishMode })).unpublishedRelatedItems
 
+/**
+ * Local measurement of what a publish would do: seed/version/attestation counts
+ * and Arweave upload byte totals. Does not hit the network or create transactions.
+ */
 export const summarizePublishWork = async (
-  item: IItem<any>,
+  item: { seedLocalId: string; modelName?: string },
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishWorkSummary> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const { republishRevokedSeed, forceFullSnapshot } = await publishForcesFullSnapshot(item, publishMode)
+  const graph = await getPublishGraph(item, { publishMode })
+  const sources = await getPublishUploadSources(graph)
   const acc: PublishWorkSummary = {
     publishMode,
-    seedCount: 0,
+    seedCount: graph.nodes.length,
     newSeedCount: 0,
     newVersionCount: 0,
     attestationCount: 0,
@@ -545,19 +124,24 @@ export const summarizePublishWork = async (
     uploadCount: 0,
     uploadBytes: 0,
     uploadSizes: [],
-    unpublishedRelatedItems: [],
+    unpublishedRelatedItems: graph.unpublishedRelatedItems,
   }
-  await withItemLoads(undefined, async (loads) => {
-    const graph = await getPublishDraftGraph(item, { forceFullSnapshot, loads })
-    const { drafts } = graph
-    const seenUploads = new Set<string>()
-    const visited = new Set<string>()
-    for (const owner of [item, ...drafts.map((d) => d.item)]) {
-      await summarizeItem(owner, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph, loads)
+  for (const source of sources) {
+    const bytes = await sourceBytes(source)
+    if (bytes <= 0) continue
+    acc.uploadCount += 1
+    acc.uploadBytes += bytes
+    acc.uploadSizes.push(bytes)
+  }
+  for (const node of graph.nodes) {
+    if (node.newSeed) acc.newSeedCount += 1
+    if (node.newSeed || graph.forceFullSnapshot) acc.newVersionCount += 1
+    const uploaded = sources.some((s) => s.seedLocalId === node.seedLocalId)
+    for (const property of node.properties) {
+      const work = await propertyWork(node, property, graph.forceFullSnapshot, uploaded)
+      acc.attestationCount += work.attestations
+      acc.revocationCount += work.revocations
     }
-    await collectUnpublishedEmbeddedImages(item, acc.unpublishedRelatedItems, loads)
-  })
-  // summarizeItem counts the root as an existing seed (it has a seedUid).
-  if (republishRevokedSeed) acc.newSeedCount += 1
+  }
   return acc
 }

@@ -1561,7 +1561,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Use dynamic import to break circular dependency
     const getPublishUploadsMod = await import('../db/read/getPublishUploads')
     const { getPublishUploads } = getPublishUploadsMod
-    return await getPublishUploads(this, [], undefined, options)
+    return await getPublishUploads(this, options)
   }
 
   getPublishPayload = async (

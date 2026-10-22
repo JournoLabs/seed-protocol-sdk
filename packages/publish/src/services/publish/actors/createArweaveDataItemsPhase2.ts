@@ -1,7 +1,6 @@
 import type { GetPublishUploadDataOptions } from '../helpers/getPublishUploadData'
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
-import { waitForItem } from './utils'
 import { getPublishUploadData } from '../helpers/getPublishUploadData'
 import { getPublishConfig } from '~/config'
 import { signBundlerUploadDataList, type CreateArweaveDataItemsResult } from './createArweaveDataItems'
@@ -15,10 +14,8 @@ type PublishInput = { input: { context: PublishMachineContext; event: unknown } 
 export async function executeCreateArweaveDataItemsPhase2(
   context: PublishMachineContext,
 ): Promise<CreateArweaveDataItemsResult> {
-  let { item } = context
-  // A restored publish record carries the item as plain data: load it, and drop that hold after
-  const loaded = !item.getPublishUploads ? await waitForItem(item.seedLocalId) : undefined
-  if (loaded) item = loaded
+  // Uploads are read from rows: a restored publish record's plain item data is enough
+  const { item } = context
 
   const uploadDataOpts: GetPublishUploadDataOptions = {}
   if (context.arweaveUploadTags?.length) {
@@ -31,10 +28,8 @@ export async function executeCreateArweaveDataItemsPhase2(
   }
   const uploadDataList = await getPublishUploadData(
     item,
-    [],
-    undefined,
     Object.keys(uploadDataOpts).length ? uploadDataOpts : undefined,
-  ).finally(() => loaded?.unload())
+  )
 
   const config = getPublishConfig()
   const signDataItems = context.signDataItems ?? config.signDataItems

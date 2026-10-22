@@ -1,13 +1,12 @@
 /**
- * Publish reads (payload build, upload data, work summary, draft graph) load the related items
- * they walk. Each load takes an Item cache hold; the read must drop its own holds when it is done,
- * or every related item stays loaded and running for the session (audit 1.10 / V8).
+ * Publish reads (payload build, upload data, work summary, publish graph) read rows and load no
+ * Item: a load would take a cache hold, and an unreleased one keeps the related item loaded and
+ * running for the session (audit 1.10 / V8).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploadData, itemHasPublishUploadCandidates } from '@/db/read/getPublishUploads'
-import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
-import { getRelatedItemsForPublish } from '@/db/read/getRelatedItemsForPublish'
+import { getPublishGraph } from '@/db/read/publishGraph'
 import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { Item } from '@/Item/Item'
 import type { IItem } from '@/interfaces'
@@ -82,22 +81,15 @@ testDescribe('publish reads release the Item holds they take', () => {
     postItem.unload()
   }, 60_000)
 
-  it('getPublishDraftGraph and getRelatedItemsForPublish hold only the items they return', async () => {
+  it('getPublishGraph loads no item at all', async () => {
     const { authorItem, postItem } = await createItemWithRelation({ authorName: 'Graph Author', postTitle: 'Graph Post' })
     const authorId = authorItem.seedLocalId
     authorItem.unload()
 
-    const { drafts } = await getPublishDraftGraph(postItem)
-    expect(drafts.map((d) => d.item.seedLocalId)).toEqual([authorId])
-    expect(refCount(authorId)).toBe(1)
-    drafts[0]!.item.unload()
-    expect(refCount(authorId)).toBeUndefined()
-
-    const related = await getRelatedItemsForPublish(postItem)
-    expect(related.map((r) => r.seedLocalId)).toEqual([authorId])
-    expect(refCount(authorId)).toBe(1)
-    related[0]!.unload()
+    const graph = await getPublishGraph(postItem)
+    expect(graph.nodes.filter((n) => n.kind === 'draft').map((n) => n.seedLocalId)).toEqual([authorId])
     expect(refCount(authorId)).toBeUndefined()
     postItem.unload()
   }, 60_000)
+
 })

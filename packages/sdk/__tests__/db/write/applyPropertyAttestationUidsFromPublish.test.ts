@@ -30,7 +30,7 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     await teardownTestEnvironment()
   })
 
-  it('writes UIDs onto latest placeholder metadata rows and clears pending diff', async () => {
+  it('writes UIDs onto the attested rows and clears pending diff', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'Apply UID test',
       count: 42,
@@ -73,8 +73,8 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
       seedLocalId,
       attestationCreatedAtMs: t + 10_000,
       pairs: [
-        { schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' },
-        { schemaUid: SCHEMA_COUNT, attestationUid: ATTEST_COUNT, propertyName: 'count' },
+        { schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title', metadataLocalId: titleRow!.localId },
+        { schemaUid: SCHEMA_COUNT, attestationUid: ATTEST_COUNT, propertyName: 'count', metadataLocalId: countRow!.localId },
       ],
     })
 
@@ -120,7 +120,7 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     await applyPropertyAttestationUidsFromPublish({
       seedLocalId,
       attestationCreatedAtMs: t + 10_000,
-      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' }],
+      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title', metadataLocalId: titleRow.localId }],
     })
 
     const [derived] = await db.select().from(metadata).where(eq(metadata.localId, derivedLocalId))
@@ -129,64 +129,45 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     expect(title?.uid).toBe(ATTEST_TITLE)
   })
 
-  it('with two placeholder title rows same timestamp, applies UID to local_id tie-break winner', async () => {
+  it('records the row the payload read, not a newer placeholder of the same property (G18-4)', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
-      title: 'Two placeholders tie',
+      title: 'Attested value',
       count: 7,
     })
     const seedLocalId = item.seedLocalId!
     const db = BaseDb.getAppDb()
     const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
-    const titleRow = rows.find((r) => r.propertyName === 'title')
-    expect(titleRow?.localId).toBeTruthy()
+    const titleRow = rows.find((r) => r.propertyName === 'title')!
 
+    // An edit that landed after the payload was built: newer, no uid, another value.
     const t = Date.now()
+    const newerLocalId = `newer_title_${t}`
     await db.insert(metadata).values({
-      localId: `aaa_2ph_title_${t}`,
+      localId: newerLocalId,
       uid: null,
-      propertyName: titleRow!.propertyName,
-      propertyValue: titleRow!.propertyValue,
-      schemaUid: SCHEMA_TITLE,
-      modelType: titleRow!.modelType,
-      seedLocalId: titleRow!.seedLocalId,
-      seedUid: titleRow!.seedUid,
-      versionLocalId: titleRow!.versionLocalId,
-      versionUid: titleRow!.versionUid,
-      easDataType: titleRow!.easDataType,
-      createdAt: t,
-      attestationCreatedAt: null,
+      propertyName: 'title',
+      propertyValue: 'edited after the payload',
+      seedLocalId,
+      versionLocalId: titleRow.versionLocalId,
+      createdAt: t + 60_000,
     })
-
-    await db
-      .update(metadata)
-      .set({
-        localId: `zzz_2ph_title_${t}`,
-        uid: null,
-        schemaUid: SCHEMA_TITLE,
-        createdAt: t,
-        attestationCreatedAt: null,
-      })
-      .where(eq(metadata.localId, titleRow!.localId!))
-
-    let diff = await getPublishPendingDiff({ seedLocalId })
-    expect(diff.pendingProperties.map((p) => p.propertyName)).toContain('title')
 
     await applyPropertyAttestationUidsFromPublish({
       seedLocalId,
-      attestationCreatedAtMs: t + 5_000,
-      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' }],
+      attestationCreatedAtMs: t,
+      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title', metadataLocalId: titleRow.localId }],
     })
 
-    const zzz = await db.select().from(metadata).where(eq(metadata.localId, `zzz_2ph_title_${t}`))
-    const aaa = await db.select().from(metadata).where(eq(metadata.localId, `aaa_2ph_title_${t}`))
-    expect(zzz[0]?.uid).toBe(ATTEST_TITLE)
-    expect(aaa[0]?.uid == null || aaa[0]?.uid === '').toBe(true)
-
-    diff = await getPublishPendingDiff({ seedLocalId })
-    expect(diff.pendingProperties.map((p) => p.propertyName)).not.toContain('title')
+    const [attested] = await db.select().from(metadata).where(eq(metadata.localId, titleRow.localId!))
+    const [newer] = await db.select().from(metadata).where(eq(metadata.localId, newerLocalId))
+    expect(attested?.uid).toBe(ATTEST_TITLE)
+    expect(attested?.propertyValue).toBe('Attested value')
+    expect(newer?.uid).toBeNull()
+    const diff = await getPublishPendingDiff({ seedLocalId })
+    expect(diff.pendingProperties.map((p) => p.propertyName)).toContain('title')
   })
 
-  it('matches latest placeholder by propertyName when schemaUid is missing and backfills it', async () => {
+  it('backfills the schema uid of an attested row that has none', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'No schema uid',
       count: 3,
@@ -224,8 +205,8 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
       seedLocalId,
       attestationCreatedAtMs: t + 10_000,
       pairs: [
-        { schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' },
-        { schemaUid: SCHEMA_COUNT, attestationUid: ATTEST_COUNT, propertyName: 'count' },
+        { schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title', metadataLocalId: titleRow!.localId },
+        { schemaUid: SCHEMA_COUNT, attestationUid: ATTEST_COUNT, propertyName: 'count', metadataLocalId: countRow!.localId },
       ],
     })
 
@@ -243,7 +224,7 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     expect(stillPending).toHaveLength(0)
   })
 
-  it('does not apply when propertyName matches but row schemaUid differs', async () => {
+  it('a pair without a row id records nothing on the rows of its property (no search by name)', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'Mismatched schema uid',
       count: 1,

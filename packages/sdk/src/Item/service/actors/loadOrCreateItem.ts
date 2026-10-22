@@ -59,8 +59,7 @@ function dedupeMetadataRowsByInstanceKey(
 /**
  * Create ItemProperty instances for all metadata records plus placeholder instances
  * for model schema properties that have no metadata. Ensures items (e.g. Image) have
- * all model properties (e.g. storageTransactionId) so getSegmentedItemProperties
- * can find them for getPublishPayload.
+ * all model properties (e.g. storageTransactionId).
  * @param metadataRows - Array of metadata records to create ItemProperty instances for
  * @param seedLocalId - Seed local ID
  * @param seedUid - Seed UID

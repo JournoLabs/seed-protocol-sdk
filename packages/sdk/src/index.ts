@@ -227,7 +227,6 @@ export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
 export { markPropertyAttestationsRetracted } from './db/write/markPropertyAttestationsRetracted'
 export { getPendingRetractions, type PendingRetraction } from './db/read/getPropertyClear'
 
-export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
 export { claimUnpublishedDrafts } from './db/write/claimUnpublishedDrafts'
 export {
@@ -336,13 +335,15 @@ export {
   type UnpublishedRelatedItem,
 } from './db/read/publishErrors'
 
-export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
 export {
-  getPublishDraftGraph,
-  type PublishDraftGraph,
-  type PublishDraftGraphNode,
-  type GetPublishDraftGraphOptions,
-} from './db/read/publishDraftGraph'
+  getPublishGraph,
+  type PublishGraph,
+  type PublishGraphNode,
+  type PublishGraphProperty,
+  type PublishGraphRef,
+  type PublishPropertyKind,
+  type GetPublishGraphOptions,
+} from './db/read/publishGraph'
 export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,
@@ -359,7 +360,6 @@ export {
 export {
   summarizePublishWork,
   getUnpublishedRelatedItems,
-  shouldAttestProperty,
   estimateDataUriByteLength,
   type PublishWorkSummary,
   type SummarizePublishWorkOptions,

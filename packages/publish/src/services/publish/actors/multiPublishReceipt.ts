@@ -12,6 +12,8 @@ type ReceiptLike = {
 /** The fields of a normalized multiPublish request this module reads. */
 export type MultiPublishRequestLike = {
   localId?: string
+  /** The version row a Version attestation this request creates is recorded on. */
+  versionLocalId?: string
   seedUid?: string
   seedSchemaUid?: string
   versionUid?: string
@@ -21,6 +23,7 @@ export type MultiPublishRequestLike = {
     data?: unknown[]
     _propertyName?: string
     _metadataLocalId?: string
+    _attestedValue?: string
   }>
 }
 
@@ -30,6 +33,8 @@ export type AttributedPropertyPair = {
   propertyName?: string
   /** The metadata row whose value was attested. */
   metadataLocalId?: string
+  /** A value the attestation carries that the row doesn't hold yet. */
+  value?: string
 }
 
 /** What one request of a multiPublish transaction created. */
@@ -48,7 +53,7 @@ const sameSchema = (a: string | undefined, b: string | undefined): boolean =>
   !!a && !!b && toHex32Normalized(a) === toHex32Normalized(b)
 
 /** Property attestations EAS creates for one request: one per data entry of each list entry. */
-type PropertySlot = { schema?: string; propertyName?: string; metadataLocalId?: string }
+type PropertySlot = { schema?: string; propertyName?: string; metadataLocalId?: string; value?: string }
 
 function expandPropertySlots(req: MultiPublishRequestLike): PropertySlot[] {
   const out: PropertySlot[] = []
@@ -60,7 +65,8 @@ function expandPropertySlots(req: MultiPublishRequestLike): PropertySlot[] {
       typeof att?._metadataLocalId === 'string' && att._metadataLocalId !== ''
         ? att._metadataLocalId
         : undefined
-    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName, metadataLocalId })
+    const value = typeof att?._attestedValue === 'string' ? att._attestedValue : undefined
+    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName, metadataLocalId, value })
   }
   return out
 }
@@ -219,6 +225,7 @@ export function attributeMultiPublishReceipt(params: {
         attestationUid: got.attestationUid,
         ...(slot.propertyName ? { propertyName: slot.propertyName } : {}),
         ...(slot.metadataLocalId ? { metadataLocalId: slot.metadataLocalId } : {}),
+        ...(slot.value !== undefined ? { value: slot.value } : {}),
       })
     })
     return out

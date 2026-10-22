@@ -32,9 +32,11 @@ When using the publish package with `ConnectButton` and its publish flow:
    item through relation and list properties, at any depth, each with its full property set (its own
    relations, lists, files and Html-embedded images included). Already-published targets are
    attested by their current seed uid and not published again; a revoked target anywhere in the graph
-   stops the publish with `RelatedItemUnpublishedError`. Uploads (`getPublishUploads`, the publish
-   package's `getPublishUploadData`), `summarizePublishWork` and `getUnpublishedRelatedItems` walk the
-   same graph (`getPublishDraftGraph`). In a cycle (A ↔ B, or a draft pointing back at the draft
+   stops the publish with `RelatedItemUnpublishedError`. The graph is read once from the local rows
+   (`getPublishGraph`): each seed's model definitions and the current row of each property, after
+   pending edits are written. The payload, uploads (`getPublishUploads`, the publish package's
+   `getPublishUploadData`), `summarizePublishWork`, `getUnpublishedRelatedItems`, the Html passes and
+   `ensureEasSchemasForItem` read that graph; none of them reads a loaded Item. In a cycle (A ↔ B, or a draft pointing back at the draft
    being published), an item can only attest the uid of a seed created before it, so the reference
    back to the item still being walked is left out of this publish; it keeps no attestation uid, and
    the next publish of its item attests it with the target's uid.
@@ -52,7 +54,10 @@ When using the publish package with `ConnectButton` and its publish flow:
    referenced-first, so its payloads never do this.
 
 4. **Local recording.** Each request records its own seed, version and property attestation uids
-   (`applyPropertyAttestationUidsFromPublish`). A relation or list-of-relation value that named seeds
+   (`updateVersionUid`, `applyPropertyAttestationUidsFromPublish`). A request names the version row
+   it was built from (`versionLocalId`) and each attestation the metadata row its value was read
+   from (`_metadataLocalId`); recording updates exactly those rows, so an edit saved while the
+   publish ran stays a pending draft. A relation or list-of-relation value that named seeds
    by local id is recorded as attested, the way an EAS sync stores it: the seed uid (relation) or a
    JSON array of seed uids in slot order (list, on its `<singular><Ref>Ids` row). The related seeds
    get their uids too, so local ids keep resolving to the same items.

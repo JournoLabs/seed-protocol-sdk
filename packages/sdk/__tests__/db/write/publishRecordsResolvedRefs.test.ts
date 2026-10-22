@@ -98,11 +98,14 @@ const replayPublish = async (root: Item<any>, path: Path) => {
       schemaUid: att.schema,
       attestationUid: nextUid(),
       propertyName: att._propertyName,
+      metadataLocalId: att._metadataLocalId,
+      value: att._attestedValue,
     }))
   const recordVersion = (req: any) =>
     updateVersionUid({
       seedLocalId: req.localId,
       versionUid: versionUids[req.localId]!,
+      versionLocalId: req.versionLocalId,
       publisher: PUBLISHER,
       attestationCreatedAt: ms,
     })
@@ -242,7 +245,7 @@ testDescribe('publish records relation and list values as the attested seed uids
       seedLocalId: root.seedLocalId,
       attestationCreatedAtMs: Date.now(),
       versionUid,
-      pairs: [{ schemaUid: listAtt.schema, attestationUid: attUid, propertyName: 'members' }],
+      pairs: [{ schemaUid: listAtt.schema, attestationUid: attUid, propertyName: 'members', metadataLocalId: listAtt._metadataLocalId }],
     })
     const after = await latestRow(root.seedLocalId, LIST_STORAGE_NAME)
     expect(after.uid).toBe(attUid)

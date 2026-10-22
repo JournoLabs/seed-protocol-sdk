@@ -134,7 +134,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
     expect(deferredHtmlSeedLocalIds).toEqual([htmlSeed])
 
     const phase1 = withTxIds(
-      await getPublishUploads(post as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      await getPublishUploads(post as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
     expect(phase1.map((u) => u.seedLocalId)).toContain(imageSeed)
     expect(phase1.map((u) => u.seedLocalId)).not.toContain(htmlSeed)
@@ -143,7 +143,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
     const imageUrl = getPublicArweaveRawUrl(phase1.find((u) => u.seedLocalId === imageSeed)!.txId)
     expect(await readHtml(post)).toBe(ARCHIVE(imageUrl))
 
-    const phase2 = await getPublishUploads(post as any, [], undefined, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds })
+    const phase2 = await getPublishUploads(post as any, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds })
     expect(phase2.map((u) => u.seedLocalId)).toEqual([htmlSeed])
   }, 90000)
 
@@ -217,7 +217,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
       )
       const { deferredHtmlSeedLocalIds } = await prepareHtmlEmbeddedImagesForPublish(post as any, 'materialize')
       const phase1 = withTxIds(
-        await getPublishUploads(post as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+        await getPublishUploads(post as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
       )
       await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, phase1, deferredHtmlSeedLocalIds)
       const html = await readHtml(post)

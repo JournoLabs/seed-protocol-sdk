@@ -1,26 +1,22 @@
 import { BaseFileManager } from '@/helpers'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { storageUploadPath } from '@/storageValue/resolve'
-import { currentPropertyRow, type CurrentPropertyRow } from '@/db/read/currentPropertyRow'
-import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
-import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString, BaseArweaveClient } from '@seedprotocol/arweave'
-import { isPlaceholderUid } from '@seedprotocol/eas'
-import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
 import debug from 'debug'
-import { IItem, IItemProperty } from '@/interfaces'
 import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
-import { type ItemLoads, withItemLoads } from '@/db/read/itemLoads'
-import type { ArweaveTransaction, TransactionTag } from '@seedprotocol/arweave'
+import type { TransactionTag } from '@seedprotocol/arweave'
 import type { PublishUpload, PublishUploadData } from '@/types/publish'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { findEmbeddedImageFilePath } from '@/helpers/htmlEmbeddedDataUriPublish'
-import { eq } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
-import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
 import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
+import {
+  getPublishGraph,
+  type PublishGraph,
+  type PublishGraphNode,
+  type PublishGraphProperty,
+} from '@/db/read/publishGraph'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -38,8 +34,24 @@ export type GetPublishUploadsOptions = {
    * When set, only Html storage seeds in this list are included (phase 2). Non-Html storage uploads are omitted.
    */
   onlyHtmlStorageSeedLocalIds?: string[]
-  /** When true, do not recurse into relation properties (phase 2 must not re-upload related items). */
-  skipRelationRecursion?: boolean
+}
+
+type UploadTarget = Pick<
+  PublishUploadData,
+  'itemPropertyName' | 'itemPropertyLocalId' | 'seedLocalId' | 'versionLocalId'
+>
+
+/**
+ * One upload a publish makes, before its bytes are read: a storage seed's file, an embedded
+ * image's file, or a composite of a node's ItemStorage files. Keyed by the seed whose
+ * storageTransactionId attests it.
+ */
+export type PublishUploadSource = UploadTarget & {
+  /** A single file (`filePath`), or a composite of ItemStorage files (`children`). */
+  filePath?: string
+  children?: { name: string; filePath: string }[]
+  /** A saved ItemStorage edit whose file is gone: the paths tried, per property. */
+  missingLocalEdits?: { name: string; tried: string[] }[]
 }
 
 const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
@@ -59,26 +71,6 @@ const readUploadFile = async (
   const sourceType = typeof Blob !== 'undefined' && data instanceof Blob ? data.type : undefined
   return { bytes, contentType: resolveUploadMimeType({ sourceType, fileName, bytes }) }
 }
-
-export const prepareArweaveTransaction = async (
-  data: string | Uint8Array,
-  contentHash: string | undefined,
-  contentType?: string,
-  additionalTags?: TransactionTag[],
-): Promise<ArweaveTransaction> => {
-  const tags = buildArweaveContentTags(contentHash, contentType, additionalTags)
-
-  const tx = await BaseArweaveClient.createTransaction(data, {
-    tags: tags.length ? tags : undefined,
-  })
-
-  return tx
-}
-
-type UploadTarget = Pick<
-  PublishUploadData,
-  'itemPropertyName' | 'itemPropertyLocalId' | 'seedLocalId' | 'versionLocalId'
->
 
 /**
  * The one place an upload's bytes become a {@link PublishUploadData}: everything after this
@@ -102,178 +94,24 @@ const buildPublishUploadData = (
   }
 }
 
-
-
-const getStorageSeedUploadData = async (
-  itemStorageSeedProperties: IItemProperty<any>[],
-  options?: GetPublishUploadsOptions,
-): Promise<PublishUploadData[]> => {
-  const uploads: PublishUploadData[] = []
-
-  for (const itemProperty of itemStorageSeedProperties) {
-    const snapshot = itemProperty.getService().getSnapshot()
-    const context = 'context' in snapshot ? snapshot.context : null
-    if (!context) {
-      continue
-    }
-    const propertyValue = (context as any).propertyValue
-    const refResolvedValue = (context as any).refResolvedValue
-    if (!refResolvedValue) {
-      continue
-    }
-
-    // propertyValue is the storage seed's seedLocalId; use it for the upload so processRelationOrImageProperty can match
-    const { seedLocalId } = resolveSeedIdsFromRefString(
-      normalizeRelationPropertyValue(propertyValue) ?? '',
-    )
-    if (!seedLocalId) {
-      continue
-    }
-
-    const dataType =
-      itemProperty.propertyDef?.refValueType ??
-      itemProperty.propertyDef?.dataType ??
-      'Image'
-
-    if (isDataType(dataType, ModelPropertyDataTypes.Html)) {
-      if (options?.deferHtmlStorageSeedLocalIds?.includes(seedLocalId)) {
-        continue
-      }
-      if (
-        options?.onlyHtmlStorageSeedLocalIds?.length &&
-        !options.onlyHtmlStorageSeedLocalIds.includes(seedLocalId)
-      ) {
-        continue
-      }
-    } else if (options?.onlyHtmlStorageSeedLocalIds?.length) {
-      continue
-    }
-
-    const filePath = storageUploadPath({
-      dataType,
-      refResolvedValue,
-      localStorageDir: (context as any).localStorageDir,
-    })
-
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) {
-      continue
-    }
-
-    const { bytes: fileContents, contentType } = await readUploadFile(filePath, refResolvedValue)
-
-    uploads.push(
-      buildPublishUploadData(
-        fileContents,
-        contentType,
-        {
-          itemPropertyName: itemProperty.propertyName,
-          itemPropertyLocalId: itemProperty.localId,
-          seedLocalId,
-          versionLocalId: itemProperty.versionLocalId!,
-        },
-        options,
-      ),
-    )
-  }
-
-  return uploads
-}
-
-async function appendCoPublishedImageUploadData(
-  item: IItem<any>,
-  uploads: PublishUploadData[],
-  loads: ItemLoads,
-  options?: GetPublishUploadsOptions,
-): Promise<PublishUploadData[]> {
-  const appDb = BaseDb.getAppDb()
-  if (!appDb || options?.onlyHtmlStorageSeedLocalIds?.length) return uploads
-
-  const rows = await appDb
-    .select()
-    .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
-
-  const seen = new Set(uploads.map((u) => u.seedLocalId))
-
-  for (const row of rows) {
-    if (seen.has(row.imageSeedLocalId)) continue
-    const imageItem = await loads.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
-    if (!imageItem) continue
-    const st =
-      imageItem.internalProperties['storageTransactionId'] ??
-      imageItem.allProperties['storageTransactionId']
-    const filePath = await findEmbeddedImageFilePath(imageItem.seedLocalId)
-
-    const more: PublishUploadData[] = []
-    if (filePath && st && st.localId && st.versionLocalId) {
-      const { bytes, contentType } = await readUploadFile(filePath)
-      more.push(
-        buildPublishUploadData(
-          bytes,
-          contentType,
-          {
-            itemPropertyName: st.propertyName,
-            itemPropertyLocalId: st.localId,
-            seedLocalId: imageItem.seedLocalId,
-            versionLocalId: st.versionLocalId,
-          },
-          options,
-        ),
-      )
-    }
-    for (const u of more) {
-      if (!seen.has(u.seedLocalId)) {
-        uploads.push(u)
-        seen.add(u.seedLocalId)
-      }
-    }
-  }
-  return uploads
-}
-
-export type UploadProperty = {
-  itemProperty: IItemProperty<any>
-  childProperties: IItemProperty<any>[]
-}
-type ChildUploadData = {
-  propertyName: string
-  localStoragePath: string
-}
-
 const isUsablePath = (filePath: string | void | null | undefined): filePath is string =>
   !!filePath && !filePath.endsWith('undefined') && !filePath.endsWith('null')
 
-/** An ItemStorage property's current row, read from the DB (not the property's context). */
-const getLatestItemStorageRow = async (
-  childProperty: IItemProperty<any>,
-): Promise<CurrentPropertyRow | undefined> => {
-  const seedLocalId = childProperty.seedLocalId
-  const propertyName = childProperty.storagePropertyName || childProperty.propertyName
-  if (!seedLocalId || !propertyName) return undefined
-  // Publish waits for the seed's outbox ops before it reads, so no overlay
-  return currentPropertyRow(
-    { seedLocalId },
-    { propertyName, modelName: childProperty.modelName, definitionId: childProperty.propertyDef?.id },
-    { overlay: false },
-  )
-}
-
 /**
- * Local file of one ItemStorage child of a composite upload. Tries, in order: the property's
- * localStoragePath (context set by save / hydration / the live query), its newest metadata row's
- * refResolvedValue + localStorageDir, then (for a local draft, or no row) the name
- * saveItemStorage gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage
- * directory). A published or derived row is never swapped for a local file of another name: that
- * file would be older content.
+ * Local file of one ItemStorage property of a node. Tries, in order: its current row's
+ * refResolvedValue + localStorageDir, then (for a local draft, or no row) the name saveItemStorage
+ * gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage directory). A
+ * published or derived row is never swapped for a local file of another name: that file would be
+ * older content.
  *
- * `missingLocalEdit` lists the paths tried when nothing exists although the newest row is a saved
- * local edit (no attestation uid, not derived from one, refResolvedValue set by saveItemStorage):
- * that edit's file should be there. A published or derived row without a file (e.g. content not
- * downloaded, or a property the composite never had) is skipped as before.
+ * `missingLocalEdit` lists the paths tried when nothing exists although the row is a saved local
+ * edit (no attestation uid, not derived from one, refResolvedValue set by saveItemStorage): that
+ * edit's file should be there. A published or derived row without a file (e.g. content not
+ * downloaded, or a property the composite never had) is skipped.
  */
 export const resolveItemStorageChildFile = async (
-  childProperty: IItemProperty<any>,
+  node: Pick<PublishGraphNode, 'seedLocalId' | 'seedUid'>,
+  property: Pick<PublishGraphProperty, 'definition' | 'row'>,
 ): Promise<{ filePath?: string; missingLocalEdit?: string[] }> => {
   const tried: string[] = []
   const tryPath = async (filePath: string | void | null | undefined): Promise<string | undefined> => {
@@ -282,15 +120,8 @@ export const resolveItemStorageChildFile = async (
     return (await BaseFileManager.pathExists(filePath)) ? filePath : undefined
   }
 
-  const fromContext = await tryPath(childProperty.localStoragePath)
-  if (fromContext) return { filePath: fromContext }
-
-  const row = await getLatestItemStorageRow(childProperty).catch((error) => {
-    logger('resolveItemStorageChildFile: metadata lookup failed', error)
-    return undefined
-  })
-  const propertyDef = childProperty.propertyDef
-  const dir = getItemStorageSubdir(propertyDef?.localStorageDir || row?.localStorageDir)
+  const { row, definition } = property
+  const dir = getItemStorageSubdir(definition.localStorageDir || row?.localStorageDir)
 
   if (row?.refResolvedValue) {
     const fromRow = await tryPath(BaseFileManager.getFilesPath(dir, row.refResolvedValue))
@@ -298,15 +129,11 @@ export const resolveItemStorageChildFile = async (
   }
 
   const isLocalDraft = !!row && !row.uid && row.derivedFromUid == null
-
-  const suffix = propertyDef?.filenameSuffix
-  const seedIds = !row || isLocalDraft
-    ? [row?.seedUid, childProperty.seedUid, row?.seedLocalId, childProperty.seedLocalId]
-    : []
+  const seedIds = !row || isLocalDraft ? [row?.seedUid, node.seedUid, row?.seedLocalId, node.seedLocalId] : []
   for (const seedId of seedIds) {
     if (!seedId) continue
     const derived = await tryPath(
-      BaseFileManager.getFilesPath(dir, getItemStorageLocalFileName(seedId, suffix)),
+      BaseFileManager.getFilesPath(dir, getItemStorageLocalFileName(seedId, definition.filenameSuffix)),
     )
     if (derived) return { filePath: derived }
   }
@@ -316,397 +143,156 @@ export const resolveItemStorageChildFile = async (
   return isLocalDraft && !!row?.refResolvedValue ? { missingLocalEdit: tried } : {}
 }
 
-/**
- * True if publish would include at least one Arweave upload (local file / storage seed present).
- * Does not create Arweave transactions or hit the network — use for routing (e.g. skip EAS-only)
- * when {@link getPublishUploads} would fail early (e.g. gateway unreachable during tx creation).
- */
-async function storageSeedHasUploadCandidates(
-  itemStorageSeedProperties: IItemProperty<any>[],
-): Promise<boolean> {
-  for (const itemProperty of itemStorageSeedProperties) {
-    const snapshot = itemProperty.getService().getSnapshot()
-    const context = 'context' in snapshot ? snapshot.context : null
-    if (!context) {
-      continue
-    }
-    const propertyValue = (context as any).propertyValue
-    const refResolvedValue = (context as any).refResolvedValue
-    if (!refResolvedValue) {
-      continue
-    }
+const slotOf = (node: PublishGraphNode) => node.properties.find((p) => p.kind === 'storageTransaction')
 
-    const { seedLocalId } = resolveSeedIdsFromRefString(
-      normalizeRelationPropertyValue(propertyValue) ?? '',
-    )
-    if (!seedLocalId) {
-      continue
-    }
-
-    const dataType =
-      itemProperty.propertyDef?.refValueType ??
-      itemProperty.propertyDef?.dataType ??
-      'Image'
-    const filePath = storageUploadPath({
-      dataType,
-      refResolvedValue,
-      localStorageDir: (context as any).localStorageDir,
-    })
-
-    if (await BaseFileManager.pathExists(filePath)) {
-      return true
-    }
+/** Where an upload attesting through `node`'s storageTransactionId is recorded. */
+const slotTarget = (node: PublishGraphNode): UploadTarget => {
+  const slot = slotOf(node)
+  return {
+    seedLocalId: node.seedLocalId,
+    itemPropertyName: slot?.key ?? 'storageTransactionId',
+    itemPropertyLocalId: slot?.row?.localId ?? '',
+    versionLocalId: slot?.row?.versionLocalId ?? node.version.localId ?? '',
   }
-
-  return false
 }
 
-async function uploadPropertyWouldUpload(
-  uploadProperty: UploadProperty,
-  relatedItemProperty?: IItemProperty<any>,
-): Promise<boolean> {
-
-  for (const childProperty of uploadProperty.childProperties) {
-    // Not strict: a local edit whose file is missing still means "would upload", so the publish
-    // goes ahead and fails loudly in processUploadPropertyData instead of skipping the upload.
-    const resolved = await resolveItemStorageChildFile(childProperty)
-    if (resolved.filePath || resolved.missingLocalEdit) {
-      return true
-    }
+/** A node's own files: the ItemStorage properties beside its storageTransactionId, as one composite. */
+async function compositeSource(node: PublishGraphNode): Promise<PublishUploadSource | undefined> {
+  if (!slotOf(node)) return undefined
+  const children: { name: string; filePath: string }[] = []
+  const missingLocalEdits: { name: string; tried: string[] }[] = []
+  for (const property of node.properties) {
+    if (property.kind !== 'itemStorage') continue
+    const { filePath, missingLocalEdit } = await resolveItemStorageChildFile(node, property)
+    if (filePath) children.push({ name: property.key, filePath })
+    else if (missingLocalEdit) missingLocalEdits.push({ name: property.key, tried: missingLocalEdit })
   }
-
-  if (relatedItemProperty && relatedItemProperty.localStoragePath) {
-    const filePath = relatedItemProperty.localStoragePath
-
-    if (!filePath || filePath.endsWith('undefined')) {
-      return false
-    }
-
-    return await BaseFileManager.pathExists(filePath)
-  }
-
-  return false
+  if (children.length === 0 && missingLocalEdits.length === 0) return undefined
+  return { ...slotTarget(node), children, ...(missingLocalEdits.length ? { missingLocalEdits } : {}) }
 }
 
-async function itemOwnUploadCandidates(
-  item: IItem<any>,
-  relatedItemProperty: IItemProperty<any> | undefined,
-  recurseStorageRelations: boolean,
-  loads: ItemLoads,
-): Promise<boolean> {
-  const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
-    await getSegmentedItemProperties(item)
-
-  for (const uploadProperty of itemUploadProperties) {
-    if (await uploadPropertyWouldUpload(uploadProperty, relatedItemProperty)) {
-      return true
-    }
-  }
-
-  if (await storageSeedHasUploadCandidates(itemImageProperties)) {
-    return true
-  }
-
-  if (!recurseStorageRelations) return false
-  const storageProperties = new Set(itemImageProperties)
-  for (const relationProperty of itemRelationProperties) {
-    if (!storageProperties.has(relationProperty)) continue
-    const snapshot = relationProperty.getService().getSnapshot()
-    const context = 'context' in snapshot ? snapshot.context : null
-    if (!context) {
-      continue
-    }
-    const propertyValue = (context as any).propertyValue
-
-    if (!propertyValue || relationProperty.uid) {
-      continue
-    }
-
-    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(
-      normalizeRelationPropertyValue(propertyValue) ?? '',
-    )
-    if (!seedLocalId && !seedUid) {
-      throw new Error(
-        `Invalid relation value for ${relationProperty.propertyName}: expected local seed id or 0x uid`,
-      )
-    }
-
-    const relatedItem = await loads.find({
-      seedLocalId,
-      seedUid,
-    })
-
-    if (!relatedItem) {
-      // Related seed referenced by attested uid with no local copy: already published, nothing to upload.
-      if (isPublishedSeedRef(propertyValue)) continue
-      throw new Error(
-        `No relatedItem found for ${relationProperty.propertyName}`,
-      )
-    }
-
-    if (await itemOwnUploadCandidates(relatedItem, relationProperty, false, loads)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-/** Same walk as getPublishUploads: the item and the draft items its publish carries along. */
-export async function itemHasPublishUploadCandidates(
-  item: IItem<any>,
-  relatedItemProperty?: IItemProperty<any>,
-): Promise<boolean> {
-  return withItemLoads(undefined, async (loads) => {
-    if (await itemOwnUploadCandidates(item, relatedItemProperty, true, loads)) return true
-    const { drafts } = await getPublishDraftGraph(item, { strict: true, loads })
-    for (const { item: draft, via, viaList } of drafts) {
-      if (await itemOwnUploadCandidates(draft, viaList ? undefined : via, true, loads)) return true
-    }
-    return false
+/** The file of a storage seed this publish attests, named by the referring property's row. */
+async function storageSeedSource(owner: PublishGraphNode, property: PublishGraphProperty): Promise<PublishUploadSource | undefined> {
+  const target = property.refs[0]?.node
+  const refResolvedValue = property.row?.refResolvedValue
+  if (!target || !refResolvedValue) return undefined
+  const filePath = storageUploadPath({
+    dataType: property.definition.refValueType ?? property.definition.dataType,
+    refResolvedValue,
+    localStorageDir: property.row?.localStorageDir,
   })
+  if (!(await BaseFileManager.pathExists(filePath))) return undefined
+  return {
+    seedLocalId: target.seedLocalId,
+    itemPropertyName: property.key,
+    itemPropertyLocalId: property.row?.localId ?? '',
+    versionLocalId: property.row?.versionLocalId ?? owner.version.localId ?? '',
+    filePath,
+  }
 }
 
-const processUploadPropertyData = async (
-  uploadProperty: UploadProperty,
-  uploads: PublishUploadData[],
-  relatedItemProperty?: IItemProperty<any>,
+const isHtmlStorageProperty = (property: PublishGraphProperty): boolean =>
+  isDataType(property.definition.refValueType ?? property.definition.dataType, ModelPropertyDataTypes.Html)
+
+/**
+ * Every upload a publish makes, in graph order (the root's first), one per attesting seed. The
+ * options select the phases of a publish with Html-embedded images: phase 1 defers the listed Html
+ * storage seeds, phase 2 uploads only those.
+ */
+export async function getPublishUploadSources(
+  graph: PublishGraph,
   options?: GetPublishUploadsOptions,
-): Promise<PublishUploadData[]> => {
-  const itemProperty = uploadProperty.itemProperty
-
-  const childUploads: ChildUploadData[] = []
-
-  for (const childProperty of uploadProperty.childProperties) {
-    const { filePath, missingLocalEdit } = await resolveItemStorageChildFile(childProperty)
-
-    if (!filePath) {
-      if (missingLocalEdit) {
-        // Uploading without it would publish a composite that silently lacks this edit.
-        throw new Error(
-          `Cannot publish ${itemProperty.seedLocalId}: the local file for ${childProperty.propertyName} ` +
-            `was not found (looked in ${missingLocalEdit.join(', ')})`,
-        )
-      }
-      continue
-    }
-
-    childUploads.push({
-      propertyName: childProperty.propertyName,
-      localStoragePath: filePath,
-    })
+): Promise<PublishUploadSource[]> {
+  const onlyHtml = options?.onlyHtmlStorageSeedLocalIds?.length ? new Set(options.onlyHtmlStorageSeedLocalIds) : undefined
+  const deferHtml = new Set(options?.deferHtmlStorageSeedLocalIds ?? [])
+  const sources: PublishUploadSource[] = []
+  const add = (source: PublishUploadSource | undefined) => {
+    if (source && !sources.some((s) => s.seedLocalId === source.seedLocalId)) sources.push(source)
   }
 
-  let fileContents
-  let fileContentType: string | undefined
-
-  if (!childUploads || childUploads.length === 0) {
-    if (relatedItemProperty && relatedItemProperty.localStoragePath) {
-      const filePath = relatedItemProperty.localStoragePath
-
-      if (!filePath || filePath.endsWith('undefined')) {
-        return uploads
-      }
-
-      const exists = await BaseFileManager.pathExists(filePath)
-      if (!exists) {
-        return uploads
-      }
-
-      try {
-        const read = await readUploadFile(filePath)
-        fileContents = read.bytes
-        fileContentType = read.contentType
-      } catch {
-        const fs = await BaseFileManager.getFs()
-        fileContents = await toUint8Array(fs.readFileSync(filePath))
-        fileContentType = resolveUploadMimeType({ fileName: filePath, bytes: fileContents })
-      }
+  for (const node of [graph.root, ...graph.nodes.filter((n) => n !== graph.root)]) {
+    if (!onlyHtml) add(await compositeSource(node))
+    if (node.kind !== 'root' && node.kind !== 'draft') continue
+    for (const property of node.properties) {
+      if (property.kind !== 'storageSeed' || property.deferred) continue
+      const seedLocalId = property.refs[0]?.node?.seedLocalId
+      if (!seedLocalId) continue
+      if (isHtmlStorageProperty(property) ? deferHtml.has(seedLocalId) || (onlyHtml && !onlyHtml.has(seedLocalId)) : onlyHtml) continue
+      add(await storageSeedSource(node, property))
     }
-    if (!fileContents) {
-      return uploads
+    if (onlyHtml) continue
+    for (const row of node.embeddedImages) {
+      const image = graph.nodes.find((n) => n.seedLocalId === row.imageSeedLocalId && n.kind === 'embeddedImage')
+      const filePath = image ? await findEmbeddedImageFilePath(image.seedLocalId) : undefined
+      if (image && filePath) add({ ...slotTarget(image), filePath })
     }
   }
-
-  if (childUploads.length > 0) {
-    // Composite of the item's ItemStorage files; see helpers/compositeUpload.ts for the format.
-    // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
-    const children: CompositeChild[] = []
-    const fs = await BaseFileManager.getFs()
-    for (const childUpload of childUploads) {
-      let childUploadContents: Uint8Array | string
-      try {
-        childUploadContents = await fs.promises.readFile(childUpload.localStoragePath)
-      } catch {
-        childUploadContents = fs.readFileSync(childUpload.localStoragePath)
-      }
-      children.push({
-        name: childUpload.propertyName,
-        bytes:
-          typeof childUploadContents === 'string'
-            ? new TextEncoder().encode(childUploadContents)
-            : new Uint8Array(childUploadContents),
-      })
-    }
-    fileContents = encodeCompositeUpload(children)
-  }
-
-  if (!fileContents) {
-    throw new Error(`No file contents found for ${itemProperty.propertyName}`)
-  }
-
-  const uint8Array = new Uint8Array(fileContents)
-
-  let contentType: string | undefined
-  if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
-    contentType = fileContentType
-  } else if (childUploads.length > 0) {
-    contentType = 'application/octet-stream'
-  }
-
-  const itemPropertyLocalId = relatedItemProperty
-    ? relatedItemProperty.localId
-    : itemProperty.localId
-  const itemPropertyName = relatedItemProperty
-    ? relatedItemProperty.propertyName
-    : itemProperty.propertyName
-
-  uploads.push(
-    buildPublishUploadData(
-      uint8Array,
-      contentType,
-      {
-        itemPropertyName,
-        itemPropertyLocalId,
-        seedLocalId: itemProperty.seedLocalId!,
-        versionLocalId: itemProperty.versionLocalId!,
-      },
-      options,
-    ),
-  )
-
-  return uploads
+  return sources
 }
 
-/** No seed uid yet: a related item in this state is published together with the item. */
-const isDraftItem = (item: IItem<any>): boolean => isPlaceholderUid(item.seedUid)
-
-/** One item's own uploads: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
-const getItemOwnPublishUploadData = async (
-  item: IItem<any>,
-  uploads: PublishUploadData[],
-  relatedItemProperty: IItemProperty<any> | undefined,
-  options: GetPublishUploadsOptions | undefined,
-  loads: ItemLoads,
-): Promise<PublishUploadData[]> => {
-  const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
-    await getSegmentedItemProperties(item)
-
-  // Phase 2 of an embedded-image publish: only the deferred Html storage seeds, of this item and of
-  // the related items published with it (whose Html can embed images too).
-  const onlyDeferredHtml = !!options?.onlyHtmlStorageSeedLocalIds?.length
-  if (onlyDeferredHtml) {
-    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
-    uploads.push(...storageSeedUploads)
-  } else {
-    for (const uploadProperty of itemUploadProperties) {
-      uploads = await processUploadPropertyData(
-        uploadProperty,
-        uploads,
-        relatedItemProperty,
-        options,
-      )
-    }
-
-    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
-    uploads.push(...storageSeedUploads)
-
-    // Images embedded in this item's Html: the published item's, and a related draft's published with it.
-    if (!relatedItemProperty || isDraftItem(item)) {
-      uploads = await appendCoPublishedImageUploadData(item, uploads, loads, options)
-    }
-  }
-
-  if (options?.skipRelationRecursion) {
-    return uploads
-  }
-
-  // Relations to Image/File/Html/Json items: their file, read through the relation property.
-  const storageProperties = new Set(itemImageProperties)
-  for (const relationProperty of itemRelationProperties) {
-    if (!storageProperties.has(relationProperty)) continue
-    const snapshot = relationProperty.getService().getSnapshot()
-    const context = 'context' in snapshot ? snapshot.context : null
-    if (!context) {
-      continue
-    }
-    const propertyValue = (context as any).propertyValue
-
-    if (!propertyValue || relationProperty.uid) {
-      continue
-    }
-
-    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(
-      normalizeRelationPropertyValue(propertyValue) ?? '',
-    )
-    if (!seedLocalId && !seedUid) {
-      throw new Error(
-        `Invalid relation value for ${relationProperty.propertyName}: expected local seed id or 0x uid`,
-      )
-    }
-
-    const relatedItem = await loads.find({
-      seedLocalId,
-      seedUid,
-    })
-
-    if (!relatedItem) {
-      // Related seed referenced by attested uid with no local copy: already published, nothing to upload.
-      if (isPublishedSeedRef(propertyValue)) continue
-      throw new Error(
-        `No relatedItem found for ${relationProperty.propertyName}`,
-      )
-    }
-
-    uploads = await getItemOwnPublishUploadData(
-      relatedItem,
-      uploads,
-      relationProperty,
-      { ...options, skipRelationRecursion: true },
-      loads,
+/** The bytes of one source; a missing local ItemStorage edit fails the publish. */
+async function readSource(source: PublishUploadSource, options: GetPublishUploadsOptions | undefined): Promise<PublishUploadData> {
+  const { filePath, children, missingLocalEdits, ...target } = source
+  const missing = missingLocalEdits?.[0]
+  if (missing) {
+    // Uploading without it would publish a composite that silently lacks this edit.
+    throw new Error(
+      `Cannot publish ${source.seedLocalId}: the local file for ${missing.name} ` +
+        `was not found (looked in ${missing.tried.join(', ')})`,
     )
   }
+  if (children) {
+    // Composite of the node's ItemStorage files; see helpers/compositeUpload.ts for the format.
+    // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
+    const parts: CompositeChild[] = []
+    for (const child of children) parts.push({ name: child.name, bytes: (await readUploadFile(child.filePath)).bytes })
+    return buildPublishUploadData(encodeCompositeUpload(parts), 'application/octet-stream', target, options)
+  }
+  const { bytes, contentType } = await readUploadFile(filePath!)
+  return buildPublishUploadData(bytes, contentType, target, options)
+}
 
-  return uploads
+/** Fails like a publish would when an item's relation names a seed that isn't there. */
+function assertRefsResolve(graph: PublishGraph): void {
+  for (const broken of graph.brokenRefs) {
+    if (broken.list) continue
+    throw new Error(
+      broken.reason === 'invalid'
+        ? `Invalid relation value for ${broken.propertyKey}: expected local seed id or 0x uid`
+        : `No relatedItem found for ${broken.propertyKey}`,
+    )
+  }
 }
 
 /**
- * Upload data for a publish of `item`: its own, and that of every draft item the publish carries
- * along (reachable through relation and list properties, see publishDraftGraph.ts). Raw bytes plus
- * Content-SHA-256 / Content-Type / configured tags; no Arweave transaction is created, so this
- * does not touch the network. The bundler path in `@seedprotocol/publish` signs these as
- * DataItems; {@link getPublishUploads} turns them into L1 transactions.
+ * True if publish would include at least one Arweave upload (local file / storage seed present,
+ * or a saved local edit whose file is missing, which the upload then reports). Reads rows and
+ * file metadata only, for routing (e.g. skip the Arweave steps).
+ */
+export async function itemHasPublishUploadCandidates(item: { seedLocalId: string; modelName?: string }): Promise<boolean> {
+  const graph = await getPublishGraph(item)
+  assertRefsResolve(graph)
+  return (await getPublishUploadSources(graph)).length > 0
+}
+
+/**
+ * Upload data for a publish of `item`: its own, and that of every seed the publish attests with it
+ * (see publishGraph.ts). Raw bytes plus Content-SHA-256 / Content-Type / configured tags; no
+ * Arweave transaction is created, so this does not touch the network. The bundler path in
+ * `@seedprotocol/publish` signs these as DataItems; {@link getPublishUploads} turns them into L1
+ * transactions.
  */
 export const getPublishUploadData = async (
-  item: IItem<any>,
-  uploads: PublishUploadData[] = [],
-  relatedItemProperty?: IItemProperty<any>,
+  item: { seedLocalId: string; modelName?: string },
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUploadData[]> => {
-  return withItemLoads(undefined, async (loads) => {
-    uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options, loads)
-
-    if (options?.skipRelationRecursion) {
-      return uploads
-    }
-
-    const { drafts } = await getPublishDraftGraph(item, { strict: true, loads })
-    for (const { item: draft, via, viaList } of drafts) {
-      uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options, loads)
-    }
-
-    return uploads
-  })
+  const graph = await getPublishGraph(item)
+  assertRefsResolve(graph)
+  const sources = await getPublishUploadSources(graph, options)
+  logger('%d uploads for %s', sources.length, item.seedLocalId)
+  const uploads: PublishUploadData[] = []
+  for (const source of sources) uploads.push(await readSource(source, options))
+  return uploads
 }
 
 /**
@@ -714,17 +300,12 @@ export const getPublishUploadData = async (
  * unsigned transaction carrying the same tags.
  */
 export const getPublishUploads = async (
-  item: IItem<any>,
-  uploads: PublishUpload[] = [],
-  relatedItemProperty?: IItemProperty<any>,
+  item: { seedLocalId: string; modelName?: string },
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUpload[]> => {
-  // Every edit made before publishing is in `metadata` and its files first (ADR 0019)
-  const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
-  const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
+  const uploadData = await getPublishUploadData(item, options)
   // Each createTransaction fetches the price / anchor from the gateway: run a few at once.
-  const created = await mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
+  return mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
     itemPropertyName: upload.itemPropertyName,
     itemPropertyLocalId: upload.itemPropertyLocalId,
     seedLocalId: upload.seedLocalId,
@@ -733,6 +314,4 @@ export const getPublishUploads = async (
       tags: upload.tags.length ? upload.tags : undefined,
     }),
   }))
-  uploads.push(...created)
-  return uploads
 }
