@@ -25,8 +25,6 @@ export const validateProperty = fromCallback<
     }
     const schemaFileId = typeof context.id === 'string' ? context.id : undefined
     if (schemaFileId && (fullContext.modelName === undefined || fullContext.dataType === undefined)) {
-      // Brief wait so trackPendingWrite from ModelProperty.create() has time to run (it's in setTimeout(0))
-      await new Promise((r) => setTimeout(r, 60))
       try {
         const { resolveModelRecord, resolvePropertyModelRecord } = await import('../../../db/read/resolveModelRecord')
         // Try pending write first (property row may not exist yet)
@@ -41,30 +39,13 @@ export const validateProperty = fromCallback<
             }
           }
         }
-        // Then DB property lookup with retry (catches row after initial write)
-        let fromDb: { name: string; dataType: string } | undefined
-        for (let attempt = 0; attempt < 6; attempt++) {
-          fromDb = await resolvePropertyModelRecord(schemaFileId)
-          if (fromDb) break
-          if (attempt < 5) await new Promise((r) => setTimeout(r, 40))
-        }
+        // Then the property's row, once its write has run
+        const fromDb = await resolvePropertyModelRecord(schemaFileId)
         if (fromDb) {
           fullContext = {
             ...fullContext,
             modelName: fullContext.modelName ?? fromDb.name,
             dataType: fullContext.dataType ?? fromDb.dataType,
-          }
-        }
-        // If still no modelName, try pending write again (may have been set during retries)
-        if (fullContext.modelName === undefined && schemaFileId) {
-          const mod = await import('../../../ModelProperty/ModelProperty')
-          const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
-          const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileId)
-          if (pendingModelId != null) {
-            const modelName = (await resolveModelRecord(undefined, { modelId: pendingModelId }))?.name
-            if (modelName) {
-              fullContext = { ...fullContext, modelName }
-            }
           }
         }
       } catch {

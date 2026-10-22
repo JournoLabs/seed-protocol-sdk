@@ -1,3 +1,4 @@
+import { whenAppDbReady } from '@/db/whenAppDbReady'
 import {
   appState,
   models as modelsTable,
@@ -561,15 +562,9 @@ export const getAllAddressesFromDb = async (): Promise<string[]> => {
 }
 
 async function getAddressConfigFromDb(): Promise<NormalizedAddressConfig | null> {
-  const appDb = BaseDb.getAppDb()
-
-  if (!appDb) {
-    return new Promise((resolve) => {
-      setTimeout(async () => {
-        resolve(await getAddressConfigFromDb())
-      }, 500)
-    })
-  }
+  // Before init opens the database (or with no init) there are no stored addresses to read
+  const appDb = await whenAppDbReady()
+  if (!appDb) return null
 
   const appStatesRecords = await appDb
     .select()

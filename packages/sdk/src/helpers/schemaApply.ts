@@ -242,8 +242,6 @@ async function writeSchemaFile(file: SchemaFileFormat): Promise<string> {
   const filePath = getSchemaFilePath(file.id!, file.metadata.name, file.version)
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getWorkingDir())
   await BaseFileManager.saveFile(filePath, JSON.stringify(file, null, 2))
-  // Browser file writes may not be readable at once
-  await BaseFileManager.waitForFileWithContent(filePath, 100, 5000)
   return filePath
 }
 

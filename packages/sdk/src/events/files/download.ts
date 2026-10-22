@@ -8,8 +8,7 @@ import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import debug from 'debug'
 // Dynamic import to break circular dependency with globalMachine
 // import { getGlobalService } from '@/services/global/globalMachine'
-import { waitFor } from 'xstate'
-import { BaseDb } from '@/db/Db/BaseDb'
+import { whenAppDbReady } from '@/db/whenAppDbReady'
 import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient } from '@seedprotocol/eas'
 import {
@@ -32,29 +31,9 @@ const GET_FILES_METADATA_STALE_MS = 120_000
 let bulkDownloadInFlight: Promise<void> | null = null
 const lazyDownloadInFlightByTransactionId = new Map<string, Promise<boolean>>()
 
-const getAppDbReady = async () => {
-  if (!BaseDb.isAppDbReady()) {
-    // Wait for ClientManager to be ready (DB_INIT state or later)
-    const clientManagerMod = await import('../../client/ClientManager')
-    const { getClient } = clientManagerMod
-    const clientManager = getClient()
-    const clientService = clientManager.getService()
-
-    await waitFor(clientService, (snapshot) => {
-      const state = snapshot.value
-      return state === 'dbInit' ||
-             state === 'saveConfig' ||
-             state === 'processSchemaFiles' ||
-             state === 'addModelsToDb' ||
-             state === 'idle'
-    }, { timeout: 30000 })
-  }
-
-  return BaseDb.getAppDb()
-}
 
 const getExcludedTransactions = async (): Promise<Set<string>> => {
-  const appDb = await getAppDbReady()
+  const appDb = await whenAppDbReady()
   if (!appDb) {
     return new Set<string>()
   }
@@ -107,7 +86,7 @@ const mergeAddressLists = (a: string[] | undefined, b: string[] | undefined): st
 }
 
 const collectTransactionIdsFromLocalMetadata = async (): Promise<string[]> => {
-  const appDb = await getAppDbReady()
+  const appDb = await whenAppDbReady()
   if (!appDb) {
     return []
   }
@@ -329,15 +308,8 @@ export const downloadAllFilesBinaryRequestHandler = async (addressesHint?: strin
     return
   }
 
-  let fromDb: string[] = []
-  if (BaseDb.isAppDbReady()) {
-    fromDb = await getAllAddressesFromDb()
-  }
-
-  if (!BaseDb.isAppDbReady()) {
-    await getAppDbReady()
-    fromDb = await getAllAddressesFromDb()
-  }
+  // Waits for init to open the database, if it hasn't yet
+  const fromDb = await getAllAddressesFromDb()
 
   const addresses = mergeAddressLists(addressesHint, fromDb)
 
