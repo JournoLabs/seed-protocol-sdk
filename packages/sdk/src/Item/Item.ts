@@ -2157,6 +2157,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 lastVersionPublishedAt = Math.max(lastVersionPublishedAt ?? 0, v.attestationCreatedAt)
               }
               const latestVersionLocalId = latestVersion.localId
+
+              // Before the metadata reads below: the publish time depends only on the version rows,
+              // and a slow ItemProperty lookup must not hold it back.
+              sendToItemMachine({ type: 'updateContext', lastVersionPublishedAt })
               
               logger(`[Item._setupLiveQuerySubscription] Versions updated, latest version: ${latestVersionLocalId}`)
               
