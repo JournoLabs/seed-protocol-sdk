@@ -447,6 +447,7 @@ async function unlinkModelsFromSchema(db: Db, schemaId: number, modelNames: stri
 /**
  * A schema row's definition. A draft row's is its `schema_data`; a published row's is its
  * (schema_file_id, version) file, else its `schema_data`; a row with neither starts empty. The
+ * internal schema has no stored file (applySchemaFile skips it), so its row reads `schema_data`. The
  * row's name and id win over the file's, and the models linked to the row are merged in
  * (`mergeDbModelsIntoSchemaModels`: the rows decide which models and properties exist; the file
  * keeps what only it holds). Reads only.
@@ -466,9 +467,10 @@ export async function resolveSchemaRow(
     }
   }
 
-  let schema = row.isDraft ? fromData() : undefined
+  const internal = isInternalSchema(row.name, row.schemaFileId ?? undefined)
+  let schema = row.isDraft || internal ? fromData() : undefined
   let filePath: string | undefined
-  if (!schema && row.schemaFileId) {
+  if (!schema && row.schemaFileId && !internal) {
     filePath = getSchemaFilePath(row.schemaFileId, row.name, row.version)
     schema = await readSchemaFile(filePath)
     if (!schema) {
