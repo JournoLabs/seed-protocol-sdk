@@ -4,7 +4,7 @@ import {
   DEFAULT_ARWEAVE_HOST,
   resolveArweaveHostFromEnv,
 } from '@seedprotocol/arweave'
-import { assertSingleEasModule, ensureEasPlatform } from '@seedprotocol/eas'
+import { assertSingleEasModule, BaseEasClient, ensureEasPlatform } from '@seedprotocol/eas'
 
 let initialized = false
 
@@ -33,6 +33,20 @@ export function configureQueryArweavePlatform(registrar: QueryArweavePlatformReg
   registerArweavePlatform = registrar
 }
 
+/** Fills in the EAS client for a process where nothing has registered one. */
+export type QueryEasPlatformRegistrar = () => Promise<void>
+
+/** Browser default: none here; ensureEasPlatform registers the default client. */
+let registerEasPlatform: QueryEasPlatformRegistrar = async () => {}
+
+/**
+ * @internal Set by the Node entries, which register the Node EAS client (connection reuse and TLS
+ * settings for the indexer; see `@seedprotocol/eas/node`) when none is configured.
+ */
+export function configureQueryEasPlatform(registrar: QueryEasPlatformRegistrar): void {
+  registerEasPlatform = registrar
+}
+
 function resolveQueryArweaveDomain(explicit?: string): string {
   return explicit ?? resolveArweaveHostFromEnv() ?? DEFAULT_ARWEAVE_HOST
 }
@@ -52,6 +66,7 @@ export async function initializeQueryPlatform(
   assertSingleEasModule()
   assertSingleArweaveModule()
   if (initialized) return
+  if (!BaseEasClient.isConfigured()) await registerEasPlatform()
   ensureEasPlatform()
   if (!BaseArweaveClient.isConfigured()) {
     await registerArweavePlatform({
