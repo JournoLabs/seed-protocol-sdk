@@ -1,14 +1,13 @@
-import { ClientManagerContext, SeedConstructorOptions } from "@/types"
-import { assign, setup } from "xstate"
+import { ClientManagerContext } from "@/types"
+import { assign, fromPromise, setup } from "xstate"
 import debug from "debug"
 import { normalizeAddressConfig } from "@/helpers/addresses"
 import { requestEasSyncFromAddressChange } from "@/events/item/easSyncManager"
-import { platformClassesInit } from "./actors/platformClassesInit"
+import { platformClassesInit, type InitEvent } from "./actors/platformClassesInit"
 import { saveAppState } from "./actors/saveAppState"
 import { fileSystemInit } from "./actors/fileSystemInit"
 import { dbInit } from "./actors/dbInit"
 import { ClientManagerEvents, ClientManagerState, MachineIds } from "@/client/constants"
-import { addModelsToStore } from "./actors/addModelsToStore"
 import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
@@ -26,7 +25,6 @@ const {
   DB_INIT,
   SAVE_CONFIG,
   PROCESS_SCHEMA_FILES,
-  ADD_MODELS_TO_STORE,
   ADD_MODELS_TO_DB,
   IDLE,
   INIT_FAILED,
@@ -34,22 +32,15 @@ const {
 
 const {
   UPDATE_CONTEXT,
-  PLATFORM_CLASSES_READY,
-  FILE_SYSTEM_READY,
-  DB_READY,
-  SAVE_CONFIG_SUCCESS,
   SAVE_APP_STATE_SUCCESS,
   SAVE_APP_STATE_ERROR,
   SET_ADDRESSES,
-  ADD_MODELS_TO_STORE_SUCCESS,
-  ADD_MODELS_TO_DB_SUCCESS,
-  PROCESS_SCHEMA_FILES_SUCCESS,
 } = ClientManagerEvents
 
-type InitEvent = {
-  type: 'init'
-  options: SeedConstructorOptions
-}
+// processSchemaFiles can be slow (syncSchemaFromSource, loadAllSchemasFromDb, OPFS file I/O)
+const PROCESS_SCHEMA_FILES_TIMEOUT_MS = 120000
+
+type StepInput = { context: ClientManagerContext }
 
 const logSyncAfterAddressSave = debug(
   "seedSdk:client:clientManagerMachine:syncAfterAddressSave",
@@ -124,15 +115,19 @@ export const clientManagerMachine = setup({
     context: {} as ClientManagerContext,
     input: {} as ClientManagerContext | undefined,
   },
+  // Each init step is one awaited function; a rejection moves the client to INIT_FAILED.
   actors: {
-    platformClassesInit,
-    fileSystemInit,
-    dbInit,
-    saveConfig,
+    platformClassesInit: fromPromise<Partial<ClientManagerContext>, { event: InitEvent }>(({ input }) =>
+      platformClassesInit(input),
+    ),
+    fileSystemInit: fromPromise<void, StepInput>(({ input }) => fileSystemInit(input.context)),
+    dbInit: fromPromise<void, StepInput>(({ input }) => dbInit(input.context)),
+    saveConfig: fromPromise<void, StepInput>(({ input }) => saveConfig(input.context)),
+    processSchemaFiles: fromPromise<ClientManagerContext['models'], StepInput>(({ input }) =>
+      processSchemaFiles(input.context),
+    ),
+    addModelsToDb: fromPromise<void, StepInput>(({ input }) => addModelsToDb(input.context)),
     saveAppState,
-    addModelsToStore,
-    addModelsToDb,
-    processSchemaFiles,
   },
   actions: {
     assignInitError: assign(({ event }, params: { fallbackMessage: string }) => ({
@@ -163,104 +158,63 @@ export const clientManagerMachine = setup({
     },
   },
   states: {
-    [UNINITIALIZED]: {
-      on: {
-        init: {
-          target: PLATFORM_CLASSES_INIT,
-        },
-      },
-    },
+    [UNINITIALIZED]: {},
     [PLATFORM_CLASSES_INIT]: {
-      on: {
-        [PLATFORM_CLASSES_READY]: {
-          target: FILE_SYSTEM_INIT,
-        },
-        error: failInit('Platform classes initialization failed'),
-      },
       invoke: {
         src: 'platformClassesInit',
-        input: ({ event, context }) => ({ 
-          event: event as InitEvent, 
-          context 
-        }),
+        input: ({ event }) => ({ event: event as InitEvent }),
+        onDone: {
+          target: FILE_SYSTEM_INIT,
+          actions: assign(({ event }) => event.output),
+        },
         onError: failInit('Platform classes initialization failed'),
       },
     },
     [FILE_SYSTEM_INIT]: {
-      on: {
-        [FILE_SYSTEM_READY]: {
-          target: DB_INIT,
-        },
-        error: failInit('File system initialization failed'),
-      },
       invoke: {
         src: 'fileSystemInit',
         input: ({ context }) => ({ context }),
+        onDone: DB_INIT,
         onError: failInit('File system initialization failed'),
       },
     },
     [DB_INIT]: {
-      on: {
-        [DB_READY]: {
-          target: SAVE_CONFIG,
-        },
-        error: failInit('Database initialization failed'),
-      },
       invoke: {
         src: 'dbInit',
         input: ({ context }) => ({ context }),
+        onDone: SAVE_CONFIG,
         onError: failInit('Database initialization failed'),
       },
     },
     [SAVE_CONFIG]: {
-      on: {
-        [SAVE_CONFIG_SUCCESS]: {
-          target: PROCESS_SCHEMA_FILES,
-        },
-        error: failInit('Saving config failed'),
-      },
       invoke: {
         src: 'saveConfig',
         input: ({ context }) => ({ context }),
+        onDone: PROCESS_SCHEMA_FILES,
         onError: failInit('Saving config failed'),
       },
     },
     [PROCESS_SCHEMA_FILES]: {
-      on: {
-        [PROCESS_SCHEMA_FILES_SUCCESS]: {
-          target: ADD_MODELS_TO_STORE,
-        },
-        error: failInit('Schema processing failed'),
-      },
       invoke: {
         src: 'processSchemaFiles',
         input: ({ context }) => ({ context }),
+        onDone: {
+          target: ADD_MODELS_TO_DB,
+          actions: assign({ models: ({ event }) => event.output }),
+        },
         onError: failInit('Schema processing failed'),
       },
-    },
-    [ADD_MODELS_TO_STORE]: {
-      on: {
-        [ADD_MODELS_TO_STORE_SUCCESS]: {
-          target: ADD_MODELS_TO_DB,
-        },
-        error: failInit('Adding models to store failed'),
-      },
-      invoke: {
-        src: 'addModelsToStore',
-        input: ({ context }) => ({ context }),
-        onError: failInit('Adding models to store failed'),
+      after: {
+        [PROCESS_SCHEMA_FILES_TIMEOUT_MS]: failInit(
+          `processSchemaFiles timed out after ${PROCESS_SCHEMA_FILES_TIMEOUT_MS}ms`,
+        ),
       },
     },
     [ADD_MODELS_TO_DB]: {
-      on: {
-        [ADD_MODELS_TO_DB_SUCCESS]: {
-          target: IDLE,
-        },
-        error: failInit('Adding models to database failed'),
-      },
       invoke: {
         src: 'addModelsToDb',
         input: ({ context }) => ({ context }),
+        onDone: IDLE,
         onError: failInit('Adding models to database failed'),
       },
     },
@@ -268,16 +222,6 @@ export const clientManagerMachine = setup({
       entry: assign({
         isInitialized: false,
       }),
-      on: {
-        init: {
-          target: PLATFORM_CLASSES_INIT,
-          actions: assign({
-            isInitialized: false,
-            initError: undefined,
-            saveError: undefined,
-          }),
-        },
-      },
     },
     [IDLE]: {
       entry: [
@@ -336,14 +280,6 @@ export const clientManagerMachine = setup({
               }
             })
           ],
-        },
-        init: {
-          target: PLATFORM_CLASSES_INIT,
-          actions: assign({
-            isInitialized: false,
-            initError: undefined,
-            saveError: undefined,
-          }),
         },
       },
     },

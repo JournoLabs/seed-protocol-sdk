@@ -45,7 +45,6 @@ const getAppDbReady = async () => {
       return state === 'dbInit' ||
              state === 'saveConfig' ||
              state === 'processSchemaFiles' ||
-             state === 'addModelsToStore' ||
              state === 'addModelsToDb' ||
              state === 'idle'
     }, { timeout: 30000 })

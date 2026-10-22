@@ -1,4 +1,3 @@
-import { EventObject, fromCallback } from 'xstate'
 import { inDefinitionsTransaction, insertModelStubs } from '@/db/write/definitions'
 import { writeModelUids } from '@/db/write/writeModelUids'
 import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
@@ -6,8 +5,7 @@ import { matchEasModelSchemas } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { loadNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { isTestOrSeedDev } from '@/helpers/environment'
-import { ClientManagerEvents } from '@/client/constants'
-import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
+import { ClientManagerContext } from '@/types/machines'
 import debug from 'debug'
 import { withSeedDbLock } from '@/helpers/tabLocks'
 import { createRetryWhenOnline } from '@/helpers/retryWhenOnline'
@@ -32,10 +30,11 @@ export async function ensureModelStubs(modelNames: string[], filesDir: string | 
 let retryModelUidsLookup: (() => Promise<void>) | undefined
 const modelUidsRetry = createRetryWhenOnline(() => void retryModelUidsLookup?.())
 
-export const addModelsToDb = fromCallback<
-  EventObject,
-  FromCallbackInput<ClientManagerContext>
->(({ sendBack, input: { context } }) => {
+/**
+ * Init step: makes sure every model in the context has a row, starts the background EAS lookup of
+ * their schema uids, and loads the nameMatch levels.
+ */
+export async function addModelsToDb(context: ClientManagerContext): Promise<void> {
   const { models } = context
 
   const _addModelsToDb = async () => {
@@ -136,30 +135,15 @@ export const addModelsToDb = fromCallback<
     return hasModelsInDb
   }
 
-  _addModelsToDb()
+  try {
+    await _addModelsToDb()
     // Model.findByModelType reads the nameMatch levels synchronously: have them before init is ready.
-    .then(() =>
-      loadNameMatchLevels().catch((error) => {
-        logger('[client/actors] [addModelsToDb] Could not load nameMatch levels:', error)
-      }),
-    )
-    .then(() => {
-      sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
+    await loadNameMatchLevels().catch((error) => {
+      logger('[client/actors] [addModelsToDb] Could not load nameMatch levels:', error)
     })
-    .catch((error) => {
-      logger('[client/actors] [addModelsToDb] Error:', error)
-      // In test environments, still send success to allow initialization to complete
-      if (isTestOrSeedDev()) {
-        logger('[client/actors] [addModelsToDb] Continuing despite error in test environment')
-        sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
-      } else {
-        sendBack({
-          type: 'error',
-          error: error instanceof Error ? error : new Error(String(error)),
-        })
-      }
-    })
-
-  return () => { }
-})
-
+  } catch (error) {
+    logger('[client/actors] [addModelsToDb] Error:', error)
+    // In test environments, initialization completes anyway
+    if (!isTestOrSeedDev()) throw error
+  }
+}

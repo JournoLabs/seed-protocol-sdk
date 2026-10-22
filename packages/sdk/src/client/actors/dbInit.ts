@@ -1,44 +1,17 @@
-import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
-import { EventObject, fromCallback } from "xstate"
-import { ClientManagerEvents } from "@/client/constants"
+import { ClientManagerContext } from "@/types/machines"
 import { BaseDb } from "@/db/Db/BaseDb"
 import debug from "debug"
 
 const logger = debug('seedSdk:client:actors:dbInit')
 
-export const dbInit = fromCallback<
-EventObject, 
-FromCallbackInput<ClientManagerContext>
->(({sendBack, input: {context}}) => {
-
-  const _dbInit = async () => {
-    const { filesDir, dbConfig } = context
-    if (!filesDir) {
-      throw new Error('filesDir is required')
-    }
-    
-    // Prepare databases - this handles all initialization, migration, and file setup
-    await BaseDb.prepareDb(filesDir, dbConfig)
-
-    // Verify database is ready
-    const appDb = BaseDb.getAppDb()
-    if (!appDb) {
-      throw new Error('Database not available after preparation')
-    }
-    
-    logger('[client/actors] [dbInit] Database prepared and ready')
+/** Init step: opens and migrates the app database (BaseDb.prepareDb). */
+export async function dbInit({ filesDir, dbConfig }: ClientManagerContext): Promise<void> {
+  if (!filesDir) {
+    throw new Error('filesDir is required')
   }
-
-  _dbInit()
-    .then(() => {
-      sendBack({ type: ClientManagerEvents.DB_READY })
-    })
-    .catch((error) => {
-      logger('Error in dbInit:', error)
-      sendBack({ 
-        type: 'error', 
-        error: error instanceof Error ? error : new Error(String(error))
-      })
-    })
-
-})
+  await BaseDb.prepareDb(filesDir, dbConfig)
+  if (!BaseDb.getAppDb()) {
+    throw new Error('Database not available after preparation')
+  }
+  logger('Database prepared and ready')
+}

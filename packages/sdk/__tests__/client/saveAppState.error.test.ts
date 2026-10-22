@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assign, createActor, fromCallback, setup, waitFor } from 'xstate'
+import { assign, createActor, fromCallback, fromPromise, setup, waitFor } from 'xstate'
 import { saveAppState } from '@/client/actors/saveAppState'
 import { clientManagerMachine } from '@/client/clientManagerMachine'
 import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
@@ -25,6 +25,8 @@ const initOptions = {
   },
   addresses: [],
 }
+
+const succeed = () => fromPromise(async () => ({}))
 
 function sendAndForget(type: string, extra?: Record<string, unknown>) {
   return fromCallback(({ sendBack }) => {
@@ -92,13 +94,12 @@ describe('saveAppState failure', () => {
   it('clears isSaving and records saveError so setAddresses can reject immediately', async () => {
     const machine = clientManagerMachine.provide({
       actors: {
-        platformClassesInit: sendAndForget(ClientManagerEvents.PLATFORM_CLASSES_READY),
-        fileSystemInit: sendAndForget(ClientManagerEvents.FILE_SYSTEM_READY),
-        dbInit: sendAndForget(ClientManagerEvents.DB_READY),
-        saveConfig: sendAndForget(ClientManagerEvents.SAVE_CONFIG_SUCCESS),
-        processSchemaFiles: sendAndForget(ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS),
-        addModelsToStore: sendAndForget(ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS),
-        addModelsToDb: sendAndForget(ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS),
+        platformClassesInit: succeed(),
+        fileSystemInit: succeed(),
+        dbInit: succeed(),
+        saveConfig: succeed(),
+        processSchemaFiles: succeed(),
+        addModelsToDb: succeed(),
         saveAppState: sendAndForget(ClientManagerEvents.SAVE_APP_STATE_ERROR, {
           error: new Error('App DB not found'),
         }),
