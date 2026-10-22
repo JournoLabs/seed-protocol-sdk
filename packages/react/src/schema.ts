@@ -52,11 +52,12 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
       setSchema(schemaInstance)
 
       const service = schemaInstance.getService()
+      // The schema's status changes reach its actor's subscribers (Schema status is mirrored there)
       const apply = (snapshot: SchemaSnapshot) => {
-        if (snapshot.value === 'idle') {
+        if (schemaInstance.status === 'ready') {
           flushSync(() => setIsLoading(false))
           setError(null)
-        } else if (snapshot.value === 'error') {
+        } else if (schemaInstance.status === 'error') {
           // A failed load used to report isLoading: true, error: null forever.
           const err = snapshot.context._loadingError?.error
           setIsLoading(false)

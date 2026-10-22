@@ -63,10 +63,6 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
-// Models writing their row or creating their properties, keyed by actor. Their own snapshot ends
-// the write, so the live query doesn't look their row up on its timer meanwhile.
-const modelWritesInFlight = new WeakSet<object>()
-
 /** The models row with this file id, if one exists. */
 const findModelRowId = async (modelFileId: string): Promise<number | undefined> => {
   const db = BaseDb.getAppDb()
@@ -208,37 +204,32 @@ export class Model {
     if (context._validationErrors?.length) throw new Error('the model failed validation')
     if (!context.id) throw new Error('it has no id')
 
-    modelWritesInFlight.add(service)
-    try {
-      let dbId = options.adoptExistingRow ? await findModelRowId(context.id) : undefined
-      if (dbId === undefined) {
-        const schemaId = await findSchemaRowId(options.schemaInstance, options.schemaName)
-        if (!schemaId) throw new Error(`its schema "${options.schemaName}" was not found in the database`)
-        ensureRunning()
-        const current = service.getSnapshot().context
-        dbId = await saveDefinition({
-          type: 'model',
-          modelFileId: current.id!,
-          modelName: current.modelName,
-          schemaId,
-          properties: propertiesToWrite(instance),
-        })
-      } else {
-        logger(`Model "${context.modelName}" adopts model row ${dbId} written by its schema import`)
-      }
+    let dbId = options.adoptExistingRow ? await findModelRowId(context.id) : undefined
+    if (dbId === undefined) {
+      const schemaId = await findSchemaRowId(options.schemaInstance, options.schemaName)
+      if (!schemaId) throw new Error(`its schema "${options.schemaName}" was not found in the database`)
       ensureRunning()
-      service.send({ type: 'updateContext', _dbId: dbId })
+      const current = service.getSnapshot().context
+      dbId = await saveDefinition({
+        type: 'model',
+        modelFileId: current.id!,
+        modelName: current.modelName,
+        schemaId,
+        properties: propertiesToWrite(instance),
+      })
+    } else {
+      logger(`Model "${context.modelName}" adopts model row ${dbId} written by its schema import`)
+    }
+    ensureRunning()
+    service.send({ type: 'updateContext', _dbId: dbId })
 
-      const definitions = service.getSnapshot().context._pendingPropertyDefinitions
-      if (definitions && Object.keys(definitions).length > 0) {
-        await createModelProperties(instance, definitions)
-        ensureRunning()
-        service.send({ type: 'updateContext', _pendingPropertyDefinitions: undefined })
-        // Node has no live query to pick up the new property rows
-        await instance._refreshPropertiesFromDb()
-      }
-    } finally {
-      modelWritesInFlight.delete(service)
+    const definitions = service.getSnapshot().context._pendingPropertyDefinitions
+    if (definitions && Object.keys(definitions).length > 0) {
+      await createModelProperties(instance, definitions)
+      ensureRunning()
+      service.send({ type: 'updateContext', _pendingPropertyDefinitions: undefined })
+      // Node has no live query to pick up the new property rows
+      await instance._refreshPropertiesFromDb()
     }
   }
 
@@ -552,43 +543,6 @@ export class Model {
    */
   static getById(modelFileId: string): Model | undefined {
     return this.cache.hold(modelFileId)
-  }
-
-  /**
-   * Models their schema holds, by modelFileId. A schema's first load of a model takes one hold for
-   * the schema, and the schema's last unload releases it (releaseSchemaHolds), so a user's unload
-   * can't drop a model out of `schema.models` while the schema is loaded.
-   */
-  private static schemaHeldModelIds = new Set<string>()
-
-  /**
-   * @internal For a Schema loading its models: true when this load should take the schema's hold
-   * on the model (pass no `hold` option), false when the schema already holds it (pass
-   * `hold: false`). After a true, call `dropSchemaHold` if the load returns no model.
-   */
-  static takeSchemaHold(modelFileId: string | undefined): boolean {
-    if (!modelFileId || this.schemaHeldModelIds.has(modelFileId)) return false
-    this.schemaHeldModelIds.add(modelFileId)
-    return true
-  }
-
-  /** @internal The load `takeSchemaHold` approved found no model: there is no hold to release. */
-  static dropSchemaHold(modelFileId: string): void {
-    this.schemaHeldModelIds.delete(modelFileId)
-  }
-
-  /** @internal A Schema's last unload: releases its hold on each of its models. */
-  static releaseSchemaHolds(schemaName: string): void {
-    for (const modelFileId of [...this.schemaHeldModelIds]) {
-      const model = this.peek(modelFileId)
-      if (!model) {
-        this.schemaHeldModelIds.delete(modelFileId)
-        continue
-      }
-      if (model._getSnapshotContext().schemaName !== schemaName) continue
-      this.schemaHeldModelIds.delete(modelFileId)
-      model.unload()
-    }
   }
 
   /**
@@ -1291,8 +1245,7 @@ export class Model {
     const evicted = evictEntities(this.cache, (model) => model._getSnapshotContext().schemaName === schemaName)
     const evictedNames: string[] = []
     for (const model of evicted) {
-      const { id, modelName } = model._getSnapshotContext()
-      if (id) this.schemaHeldModelIds.delete(id)
+      const { modelName } = model._getSnapshotContext()
       if (modelName) evictedNames.push(modelName)
     }
     return evictedNames
@@ -1316,7 +1269,6 @@ export class Model {
 
     // A lookup by id already reading the row must not re-cache the model
     const finishEviction = evictionLog.evict(modelFileId ? [`model:${modelFileId}`] : [])
-    if (modelFileId) Model.schemaHeldModelIds.delete(modelFileId)
 
     try {
       await destroyEntity(this, Model.cache, async () => {
@@ -1470,8 +1422,6 @@ export class Model {
           schemaFileId: row.schemaFileId,
         }))
       },
-      // The model writes its row while itself idle; wait for that write to end.
-      canRetryEntityId: (model) => !modelWritesInFlight.has(model.getService()),
       loggerName: 'seedSdk:model:liveQuery',
     })
   }

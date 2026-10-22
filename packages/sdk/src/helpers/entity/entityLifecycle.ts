@@ -60,6 +60,10 @@ export function setEntityStatus(instance: ActorBacked, status: EntityStatus, err
   if (lifecycle.status === status) return
   lifecycle.status = status
   if (status !== 'loading') lifecycle.settle()
+  // Mirrored into the actor's context, so what subscribes to the actor (React hooks) sees it change.
+  // Internal key: no machine revalidates on it.
+  const actor = instance.getService() as Actor & { getSnapshot?(): { status: string } }
+  if (actor.getSnapshot?.().status === 'active') actor.send?.({ type: 'updateContext', _status: status } as never)
   for (const listener of [...lifecycle.listeners]) listener(status)
 }
 

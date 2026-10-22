@@ -1,8 +1,8 @@
 import { applyContextUpdate, isInternalUpdate } from '@/helpers/entity/contextUpdate'
-import { assign, fromPromise, setup } from 'xstate'
+import { assign, setup } from 'xstate'
 import { SchemaFileFormat } from '@/types/import'
 import { ValidationError } from '@/Schema/validation'
-import { loadOrCreateSchema, type LoadedSchema } from '../loadOrCreateSchema'
+import type { LoadedSchema } from '../loadOrCreateSchema'
 import { SchemaValidationService } from './validation/SchemaValidationService'
 
 const validationService = new SchemaValidationService()
@@ -66,14 +66,9 @@ export const schemaMachine = setup({
       | { type: 'markAsDraft'; propertyKey: string }
       | { type: 'clearDraft'; _dbUpdatedAt?: number; _dbVersion?: number }
       | { type: 'validateSchema' }
-      | { type: 'reloadFromDb' }
+      | { type: 'loaded'; output: LoadedSchema }
       | { type: 'destroyStarted' }
       | { type: 'destroyError'; error: unknown },
-  },
-  actors: {
-    loadOrCreateSchema: fromPromise<LoadedSchema, { schemaName: string }>(({ input }) =>
-      loadOrCreateSchema(input.schemaName),
-    ),
   },
   actions: {
     // Validation is synchronous: the result is in the context as soon as the event is handled
@@ -94,7 +89,7 @@ export const schemaMachine = setup({
   },
 }).createMachine({
   id: 'schema',
-  initial: 'loading',
+  initial: 'idle',
   context: ({ input }) => ({
     schemaName: input.schemaName,
     _isDraft: false,
@@ -154,6 +149,55 @@ export const schemaMachine = setup({
         return newContext
       }),
     },
+    // The load runs outside the machine (Schema.load); its result arrives here
+    loaded: [
+      {
+        // Created at runtime: what code already set wins over the new record's defaults
+        guard: ({ event }) => event.output.created,
+        actions: assign(({ context, event }) => {
+          const { schema, schemaRecord, modelIds } = event.output
+          return {
+            _schemaRecord: schemaRecord,
+            id: schema.id, // schemaFileId (string)
+            _dbId: schemaRecord?.id, // Database integer ID
+            $schema: context.$schema ?? schema.$schema,
+            version: context.version ?? schema.version,
+            metadata: context.metadata ?? schema.metadata,
+            enums: context.enums ?? schema.enums,
+            migrations: context.migrations ?? schema.migrations,
+            nameMatch: context.nameMatch ?? schema.nameMatch,
+            models: context.models ?? schema.models,
+            _liveQueryModelIds: modelIds,
+          }
+        }),
+      },
+      {
+        actions: assign(({ event }) => {
+          const { schema, schemaRecord, modelIds, loadedAt, dbVersion, dbUpdatedAt } = event.output
+          return {
+            schemaName: schema.metadata.name,
+            $schema: schema.$schema,
+            version: schema.version,
+            metadata: schema.metadata,
+            models: schema.models,
+            enums: schema.enums,
+            migrations: schema.migrations,
+            nameMatch: schema.nameMatch,
+            _isDraft: false,
+            _isEdited: schemaRecord?.isEdited ?? false,
+            _editedProperties: new Set<string>(),
+            _validationErrors: undefined,
+            id: schema.id, // schemaFileId (string)
+            _dbId: schemaRecord?.id, // Database integer ID
+            _loadedAt: loadedAt,
+            _dbVersion: dbVersion,
+            _dbUpdatedAt: dbUpdatedAt,
+            _liveQueryModelIds: modelIds,
+            _schemaRecord: schemaRecord,
+          }
+        }),
+      },
+    ],
     destroyStarted: {
       actions: assign({ _destroyError: null }),
     },
@@ -167,78 +211,6 @@ export const schemaMachine = setup({
     },
   },
   states: {
-    loading: {
-      invoke: {
-        src: 'loadOrCreateSchema',
-        input: ({ context }) => ({ schemaName: context.schemaName }),
-        onDone: [
-          {
-            // Created at runtime: what code already set wins over the new record's defaults
-            guard: ({ event }) => event.output.created,
-            target: 'idle',
-            actions: assign(({ context, event }) => {
-              const { schema, schemaRecord, modelIds } = event.output
-              return {
-                _schemaRecord: schemaRecord,
-                id: schema.id, // schemaFileId (string)
-                _dbId: schemaRecord?.id, // Database integer ID
-                $schema: context.$schema ?? schema.$schema,
-                version: context.version ?? schema.version,
-                metadata: context.metadata ?? schema.metadata,
-                enums: context.enums ?? schema.enums,
-                migrations: context.migrations ?? schema.migrations,
-                nameMatch: context.nameMatch ?? schema.nameMatch,
-                models: context.models ?? schema.models,
-                _liveQueryModelIds: modelIds,
-              }
-            }),
-          },
-          {
-            target: 'idle',
-            actions: assign(({ event }) => {
-              const { schema, schemaRecord, modelIds, loadedAt, dbVersion, dbUpdatedAt } = event.output
-              return {
-                schemaName: schema.metadata.name,
-                $schema: schema.$schema,
-                version: schema.version,
-                metadata: schema.metadata,
-                models: schema.models,
-                enums: schema.enums,
-                migrations: schema.migrations,
-                nameMatch: schema.nameMatch,
-                _isDraft: false,
-                _isEdited: schemaRecord?.isEdited ?? false,
-                _editedProperties: new Set<string>(),
-                _validationErrors: undefined,
-                id: schema.id, // schemaFileId (string)
-                _dbId: schemaRecord?.id, // Database integer ID
-                _loadedAt: loadedAt,
-                _dbVersion: dbVersion,
-                _dbUpdatedAt: dbUpdatedAt,
-                _liveQueryModelIds: modelIds,
-                _schemaRecord: schemaRecord,
-              }
-            }),
-          },
-        ],
-        onError: {
-          target: 'error',
-          actions: assign({
-            _loadingError: ({ event }) => ({
-              stage: 'loading',
-              error: event.error instanceof Error ? event.error : new Error(String(event.error)),
-            }),
-          }),
-        },
-      },
-    },
-    idle: {
-      on: {
-        reloadFromDb: {
-          target: 'loading',
-        },
-      },
-    },
-    error: {},
+    idle: {},
   },
 })

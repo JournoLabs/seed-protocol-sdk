@@ -191,15 +191,14 @@ export async function createModelsForSchemaFile(file: SchemaFileFormat): Promise
   const result: ModelDefinitions = {}
   for (const [modelName, model] of Object.entries(file.models)) {
     const modelFileId = model.id
-    // The schema holds its models once (Model.takeSchemaHold); a model it already holds takes no more.
-    const schemaHold = Model.takeSchemaHold(modelFileId)
+    // No hold: a loaded Schema holds its models (loadOrCreateSchema)
     result[modelName] = Model.create(modelName, file.metadata.name, {
       modelFileId,
       id: modelFileId,
       properties: definitions.get(modelName) ?? {},
       waitForReady: false,
       persistedBy: Promise.resolve(),
-      ...(!schemaHold && { hold: false as const }),
+      hold: false,
     }) as unknown as ModelClassType
   }
   return result

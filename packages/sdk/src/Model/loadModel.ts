@@ -255,23 +255,8 @@ export async function loadModel(context: ModelMachineContext, isStopped: () => b
       // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
       if (isStopped()) throw new Error('the model was unloaded while it loaded')
       const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-      const schemaSnapshot = schema.getService().getSnapshot()
-      
-      // Wait for schema to load if it's still loading
-      if (schemaSnapshot.value === 'loading') {
-        await new Promise<void>((resolve, reject) => {
-          const subscription = schema.getService().subscribe((snapshot) => {
-            if (snapshot.value === 'idle' || snapshot.value === 'error') {
-              subscription.unsubscribe()
-              if (snapshot.value === 'error') {
-                reject(new Error('Schema failed to load'))
-              } else {
-                resolve()
-              }
-            }
-          })
-        })
-      }
+      // A schema still loading: its models are known once it has loaded
+      await schema.waitForReady()
 
       const schemaContext = schema.getService().getSnapshot().context
       // Check by name first; also check by schemaFileId so we recognize the schema model even when context is keyed differently or not yet updated

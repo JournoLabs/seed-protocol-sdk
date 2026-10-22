@@ -118,7 +118,7 @@ function UseSchemaTest({ schemaIdentifier }: { schemaIdentifier: string | null |
       return
     }
 
-    // Wait for schema to be fully loaded (idle state)
+    // Wait for schema to be fully loaded (status ready)
     // Note: schema is wrapped in a Proxy (via createReactiveProxy) which preserves
     // all methods at runtime via Reflect.get, but TypeScript's Proxy type system
     // doesn't automatically preserve method signatures. The getService method exists
@@ -130,7 +130,7 @@ function UseSchemaTest({ schemaIdentifier }: { schemaIdentifier: string | null |
     // Update models count initially
     setModelsCount(schema.models?.length || 0)
     
-    if (snapshot.value === 'idle') {
+    if ((schema as any).status === 'ready') {
       setStatus('loaded')
     }
 
@@ -138,7 +138,7 @@ function UseSchemaTest({ schemaIdentifier }: { schemaIdentifier: string | null |
     // Also subscribe to context changes to detect when models are added via liveQuery
     const subscription = service.subscribe((snapshot: SnapshotFrom<typeof schemaMachine>) => {
       console.log('snapshot.value:', snapshot.value)
-      if (snapshot.value === 'idle') {
+      if ((schema as any).status === 'ready') {
         setStatus('loaded')
       }
       // Update models count whenever context changes (liveQuery updates _liveQueryModelIds)
@@ -151,7 +151,7 @@ function UseSchemaTest({ schemaIdentifier }: { schemaIdentifier: string | null |
     // Check state immediately after subscribing (in case subscription didn't fire immediately)
     const currentSnapshot = service.getSnapshot()
     console.log('[UseSchemaTest] currentSnapshot.value:', currentSnapshot.value)
-    if (currentSnapshot.value === 'idle') {
+    if ((schema as any).status === 'ready') {
       setStatus('loaded')
     }
     
@@ -210,7 +210,7 @@ function UseSchemasTest() {
 
   const allSchemasIdle =
     (schemas?.length ?? 0) > 0 &&
-    schemas!.every((s) => s.getService().getSnapshot().value === 'idle')
+    schemas!.every((s) => s.status === 'ready')
 
   return (
     <div data-testid="use-schemas-test">
@@ -347,18 +347,18 @@ function SchemaModelsListTest({ schemaIdentifier }: { schemaIdentifier: string |
     }
     const service = (schema as any).getService()
     const snapshot = service.getSnapshot()
-    if (snapshot.value === 'idle') {
+    if ((schema as any).status === 'ready') {
       setStatus('loaded')
       setModels((schema as any).models || [])
     }
     const subscription = service.subscribe((snapshot: SnapshotFrom<typeof schemaMachine>) => {
-      if (snapshot.value === 'idle') {
+      if ((schema as any).status === 'ready') {
         setStatus('loaded')
         // Update models when schema context changes (e.g. liveQuery adds new models)
         setModels((schema as any).models || [])
       }
     })
-    if (service.getSnapshot().value === 'idle') {
+    if ((schema as any).status === 'ready') {
       setStatus('loaded')
       setModels((schema as any).models || [])
     }
@@ -1234,7 +1234,7 @@ describe(
   describe('useCreateSchema loading state', () => {
     it('clears isLoading when create returns an instance that is already loaded', async () => {
       const loaded = Schema.create('Test Schema 1', { waitForReady: false })
-      await waitUntilOrThrow(() => loaded.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+      await waitUntilOrThrow(() => loaded.status === 'ready', 'the schema to be ready')
 
       const { result } = renderHook(() => useCreateSchema())
       let created: Schema | undefined
@@ -1265,13 +1265,12 @@ describe(
 
   describe('useSchema cache hold', () => {
     const refCountByName = (name: string): number =>
-      (Schema as unknown as { instanceCacheByName: Map<string, { refCount: number }> })
-        .instanceCacheByName.get(name)?.refCount ?? 0
+      (Schema.cache.peek(name) && Schema.cache.entryOf(Schema.cache.peek(name)!)?.refCount) || 0
 
     it('releases its hold on the cached schema on unmount', async () => {
       // Hold the schema here so the cache entry outlives the hook and its count stays readable.
       const held = Schema.create('Test Schema 1', { waitForReady: false })
-      await waitUntilOrThrow(() => held.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+      await waitUntilOrThrow(() => held.status === 'ready', 'the schema to be ready')
       const before = refCountByName('Test Schema 1')
 
       const { result, unmount } = renderHook(() => useSchema('Test Schema 1'))
@@ -1284,7 +1283,7 @@ describe(
 
     it('releases the previous schema when the identifier changes', async () => {
       const held = Schema.create('Test Schema 1', { waitForReady: false })
-      await waitUntilOrThrow(() => held.getService().getSnapshot().value === 'idle', 'the schema to be idle')
+      await waitUntilOrThrow(() => held.status === 'ready', 'the schema to be ready')
       const before = refCountByName('Test Schema 1')
 
       const { result, rerender, unmount } = renderHook(
