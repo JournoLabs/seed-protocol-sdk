@@ -1,9 +1,10 @@
-import { assign, setup } from 'xstate'
+import { assign, fromPromise, setup } from 'xstate'
 import { SchemaFileFormat } from '@/types/import'
-import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
-import { checkExistingSchema } from './actors/checkExistingSchema'
-import { writeSchemaToDb } from './actors/writeSchemaToDb'
+import { loadOrCreateSchema, type LoadedSchema } from '../loadOrCreateSchema'
+import { SchemaValidationService } from './validation/SchemaValidationService'
+
+const validationService = new SchemaValidationService()
 
 export type SchemaMachineContext = {
   schemaName: string
@@ -49,7 +50,6 @@ export type SchemaMachineContext = {
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
   // Store model IDs from liveQuery for reactive updates
   _liveQueryModelIds?: string[]
-  _loadingStage?: string  // Current loading stage, for debugging
   _loadingError?: { stage: string; error: Error }  // Why loading failed
   _schemaRecord?: any  // Schema database record
   // Destroy failure from the last destroy() (read by destroy hooks)
@@ -65,28 +65,31 @@ export const schemaMachine = setup({
       | { type: 'markAsDraft'; propertyKey: string }
       | { type: 'clearDraft'; _dbUpdatedAt?: number; _dbVersion?: number }
       | { type: 'validateSchema' }
-      | { type: 'validationSuccess'; errors: ValidationError[] }
-      | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      // Staged loading events
-      | { type: 'schemaFound'; schema: SchemaFileFormat; schemaRecord: any; modelIds?: string[]; loadedAt?: number; dbVersion?: number; dbUpdatedAt?: number }
-      | { type: 'schemaNotFound' }
-      | { type: 'loadError'; error: Error }
-      | { type: 'schemaWritten'; schemaRecord: any; schema: SchemaFileFormat; modelIds?: string[] }
-      | { type: 'writeError'; error: Error }
       | { type: 'destroyStarted' }
       | { type: 'destroyError'; error: unknown },
   },
   actors: {
-    validateSchema,
-    // Staged loading actors
-    checkExistingSchema,
-    writeSchemaToDb,
+    loadOrCreateSchema: fromPromise<LoadedSchema, { schemaName: string }>(({ input }) =>
+      loadOrCreateSchema(input.schemaName),
+    ),
   },
-  guards: {
-    isSchemaValid: ({ context }) => {
-      return !context._validationErrors || context._validationErrors.length === 0
-    },
+  actions: {
+    // Validation is synchronous: the result is in the context as soon as the event is handled
+    validate: assign(({ context }) => {
+      try {
+        return { _validationErrors: validationService.validateSchema(context).errors }
+      } catch (error) {
+        return {
+          _validationErrors: [{
+            field: 'schema',
+            message: error instanceof Error ? error.message : 'Unknown validation error',
+            code: 'validation_exception',
+            severity: 'error' as const,
+          }],
+        }
+      }
+    }),
   },
 }).createMachine({
   id: 'schema',
@@ -100,14 +103,8 @@ export const schemaMachine = setup({
   }),
   on: {
     updateContext: [{
-      actions: assign(({ context, event }) => {
+      actions: [assign(({ context, event }) => {
         const newContext = Object.assign({}, context)
-
-        // Check if this is only updating internal fields
-        const onlyInternalFields = Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
-
         for (let i = 0; i < Object.keys(event).length; i++) {
           const key = Object.keys(event)[i]
           if (key === 'type') {
@@ -117,23 +114,14 @@ export const schemaMachine = setup({
             ;(newContext as any)[key] = event[key]
           }
         }
-        // Clear validation errors on context update (will be re-validated if needed)
-        newContext._validationErrors = undefined
-        
-        // Trigger validation if updating non-internal fields
-        if (!onlyInternalFields) {
-          // Validation will be triggered by the guard below
-        }
-        
         return newContext
-      }),
-      // Only trigger validation if we're updating non-internal fields
+      }), 'validate'],
+      // Only validate when updating non-internal fields
       guard: ({ event }: { event: any }) => {
         return !Object.keys(event).every((key: string) => {
           return key === 'type' || key.startsWith('_')
         })
       },
-      target: '.validating',
     }, {
       // Internal-only updates (e.g. the _dbUpdatedAt refresh after a draft save) are applied
       // without re-validating. Dropping them made the next save's conflict check compare
@@ -149,19 +137,7 @@ export const schemaMachine = setup({
       }),
     }],
     validateSchema: {
-      target: '.validating',
-    },
-    validationSuccess: {
-      actions: assign(({ context }) => ({
-        ...context,
-        _validationErrors: [],
-      })),
-    },
-    validationError: {
-      actions: assign(({ context, event }) => ({
-        ...context,
-        _validationErrors: event.errors,
-      })),
+      actions: 'validate',
     },
     markAsDraft: {
       actions: assign(({ context, event }) => ({
@@ -215,131 +191,75 @@ export const schemaMachine = setup({
   },
   states: {
     loading: {
-      initial: 'checkingExisting',
-      states: {
-        // Stage 0: Check for existing schema
-        checkingExisting: {
-          invoke: {
-            src: 'checkExistingSchema',
-            input: ({ context }) => ({ context }),
-          },
-          on: {
-            schemaFound: {
-              target: '#schema.idle',
-              actions: assign(({ event }) => {
-                return {
-                  schemaName: event.schema.metadata.name,
-                  $schema: event.schema.$schema,
-                  version: event.schema.version,
-                  metadata: event.schema.metadata,
-                  models: event.schema.models,
-                  enums: event.schema.enums,
-                  migrations: event.schema.migrations,
-                  nameMatch: event.schema.nameMatch,
-                  _isDraft: false,
-                  _isEdited: event.schemaRecord?.isEdited ?? false,
-                  _editedProperties: new Set<string>(),
-                  _validationErrors: undefined,
-                  id: event.schema.id, // schemaFileId (string)
-                  _dbId: event.schemaRecord?.id, // Database integer ID
-                  _loadedAt: event.loadedAt,
-                  _dbVersion: event.dbVersion,
-                  _dbUpdatedAt: event.dbUpdatedAt,
-                  _liveQueryModelIds: event.modelIds || [],
-                  _schemaRecord: event.schemaRecord,
-                }
-              }),
-            },
-            schemaNotFound: {
-              target: 'writingSchema',
-            },
-            loadError: {
-              target: '#schema.error',
-              actions: assign({
-                _loadingError: ({ event }) => ({ stage: 'checkingExisting', error: event.error }),
-              }),
-            },
-          },
-        },
-        // No row or file of this name: create it
-        writingSchema: {
-          entry: assign({
-            _loadingStage: 'writingSchema',
-          }),
-          invoke: {
-            src: 'writeSchemaToDb',
-            input: ({ context }) => ({
-              schemaName: context.schemaName,
+      invoke: {
+        src: 'loadOrCreateSchema',
+        input: ({ context }) => ({ schemaName: context.schemaName }),
+        onDone: [
+          {
+            // Created at runtime: what code already set wins over the new record's defaults
+            guard: ({ event }) => event.output.created,
+            target: 'idle',
+            actions: assign(({ context, event }) => {
+              const { schema, schemaRecord, modelIds } = event.output
+              return {
+                _schemaRecord: schemaRecord,
+                id: schema.id, // schemaFileId (string)
+                _dbId: schemaRecord?.id, // Database integer ID
+                $schema: context.$schema ?? schema.$schema,
+                version: context.version ?? schema.version,
+                metadata: context.metadata ?? schema.metadata,
+                enums: context.enums ?? schema.enums,
+                migrations: context.migrations ?? schema.migrations,
+                nameMatch: context.nameMatch ?? schema.nameMatch,
+                models: context.models ?? schema.models,
+                _liveQueryModelIds: modelIds,
+              }
             }),
           },
-          on: {
-            schemaWritten: {
-              target: '#schema.idle',
-              actions: assign({
-                _schemaRecord: ({ event }) => event.schemaRecord,
-                id: ({ event }) => event.schema.id, // schemaFileId (string)
-                _dbId: ({ event }) => event.schemaRecord?.id, // Database integer ID
-                // A schema created in code has these only in the written record; without them
-                // validation (and so saveNewVersion) failed with "Schema metadata is required".
-                $schema: ({ context, event }) => context.$schema ?? event.schema.$schema,
-                version: ({ context, event }) => context.version ?? event.schema.version,
-                metadata: ({ context, event }) => context.metadata ?? event.schema.metadata,
-                enums: ({ context, event }) => context.enums ?? event.schema.enums,
-                migrations: ({ context, event }) => context.migrations ?? event.schema.migrations,
-                nameMatch: ({ context, event }) => context.nameMatch ?? event.schema.nameMatch,
-                models: ({ context, event }) => context.models ?? event.schema.models,
-                _liveQueryModelIds: ({ event }) => event.modelIds ?? [],
-                _loadingStage: undefined,
-              }),
-            },
-            writeError: {
-              target: '#schema.error',
-              actions: assign({
-                _loadingError: ({ event }) => ({
-                  stage: 'writingSchema',
-                  error: event.error,
-                }),
-              }),
-            },
+          {
+            target: 'idle',
+            actions: assign(({ event }) => {
+              const { schema, schemaRecord, modelIds, loadedAt, dbVersion, dbUpdatedAt } = event.output
+              return {
+                schemaName: schema.metadata.name,
+                $schema: schema.$schema,
+                version: schema.version,
+                metadata: schema.metadata,
+                models: schema.models,
+                enums: schema.enums,
+                migrations: schema.migrations,
+                nameMatch: schema.nameMatch,
+                _isDraft: false,
+                _isEdited: schemaRecord?.isEdited ?? false,
+                _editedProperties: new Set<string>(),
+                _validationErrors: undefined,
+                id: schema.id, // schemaFileId (string)
+                _dbId: schemaRecord?.id, // Database integer ID
+                _loadedAt: loadedAt,
+                _dbVersion: dbVersion,
+                _dbUpdatedAt: dbUpdatedAt,
+                _liveQueryModelIds: modelIds,
+                _schemaRecord: schemaRecord,
+              }
+            }),
           },
+        ],
+        onError: {
+          target: 'error',
+          actions: assign({
+            _loadingError: ({ event }) => ({
+              stage: 'loading',
+              error: event.error instanceof Error ? event.error : new Error(String(event.error)),
+            }),
+          }),
         },
       },
     },
     idle: {
       on: {
-        validateSchema: {
-          target: 'validating',
-        },
         reloadFromDb: {
           target: 'loading',
         },
-      },
-      // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
-      // (updateContext) or on request (validateSchema). Re-entering while errors exist would loop
-      // forever on a schema that is still invalid.
-    },
-    validating: {
-      on: {
-        // These state-level handlers take precedence over the root ones, so they must store the result
-        // themselves.
-        validationSuccess: {
-          target: 'idle',
-          actions: assign(({ context }) => ({
-            ...context,
-            _validationErrors: [],
-          })),
-        },
-        validationError: {
-          target: 'idle',
-          actions: assign(({ context, event }) => ({
-            ...context,
-            _validationErrors: event.errors,
-          })),
-        },
-      },
-      invoke: {
-        src: 'validateSchema',
-        input: ({ context }) => ({ context }),
       },
     },
     error: {},

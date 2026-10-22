@@ -1216,49 +1216,16 @@ testDescribe('Schema Integration Tests', () => {
       
       const schema = Schema.create(schemaName, { waitForReady: false })
       
-      // Status should be 'loading' or a nested loading state initially
-      // Possible nested states: checkingExisting, writingSchema
-      const initialStatus = schema.status
-      const isInitialLoadingState = 
-        (typeof initialStatus === 'object' && initialStatus !== null && 'loading' in initialStatus) ||
-        initialStatus === 'idle' // Could already be idle if loading was very fast
-      expect(isInitialLoadingState).toBe(true)
+      // 'loading' until the load finishes, unless it already has
+      expect(['loading', 'idle']).toContain(schema.status)
       
       await waitForSchemaIdle(schema)
-      
-      // Status should be 'idle' after loading completes
       expect(schema.status).toBe('idle')
       
-      // Test that status can transition to 'validating' state
-      // Trigger validation to test 'validating' state
-      const validatePromise = schema.validate()
-      
-      // Status might be 'validating' or 'idle' (if validation completes quickly)
-      const statusAfterValidate = schema.status
-      const isValidatingOrIdle = statusAfterValidate === 'validating' || statusAfterValidate === 'idle'
-      expect(isValidatingOrIdle).toBe(true)
-      
-      // Wait for validation to complete
-      await validatePromise
-      
-      // After validation, should be back to 'idle'
+      // Validation is synchronous: the schema stays idle
+      await schema.validate()
       expect(schema.status).toBe('idle')
-      
-      // Verify status reflects the actual machine state
-      const snapshot = schema.getService().getSnapshot()
-      expect(schema.status).toBe(snapshot.value)
-      
-      // Status can be one of: 'idle', 'loading', 'validating', 'error'
-      // or nested states like { loading: 'checkingExisting' }, etc.
-      const finalStatus = schema.status
-      const validTopLevelStates = ['idle', 'loading', 'validating', 'error']
-      const isTopLevelState = typeof finalStatus === 'string' && validTopLevelStates.includes(finalStatus)
-      const isNestedState = typeof finalStatus === 'object' && finalStatus !== null && 
-        (('loading' in finalStatus) || ('validating' in finalStatus))
-      
-      // At this point, should be 'idle' (top-level state)
-      expect(finalStatus).toBe('idle')
-      expect(isTopLevelState).toBe(true)
+      expect(schema.status).toBe(schema.getService().getSnapshot().value)
     })
   })
 

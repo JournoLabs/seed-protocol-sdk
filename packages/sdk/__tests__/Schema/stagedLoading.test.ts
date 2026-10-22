@@ -137,40 +137,4 @@ describe('Staged Schema Loading', () => {
     
     actor.stop()
   })
-
-  it('should track loading stage progress', async () => {
-    const schemaName = `test-progress-${Date.now()}`
-    const actor = createActor(schemaMachine, {
-      input: { schemaName },
-    })
-
-    actor.start()
-
-    const stages: string[] = []
-
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        resolve() // Timeout after 10 seconds
-      }, 10000)
-
-      const subscription = actor.subscribe((snapshot) => {
-        if (snapshot.context._loadingStage) {
-          stages.push(snapshot.context._loadingStage)
-        }
-        
-        if (snapshot.value === 'idle' || snapshot.value === 'error') {
-          clearTimeout(timeout)
-          subscription.unsubscribe()
-          resolve()
-        }
-      })
-    })
-
-    // Should have progressed through multiple stages
-    if (stages.length > 0) {
-      expect(stages).toContain('writingSchema')
-    }
-    
-    actor.stop()
-  })
 })
