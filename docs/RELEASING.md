@@ -231,6 +231,10 @@ sections. To bring it in, a maintainer with publish rights and 2FA:
    for each configuration.
 3. Moves it from `AWAITING_FIRST_PUBLISH` into `PUBLISH_ORDER` and adds it to the loop above.
 
+**Warning:** when a published package depends on the new one, do this before the next release.
+`@seedprotocol/sdk` depends on `@seedprotocol/archive` (in `AWAITING_FIRST_PUBLISH` since
+2026-10-22), so an SDK release published before `archive` is on npm can't be installed.
+
 ## Troubleshooting
 
 - **"Tag vX.Y.Z does not match the committed version":** bump with `new-version`,

@@ -26,6 +26,7 @@ const SYNC_PACKAGES = [
   'vite',
   'mapping',
   'next',
+  'archive',
   // Private, but published manifests list it in devDependencies (workspace refs become this version).
   'bundler-core',
 ]

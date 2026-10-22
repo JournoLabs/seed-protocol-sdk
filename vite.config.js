@@ -62,6 +62,8 @@ const workspaceSourceAliases = (platform) => {
     replacement: src(path),
   })
   return [
+    exact('@seedprotocol/archive/node', 'archive/src/node/index.ts'),
+    exact('@seedprotocol/archive', 'archive/src/index.ts'),
     exact('@seedprotocol/eas/node', 'eas/src/node/index.ts'),
     exact('@seedprotocol/eas', 'eas/src/index.ts'),
     exact('@seedprotocol/arweave/node', 'arweave/src/node/index.ts'),
@@ -167,6 +169,8 @@ export default defineConfig({
             'client/schemaFileInit.test.ts',
             'helpers/easDirect.test.ts',
             'feed/**',
+            // Node-only: writes bags to disk and runs bagit.py; runs in NodeJS
+            'archive/**',
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],

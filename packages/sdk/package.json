@@ -64,6 +64,7 @@
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
     "@libsql/client": "^0.15.15",
     "@noble/hashes": "^1.8.0",
+    "@seedprotocol/archive": "workspace:*",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
     "@seedprotocol/query": "workspace:*",

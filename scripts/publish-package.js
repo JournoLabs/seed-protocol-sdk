@@ -7,7 +7,7 @@
  *   node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] all
  *   node scripts/publish-package.js [-f] [-y]          # same as "all" (used by bun run publish:all)
  *
- * Packages: eas, arweave, vite, query, sdk, feed, feed-hyper, gateway-hyper, react, publish, mapping
+ * Packages: archive, eas, arweave, vite, query, sdk, feed, feed-hyper, gateway-hyper, react, publish, mapping
  *
  * Single-package mode:
  * - If publishing anything except 'sdk' / lean packages, checks that @seedprotocol/sdk@<version> is published
@@ -47,7 +47,7 @@ const rootDir = join(__dirname, '..')
 
 // AWAITING_FIRST_PUBLISH packages can only be published one at a time, by hand.
 const VALID_PACKAGES = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
-const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'next']
+const LEAN_PACKAGES = ['archive', 'eas', 'arweave', 'vite', 'next']
 
 /** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
 const npmPublishOptions = { tag: null, provenance: false }

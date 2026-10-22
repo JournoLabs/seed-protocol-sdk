@@ -1,0 +1,75 @@
+{
+  "name": "@seedprotocol/archive",
+  "version": "0.7.8",
+  "description": "Standards-based archive packaging for Seed Protocol items: BagIt (RFC 8493) bags with SHA-256/SHA-512 manifests, Dublin Core and PREMIS metadata, and an h-entry archive document reader",
+  "keywords": [
+    "seed-protocol",
+    "archive",
+    "bagit",
+    "rfc8493",
+    "premis",
+    "dublin-core",
+    "h-entry",
+    "digital-preservation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./node": {
+      "import": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node.js"
+      },
+      "require": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0",
+    "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/archive"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/archive#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
