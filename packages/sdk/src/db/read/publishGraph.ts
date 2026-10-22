@@ -270,13 +270,16 @@ export function htmlPropertyForHtmlSeed(node: PublishGraphNode, htmlSeedLocalId:
 }
 
 /**
- * The publish graph of the seed `root` (an Item, or its local id). Reads rows only; call after the
- * outbox has drained (waitForPendingOutboxOps) so every edit is in its row.
+ * The publish graph of the seed `root` (an Item, or any `{ seedLocalId }`). Waits for pending
+ * outbox ops first, so every edit made before publishing is in its row (ADR 0019), then reads rows
+ * only.
  */
 export async function getPublishGraph(
   root: { seedLocalId: string; modelName?: string },
   options: GetPublishGraphOptions = {},
 ): Promise<PublishGraph> {
+  const { waitForPendingOutboxOps } = await import('@/outbox')
+  await waitForPendingOutboxOps()
   const rootNode = await readNode(root.seedLocalId, 'root', root.modelName)
   if (!rootNode) throw new Error(`Cannot publish ${root.seedLocalId}: no local seed with a known model`)
   const republishRevokedSeed = !!rootNode.seedUid && rootNode.newSeed

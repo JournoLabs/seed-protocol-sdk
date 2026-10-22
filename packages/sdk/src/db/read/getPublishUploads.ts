@@ -286,9 +286,6 @@ export const getPublishUploadData = async (
   item: { seedLocalId: string; modelName?: string },
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUploadData[]> => {
-  // Every edit made before publishing is in `metadata` and its files first (ADR 0019)
-  const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
   const graph = await getPublishGraph(item)
   assertRefsResolve(graph)
   const sources = await getPublishUploadSources(graph, options)

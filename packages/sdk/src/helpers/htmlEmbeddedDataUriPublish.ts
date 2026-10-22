@@ -383,9 +383,6 @@ export async function prepareHtmlEmbeddedImagesForPublish(
   if (!appDb) {
     return { deferredHtmlSeedLocalIds: [] }
   }
-  const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
-
   const deferred = new Set<string>()
   // The item's own Html, and the Html of the draft items published with it: each gets its embedded
   // images materialized and co-published (rows keyed by the item owning the Html property).

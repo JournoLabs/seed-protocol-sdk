@@ -509,9 +509,6 @@ export const getPublishPayload = async (
   uploadedTransactions: UploadedTransaction[],
   options?: GetPublishPayloadOptions,
 ): Promise<MultiPublishPayload> => {
-  // Every edit made before publishing is in `metadata` first (ADR 0019)
-  const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
   const graph = await getPublishGraph(item, { publishMode })
   const ctx: BuildContext = { graph, errors: [], uploadedTransactions }
