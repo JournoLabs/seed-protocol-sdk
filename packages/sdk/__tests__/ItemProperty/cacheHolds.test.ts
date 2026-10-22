@@ -24,7 +24,10 @@ function schemaFile(): SchemaFileFormat {
     models: {
       HoldPost: {
         id: generateId(),
-        properties: { title: { id: generateId(), type: 'Text' } },
+        properties: {
+          title: { id: generateId(), type: 'Text' },
+          related: { id: generateId(), type: 'Relation', model: 'HoldPost' },
+        },
       },
     },
     enums: {},
@@ -76,6 +79,33 @@ testDescribe('ItemProperty cache holds', () => {
     expect(byLocalId).toBeDefined()
     expect(byLocalId!.getService().getSnapshot().status).not.toBe('stopped')
     item.unload()
+  }, 30000)
+
+  it('finds a property cached under its local id when the item has a seed uid too', async () => {
+    const other = await createPost('related')
+    const item = await Item.create({
+      modelName: 'HoldPost',
+      schemaName: SCHEMA_NAME,
+      title: 'with relation',
+      related: other.seedLocalId,
+    } as never)
+    const related = item.properties.find((p) => p.propertyName === 'related')!
+    expect(related).toBeDefined()
+    // Published after the item made its instances: they're cached under the local id only. The
+    // row stores the name `relatedId`, so a miss would build a second instance under that name.
+    const seedUid = '0x' + 'ef'.repeat(32)
+
+    const found = await ItemProperty.find({
+      propertyName: 'related',
+      seedLocalId: item.seedLocalId,
+      seedUid,
+      hold: false,
+    })
+    expect(found?.getService()).toBe(related.getService())
+    const byUid = await ItemProperty.find({ propertyName: 'related', seedUid, hold: false })
+    expect(byUid?.getService()).toBe(related.getService())
+    item.unload()
+    other.unload()
   }, 30000)
 
   it('a held property dropped with its item stays out of the cache when its context changes', async () => {

@@ -1190,13 +1190,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       return undefined
     }
     
-    const cacheKeyId = seedUid || seedLocalId
-    const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
+    const keyByLocal = seedLocalId ? ItemProperty.cacheKey(seedLocalId, propertyName) : null
+    const keyByUid = seedUid ? ItemProperty.cacheKey(seedUid, propertyName) : null
     let foundProperty: ItemProperty<any> | undefined
-    
-    // Check cache first. Mutate the entry: it may also be stored under the item's other id.
-    const cachedEntry = this.instanceCache.get(cacheKey)
+
+    // Check cache first, under both ids: an instance made before publish is keyed by the local id
+    // only. Missing it here, an Image, File, Html or Relation would come back from its row under
+    // the stored name (`coverImageId`) as a second instance, and the item would swap it in and
+    // unload the first one mid-save. Mutate the entry: it is shared by both keys.
+    const lookupKey = [keyByLocal, keyByUid].find((key) => key && this.instanceCache.has(key))
+    const cachedEntry = lookupKey ? this.instanceCache.get(lookupKey) : undefined
     if (cachedEntry) {
+      for (const key of [keyByLocal, keyByUid]) {
+        if (key && !this.instanceCache.has(key)) this.instanceCache.set(key, cachedEntry)
+      }
       if (hold !== false) cachedEntry.refCount += 1
       foundProperty = cachedEntry.instance as ItemProperty<any>
     } else {
