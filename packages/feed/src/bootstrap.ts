@@ -1,4 +1,3 @@
-import { BaseEasClient } from '@seedprotocol/eas'
 import { initializeQueryPlatform, teardownQueryPlatform } from '@seedprotocol/query'
 
 export type InitializeFeedPlatformOptions = {
@@ -6,18 +5,13 @@ export type InitializeFeedPlatformOptions = {
 }
 
 /**
- * Make EAS and Arweave usable for feed generation. Clients a host app or the SDK already
- * registered are kept. With no EAS client registered, the Node one is (see
- * `@seedprotocol/eas/node`); `initializeQueryPlatform` fills in the rest, including the Node
- * Arweave client, and sets the Arweave host when `arweaveDomain` is given.
+ * Make EAS and Arweave usable for feed generation (via `initializeQueryPlatform`). Clients a host
+ * app or the SDK already registered are kept; otherwise the Node EAS and Arweave clients are
+ * registered. `arweaveDomain` sets the Arweave host.
  */
 export async function initializeFeedPlatform(
   options?: InitializeFeedPlatformOptions,
 ): Promise<void> {
-  if (!BaseEasClient.isConfigured()) {
-    const { registerNodeEasPlatform } = await import('@seedprotocol/eas/node')
-    registerNodeEasPlatform()
-  }
   await initializeQueryPlatform(options)
 }
 

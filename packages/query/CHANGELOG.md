@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- On Node, `initializeQueryPlatform` registers `NodeEasClient` when no EAS client is registered, as it already did for the Arweave client. Before, a process that used query without the SDK got `DefaultEasClient`, which doesn't use `NodeEasClient`'s TLS and keep-alive settings, so every new connection to easscan on Node 24.21+ paid the ~1.45 s handshake.
 - `queryBySchemaForMonth` bounds the month in UTC on both the remote and the SDK's local source. Before, it used the server's local time zone, so an archive's contents depended on `TZ`, and seeds created near a month edge can move to the neighbouring month.
 - Breaking: the deprecated aliases are removed. `expandRelations` is gone (use `relations: 'expand'` or `'urls'`), as are `FEED_RICH_BODY_STORAGE_SCHEMAS`, `isFeedRichBodyStorageSchema`, `feedRichBodyModelPriority`, the `get`/`setFeed…StorageModel(s)` functions and `Feed…StorageModels` types, `enrichImageSeedCloneForFeed`, `hydrateArweaveRichTextInFeedItems`, `parseEasPropertyMetadataForFeed` and its two `…ForFeed` types, and `QueryCacheConfig.backgroundRefresh` / `refreshInterval`. Each had a non-`Feed` name that is unchanged.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read. Neither was ever used.
