@@ -55,8 +55,9 @@ the entities whose seed changed. This needs no leader and works with `multiTab: 
 prunes log rows older than 10 minutes. On top of that, tabs exchange messages over the
 BroadcastChannel `seed:tabs:<db>`:
 
-- **EAS sync finished, addresses persisted, local copies removed.** Other tabs reload or drop their
-  cached Items, then emit the same event locally.
+- **EAS sync finished, addresses persisted, local copies removed.** Other tabs emit the same event
+  locally, after dropping their cached Items for removed local copies. Loaded Items already saw
+  sync's rows through the change log.
 - **Files changed.** Every file written, truncated or removed through ZenFS is announced once it is
   in OPFS. Paths are coalesced over 25 ms into messages of up to 500 paths and flushed on
   `pagehide`. Receivers refresh their ZenFS cache for those paths, and `FILES_CHANGED_EVENT`

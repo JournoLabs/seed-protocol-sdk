@@ -1,7 +1,7 @@
 # 0020. Loaded entities learn about row changes from one trigger-fed change log
 
-- **Status:** Accepted; amended 2026-10-22 (the property handler's pending-write skip is gone, see
-  Decision)
+- **Status:** Accepted; amended 2026-10-22 (the property handler's pending-write skip is gone; Items
+  watch their seed's metadata and the browser's post-sync rehydrate is gone, see Decision)
 - **Date:** 2026-10-19
 - **Scope:** `@seedprotocol/sdk` (`browser/db`, migrations, Item, ItemProperty), `@seedprotocol/react`
   (indirectly); amends ADR 0015 for Item and ItemProperty
@@ -61,6 +61,19 @@ dropped, and a row whose value is the one the context shows keeps the context's 
 as a liveQuery's first emission did, and a read that returns the rows already handed over doesn't
 reach the handler, as `BaseDb.liveQuery`'s `distinctUntilChanged` did.
 
+*Amended 2026-10-22 (theme T3 and decisions D2, D3 of the SDK audit):* in the browser the feed is
+the only way loaded Items and ItemProperties learn about writes, sync's included. Sync writes
+property rows on versions an item already has without touching `versions`, so an Item also
+registers for its seed's `metadata` changes and reads the property keys of its latest version
+(`property_id`'s name, stored name, `refSeedType`); a new key adds that property's instance. A save
+reads back the same keys and stops at the unchanged-rows check. The ItemProperty read also returns
+the property's recorded conflict (none while an edit is pending), so a conflict sync records over a
+draft reaches the loaded property. `keepLocalDraftsOverSyncedRows` writes the draft row after
+recording the conflict: `pending_writes` has no trigger, and that write makes the feed re-read.
+With both in place, `syncDbWithEas` no longer re-reads every cached item after each sync
+(`Item.rehydrateCachedItemsFromDbAfterEasSync`), and other tabs no longer run that re-read when
+the sync event is relayed. Node has no feed and keeps the re-read (decision D3).
+
 **Pruning.** The leader tab deletes log rows older than 10 minutes, at most once a minute. A tab
 whose cursor is older than the oldest remaining row (it was suspended) calls every listener once.
 Deleting log rows fires the feed but doesn't raise `max(seq)`, so nothing is dispatched.
@@ -70,7 +83,8 @@ effects broadcast reaches every tab, and each tab's feed reads the new rows. Thi
 leader and with `multiTab: 'off'`.
 
 `BaseDb.liveQuery` stays for the rest: Schema, Model and ItemProperty's property-definition
-queries, the React list hooks, and app code. Node has no entity reactivity today and gets none.
+queries, the React list hooks, and app code. Node has no change feed; after a sync it re-reads
+cached items (see the 2026-10-22 amendment).
 
 ## Consequences
 
