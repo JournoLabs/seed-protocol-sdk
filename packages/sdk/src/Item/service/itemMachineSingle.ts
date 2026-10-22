@@ -1,3 +1,4 @@
+import { applyContextUpdate } from '@/helpers/entity/contextUpdate'
 import { assign, setup } from 'xstate'
 import { MachineIds } from '@/client/constants'
 import { ItemMachineContext } from '@/types'
@@ -84,20 +85,7 @@ export const itemMachineSingle = setup({
       }),
     },
     updateContext: {
-      actions: assign(({ context, event }) => {
-        // Every key the event carries: one sent before loading sets it (revokedAt, versionsCount,
-        // createdAt) must not be dropped because the context doesn't have it yet.
-        const updates: any = {}
-        for (const key in event) {
-          if (key !== 'type') {
-            updates[key] = (event as any)[key]
-          }
-        }
-        return {
-          ...context,
-          ...updates,
-        }
-      }),
+      actions: assign(({ context, event }) => applyContextUpdate(context, event)),
     },
     destroyStarted: {
       actions: assign({ _destroyError: null }),

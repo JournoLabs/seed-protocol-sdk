@@ -36,6 +36,7 @@ import {
 import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
+import { registerClientActor } from '@/client/readiness'
 
 const logger               = debug('seedSdk:client')
 
@@ -67,6 +68,7 @@ const createClientManager = () => {
 // Replaced when init runs after stop(): an xstate actor can't be started again once stopped.
 let { actor: clientManager, actorSubscription: subscription } = createClientManager()
 export { clientManager }
+registerClientActor(() => clientManager)
 
 type ClientService = typeof clientManager
 const serviceListeners = new Set<(service: ClientService) => void>()

@@ -8,7 +8,7 @@ import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import debug from 'debug'
 // Dynamic import to break circular dependency with globalMachine
 // import { getGlobalService } from '@/services/global/globalMachine'
-import { whenAppDbReady } from '@/db/whenAppDbReady'
+import { whenDbReady } from '@/client/readiness'
 import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient } from '@seedprotocol/eas'
 import {
@@ -33,7 +33,7 @@ const lazyDownloadInFlightByTransactionId = new Map<string, Promise<boolean>>()
 
 
 const getExcludedTransactions = async (): Promise<Set<string>> => {
-  const appDb = await whenAppDbReady()
+  const appDb = await whenDbReady()
   if (!appDb) {
     return new Set<string>()
   }
@@ -86,7 +86,7 @@ const mergeAddressLists = (a: string[] | undefined, b: string[] | undefined): st
 }
 
 const collectTransactionIdsFromLocalMetadata = async (): Promise<string[]> => {
-  const appDb = await whenAppDbReady()
+  const appDb = await whenDbReady()
   if (!appDb) {
     return []
   }

@@ -8,6 +8,7 @@ import { hydrateFromDb } from '@/ItemProperty/service/actors/hydrateFromDb'
 import { loadOrCreateProperty } from '@/ItemProperty/service/actors/loadOrCreateProperty'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { normalizePropertyRecordSchema } from '@/helpers/property'
+import { applyContextUpdate } from '@/helpers/entity/contextUpdate'
 
 /**
  * A List-of-relation schema can arrive after construction (item loaded before its model).
@@ -77,15 +78,7 @@ export const propertyMachine = setup({
     },
     updateContext: {
       actions: assign(({ context, event }) => {
-        const newContext = Object.assign({}, context) as any
-
-        for (let i = 0; i < Object.keys(event).length; i++) {
-          const key = Object.keys(event)[i]
-          if (key === 'type') {
-            continue
-          }
-          newContext[key] = (event as any)[key]
-        }
+        const newContext = applyContextUpdate(context, event) as any
         return withListValueParsed(
           'propertyRecordSchema' in (event as any) ? withListRelationStorageName(newContext) : newContext,
         )

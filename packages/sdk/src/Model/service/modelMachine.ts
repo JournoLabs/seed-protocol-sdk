@@ -3,6 +3,7 @@ import { loadOrCreateModel } from './actors/loadOrCreateModel'
 import { validateModel } from './actors/validateModel'
 import { ValidationError } from '@/Schema/validation'
 import debug from 'debug'
+import { applyContextUpdate, differsFromOriginals, isInternalUpdate } from '@/helpers/entity/contextUpdate'
 import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:model:modelMachine')
@@ -91,47 +92,17 @@ export const modelMachine = setup({
         // Always update context first (no guard, always runs)
         actions: [
           assign(({ context, event }) => {
-          const newContext = { ...context } as any
-
-          // Check if this is only updating internal fields
-          const onlyInternalFields = Object.keys(event).every((key: string) => {
-            return key === 'type' || key.startsWith('_')
-          })
-
-          // Update the context with new values
-          for (let i = 0; i < Object.keys(event).length; i++) {
-            const key = Object.keys(event)[i] as string
-            if (key === 'type') {
-              continue
+            const next = applyContextUpdate(context, event)
+            if (isInternalUpdate(event)) return next
+            // Properties are computed from ModelProperty instances, which track their own edits
+            const edited = differsFromOriginals(context._originalValues as Record<string, unknown>, next, event, ['properties'])
+            return {
+              ...next,
+              ...(edited !== undefined && { _isEdited: edited }),
+              // The validating state this update enters sets them again
+              _validationErrors: undefined,
             }
-            const eventValue = (event as any)[key]
-            // Ensure arrays are properly copied (create new reference)
-            newContext[key] = Array.isArray(eventValue) ? [...eventValue] : eventValue
-          }
-          
-          // Compare with original values and set _isEdited flag (only for non-internal updates)
-          // Note: properties are not in context - they're computed from ModelProperty instances
-          // Property changes are tracked via ModelProperty._isEdited flags
-          if (!onlyInternalFields && context._originalValues) {
-            const hasChanges = Object.keys(event).some((key: string) => {
-              if (key === 'type' || key.startsWith('_') || key === 'properties') return false
-              const newValue = newContext[key]
-              const oldValue = (context._originalValues as any)?.[key]
-              
-              // Deep comparison for objects/arrays
-              if (typeof newValue === 'object' && typeof oldValue === 'object') {
-                return JSON.stringify(newValue) !== JSON.stringify(oldValue)
-              }
-              return newValue !== oldValue
-            })
-            newContext._isEdited = hasChanges
-          }
-
-          // Clear validation errors on context update (will be re-validated if needed)
-          newContext._validationErrors = undefined
-
-          return newContext
-        }),
+          }),
         // Verify the context was updated and create property instances if needed
         ({ event, self }) => {
           if ((event as any)._liveQueryPropertyIds !== undefined) {
@@ -174,11 +145,7 @@ export const modelMachine = setup({
       },
       {
         // Conditionally trigger validation for non-internal updates
-        guard: ({ event }: { event: any }) => {
-          return !Object.keys(event).every((key: string) => {
-            return key === 'type' || key.startsWith('_')
-          })
-        },
+        guard: ({ event }) => !isInternalUpdate(event),
         target: '.validating',
       },
     ],

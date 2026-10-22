@@ -17,6 +17,7 @@ export type {
 } from './client/events'
 export { getClient, INIT_CONFIG_CONFLICT_MESSAGE } from './client/ClientManager'
 export { ClientManagerState, MachineIds } from './client/constants'
+export { isClientReady, isClientReadySnapshot, whenDbReady } from './client/readiness'
 export { BaseDb } from './db/Db/BaseDb'
 export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './browser/db/changeFeed'
 export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'

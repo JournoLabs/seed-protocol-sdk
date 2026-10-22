@@ -1,3 +1,4 @@
+import { applyContextUpdate, isInternalUpdate } from '@/helpers/entity/contextUpdate'
 import { assign, fromPromise, setup } from 'xstate'
 import { SchemaFileFormat } from '@/types/import'
 import { ValidationError } from '@/Schema/validation'
@@ -102,40 +103,16 @@ export const schemaMachine = setup({
     _liveQueryModelIds: [],
   }),
   on: {
-    updateContext: [{
-      actions: [assign(({ context, event }) => {
-        const newContext = Object.assign({}, context)
-        for (let i = 0; i < Object.keys(event).length; i++) {
-          const key = Object.keys(event)[i]
-          if (key === 'type') {
-            continue
-          }
-          if (key in newContext || key.startsWith('_')) {
-            ;(newContext as any)[key] = event[key]
-          }
-        }
-        return newContext
-      }), 'validate'],
-      // Only validate when updating non-internal fields
-      guard: ({ event }: { event: any }) => {
-        return !Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
+    // Every key is applied, including ones the context doesn't have yet (id, version, metadata
+    // sent before the load sets them). Internal-only updates (`_dbUpdatedAt` after a draft save)
+    // don't revalidate.
+    updateContext: [
+      {
+        guard: ({ event }) => !isInternalUpdate(event),
+        actions: [assign(({ context, event }) => applyContextUpdate(context, event)), 'validate'],
       },
-    }, {
-      // Internal-only updates (e.g. the _dbUpdatedAt refresh after a draft save) are applied
-      // without re-validating. Dropping them made the next save's conflict check compare
-      // against a stale _dbUpdatedAt.
-      actions: assign(({ context, event }) => {
-        const newContext = Object.assign({}, context)
-        for (const key of Object.keys(event)) {
-          if (key.startsWith('_')) {
-            ;(newContext as any)[key] = (event as any)[key]
-          }
-        }
-        return newContext
-      }),
-    }],
+      { actions: assign(({ context, event }) => applyContextUpdate(context, event)) },
+    ],
     validateSchema: {
       actions: 'validate',
     },
