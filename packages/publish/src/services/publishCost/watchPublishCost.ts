@@ -24,6 +24,13 @@ export type WatchPublishCostOptions = EstimatePublishCostOptions & {
   previousEstimate?: PublishCostEstimate | null
   /** Delay before retrying once when the watcher's first estimate fails. 0 = no retry. */
   firstEstimateRetryMs?: number
+  /**
+   * Calls `onChange` after each write to the item's seed, version or property rows and returns the
+   * unwatch function, or returns null when it can't watch rows. Defaults to the SDK's change feed,
+   * which runs in the browser; when there is none (Node), the item's property values are compared
+   * on each item update instead ({@link itemPublishFingerprint}).
+   */
+  watchRows?: (item: IItem<any>, onChange: () => void) => Promise<(() => void) | null>
 }
 
 export type WatchPublishCostHandle = {
@@ -56,13 +63,24 @@ export function itemPublishFingerprint(item: IItem<any>): string {
   return parts.join('|')
 }
 
+/** The SDK's change feed for the item's rows, when this tab runs one. */
+async function watchItemRowsByFeed(item: IItem<any>, onChange: () => void): Promise<(() => void) | null> {
+  const { isChangeFeedRunning, watchEntityChanges } = await import('@seedprotocol/sdk')
+  if (!isChangeFeedRunning()) return null
+  return watchEntityChanges(
+    { seedLocalId: item.seedLocalId, seedUid: item.seedUid, tables: ['seeds', 'versions', 'metadata'] },
+    onChange,
+  )
+}
+
 function asError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
 }
 
 /**
- * Watches an item and emits USD publish-cost estimates.
- * First estimate is immediate. Later item edits restart a 15s idle timer.
+ * Watches an item and emits USD publish-cost estimates, each summarized from the item's rows.
+ * First estimate is immediate. Later writes to the item's rows (in Node, changes to its loaded
+ * property values) restart a 15s idle timer.
  * Market rates refresh every 60s and reprice the last work without re-summarizing.
  * If the first estimate fails it is retried once after 5s, and the snapshot stays `isEstimating`
  * until the retry settles.
@@ -172,13 +190,28 @@ export function watchPublishCost(
 
   void runEstimate()
 
-  const subscription = item.subscribe(() => {
+  // Edits are noticed by comparing the item's values until the row watch starts, and for good
+  // when there is none.
+  let subscription: { unsubscribe: () => void } | null = item.subscribe(() => {
     if (disposed) return
     const fingerprint = itemPublishFingerprint(item)
     if (fingerprint === lastFingerprint) return
     lastFingerprint = fingerprint
     scheduleItemEstimate()
   })
+  let unwatchRows: (() => void) | null = null
+  void (options?.watchRows ?? watchItemRowsByFeed)(item, () => {
+    if (!disposed) scheduleItemEstimate()
+  }).then(
+    (unwatch) => {
+      if (!unwatch) return
+      if (disposed) return unwatch()
+      unwatchRows = unwatch
+      subscription?.unsubscribe()
+      subscription = null
+    },
+    () => {},
+  )
 
   if (priceRefreshMs > 0) {
     priceTimer = setInterval(() => {
@@ -202,7 +235,8 @@ export function watchPublishCost(
     refresh,
     dispose: () => {
       disposed = true
-      subscription.unsubscribe()
+      subscription?.unsubscribe()
+      unwatchRows?.()
       if (idleTimer) clearTimeout(idleTimer)
       if (priceTimer) clearInterval(priceTimer)
       if (retryTimer) clearTimeout(retryTimer)
