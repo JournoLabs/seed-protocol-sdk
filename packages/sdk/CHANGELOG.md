@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
+
 ## 0.7.9 (2026-10-22)
 
 - **Breaking:** `status` on `Model`, `Schema` and `ItemProperty` is the load status, `'loading'`, `'ready'` or `'error'`, not the actor's state value. An ItemProperty that was `'idle'` once loaded is `'ready'` (PermaPress `TipTap.tsx` compares `status === 'idle'`). `Item` gains `status`, and every entity has `waitForReady({ timeout })`. The state value is still `getService().getSnapshot().value`, and the entity machines no longer have `loading`, `waitingForDb` or `error` states: an actor is `idle` from the start, so waiting for `idle` no longer means loaded. Ready means loaded: an ItemProperty with a pending save is ready.
@@ -18,7 +22,6 @@ All notable changes to this package are documented in this file.
   - A ModelProperty update with only internal keys is applied; one sent outside a save was dropped. A Model update with only internal keys keeps its validation errors.
 - A Schema's live query watches its own row id; it looked the row up by name. The Model and Schema live queries no longer retry their row lookup on a timer for up to a minute: an entity looks its row up again when its load or its row write changes it. The Model and Schema draft saves skip during client init by `isClientReady()`, not a 50 ms cached check.
 
-- New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
 - **Breaking:** `watchEntityRows` lost its `since` option (no caller), and `window.__SEED_INVALIDATE_ITEM_PROPERTIES__` is no longer declared, set or called (`@seedprotocol/react` set it; nothing else read it).
 - In the browser, loaded items learn about sync's writes from the change feed only (ADR 0020, audit T3). A loaded Item also watches its seed's `metadata` rows, so a property row sync writes on a version the item already has adds that property to the item. `syncDbWithEas` no longer re-reads every cached item's metadata and rehydrates its idle properties after each sync, in this tab and in every other tab that hears the sync event; Node still does after every sync, having no feed (decision D3). The sync event is still emitted and relayed to other tabs.
 - A loaded property shows a conflict that sync recorded over its draft (`property.conflict`) once the change feed reports the write, in the browser; the change-feed read now includes the recorded conflict. Before, it appeared only after the post-sync rehydrate or a reload. A property with a pending edit shows none, since the edit settles it.

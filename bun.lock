@@ -49,7 +49,7 @@
     },
     "packages/archive": {
       "name": "@seedprotocol/archive",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
         "parse5": "8.0.1",
@@ -64,7 +64,7 @@
     },
     "packages/arweave": {
       "name": "@seedprotocol/arweave",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@graphql-typed-document-node/core": "^3.2.0",
         "arweave": "^1.15.5",
@@ -85,7 +85,7 @@
     },
     "packages/bundler-core": {
       "name": "@seedprotocol/bundler-core",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "devDependencies": {
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -94,7 +94,7 @@
     },
     "packages/eas": {
       "name": "@seedprotocol/eas",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@graphql-typed-document-node/core": "^3.2.0",
         "@noble/hashes": "^1.8.0",
@@ -117,7 +117,7 @@
     },
     "packages/feed": {
       "name": "@seedprotocol/feed",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
@@ -137,7 +137,7 @@
     },
     "packages/feed-hyper": {
       "name": "@seedprotocol/feed-hyper",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/feed": "workspace:*",
@@ -159,7 +159,7 @@
     },
     "packages/gateway-hyper": {
       "name": "@seedprotocol/gateway-hyper",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "b4a": "^1.6.7",
         "hypercore-id-encoding": "^1.3.0",
@@ -176,7 +176,7 @@
     },
     "packages/mapping": {
       "name": "@seedprotocol/mapping",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "rss-parser": "^3.13.0",
       },
@@ -201,7 +201,7 @@
     },
     "packages/next": {
       "name": "@seedprotocol/next",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "devDependencies": {
         "@seedprotocol/bundler-core": "workspace:*",
         "@seedprotocol/react": "workspace:*",
@@ -223,7 +223,7 @@
     },
     "packages/publish": {
       "name": "@seedprotocol/publish",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
         "@seedprotocol/arweave": "workspace:*",
@@ -266,7 +266,7 @@
     },
     "packages/query": {
       "name": "@seedprotocol/query",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
         "@seedprotocol/arweave": "workspace:*",
@@ -285,7 +285,7 @@
     },
     "packages/react": {
       "name": "@seedprotocol/react",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@xstate/react": "^6.1.0",
         "debug": "^4.4.1",
@@ -317,7 +317,7 @@
     },
     "packages/sdk": {
       "name": "@seedprotocol/sdk",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
         "@libsql/client": "^0.15.15",
@@ -373,7 +373,7 @@
     },
     "packages/vite": {
       "name": "@seedprotocol/vite",
-      "version": "0.7.8",
+      "version": "0.7.9",
       "dependencies": {
         "@rollup/pluginutils": "^5.1.0",
         "vite-plugin-node-polyfills": "^0.27.0",
