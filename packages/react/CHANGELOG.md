@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Init progress no longer has an 80% step: the SDK removed its `addModelsToStore` init state, which did nothing.
 - `SeedImage` stops showing an image once its property is cleared or points at another file. It kept the URLs it had found for the previous file.
 
 ## 0.7.8 (2026-10-20)

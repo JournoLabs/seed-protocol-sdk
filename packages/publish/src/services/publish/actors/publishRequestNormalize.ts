@@ -131,6 +131,7 @@ export function normalizePublishRequest(req: any): any {
       ...(typeof att?._metadataLocalId === 'string' && att._metadataLocalId !== ''
         ? { _metadataLocalId: att._metadataLocalId }
         : {}),
+      ...(typeof att?._attestedValue === 'string' ? { _attestedValue: att._attestedValue } : {}),
       ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
         ? { _propertyNameForSchema: att._propertyNameForSchema }
         : {}),

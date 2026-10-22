@@ -63,6 +63,7 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
     await updateVersionUid({
       seedLocalId: req.localId,
       versionUid: toHex32(versionUid),
+      ...(req.versionLocalId ? { versionLocalId: req.versionLocalId } : {}),
       publisher: publisherAddress,
       attestationCreatedAt: attMs,
     })

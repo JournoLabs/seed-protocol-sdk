@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
 import { ModelPropertyDataTypes } from '@/helpers/property'
-import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import type { IItem, IItemProperty } from '@/interfaces'
+import { publishPropertyKind } from '@/db/read/publishGraph'
 
 describe('List-only multi-value restriction', () => {
   describe('validatePropertyStructure', () => {
@@ -151,36 +150,13 @@ describe('List-only multi-value restriction', () => {
     })
   })
 
-  describe('getSegmentedItemProperties', () => {
-    const createMockItemProperty = (
-      dataType: string,
-      ref?: string
-    ): IItemProperty<any> =>
-      ({
-        propertyName: 'test',
-        propertyDef: { dataType, ref },
-      }) as IItemProperty<any>
-
-    it('splits list-of-relations to itemListProperties', async () => {
-      const item = {
-        properties: [
-          createMockItemProperty(ModelPropertyDataTypes.List, 'Tag'),
-        ],
-      } as IItem<any>
-      const { itemListProperties, itemBasicProperties } = await getSegmentedItemProperties(item)
-      expect(itemListProperties).toHaveLength(1)
-      expect(itemBasicProperties).toHaveLength(0)
+  describe('publishPropertyKind', () => {
+    it('routes a list of relations as a list', () => {
+      expect(publishPropertyKind('tags', { dataType: ModelPropertyDataTypes.List, ref: 'Tag' } as any)).toBe('list')
     })
 
-    it('splits list-of-primitives to itemBasicProperties', async () => {
-      const item = {
-        properties: [
-          createMockItemProperty(ModelPropertyDataTypes.List),
-        ],
-      } as IItem<any>
-      const { itemListProperties, itemBasicProperties } = await getSegmentedItemProperties(item)
-      expect(itemListProperties).toHaveLength(0)
-      expect(itemBasicProperties).toHaveLength(1)
+    it('routes a list of primitives as a basic value', () => {
+      expect(publishPropertyKind('tags', { dataType: ModelPropertyDataTypes.List } as any)).toBe('basic')
     })
   })
 })

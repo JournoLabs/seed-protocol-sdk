@@ -269,15 +269,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
     // synchronously during schema loading, so by the time Schema reaches 'idle',
     // the database should have all records. However, we verify this here to ensure
     // the client is truly ready to use.
-    //
-    // Alternative signal: We could also check Schema's writeProcess status:
-    //   const schema = Schema.create(SEED_PROTOCOL_SCHEMA_NAME)
-    //   const writeProcess = schema.getService().getSnapshot().context.writeProcess
-    //   if (writeProcess) {
-    //     const writeStatus = writeProcess.getSnapshot().context.writeStatus
-    //     // writeStatus should be 'success' or 'idle' (if no writes needed)
-    //   }
-    // But checking the database directly is more reliable.
     
     
     // Check properties for the first model (Seed should have properties)

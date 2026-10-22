@@ -635,7 +635,6 @@ testDescribe('ModelProperty Integration Tests', () => {
         await settleInitialWrite()
 
         expect(trackPendingWrite).not.toHaveBeenCalledWith(propertyFileId, expect.anything())
-        expect(property!.getService().getSnapshot().context.writeProcess?.getSnapshot().value).toBe('idle')
       } finally {
         trackPendingWrite.mockRestore()
       }

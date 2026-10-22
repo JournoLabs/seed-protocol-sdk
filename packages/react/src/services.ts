@@ -186,8 +186,6 @@ const percentForClientState = (state: unknown): number => {
       return 100
     case ClientManagerState.ADD_MODELS_TO_DB:
       return 90
-    case ClientManagerState.ADD_MODELS_TO_STORE:
-      return 80
     case ClientManagerState.PROCESS_SCHEMA_FILES:
       return 70
     case ClientManagerState.SAVE_CONFIG:

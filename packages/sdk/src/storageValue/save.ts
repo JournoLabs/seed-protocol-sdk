@@ -1,23 +1,17 @@
-import { EventObject, fromCallback } from 'xstate'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { INTERNAL_STORAGE_MODEL_FILE_IDS, ImageSize } from '@/helpers/constants'
+import { ImageSize } from '@/helpers/constants'
 import { notifyFileSaved } from '@/helpers/tabEvents'
-import { generateId } from '@/helpers/generateId'
-import { toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
 import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
-import { beginPropertyWrite, propertyWriteKey, type PropertyWriteTicket } from '@/helpers/propertyWriteTickets'
-import { resolveNewSeedFields } from '@/db/write/createSeed'
-import { writeStorageValue } from '@/ItemProperty/service/actors/saveValueToDb/storageValue'
-import type { FromCallbackInput } from '@/types/machines'
-import type { PropertyMachineContext, SaveValueToDbEvent } from '@/types/property'
-import { STORAGE_SUBDIR, stageStorageContent, storageFileName, type StorageKind } from './content'
-
-const DATA_TYPE: Record<StorageKind, 'Image' | 'File' | 'Html'> = { image: 'Image', file: 'File', html: 'Html' }
+import { resolveNewSeedFields, type NewSeedFields } from '@/db/write/createSeed'
+import type { OutboxOp } from '@/outbox/outbox'
+import type { StorageValueOp } from '@/outbox/itemAppliers'
+import { STORAGE_SUBDIR, stageStorageContent, storageFileName, type StorageContent } from './content'
+import { deleteStagedFile, requireStagedFile } from './stage'
 
 const FS_READY_TIMEOUT_MS = 10_000
 const RESIZE_TIMEOUT_MS = 8_000
 
-/** Waits for the client to set up the file system (a save can start while it still loads). */
+/** Waits for the client to set up the file system (a drain can start while it still loads). */
 async function waitForFileSystem(): Promise<void> {
   const start = Date.now()
   for (;;) {
@@ -37,7 +31,7 @@ async function waitForFileSystem(): Promise<void> {
 
 /**
  * Sized versions for display (Image only). The original is already stored, so a resize that fails
- * (Node has no resizer) or hangs (a browser worker) doesn't fail the save.
+ * (Node has no resizer) or hangs (a browser worker) changes nothing.
  */
 async function resizeImage(filePath: string): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -59,33 +53,41 @@ async function resizeImage(filePath: string): Promise<void> {
   }
 }
 
+/** What preparing a storage op (Html, File, Image) found and wrote, for its applier. */
+export type PreparedStorageValue = {
+  fileName: string
+  /** The file written for this value; absent when the value named a file already there. */
+  ownedFilePath?: string
+  fields: NewSeedFields
+  schemaUid?: string | null
+  /** The storage model's EAS schema uid. */
+  refModelUid?: string | null
+}
+
+/** The assigned content of a storage op: its string source, or the bytes in its staged file. */
+async function stagedContent(op: OutboxOp, value: StorageValueOp): Promise<StorageContent> {
+  const kind = value.storageSeed.type
+  const stage = value.stage!
+  if (stage.source !== undefined) return stageStorageContent(kind, stage.source)
+  if (!op.valueRef) throw new Error(`Storage op ${op.opId} has no staged value`)
+  await requireStagedFile(op.valueRef)
+  const data = await (await BaseFileManager.readFile(op.valueRef)).arrayBuffer()
+  return { kind: 'bytes', data, mimeType: stage.mimeType, sourceName: stage.sourceName }
+}
+
 /**
- * Saves an Image, File or Html value (ADR 0019 "Storage values"): stages the assigned value as
- * content, names a new storage seed and its file after one id, writes the file at its final path,
- * appends the `storage` op that creates the seed and points the property's row at it, and waits
- * for it to apply. Returns the context update, or undefined when a newer value superseded this one
- * (its save sets the context).
- *
- * The row's schema uid is the property's own: the context's when it has one that isn't the storage
+ * Stages a storage op's value (ADR 0019 "Storage values"), before its transaction: turns the
+ * assigned value into content (fetching a URL, reading the staged bytes), writes the file at its
+ * final path, named after the new storage seed, and resolves the seed's fields and the row's schema
+ * uid. The row's schema uid is the property's own: the op's when it has one that isn't the storage
  * model's uid, else the one EAS has for the property's definition.
  */
-export async function saveStorageValue(
-  kind: StorageKind,
-  context: PropertyMachineContext,
-  newValue: unknown,
-  ticket: PropertyWriteTicket | undefined,
-): Promise<Partial<PropertyMachineContext> | undefined> {
-  const { propertyName: key, propertyRecordSchema, seedLocalId, seedUid, versionLocalId, versionUid, modelName } = context
-  if (!key) throw new Error('propertyName is required')
-  const propertyName = toMetadataPropertyName(key, DATA_TYPE[kind])
-
+export async function prepareStorageValue(op: OutboxOp, value: StorageValueOp): Promise<PreparedStorageValue> {
+  const kind = value.storageSeed.type
   await waitForFileSystem()
-  const content = await stageStorageContent(kind, newValue)
-
-  // Named now so the file can be named after it; the seed row is written when the op applies
-  const storageSeedLocalId = generateId()
+  const content = await stagedContent(op, value)
+  const fileName = storageFileName(kind, value.storageSeed.localId, content)
   const subdir = STORAGE_SUBDIR[kind]
-  const fileName = storageFileName(kind, storageSeedLocalId, content)
   const filePath = BaseFileManager.getFilesPath(subdir, fileName)
   if (content.kind !== 'existing') {
     await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(subdir))
@@ -96,79 +98,31 @@ export async function saveStorageValue(
     notifyFileSaved(filePath)
   }
 
-  // Image and File show a session URL (blob: in browsers, file:// in Node), kept in the context
-  // only: stored, it is dead after a reload. Html shows its text.
-  const displayUrl = kind === 'html' ? undefined : await BaseFileManager.getContentUrlFromPath(filePath)
-
-  const seedFields = await resolveNewSeedFields(kind)
-  const storageModelUid = seedFields.schemaUid ?? undefined
+  const fields = value.storageSeed.fields ?? (await resolveNewSeedFields(kind))
+  const storageModelUid = fields.schemaUid ?? undefined
+  const rowSchemaUid = value.row?.schemaUid
   const schemaUid =
-    context.schemaUid && context.schemaUid !== storageModelUid
-      ? context.schemaUid
-      : await lookupPropertySchemaUid(propertyName, propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1])
-
-  const localStorageDir = `/${subdir}`
-  const written = await writeStorageValue(
-    { seedLocalId, seedUid, propertyName },
-    {
-      storageSeed: {
-        localId: storageSeedLocalId,
-        type: kind,
-        modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS[kind],
-        fields: seedFields,
-      },
-      // A reference to a file that was already there isn't this value's to delete
-      ownedFilePath: content.kind === 'existing' ? undefined : filePath,
-      row: {
-        seedUid,
-        versionLocalId,
-        versionUid,
-        modelName,
-        schemaUid,
-        refModelUid: storageModelUid,
-        refResolvedValue: fileName,
-        localStorageDir,
-      },
-      propertyRecordSchema,
-    },
-    ticket,
-  )
-  if (written.skipped) return undefined
-
-  if (kind === 'image' && content.kind !== 'existing') await resizeImage(filePath)
-
+    rowSchemaUid && rowSchemaUid !== storageModelUid
+      ? rowSchemaUid
+      : await lookupPropertySchemaUid(
+          op.propertyName ?? '',
+          value.propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+        )
   return {
-    localId: context.localId,
-    ...written.row,
-    propertyValue: storageSeedLocalId,
-    refSeedType: kind,
-    renderValue: content.kind === 'text' && kind === 'html' ? content.data : displayUrl,
-    refResolvedDisplayValue: displayUrl,
-    refResolvedValue: fileName,
-    localStorageDir,
-    easDataType: 'bytes32',
-    schemaUid,
+    fileName,
+    ...(content.kind !== 'existing' && { ownedFilePath: filePath }),
+    fields,
+    schemaUid: schemaUid ?? null,
+    refModelUid: storageModelUid ?? null,
   }
 }
 
-/**
- * The machine actor for one kind (`saveImage`, `saveFile`, `saveHtml`): runs saveStorageValue and
- * reports `save<Kind>Success` or `save<Kind>Error`.
- */
-export function storageSaveActor(kind: StorageKind) {
-  const eventPrefix = `save${DATA_TYPE[kind]}`
-  return fromCallback<EventObject, FromCallbackInput<PropertyMachineContext, SaveValueToDbEvent>>(
-    ({ sendBack, input: { context, event } }) => {
-      // Taken when the save starts: a newer save of the property makes this one drop its value
-      const writeKey = propertyWriteKey(context.seedLocalId ?? context.seedUid, context.propertyName)
-      const ticket = writeKey ? beginPropertyWrite(writeKey) : undefined
-      saveStorageValue(kind, context, event?.newValue, ticket)
-        .then((update) => {
-          if (update) sendBack({ type: 'updateContext', ...update })
-        })
-        .finally(() => ticket?.end())
-        .then(() => sendBack({ type: `${eventPrefix}Success` }))
-        .catch((error) => sendBack({ type: `${eventPrefix}Error`, error }))
-    },
-  )
+/** After a storage op applied: drops its staged bytes and makes an Image's sized versions (not awaited). */
+export async function afterStorageValueApplied(
+  op: OutboxOp,
+  value: StorageValueOp,
+  prepared: PreparedStorageValue | undefined,
+): Promise<void> {
+  await deleteStagedFile(op.valueRef)
+  if (value.storageSeed.type === 'image' && prepared?.ownedFilePath) void resizeImage(prepared.ownedFilePath)
 }

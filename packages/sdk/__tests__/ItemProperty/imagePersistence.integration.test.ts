@@ -527,17 +527,17 @@ testDescribe('Image property persistence integration tests', () => {
     expect((await latestRow(item.seedLocalId!, 'featured')).retract).toBe(true)
   })
 
-  it('restores the saved image when saving a new one fails', async () => {
+  it('shows the saved image again when saving a new one fails (decision D2)', async () => {
     const { property, saved } = await itemWithSavedImage('Post with a failed image save')
-    const shownBefore = property.value
 
-    // Not a file name, data URL or URL: saveImage finds no file data and throws
+    // Not a file name, data URL or URL: preparing the op finds no file data and fails it, and the
+    // property shows the overlay's next value, the stored row
     property.value = 'not an image!'
     const ctx = await waitForSaveSettled(property)
 
     expect(ctx._saveError?.message).toBe('No file data found')
     expect(ctx.propertyValue).toBe(saved.propertyValue)
-    expect(ctx.renderValue).toBe(saved.renderValue)
-    expect(property.value).toBe(shownBefore)
+    expect(ctx.refResolvedValue).toBe(saved.refResolvedValue)
+    await expect(property.save()).rejects.toThrow('No file data found')
   })
 })

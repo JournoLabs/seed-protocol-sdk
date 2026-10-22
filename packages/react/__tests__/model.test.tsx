@@ -702,7 +702,6 @@ describe('React Model Hooks Integration Tests', () => {
           if (isIdle) {
             console.log('[TEST] Model is idle, context:', {
               modelFileId: modelSnapshot.context._modelFileId,
-              writeProcess: !!modelSnapshot.context.writeProcess,
               validationErrors: modelSnapshot.context._validationErrors,
             })
           }

@@ -63,6 +63,7 @@ export type ItemPropertyValueType =
 export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'> & {
   propertyValue?: ItemPropertyValueType
   populatedFromDb?: boolean
+  /** The latest assignment's op hasn't settled yet (ADR 0019). */
   isSaving: boolean
   propertyRecordSchema?: PropertyType
   isRelation: boolean
@@ -75,11 +76,14 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   newValue?: ItemPropertyValueType
   /** Destroy failure from the last destroy() (read by destroy hooks). */
   _destroyError?: { message: string; name?: string } | null
-  /** Validation errors from last failed save (enum, pattern, etc.). Cleared on successful save. */
+  /**
+   * The rules the last assigned value broke (enum, pattern, etc.); that value was not written.
+   * Cleared by the next assignment.
+   */
   _saveValidationErrors?: import('@/Schema/validation').ValidationError[]
   /**
-   * Error from the last failed save (ownership refusal, file save, metadata creation), as thrown, so
-   * its class and fields (`code`, `cause`) survive. Cleared when the next save starts.
+   * Error from the last failed write (ownership refusal, file save, metadata creation), as thrown,
+   * so its class and fields (`code`, `cause`) survive. Cleared by the next assignment.
    */
   _saveError?: Error | null
   /**
@@ -87,24 +91,5 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
    * it was pending (ADR 0019); null when there is none.
    */
   conflict?: import('@/outbox/conflicts').PropertyConflict | null
-  /** Set by an assignment's save: the values to restore if that save fails. */
-  _valueBeforeSave?: PropertyValueSnapshot
 }
 
-export type SaveValueToDbEvent = {
-  type: 'saveValueToDb'
-  newValue: ItemPropertyValueType
-  /** Values shown before an assignment; restored if the save is refused or fails. */
-  before?: PropertyValueSnapshot
-  /** A clear (ADR 0021): `newValue` is null, and `retract` marks one that publish revokes. */
-  clear?: { retract: boolean }
-}
-
-export type PropertyValueSnapshot = {
-  propertyValue?: unknown
-  renderValue?: unknown
-  refResolvedValue?: string | null
-  refResolvedDisplayValue?: string | null
-  localStorageDir?: string | null
-  storageTransactionId?: string
-}

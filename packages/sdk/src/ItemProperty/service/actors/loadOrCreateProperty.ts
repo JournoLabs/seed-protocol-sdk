@@ -141,7 +141,10 @@ export const loadOrCreateProperty = fromCallback<
         : kind === 'html'
           ? undefined
           : (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
-    if (kind && kind !== 'itemStorage') {
+    if (metadataRecord.pendingText !== undefined) {
+      // A pending Html value: its file isn't written until its op is prepared
+      renderValue = metadataRecord.pendingText
+    } else if (kind && kind !== 'itemStorage') {
       try {
         const display = await resolveStorageDisplay(kind, metadataRecord, { fetch: true })
         metadataRecord.refResolvedValue = display.ref.refResolvedValue ?? null

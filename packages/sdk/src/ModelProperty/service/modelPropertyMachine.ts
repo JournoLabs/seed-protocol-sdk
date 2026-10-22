@@ -1,11 +1,10 @@
-import { assign, setup, ActorRefFrom } from 'xstate'
+import { assign, setup } from 'xstate'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
 import { saveToSchema } from './actors/saveToSchema'
 import { compareAndMarkDraft } from './actors/compareAndMarkDraft'
 import { validateProperty } from './actors/validateProperty'
 import { ValidationError } from '@/Schema/validation'
-import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 
 export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   // Store original values from the JSON schema file
@@ -16,7 +15,6 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   _schemaName?: string
   // Validation errors
   _validationErrors?: ValidationError[]
-  writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   // Property file ID (schemaFileId from JSON schema file) - used for lookups
   _propertyFileId?: string
   // Note: id field (from TProperty) is now the schemaFileId (string)
@@ -43,7 +41,6 @@ export const modelPropertyMachine = setup({
       | { type: 'validateProperty' }
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
-      | { type: 'requestWrite'; data: any }
       | { type: 'destroyStarted' }
       | { type: 'destroyError'; error: unknown },
   },
@@ -51,7 +48,6 @@ export const modelPropertyMachine = setup({
     saveToSchema,
     compareAndMarkDraft,
     validateProperty,
-    writeProcessMachine,
   },
   guards: {
     isPropertyValid: ({ context }) => {
@@ -210,34 +206,7 @@ export const modelPropertyMachine = setup({
         validateProperty: {
           target: 'validating',
         },
-        requestWrite: {
-          actions: ({ context, event }) => {
-            if (context.writeProcess) {
-              context.writeProcess.send({
-                type: 'startWrite',
-                data: event.data,
-              })
-            }
-          },
-        },
       },
-      entry: assign({
-        writeProcess: ({ spawn, context }) => {
-          // Spawn writeProcess if we have id (schemaFileId)
-          // New properties will have id generated
-          const entityId = context.id
-          if (!context.writeProcess && entityId) {
-            return spawn(writeProcessMachine, {
-              input: {
-                entityType: 'modelProperty',
-                entityId: String(entityId),
-                entityData: context,
-              },
-            })
-          }
-          return context.writeProcess
-        },
-      }),
     },
     validating: {
       on: {

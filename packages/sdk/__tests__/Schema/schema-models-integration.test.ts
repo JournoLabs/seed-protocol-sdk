@@ -53,9 +53,7 @@ testDescribe('Schema Models Integration Tests', () => {
     // tests re-import it over the existing rows.
     await cleanupTestSchemaData()
 
-    // Drop cached Schema instances so each test loads a fresh one. The Seed Protocol instance cached by client
-    // init went through the schemaNotFound -> writingSchema path, whose schemaWritten handler only assigns
-    // id/_dbId, so its context has no metadata/models (schema.models still works via _liveQueryModelIds).
+    // Drop cached Schema instances so each test loads a fresh one.
     Schema.clearCache()
 
     // Clean up schema files

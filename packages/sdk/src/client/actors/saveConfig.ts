@@ -1,9 +1,7 @@
-import { EventObject, fromCallback } from 'xstate'
-import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { isTestOrSeedDev } from '@/helpers/environment'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
-import { ClientManagerContext, FromCallbackInput, } from '@/types'
+import { ClientManagerContext } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
 import { normalizeAddressConfig, normalizeAddressList } from '@/helpers/addresses'
@@ -72,11 +70,11 @@ export async function persistInitAddresses(
   announceAddressesPersisted({ owned, watched })
 }
 
-export const saveConfig = fromCallback<
-  EventObject,
-  FromCallbackInput<ClientManagerContext>
->(({ sendBack, input: { context } }) => {
-
+/**
+ * Init step: stores the endpoints, the init addresses and the gateway settings in app_state, and
+ * checks the database's chain against the configured one.
+ */
+export async function saveConfig(context: ClientManagerContext): Promise<void> {
   logger('saveConfig starting')
 
   const {
@@ -95,11 +93,9 @@ export const saveConfig = fromCallback<
   } = context
 
   // Validate endpoints - required for proper initialization
-  // If endpoints are missing or invalid, initialization should fail
   if (!endpoints || !endpoints.filePaths || !endpoints.files) {
-    const error = new Error('saveConfig called with invalid endpoints: endpoints must include both filePaths and files')
     logger('[internal/actors] [saveConfig] Invalid endpoints:', { endpoints })
-    throw error
+    throw new Error('saveConfig called with invalid endpoints: endpoints must include both filePaths and files')
   }
 
   const _saveConfig = async (): Promise<void> => {
@@ -184,24 +180,6 @@ export const saveConfig = fromCallback<
   }
 
   // Init writes run one tab at a time (docs/MULTI_TAB.md).
-  withSeedDbLock('init', context.filesDir, _saveConfig)
-    .then(() => {
-      logger('[internal/actors] [saveConfig] saveConfig success')
-      return sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })
-    })
-    .catch((error: any) => {
-      logger('[internal/actors] [saveConfig] Error in saveConfig promise chain:', error)
-      // In test environments, still send success to allow state machine to progress
-      if (isTestOrSeedDev()) {
-        logger('[internal/actors] [saveConfig] Sending success despite error in test environment')
-        sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })
-      } else {
-        sendBack({
-          type: 'error',
-          error: error instanceof Error ? error : new Error(String(error)),
-        })
-      }
-    })
-
-  return () => { }
-})
+  await withSeedDbLock('init', context.filesDir, _saveConfig)
+  logger('[internal/actors] [saveConfig] saveConfig success')
+}

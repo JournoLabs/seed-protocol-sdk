@@ -8,7 +8,6 @@ import { useClientSelector } from './client'
 const DB_READY_STATES = new Set<string>([
   ClientManagerState.SAVE_CONFIG,
   ClientManagerState.PROCESS_SCHEMA_FILES,
-  ClientManagerState.ADD_MODELS_TO_STORE,
   ClientManagerState.ADD_MODELS_TO_DB,
   ClientManagerState.IDLE,
 ])

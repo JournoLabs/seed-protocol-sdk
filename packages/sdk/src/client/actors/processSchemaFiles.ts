@@ -1,6 +1,4 @@
-import { EventObject, fromCallback } from "xstate"
-import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
-import { ClientManagerEvents } from "@/client/constants"
+import { ClientManagerContext } from "@/types/machines"
 import { isInternalSchema } from "@/helpers/constants"
 import { listLatestSchemaFiles, loadAllSchemasFromDb, readSchemaFile } from "@/helpers/schema"
 import { applySchemaFile, createModelsForSchemaFile } from "@/helpers/schemaApply"
@@ -101,73 +99,24 @@ export async function processSchemaFilesOnce(
   return allModels
 }
 
-// Timeout for the entire schema processing operation (120 seconds)
-// Schema processing can be slow with syncSchemaFromSource, loadAllSchemasFromDb, and OPFS file I/O
-const PROCESS_SCHEMA_FILES_TIMEOUT_MS = 120000
-
-export const processSchemaFiles = fromCallback<
-  EventObject,
-  FromCallbackInput<ClientManagerContext>
->(({ sendBack, input: { context } }) => {
+/**
+ * Init step: runs processSchemaFilesOnce under the init lock and returns the models it loaded.
+ * Runs one at a time: its schema and model inserts check for rows first, so tabs take turns
+ * (docs/MULTI_TAB.md), and so do overlapping inits in this tab.
+ */
+export function processSchemaFiles(context: ClientManagerContext): Promise<{ [modelName: string]: any }> {
   logger('processSchemaFiles started')
-
-  let hasResponded = false
-  let timeoutId: NodeJS.Timeout | null = null
-
-  const reportError = (error: Error) => {
-    if (!hasResponded) {
-      hasResponded = true
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
-      logger('processSchemaFiles error:', error)
-      sendBack({ 
-        type: 'error', 
-        error: error instanceof Error ? error : new Error(String(error))
-      })
-    }
-  }
-
-  const reportSuccess = () => {
-    if (!hasResponded) {
-      hasResponded = true
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
-      logger('processSchemaFiles completed')
-      sendBack({ type: ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS })
-    }
-  }
-
-  // Set up a single timeout for the entire operation
-  timeoutId = setTimeout(() => {
-    reportError(new Error(`processSchemaFiles timed out after ${PROCESS_SCHEMA_FILES_TIMEOUT_MS}ms`))
-  }, PROCESS_SCHEMA_FILES_TIMEOUT_MS)
-
-  const _processSchemaFiles = async () => {
-    const models = await processSchemaFilesOnce(context)
-    sendBack({ type: ClientManagerEvents.UPDATE_CONTEXT, context: { models } })
-  }
-
-  const run = processSchemaFilesChain
-    // Its schema and model inserts check for rows first, so tabs take turns (docs/MULTI_TAB.md).
-    .then(() => withSeedDbLock('init', context.filesDir, _processSchemaFiles))
+  const run = processSchemaFilesChain.then(() =>
+    withSeedDbLock('init', context.filesDir, () => processSchemaFilesOnce(context)),
+  )
   // The chain only orders runs; a failed run must not fail the next init too.
-  processSchemaFilesChain = run.catch(() => {})
-  run.then(reportSuccess).catch((error) => {
-    reportError(error instanceof Error ? error : new Error(String(error)))
-  })
+  processSchemaFilesChain = run.then(
+    () => {},
+    () => {},
+  )
+  return run
+}
 
-  // Cleanup function to clear timeout if actor is stopped
-  return () => {
-    if (timeoutId) {
-      clearTimeout(timeoutId)
-      timeoutId = null
-    }
-  }
-})
 /**
  * Applies each schema's newest version file that its row hasn't applied: no row with the file's
  * id, or a published row at an older version. Drafts keep their edits. A file named like a schema

@@ -33,12 +33,16 @@ export type AppendOutboxOpInput = {
   value?: unknown
   /** The stored metadata row the edit was made against. */
   baseRowId?: string | null
+  /** A staged file holding the op's content (a storage value's bytes), written by the appending tab. */
+  valueRef?: string | null
 }
 
 /** Applies ops of one kind. Registered by the code that defines the kind. */
 export type OutboxApplier<Prepared = unknown> = {
   /**
-   * Runs before the transaction, for lookups that may call EAS or the app. Must not write.
+   * Runs before the transaction, for lookups that may call EAS or the app. Must not write to the
+   * database. It may write a file that only this op uses (a storage value's file, named after its
+   * new seed); `discard` deletes it if the op never applies.
    */
   prepare?: (op: OutboxOp) => Promise<Prepared>
   /**
@@ -56,10 +60,17 @@ export type OutboxApplier<Prepared = unknown> = {
    */
   around?: <T>(op: OutboxOp, run: () => Promise<T>) => Promise<T>
   /**
-   * Cleans up after an op that will never apply (superseded or failed): a file written for it,
-   * say. Runs after the op is settled; errors are logged and ignored.
+   * Runs after the op's transaction committed, before its waiters hear: deleting its staged file,
+   * say. Errors are logged and ignored.
    */
-  discard?: (op: OutboxOp) => Promise<void>
+  afterApply?: (op: OutboxOp, prepared: Prepared) => Promise<void>
+  /**
+   * Cleans up after an op that will never apply (superseded or failed): a file written for it,
+   * say. `prepared` is what `prepare` returned when the op failed after it; undefined for a
+   * superseded op, which is never prepared. Runs after the op is settled; errors are logged and
+   * ignored.
+   */
+  discard?: (op: OutboxOp, prepared: Prepared | undefined) => Promise<void>
 }
 
 /** File-system errors that pass (another tab or the OS holding the file). */
@@ -151,6 +162,7 @@ export async function appendOutboxOp(input: AppendOutboxOpInput): Promise<string
     kind: input.kind,
     value: input.value === undefined ? null : JSON.stringify(input.value),
     baseRowId: input.baseRowId ?? null,
+    valueRef: input.valueRef ?? null,
     createdAt: Date.now(),
     tabId: TAB_ID,
     status: 'pending' as OutboxOpStatus,
@@ -300,7 +312,9 @@ const isDue = (op: OutboxOp) => (notBefore.get(op.opId) ?? 0) <= Date.now()
 
 /**
  * The units to apply now, oldest first. A property's ops apply in order, so its queue waits
- * behind its oldest pending op, including one waiting for a retry. An op on the seed itself (no
+ * behind its oldest pending op, including one waiting for a retry. A run of value ops is one unit
+ * that applies its newest op, so it waits for that op only: an older one set aside (its staged
+ * value still being written, say) is superseded with the run. An op on the seed itself (no
  * property: create, delete) is ordered against all of its seed's ops: it waits for every earlier
  * one, and every later one waits for it.
  */
@@ -322,7 +336,6 @@ function planUnits(pending: OutboxOp[]): Unit[] {
   const units: Array<{ unit: Unit; order: number }> = []
   for (const queue of queues.values()) {
     const head = queue[0]
-    if (!isDue(head)) continue
     if (blockedBySeed(head)) continue
     let end = 0
     if (VALUE_KINDS.has(head.kind)) {
@@ -335,6 +348,7 @@ function planUnits(pending: OutboxOp[]): Unit[] {
         end++
       }
     }
+    if (!isDue(queue[end])) continue
     units.push({ unit: { op: queue[end], superseded: queue.slice(0, end) }, order: head.id })
   }
   return units.sort((a, b) => a.order - b.order).map(({ unit }) => unit)
@@ -348,8 +362,8 @@ async function applyUnit(unit: Unit): Promise<void> {
   const superseded = unit.superseded
   const ids = ops.map((op) => op.opId)
   const supersededIds = superseded.map((op) => op.opId)
+  const prepared: unknown[] = []
   try {
-    const prepared: unknown[] = []
     for (const op of ops) prepared.push(await applierFor(op).prepare?.(op))
 
     const transaction = () => BaseDb.transaction(async (tx) => {
@@ -386,7 +400,12 @@ async function applyUnit(unit: Unit): Promise<void> {
       return around ? () => around(op, inner) : inner
     }, transaction)
     await wrapped()
-    for (const id of ids) notBefore.delete(id)
+    for (const [index, op] of ops.entries()) {
+      await applierFor(op)
+        .afterApply?.(op, prepared[index])
+        .catch((error) => logger(`after applying op ${op.opId}`, error))
+    }
+    for (const id of [...ids, ...supersededIds]) notBefore.delete(id)
     settle([...ids, ...supersededIds])
     discardAll(superseded)
   } catch (error) {
@@ -397,7 +416,7 @@ async function applyUnit(unit: Unit): Promise<void> {
       scheduleRetry()
       return
     }
-    await recordFailure(ops, superseded, error)
+    await recordFailure(ops, superseded, error, prepared)
   }
 }
 
@@ -407,7 +426,12 @@ function applierFor(op: OutboxOp): OutboxApplier<unknown> {
   return applier
 }
 
-async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unknown): Promise<void> {
+async function recordFailure(
+  ops: OutboxOp[],
+  superseded: OutboxOp[],
+  error: unknown,
+  prepared: unknown[],
+): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
   const errorName = error instanceof Error ? error.name : null
   const attempts = Math.max(...ops.map((op) => op.attempts)) + 1
@@ -440,15 +464,16 @@ async function recordFailure(ops: OutboxOp[], superseded: OutboxOp[], error: unk
   }
   for (const id of ids) notBefore.delete(id)
   settle([...ids, ...supersededIds])
-  discardAll([...ops, ...superseded])
+  discardAll(ops, prepared)
+  discardAll(superseded)
 }
 
-/** Runs each op's applier's discard step (ops that will never apply). */
-function discardAll(ops: OutboxOp[]): void {
-  for (const op of ops) {
+/** Runs each op's applier's discard step (ops that will never apply), with what `prepare` returned for it. */
+function discardAll(ops: OutboxOp[], prepared: unknown[] = []): void {
+  for (const [index, op] of ops.entries()) {
     const discard = appliers.get(op.kind)?.discard
     if (!discard) continue
-    discard(op).catch((error) => logger(`discarding op ${op.opId} failed`, error))
+    discard(op, prepared[index]).catch((error) => logger(`discarding op ${op.opId} failed`, error))
   }
 }
 

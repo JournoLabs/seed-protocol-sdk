@@ -1,6 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
-import { listCompleteSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
+import { loadAllSchemasFromDb } from '@/helpers/schema'
 import { mergeSchemaFiles, writeNextSchemaVersion } from '@/helpers/schemaApply'
 import { Model } from '@/Model/Model'
 import { getDraftSaveError, queueDraftSave, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
@@ -215,7 +215,7 @@ export class Schema {
       )
     }
 
-    // Deduplicate concurrent creates for same schema (prevents many parallel checkExistingSchema loads).
+    // Deduplicate concurrent creates for same schema (prevents many parallel loads).
     // The name cache is set before a pending load is recorded, so a hold was already taken above.
     if (waitForReady) {
       const pending = this.pendingSchemaByName.get(schemaName)
@@ -331,62 +331,14 @@ export class Schema {
               },
             }
             
-            // Check current state after potential restart
-            const currentState = snapshot.value
-            // Check if state is a loading state object (XState v5 nested states)
-            const isServiceLoading = typeof currentState === 'object' && 'loading' in currentState
-            
-            // If service is loading (or was just restarted and might be loading), wait for it to finish
-            // Otherwise loadOrCreateSchemaSuccess might overwrite our update with old data
-            if (isServiceLoading || wasServiceStopped) {
-              logger(`Service is ${isServiceLoading ? 'loading' : 'was stopped'}, will send updateContext after loading completes (current state: ${currentState})`)
-              
-              // Helper function to send the update
-              const sendUpdate = () => {
-                logger(`Sending updateContext with newName="${newName}"`)
-                instance._service.send(updateEvent)
-                
-                // Verify the update
-                setTimeout(() => {
-                  const verifySnapshot = instance._service.getSnapshot()
-                  logger(`After updateContext: context schemaName="${verifySnapshot.context.schemaName}", metadata.name="${verifySnapshot.context.metadata?.name}"`)
-                }, 0)
-              }
-              
-              // Check if already idle (might have loaded synchronously)
-              if (currentState === 'idle') {
-                // Service is already idle, but loadOrCreateSchemaSuccess might have just fired
-                // Use a small delay to ensure loadOrCreateSchemaSuccess has been processed
-                logger(`Service is already idle after restart, will send updateContext after brief delay to ensure loadOrCreateSchemaSuccess processed`)
-                setTimeout(() => {
-                  sendUpdate()
-                }, 10)
-              } else {
-                // Subscribe to wait for loading to complete, then send the update
-                // Use a small delay after idle to ensure loadOrCreateSchemaSuccess has been processed
-                const loadingSubscription = instance._service.subscribe((snapshot) => {
-                  if (snapshot.value === 'idle') {
-                    loadingSubscription.unsubscribe()
-                    logger(`Service finished loading, will send updateContext with newName="${newName}" after brief delay`)
-                    setTimeout(() => {
-                      sendUpdate()
-                    }, 10)
-                  } else if (snapshot.value === 'error') {
-                    loadingSubscription.unsubscribe()
-                    logger(`Service failed to load, cannot update context`)
-                  }
-                })
-              }
+            // A schema still loading would overwrite the update with what it loads: send it once idle
+            if (wasServiceStopped || snapshot.value === 'loading') {
+              waitForEntityIdle(instance).then(
+                () => instance._service.send(updateEvent),
+                () => logger(`Schema failed to load, cannot rename it to "${newName}"`),
+              )
             } else {
-              // Service is already idle, send update immediately
-              logger(`Service is already idle, sending updateContext immediately: newName="${newName}", current context schemaName="${snapshot.context.schemaName}"`)
               instance._service.send(updateEvent)
-              
-              // Verify the update
-              setTimeout(() => {
-                const verifySnapshot = instance._service.getSnapshot()
-                logger(`After updateContext: context schemaName="${verifySnapshot.context.schemaName}", metadata.name="${verifySnapshot.context.metadata?.name}"`)
-              }, 0)
             }
             
             // Mark schema as draft when name changes
@@ -679,171 +631,115 @@ export class Schema {
       readyTimeout = DEFAULT_READY_TIMEOUT_MS,
     } = options
     
-    try {
-      // Use loadAllSchemasFromDb as single source of truth
-      // This intelligently merges database and file data, including drafts
-      const allSchemasData = await loadAllSchemasFromDb()
+    // Use loadAllSchemasFromDb as single source of truth
+    // This intelligently merges database and file data, including drafts
+    const allSchemasData = await loadAllSchemasFromDb()
 
-      // Filter internal schemas unless explicitly included
-      let filteredSchemas = includeInternal
-        ? allSchemasData
-        : allSchemasData.filter(schemaData => {
-            const schema = schemaData.schema
-            // Check if this is an internal schema by name or ID
-            return !isInternalSchema(
-              schema.metadata?.name || '',
-              schema.id
-            )
-          })
-      
-      // Filter to latest versions if needed
-      if (!includeAllVersions) {
-        // Group by schema name and keep only the latest version of each
-        const schemaMap = new Map<string, typeof filteredSchemas[0]>()
-        for (const schemaData of filteredSchemas) {
-          const schemaName = schemaData.schema.metadata?.name || ''
-          if (!schemaName) continue
-          
-          const existing = schemaMap.get(schemaName)
-          if (!existing || schemaData.schema.version > existing.schema.version) {
-            schemaMap.set(schemaName, schemaData)
-          } else if (schemaData.schema.version === existing.schema.version) {
-            // If versions are equal, use updatedAt as tiebreaker
-            const currentUpdatedAt = new Date(schemaData.schema.metadata?.updatedAt || 0).getTime()
-            const existingUpdatedAt = new Date(existing.schema.metadata?.updatedAt || 0).getTime()
-            if (currentUpdatedAt > existingUpdatedAt) {
-              schemaMap.set(schemaName, schemaData)
-            }
-          }
-        }
-        filteredSchemas = Array.from(schemaMap.values())
-      }
-
-      // Create Schema instances using the schemaFileId from filtered data to ensure correct version
-      const schemaInstances: Schema[] = []
-      const processedSchemaNames = new Set<string>()
-      
+    // Filter internal schemas unless explicitly included
+    let filteredSchemas = includeInternal
+      ? allSchemasData
+      : allSchemasData.filter(schemaData => {
+          const schema = schemaData.schema
+          // Check if this is an internal schema by name or ID
+          return !isInternalSchema(
+            schema.metadata?.name || '',
+            schema.id
+          )
+        })
+    
+    // Filter to latest versions if needed
+    if (!includeAllVersions) {
+      // Group by schema name and keep only the latest version of each
+      const schemaMap = new Map<string, typeof filteredSchemas[0]>()
       for (const schemaData of filteredSchemas) {
-        const schemaName = schemaData.schema.metadata?.name
-        const schemaFileId = schemaData.schema.id
-        const expectedVersion = schemaData.schema.version
-        
+        const schemaName = schemaData.schema.metadata?.name || ''
         if (!schemaName) continue
         
-        // Skip if we've already processed this schema name (to avoid duplicates)
-        if (processedSchemaNames.has(schemaName)) {
-          continue
-        }
-        processedSchemaNames.add(schemaName)
-        
-        // Try to use schemaFileId to ensure we load the correct version
-        // First check if we have a cached instance by schemaFileId. Schema.all takes no holds: it
-        // lists schemas (useSchemas caches the list and never unloads it).
-        if (schemaFileId) {
-          const cachedById = this.peek(schemaFileId)
-          if (cachedById) {
-            // Verify the cached instance has the correct version
-            const cachedContext = cachedById.getService().getSnapshot().context
-            if (cachedContext.version === expectedVersion) {
-              schemaInstances.push(cachedById)
-              continue
-            }
+        const existing = schemaMap.get(schemaName)
+        if (!existing || schemaData.schema.version > existing.schema.version) {
+          schemaMap.set(schemaName, schemaData)
+        } else if (schemaData.schema.version === existing.schema.version) {
+          // If versions are equal, use updatedAt as tiebreaker
+          const currentUpdatedAt = new Date(schemaData.schema.metadata?.updatedAt || 0).getTime()
+          const existingUpdatedAt = new Date(existing.schema.metadata?.updatedAt || 0).getTime()
+          if (currentUpdatedAt > existingUpdatedAt) {
+            schemaMap.set(schemaName, schemaData)
           }
         }
-        
-        // If no cached instance by ID, check by name but verify version
-        const cachedByName = this.instanceCacheByName.get(schemaName)
-        if (cachedByName) {
-          const cachedContext = cachedByName.instance.getService().getSnapshot().context
-          // Only use cached instance if it has the correct version
-          if (cachedContext.version === expectedVersion && (!schemaFileId || cachedContext.id === schemaFileId)) {
-            schemaInstances.push(cachedByName.instance)
+      }
+      filteredSchemas = Array.from(schemaMap.values())
+    }
+
+    // Create Schema instances using the schemaFileId from filtered data to ensure correct version
+    const schemaInstances: Schema[] = []
+    const processedSchemaNames = new Set<string>()
+    
+    for (const schemaData of filteredSchemas) {
+      const schemaName = schemaData.schema.metadata?.name
+      const schemaFileId = schemaData.schema.id
+      const expectedVersion = schemaData.schema.version
+      
+      if (!schemaName) continue
+      
+      // Skip if we've already processed this schema name (to avoid duplicates)
+      if (processedSchemaNames.has(schemaName)) {
+        continue
+      }
+      processedSchemaNames.add(schemaName)
+      
+      // Try to use schemaFileId to ensure we load the correct version
+      // First check if we have a cached instance by schemaFileId. Schema.all takes no holds: it
+      // lists schemas (useSchemas caches the list and never unloads it).
+      if (schemaFileId) {
+        const cachedById = this.peek(schemaFileId)
+        if (cachedById) {
+          // Verify the cached instance has the correct version
+          const cachedContext = cachedById.getService().getSnapshot().context
+          if (cachedContext.version === expectedVersion) {
+            schemaInstances.push(cachedById)
             continue
           }
         }
-        
-        // Create new instance - it will load from database
-        // The loadOrCreateSchema actor should query by name and get the latest version
-        // But to ensure we get the correct version, we'll use createById if we have the schemaFileId
-        if (schemaFileId) {
-          try {
-            const instance = await this.createById(schemaFileId, { hold: false })
-            schemaInstances.push(instance)
-          } catch {
-            // Fallback to creating by name if createById fails
-            schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
-          }
-        } else {
-          schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
+      }
+      
+      // If no cached instance by ID, check by name but verify version
+      const cachedByName = this.instanceCacheByName.get(schemaName)
+      if (cachedByName) {
+        const cachedContext = cachedByName.instance.getService().getSnapshot().context
+        // Only use cached instance if it has the correct version
+        if (cachedContext.version === expectedVersion && (!schemaFileId || cachedContext.id === schemaFileId)) {
+          schemaInstances.push(cachedByName.instance)
+          continue
         }
       }
-
-      if (waitForReady && schemaInstances.length > 0) {
-        await Promise.all(
-          schemaInstances.map((s) =>
-            waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
-              timeout: readyTimeout,
-            }),
-          ),
-        )
-      }
-
-      return schemaInstances
-    } catch (error) {
-      // Fallback to file-based approach if database is unavailable
-      // This maintains backward compatibility for environments without database
-      logger(`Error loading schemas from database, falling back to files: ${error instanceof Error ? error.message : String(error)}`)
       
-      // Use existing file-based implementation as fallback
-      const allSchemaFiles = await listCompleteSchemaFiles()
-      
-      // Filter out internal schemas unless explicitly included
-      const filteredSchemas = includeInternal
-        ? allSchemaFiles
-        : allSchemaFiles.filter(schema => {
-            // Check if this is an internal schema by name or ID
-            return !isInternalSchema(schema.name, schema.schemaFileId)
-          })
-      
-      // If includeAllVersions is false, filter to only latest version of each schema
-      const schemasToUse = includeAllVersions
-        ? filteredSchemas
-        : (() => {
-            // Group by schema name and keep only the latest version of each
-            const schemaMap = new Map<string, typeof filteredSchemas[0]>()
-            for (const schema of filteredSchemas) {
-              const existing = schemaMap.get(schema.name)
-              if (!existing || schema.version > existing.version) {
-                schemaMap.set(schema.name, schema)
-              }
-            }
-            return Array.from(schemaMap.values())
-          })()
-      
-      // Get unique schema names (one instance per schema name)
-      const uniqueSchemaNames = new Set<string>()
-      for (const schema of schemasToUse) {
-        uniqueSchemaNames.add(schema.name)
-      }
-      
-      // Create Schema instances for each unique schema name
-      const schemaInstances: Schema[] = []
-      for (const schemaName of uniqueSchemaNames) {
+      // Create new instance - it will load from database
+      // The loadOrCreateSchema actor should query by name and get the latest version
+      // But to ensure we get the correct version, we'll use createById if we have the schemaFileId
+      if (schemaFileId) {
+        try {
+          const instance = await this.createById(schemaFileId, { hold: false })
+          schemaInstances.push(instance)
+        } catch {
+          // Fallback to creating by name if createById fails
+          schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
+        }
+      } else {
         schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
       }
-
-      if (waitForReady && schemaInstances.length > 0) {
-        await Promise.all(
-          schemaInstances.map((s) =>
-            waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
-              timeout: readyTimeout,
-            }),
-          ),
-        )
-      }
-
-      return schemaInstances
     }
+
+    if (waitForReady && schemaInstances.length > 0) {
+      await Promise.all(
+        schemaInstances.map((s) =>
+          waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
+            timeout: readyTimeout,
+          }),
+        ),
+      )
+    }
+
+    return schemaInstances
   }
 
   getService(): SchemaService {
@@ -976,38 +872,13 @@ export class Schema {
    * @returns Validation result
    */
   async validate(): Promise<{ isValid: boolean; errors: any[] }> {
-    return new Promise((resolve) => {
-      let resolved = false
-      const subscription = this._service.subscribe((snapshot) => {
-        if (snapshot.value === 'idle' || snapshot.value === 'error') {
-          if (!resolved) {
-            resolved = true
-            subscription.unsubscribe()
-            const errors = snapshot.context._validationErrors || []
-            resolve({
-              isValid: errors.length === 0,
-              errors,
-            })
-          }
-        }
-      })
-
-      this._service.send({ type: 'validateSchema' })
-      
-      // Timeout fallback to ensure we always resolve (15 seconds - longer than actor timeout)
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          subscription.unsubscribe()
-          const errors = this._getSnapshotContext()._validationErrors || []
-          resolve({
-            isValid: errors.length === 0,
-            errors,
-          })
-        }
-      }, 15000)
-    })
+    // Validate the loaded schema, not the empty context of one still loading
+    await waitForEntityIdle(this, { throwOnError: false })
+    this._service.send({ type: 'validateSchema' })
+    const errors = this._getSnapshotContext()._validationErrors || []
+    return { isValid: errors.length === 0, errors }
   }
+
 
   /**
    * Build the file-format `models` object from this schema's Model instances: every model
@@ -1655,7 +1526,7 @@ export class Schema {
       const { ModelProperty } = await import('../ModelProperty/ModelProperty')
       ModelProperty.evictForModels(evictedModelNames, schemaName)
       // Evicting stops new writes but not ones already running; let those land before deleting their rows
-      const { waitForInFlightWrites } = await import('../services/write/actors/writeToDatabase')
+      const { waitForInFlightWrites } = await import('../db/write/saveDefinition')
       await waitForInFlightWrites()
     }
 
@@ -1854,48 +1725,21 @@ export class Schema {
           return []
         }
 
-        // Retry logic for initial query
-        const queryInitialModels = async (retries = 3): Promise<any[]> => {
-          try {
-            const initialModels = await db
-              .select({
-                modelId: modelSchemas.modelId,
-                modelName: modelsTable.name,
-                modelFileId: modelsTable.schemaFileId,
-              })
-              .from(modelSchemas)
-              .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-              .where(eq(modelSchemas.schemaId, typeof schemaId === 'string' ? parseInt(schemaId, 10) : schemaId))
-            
-            logger(`[Schema._setupLiveQuerySubscription] Initial query found ${initialModels.length} models`)
-            
-            if (initialModels.length > 0) {
-              return initialModels.map((row: { modelId: number; modelName: string; modelFileId: string | null }) => ({
-                modelId: row.modelId,
-                modelName: row.modelName,
-                modelFileId: row.modelFileId || '',
-              }))
-            } else if (retries > 0) {
-              logger(`[Schema._setupLiveQuerySubscription] No models found, retrying... (${retries} retries left)`)
-              await new Promise(resolve => setTimeout(resolve, 100))
-              return queryInitialModels(retries - 1)
-            } else {
-              logger(`[Schema._setupLiveQuerySubscription] No models found in initial query after retries`)
-              return []
-            }
-          } catch (error) {
-            if (retries > 0) {
-              logger(`[Schema._setupLiveQuerySubscription] Error querying initial models, retrying... (${retries} retries left): ${error}`)
-              await new Promise(resolve => setTimeout(resolve, 100))
-              return queryInitialModels(retries - 1)
-            } else {
-              logger(`[Schema._setupLiveQuerySubscription] Error querying initial models after retries: ${error}`)
-              return []
-            }
-          }
-        }
-        
-        return queryInitialModels()
+        // The schema is idle, so its load (and any import it waited for) wrote these rows already
+        const initialModels = await db
+          .select({
+            modelId: modelSchemas.modelId,
+            modelName: modelsTable.name,
+            modelFileId: modelsTable.schemaFileId,
+          })
+          .from(modelSchemas)
+          .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+          .where(eq(modelSchemas.schemaId, typeof schemaId === 'string' ? parseInt(schemaId, 10) : schemaId))
+        return initialModels.map((row: { modelId: number; modelName: string; modelFileId: string | null }) => ({
+          modelId: row.modelId,
+          modelName: row.modelName,
+          modelFileId: row.modelFileId || '',
+        }))
       },
       instanceState: schemaInstanceState,
       loggerName: 'seedSdk:schema:liveQuery',

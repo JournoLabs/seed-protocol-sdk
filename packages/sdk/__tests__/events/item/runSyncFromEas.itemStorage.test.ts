@@ -229,44 +229,36 @@ describe.sequential(
       return pendingProperties.find((p) => p.propertyName === 'html')
     }
 
-    /** Run the ItemStorage save actor, as an ItemProperty loaded from `row` would. */
+    /** Write an ItemStorage value as an ItemProperty loaded from `row` would; returns the applied op's row. */
     const saveHtml = async (row: MetadataType, newValue: string) => {
-      const { saveItemStorage } =
-        await import('@/ItemProperty/service/actors/saveValueToDb/saveItemStorage')
-      const { createActor, createMachine } = await import('xstate')
-      const events: { type: string; [key: string]: unknown }[] = []
-      const parent = createMachine({
-        invoke: {
-          src: saveItemStorage,
-          input: {
-            context: {
-              localId: row.localId,
-              seedLocalId: row.seedLocalId,
-              seedUid: seed,
-              propertyName: 'html',
-              modelName: MODEL_NAME,
-              propertyRecordSchema: {
-                dataType: 'Text',
-                storageType: 'ItemStorage',
-                localStorageDir: '/html',
-                filenameSuffix: '.html',
-              },
-            },
-            event: { type: 'save', newValue },
-          } as any,
-        },
-        on: { '*': { actions: ({ event }) => void events.push(event as any) } },
-      })
-      const actor = createActor(parent).start()
-      await vi.waitFor(
-        () => {
-          if (!events.some((e) => e.type.startsWith('saveItemStorage')))
-            throw new Error('save not done')
-        },
-        { timeout: WAIT_TIMEOUT_MS },
+      const { appendPlannedWrite, planPropertyWrite, whenValidationLoaded } =
+        await import('@/ItemProperty/propertyWrite')
+      const { getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } =
+        await import('@/outbox')
+      await whenValidationLoaded()
+      const plan = planPropertyWrite(
+        {
+          localId: row.localId,
+          seedLocalId: row.seedLocalId,
+          seedUid: seed,
+          propertyName: 'html',
+          modelName: MODEL_NAME,
+          propertyRecordSchema: {
+            dataType: 'Text',
+            storageType: 'ItemStorage',
+            localStorageDir: '/html',
+            filenameSuffix: '.html',
+          },
+        } as any,
+        newValue,
       )
-      actor.stop()
-      return events
+      if (plan.writeKind === 'invalid') throw new Error('invalid value')
+      startItemOutbox()
+      const opId = await appendPlannedWrite(row.seedLocalId!, plan)
+      await waitForOutboxOp(opId)
+      const [op] = await getOutboxOps([opId])
+      expect(op?.status).toBe('applied')
+      return outboxOpResult<{ localId: string }>(op!)
     }
 
     it('derives a row from the canonical storage transaction, marked with its source', async () => {
@@ -286,20 +278,14 @@ describe.sequential(
 
     it('saves an edit into a new local draft, not into the derived row or its file', async () => {
       const derived = (await rows()).find((r) => r.derivedFromUid != null)!
-      const events = await saveHtml(derived, '<p>local edit</p>')
-      expect(events.map((e) => e.type)).toContain('saveItemStorageSuccess')
+      const result = await saveHtml(derived, '<p>local edit</p>')
 
       expect(await localEdit()).toEqual([`${seed}.html`, null])
       const draft = (await rows()).find(
         (r) => r.propertyName === 'html' && !r.uid && r.derivedFromUid == null,
       )!
       // The property now points at the draft row.
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          type: 'updateContext',
-          localId: draft.localId,
-        }),
-      )
+      expect(result?.localId).toBe(draft.localId)
 
       // The derived row is as sync left it.
       const derivedAfter = (await rows()).find(

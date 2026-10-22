@@ -15,8 +15,9 @@ import { waitForPropertyInstances } from '../test-utils/getPublishPayloadIntegra
 
 /**
  * Html, File and Image values are written through the outbox as `storage` ops (ADR 0019): the
- * file is written first, named after a new storage seed, and applying the op creates that seed,
- * its version and the property row. A value that never applies has its file deleted.
+ * setter appends the op with the value (a string in the op, a Blob's bytes in a staged file);
+ * preparing it writes the file, named after a new storage seed, and applying it creates that seed,
+ * its version and the property row. A value that never applies never gets a file.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
@@ -101,28 +102,30 @@ testDescribe('storage values through the outbox', () => {
     post.unload()
   }, 30000)
 
-  it('quick Html edits keep the newest and delete the superseded value’s file without creating its seed', async () => {
+  it('quick Html edits keep the newest; the superseded value gets no file and no seed', async () => {
     const post = await createPost()
     const html = propertyOf(post, 'html')
     pauseOutboxDrainForTests(true)
     html.value = '<p>older</p>'
-    await vi.waitFor(async () => expect(await storageOps(post.seedLocalId)).toHaveLength(1), { timeout: 10000 })
     html.value = '<p>newer</p>'
+    // Both appended before the setter returned
     await vi.waitFor(async () => expect(await storageOps(post.seedLocalId)).toHaveLength(2), { timeout: 10000 })
 
     const [older, newer] = await storageOps(post.seedLocalId)
-    const olderFile = outboxOpValue<StorageValueOp>(older)!.ownedFilePath!
-    expect(await BaseFileManager.pathExists(olderFile)).toBe(true)
+    expect(outboxOpValue<StorageValueOp>(older)!.stage?.source).toBe('<p>older</p>')
+    const olderFile = BaseFileManager.getFilesPath('html', outboxOpValue<StorageValueOp>(older)!.row!.refResolvedValue)
+    expect(await BaseFileManager.pathExists(olderFile)).toBe(false)
 
     pauseOutboxDrainForTests(false)
     await Promise.all([waitForOutboxOp(older.opId), waitForOutboxOp(newer.opId)])
     const [olderAfter, newerAfter] = await storageOps(post.seedLocalId)
     expect([olderAfter.status, newerAfter.status]).toEqual(['superseded', 'applied'])
 
-    await vi.waitFor(async () => expect(await BaseFileManager.pathExists(olderFile)).toBe(false), { timeout: 5000 })
+    expect(await BaseFileManager.pathExists(olderFile)).toBe(false)
     const olderSeed = outboxOpValue<StorageValueOp>(older)!.storageSeed.localId
     const newerSeed = outboxOpValue<StorageValueOp>(newer)!.storageSeed.localId
     expect((await seedRows([olderSeed, newerSeed])).map((row: { localId: string }) => row.localId)).toEqual([newerSeed])
+    expect(html.value).toBe('<p>newer</p>')
     post.unload()
   }, 30000)
 
@@ -140,7 +143,7 @@ testDescribe('storage values through the outbox', () => {
     attachment.value = 'replacing text content'
     await vi.waitFor(async () => expect(await storageOps(post.seedLocalId)).toHaveLength(2), { timeout: 10000 })
     const [byName] = await storageOps(post.seedLocalId)
-    expect(outboxOpValue<StorageValueOp>(byName)!.ownedFilePath).toBeUndefined()
+    expect(outboxOpValue<StorageValueOp>(byName)!.stage?.source).toBe(name)
 
     pauseOutboxDrainForTests(false)
     await waitForOutboxOp(byName.opId)
@@ -149,39 +152,47 @@ testDescribe('storage values through the outbox', () => {
     post.unload()
   }, 30000)
 
-  it('an older Html save that finishes writing its file last appends nothing and deletes its file', async () => {
+  it('a newer Html value assigned while the older one’s file is written applies after it', async () => {
     const post = await createPost()
     const html = propertyOf(post, 'html')
     const original = BaseFileManager.saveFile.bind(BaseFileManager)
-    let olderPath: string | undefined
     let releaseOlder!: () => void
     const olderHeld = new Promise<void>((resolve) => (releaseOlder = resolve))
     let olderReached!: () => void
     const reached = new Promise<void>((resolve) => (olderReached = resolve))
     const spy = vi.spyOn(BaseFileManager, 'saveFile').mockImplementation(async (filePath, content) => {
       if (content === '<p>older, slow</p>') {
-        olderPath = filePath
         olderReached()
         await olderHeld
       }
       return original(filePath, content)
     })
     try {
-      // The newer value is assigned while the older save is still writing its file
+      // The drainer is writing the older value's file when the newer value is assigned
       html.value = '<p>older, slow</p>'
       await reached
       html.value = '<p>newer</p>'
-      await vi.waitFor(async () => expect((await storageOps(post.seedLocalId)).at(-1)?.status).toBe('applied'), {
-        timeout: 10000,
-      })
+      expect(html.value).toBe('<p>newer</p>')
       releaseOlder()
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      const ops = await storageOps(post.seedLocalId)
-      expect(ops).toHaveLength(1)
-      expect(outboxOpValue<StorageValueOp>(ops[0])!.row!.refResolvedValue).not.toContain('older')
-      expect(await BaseFileManager.pathExists(olderPath!)).toBe(false)
-      expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', outboxOpValue<StorageValueOp>(ops[0])!.row!.refResolvedValue!))).toBe('<p>newer</p>')
+      const ops = await vi.waitFor(
+        async () => {
+          const all = await storageOps(post.seedLocalId)
+          expect(all.map((op: { status: string }) => op.status)).toEqual(['applied', 'applied'])
+          return all
+        },
+        { timeout: 10000 },
+      )
+      const newerSeed = outboxOpValue<StorageValueOp>(ops[1])!.storageSeed.localId
+      const [row] = await BaseDb.getAppDb()
+        .select()
+        .from(metadata)
+        .where(and(eq(metadata.seedLocalId, post.seedLocalId), inArray(metadata.propertyName, ['html', 'htmlId'])))
+      expect(row.propertyValue).toBe(newerSeed)
+      expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', row.refResolvedValue!))).toBe(
+        '<p>newer</p>',
+      )
+      await html.save()
+      expect(html.value).toBe('<p>newer</p>')
     } finally {
       spy.mockRestore()
     }

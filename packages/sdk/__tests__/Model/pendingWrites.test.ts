@@ -1,59 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 
-// Pending-write tracking is purely in-memory static state on Model and ModelProperty; these tests never touch
+// Pending-write tracking is purely in-memory static state on ModelProperty; these tests never touch
 // the DB, so they need no client/DB setup. Each test resets the private maps so ids don't leak between tests.
 describe('Pending Writes Tracking', () => {
   afterEach(() => {
-    ;((Model as any).pendingWrites as Map<string, unknown>).clear()
     ;((ModelProperty as any).pendingWrites as Map<string, unknown>).clear()
-  })
-
-  describe('Model pending writes', () => {
-    it('should track pending model writes', () => {
-      const modelFileId = 'test-model-id'
-      const schemaId = 1
-
-      // Track a pending write
-      Model.trackPendingWrite(modelFileId, schemaId)
-
-      // Get pending model IDs
-      const pendingIds = Model.getPendingModelIds(schemaId)
-
-      expect(pendingIds).toContain(modelFileId)
-    })
-
-    it('should return empty array for non-existent schema', () => {
-      const pendingIds = Model.getPendingModelIds(999)
-
-      expect(pendingIds).toHaveLength(0)
-    })
-
-    it('should filter out error status writes', () => {
-      const modelFileId1 = 'test-model-id-1'
-      const modelFileId2 = 'test-model-id-2'
-      const schemaId = 1
-
-      // Track pending writes
-      Model.trackPendingWrite(modelFileId1, schemaId)
-      Model.trackPendingWrite(modelFileId2, schemaId)
-
-      // Manually set one to error status (in real scenario, this would be done by write process)
-      const pendingWrites = (Model as any).pendingWrites as Map<string, any>
-      if (pendingWrites) {
-        const write = pendingWrites.get(modelFileId2)
-        if (write) {
-          write.status = 'error'
-        }
-      }
-
-      // Get pending model IDs - should exclude error status
-      const pendingIds = Model.getPendingModelIds(schemaId)
-
-      expect(pendingIds).toContain(modelFileId1)
-      expect(pendingIds).not.toContain(modelFileId2)
-    })
   })
 
   describe('ModelProperty pending writes', () => {

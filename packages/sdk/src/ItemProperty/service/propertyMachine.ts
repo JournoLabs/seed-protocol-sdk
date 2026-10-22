@@ -1,18 +1,11 @@
 import { assign, setup, stateIn } from 'xstate'
-import { PropertyMachineContext, SaveValueToDbEvent } from '@/types'
+import { PropertyMachineContext } from '@/types'
 
 import { waitForDb } from '@/ItemProperty/service/actors/waitForDb'
 import { initialize } from '@/ItemProperty/service/actors/initialize'
 import { resolveRelatedValue } from '@/ItemProperty/service/actors/resolveRelatedValue'
 import { hydrateFromDb } from '@/ItemProperty/service/actors/hydrateFromDb'
 import { loadOrCreateProperty } from '@/ItemProperty/service/actors/loadOrCreateProperty'
-import {
-  saveImage,
-  saveFile,
-  saveHtml,
-  saveItemStorage,
-} from '@/ItemProperty/service/actors/saveValueToDb'
-import { analyzeInput } from '@/ItemProperty/service/actors/saveValueToDb/analyzeInput'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { normalizePropertyRecordSchema } from '@/helpers/property'
 
@@ -56,9 +49,6 @@ const withListValueParsed = <T extends { propertyValue?: unknown; renderValue?: 
   return { ...context, propertyValue, renderValue }
 }
 
-/** Keeps the thrown Error itself, so `save()` rethrows it with its class, `code` and `cause`. */
-const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)))
-
 export const propertyMachine = setup({
   types: {
     context: {} as PropertyMachineContext,
@@ -68,28 +58,12 @@ export const propertyMachine = setup({
     // stateIn return type does not satisfy setup() inference; runtime guard is correct for root state `idle`.
     propertyMachineIsIdle: stateIn('idle') as any,
   },
-  actions: {
-    /**
-     * A storage save (Image, File, Html, ItemStorage) failed. Each throws before or during its
-     * write, so nothing was stored: restore the shown value, as saveFailed does.
-     */
-    restoreValueAfterSaveError: assign(({ context, event }) => ({
-      _saveError: toError((event as { error?: unknown }).error),
-      ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
-      _valueBeforeSave: undefined,
-    })),
-  },
   actors: {
     waitForDb,
     loadOrCreateProperty,
     hydrateFromDb,
     initialize,
     resolveRelatedValue,
-    analyzeInput,
-    saveImage,
-    saveFile,
-    saveHtml,
-    saveItemStorage,
   },
 }).createMachine({
   id: 'itemProperty',
@@ -100,28 +74,6 @@ export const propertyMachine = setup({
     rehydrateFromDb: {
       guard: 'propertyMachineIsIdle',
       target: '.hydratingFromDb',
-    },
-    save: {
-      actions: assign({
-        isSaving: true,
-        _saveError: undefined,
-        _saveValidationErrors: undefined,
-        _valueBeforeSave: ({ event }) => (event as { before?: PropertyMachineContext['_valueBeforeSave'] }).before,
-      }),
-      target: '.saving',
-    },
-    /** analyzeInput refused (item not owned) or failed before writing: restore the shown value. */
-    saveFailed: {
-      target: '.idle',
-      actions: assign(({ context, event }) => {
-        const error = (event as { type: 'saveFailed'; error: unknown }).error
-        return {
-          isSaving: false,
-          _saveError: toError(error),
-          ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
-          _valueBeforeSave: undefined,
-        }
-      }),
     },
     updateContext: {
       actions: assign(({ context, event }) => {
@@ -151,16 +103,6 @@ export const propertyMachine = setup({
                 name: (event as { type: 'destroyError'; error: Error }).error.name,
               }
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
-      })),
-    },
-    /** The value broke its property's rules: nothing was written, so restore the shown value. */
-    saveValueValidationError: {
-      target: '.idle',
-      actions: assign(({ context, event }) => ({
-        isSaving: false,
-        _saveValidationErrors: (event as { type: 'saveValueValidationError'; errors: any[] }).errors,
-        ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
-        _valueBeforeSave: undefined,
       })),
     },
     clearSaveError: {
@@ -263,113 +205,6 @@ export const propertyMachine = setup({
         input: ({ context }) => ({ context }),
       },
     },
-    saving: {
-      initial: 'analyzingInput',
-      states: {
-        analyzingInput: {
-          on: {
-            saveValueToDbSuccess: {
-              target: 'doneSaving',
-            },
-            saveImage: 'savingImage',
-            saveFile: 'savingFile',
-            saveHtml: 'savingHtml',
-            saveItemStorage: 'savingItemStorage',
-          },
-          invoke: {
-            src: 'analyzeInput',
-            input: ({ context, event }) => {
-              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        savingImage: {
-          on: {
-            saveImageSuccess: 'doneSaving',
-            saveImageError: {
-              target: 'doneSaving',
-              actions: 'restoreValueAfterSaveError',
-            },
-          },
-          invoke: {
-            src: 'saveImage',
-            input: ({ context, event }) => {
-              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        savingFile: {
-          on: {
-            saveFileSuccess: 'doneSaving',
-            saveFileError: {
-              target: 'doneSaving',
-              actions: 'restoreValueAfterSaveError',
-            },
-          },
-          invoke: {
-            src: 'saveFile',
-            input: ({ context, event }) => {
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        savingHtml: {
-          on: {
-            saveHtmlSuccess: 'doneSaving',
-            saveHtmlError: {
-              target: 'doneSaving',
-              actions: 'restoreValueAfterSaveError',
-            },
-          },
-          invoke: {
-            src: 'saveHtml',
-            input: ({ context, event }) => {
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        savingItemStorage: {
-          on: {
-            saveItemStorageSuccess: 'doneSaving',
-            saveItemStorageError: {
-              target: 'doneSaving',
-              actions: 'restoreValueAfterSaveError',
-            },
-          },
-          invoke: {
-            src: 'saveItemStorage',
-            input: ({ context, event }) => {
-              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
-              return { context, event: event as SaveValueToDbEvent }
-            },
-          },
-        },
-        doneSaving: {
-          type: 'final',
-        },
-      },
-      onDone: {
-        target: 'idle',
-        actions: assign({
-          isSaving: false,
-          _saveValidationErrors: undefined,
-          // Only a refused or failed save restores it; kept after success, it pinned the old value.
-          _valueBeforeSave: undefined,
-        }),
-      },
-    },
   },
 
-  // conflict: {
-  //   on: {
-  //     resolveConflict: {
-  //       target: 'saving',
-  //       actions: assign({
-  //         data: ({ context, event }) => event.output,
-  //       }),
-  //     },
-  //   },
-  // },
 })

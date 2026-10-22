@@ -1,8 +1,8 @@
 /**
- * Audit 1.1 (V3b): a property context that missed an outside write attested its old value
- * (reconcilePropertyDraftRows repointed localId/uid, not the value), and uid recording gave the
- * attestation uid to the newest placeholder row by name, which held the new value. The payload now
- * carries the row id behind each value (`_metadataLocalId`) and recording updates that row.
+ * Audit 1.1 (V3b): a property context that missed an outside write attested its old value, and uid
+ * recording gave the attestation uid to the newest placeholder row by name, which held the new
+ * value. The payload is read from rows (publishGraph.ts), carries the row id behind each value
+ * (`_metadataLocalId`), and recording updates that row.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { SchemaEncoder } from '@ethereum-attestation-service/eas-sdk'

@@ -1,4 +1,3 @@
-import { IItem } from "@/interfaces"
 import { ItemData } from "./item"
 import { PropertyData } from "./property"
 
@@ -22,11 +21,3 @@ export type GetPropertiesForSeedProps = {
 export type GetItemProperties = (
   props: GetPropertiesForSeedProps,
 ) => Promise<PropertyData[]>
-
-export type GetItemParams = {
-  modelName?: string
-  seedLocalId?: string
-  seedUid?: string
-}
-
-export type GetItem = (params: GetItemParams) => Promise<IItem<any> | undefined>

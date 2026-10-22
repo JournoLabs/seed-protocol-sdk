@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { BaseFileManager } from '@/helpers'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { metadata } from '@/seedSchema'
+import { Item } from '@/Item/Item'
 import {
   estimateDataUriByteLength,
   summarizePublishWork,
@@ -9,7 +13,17 @@ import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
   createItemWithRelation,
+  waitForPropertyInstances,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
+
+/** Sets fields on a seed's row of a property (stored under one of `names`), as a save or sync would. */
+const setRow = async (seedLocalId: string, names: string[], fields: Record<string, unknown>) => {
+  const db = BaseDb.getAppDb()
+  const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+  const row = rows.find((r: { propertyName: string | null }) => names.includes(r.propertyName ?? ''))
+  expect(row, names.join('/')).toBeDefined()
+  await db.update(metadata).set(fields).where(eq(metadata.localId, row!.localId!))
+}
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -69,12 +83,7 @@ testDescribe('summarizePublishWork integration', () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'Has uid title',
     })
-    const title = item.properties.find((p) => p.propertyName === 'title')
-    expect(title).toBeDefined()
-    title!.getService().send({
-      type: 'updateContext',
-      uid: `0x${'ab'.repeat(32)}`,
-    })
+    await setRow(item.seedLocalId!, ['title'], { uid: `0x${'ab'.repeat(32)}` })
     const patch = await summarizePublishWork(item, { publishMode: 'patch' })
     const full = await summarizePublishWork(item, { publishMode: 'new_version' })
     expect(full.attestationCount).toBeGreaterThan(patch.attestationCount)
@@ -93,16 +102,12 @@ testDescribe('summarizePublishWork integration', () => {
     await BaseFileManager.saveFile(filePath, payload.buffer)
     expect(await BaseFileManager.getFileSize(filePath)).toBe(2048)
 
-    const cover =
-      item.properties.find((p) => p.propertyName === 'coverImage') ??
-      item.allProperties['coverImage']
-    expect(cover).toBeDefined()
-    cover!.getService().send({
-      type: 'updateContext',
-      propertyValue: item.seedLocalId,
+    const image = await Item.create({ modelName: 'Image' } as any)
+    await waitForPropertyInstances(image as any)
+    await setRow(item.seedLocalId!, ['coverImage', 'coverImageId'], {
+      propertyValue: image.seedLocalId,
       refResolvedValue: fileName,
       localStorageDir: 'images',
-      propertyRecordSchema: { dataType: 'Image', localStorageDir: 'images' },
     })
 
     const work = await summarizePublishWork(item)

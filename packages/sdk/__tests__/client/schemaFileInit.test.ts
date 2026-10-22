@@ -15,9 +15,9 @@ import {
 } from '../test-utils/client-init'
 import * as fs from 'fs'
 import * as path from 'path'
-import { createActor, fromCallback, waitFor } from 'xstate'
+import { createActor, fromPromise, waitFor } from 'xstate'
 import { clientManagerMachine } from '@/client/clientManagerMachine'
-import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
+import { ClientManagerState } from '@/client/constants'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const testDescribe = typeof window === 'undefined'
@@ -118,16 +118,15 @@ testDescribe('schemaFile init', () => {
     })
 
     function schemaProcessingActor(config: { schemaFile?: string; schema?: string }) {
-      const succeed = (type: string) => fromCallback(({ sendBack }) => { sendBack({ type }) })
+      const succeed = () => fromPromise(async () => ({}))
       return createActor(
         clientManagerMachine.provide({
           actors: {
-            platformClassesInit: succeed(ClientManagerEvents.PLATFORM_CLASSES_READY),
-            fileSystemInit: succeed(ClientManagerEvents.FILE_SYSTEM_READY),
-            dbInit: succeed(ClientManagerEvents.DB_READY),
-            saveConfig: succeed(ClientManagerEvents.SAVE_CONFIG_SUCCESS),
-            addModelsToStore: succeed(ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS),
-            addModelsToDb: succeed(ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS),
+            platformClassesInit: succeed(),
+            fileSystemInit: succeed(),
+            dbInit: succeed(),
+            saveConfig: succeed(),
+            addModelsToDb: succeed(),
           },
         }),
         {

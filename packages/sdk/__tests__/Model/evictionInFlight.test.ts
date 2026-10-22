@@ -9,7 +9,7 @@ import { models as modelsTable, properties as propertiesTable } from '@/seedSche
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { generateId } from '@/helpers'
-import { waitForInFlightWrites } from '@/services/write/actors/writeToDatabase'
+import { waitForInFlightWrites } from '@/db/write/saveDefinition'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
@@ -117,10 +117,10 @@ testDescribe('work in flight when a schema is evicted', () => {
       properties: { headline: { dataType: 'Text' }, summary: { dataType: 'Text' } },
       waitForReady: false,
     })
-    // Evict as soon as the model starts creating its properties (after its own write).
+    // Evict as soon as the model has its row id, which it gets right before creating its properties.
     await new Promise<void>((resolve) => {
       const subscription = model.getService().subscribe((snapshot) => {
-        if (snapshot.value !== 'creatingProperties') return
+        if (!snapshot.context._dbId) return
         subscription.unsubscribe()
         evictSchema()
         resolve()
@@ -169,37 +169,6 @@ testDescribe('work in flight when a schema is evicted', () => {
       .from(modelsTable)
       .where(eq(modelsTable.schemaFileId, modelFileId))
     expect(rows).toEqual([])
-
-    await cleanupTestSchemaData()
-  }, 30000)
-
-  it('a write still validating when its schema is evicted does not load the schema and its models again', async () => {
-    await importSchema()
-    const model = Model.create('EvictionValidating', SCHEMA_NAME, {
-      properties: { body: { dataType: 'Text' } },
-      waitForReady: false,
-    })
-    // Evict while the model's write validates (validation looks the schema up after an await).
-    await new Promise<void>((resolve) => {
-      const watch = () => {
-        const writeProcess = model.getService().getSnapshot().context.writeProcess
-        if (!writeProcess) return false
-        const subscription = writeProcess.subscribe((snapshot: { value: unknown }) => {
-          if (snapshot.value !== 'validating') return
-          subscription.unsubscribe()
-          evictSchema()
-          resolve()
-        })
-        return true
-      }
-      if (watch()) return
-      const subscription = model.getService().subscribe(() => {
-        if (watch()) subscription.unsubscribe()
-      })
-    })
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    await waitForInFlightWrites()
-    expect(cachedModels()).toEqual([])
 
     await cleanupTestSchemaData()
   }, 30000)
