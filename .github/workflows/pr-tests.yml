@@ -34,7 +34,7 @@ jobs:
       - name: Build workspace packages the tests import
         env:
           SKIP_TESTS: '1'
-        run: node scripts/build-packages.js bundler-core eas arweave query feed vite sdk react next
+        run: node scripts/build-packages.js bundler-core archive eas arweave query feed vite sdk react next
 
       - name: Run tests
         run: bun run test

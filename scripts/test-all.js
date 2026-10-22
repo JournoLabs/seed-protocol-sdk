@@ -16,6 +16,7 @@ const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 /** Packages whose own `test` script runs here, in this order. */
 export const PACKAGE_TESTS = [
   '@seedprotocol/bundler-core',
+  '@seedprotocol/archive',
   '@seedprotocol/vite',
   '@seedprotocol/query',
   '@seedprotocol/eas',

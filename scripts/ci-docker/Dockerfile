@@ -1,6 +1,6 @@
 # Image for `bun run ci:local --docker` (scripts/ci-local.js passes every build arg):
 # the Playwright Linux image matching bun.lock's playwright, Node from .nvmrc, Bun from
-# release.yml's BUN_VERSION.
+# release.yml's BUN_VERSION. pipx runs bagit-python for @seedprotocol/archive's BagIt tests.
 ARG PLAYWRIGHT_VERSION
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
 
@@ -8,7 +8,7 @@ ARG NODE_MAJOR
 ARG BUN_VERSION
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils \
+ && apt-get install -y --no-install-recommends ca-certificates curl pipx unzip xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # Latest Node of the .nvmrc major, as actions/setup-node resolves it, checked against SHASUMS256.
