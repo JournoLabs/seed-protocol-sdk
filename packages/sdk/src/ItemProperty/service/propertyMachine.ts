@@ -1,11 +1,9 @@
-import { assign, setup, stateIn } from 'xstate'
+import { and, assign, setup, stateIn } from 'xstate'
 import { PropertyMachineContext } from '@/types'
 
-import { waitForDb } from '@/ItemProperty/service/actors/waitForDb'
 import { initialize } from '@/ItemProperty/service/actors/initialize'
 import { resolveRelatedValue } from '@/ItemProperty/service/actors/resolveRelatedValue'
 import { hydrateFromDb } from '@/ItemProperty/service/actors/hydrateFromDb'
-import { loadOrCreateProperty } from '@/ItemProperty/service/actors/loadOrCreateProperty'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { normalizePropertyRecordSchema } from '@/helpers/property'
 import { applyContextUpdate } from '@/helpers/entity/contextUpdate'
@@ -56,25 +54,49 @@ export const propertyMachine = setup({
     input: {} as PropertyMachineContext,
   },
   guards: {
-    // stateIn return type does not satisfy setup() inference; runtime guard is correct for root state `idle`.
-    propertyMachineIsIdle: stateIn('idle') as any,
+    // Loaded (ItemProperty.load) and not hydrating already. stateIn's return type does not satisfy
+    // setup() inference; the runtime guard is correct for root state `idle`.
+    propertyMachineIsIdle: and([stateIn('idle') as any, ({ context }) => context._status === 'ready']),
   },
   actors: {
-    waitForDb,
-    loadOrCreateProperty,
     hydrateFromDb,
     initialize,
     resolveRelatedValue,
   },
 }).createMachine({
   id: 'itemProperty',
-  initial: 'waitingForDb',
+  // Loading runs outside the machine (ItemProperty.load); its result arrives as `loaded`
+  initial: 'idle',
   context: ({ input }) => input as PropertyMachineContext,
   on: {
     /** Re-run DB hydration (e.g. after EAS sync wrote new metadata for this version). */
     rehydrateFromDb: {
       guard: 'propertyMachineIsIdle',
       target: '.hydratingFromDb',
+    },
+    loaded: {
+      actions: assign(({ context, event }) => {
+        const property = (event as any).property
+        return withListValueParsed(withListRelationStorageName({
+          ...context,
+          propertyName: property.propertyName || context.propertyName,
+          propertyValue: property.propertyValue !== undefined ? property.propertyValue : context.propertyValue,
+          renderValue: property.renderValue !== undefined ? property.renderValue : context.renderValue,
+          seedLocalId: property.seedLocalId || context.seedLocalId,
+          seedUid: property.seedUid || context.seedUid,
+          versionLocalId: property.versionLocalId || context.versionLocalId,
+          versionUid: property.versionUid || context.versionUid,
+          schemaUid: property.schemaUid || context.schemaUid,
+          localId: property.localId || context.localId,
+          uid: property.uid || context.uid,
+          modelName: property.modelName || context.modelName,
+          propertyRecordSchema: property.propertyRecordSchema || context.propertyRecordSchema,
+          refSeedType: property.refSeedType !== undefined ? property.refSeedType : context.refSeedType,
+          refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
+          refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
+          localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,
+        }))
+      }),
     },
     updateContext: {
       actions: assign(({ context, event }) => {
@@ -104,60 +126,6 @@ export const propertyMachine = setup({
   },
   states: {
     idle: {},
-    waitingForDb: {
-      on: {
-        waitForDbSuccess: {
-          target: 'loading',
-          actions: assign({
-            isDbReady: true,
-          }),
-        },
-        waitForDbError: {
-          target: 'error',
-        },
-      },
-      invoke: {
-        src: 'waitForDb',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    loading: {
-      on: {
-        loadOrCreatePropertySuccess: {
-          target: 'idle',
-          actions: assign(({ context, event }) => {
-            const property = (event as any).property
-            return withListValueParsed(withListRelationStorageName({
-              ...context,
-              propertyName: property.propertyName || context.propertyName,
-              propertyValue: property.propertyValue !== undefined ? property.propertyValue : context.propertyValue,
-              renderValue: property.renderValue !== undefined ? property.renderValue : context.renderValue,
-              seedLocalId: property.seedLocalId || context.seedLocalId,
-              seedUid: property.seedUid || context.seedUid,
-              versionLocalId: property.versionLocalId || context.versionLocalId,
-              versionUid: property.versionUid || context.versionUid,
-              schemaUid: property.schemaUid || context.schemaUid,
-              localId: property.localId || context.localId,
-              uid: property.uid || context.uid,
-              modelName: property.modelName || context.modelName,
-              propertyRecordSchema: property.propertyRecordSchema || context.propertyRecordSchema,
-              refSeedType: property.refSeedType !== undefined ? property.refSeedType : context.refSeedType,
-              refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
-              refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
-              localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,
-            }))
-          }),
-        },
-        loadOrCreatePropertyError: {
-          target: 'error',
-        },
-      },
-      invoke: {
-        src: 'loadOrCreateProperty',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    error: {},
     hydratingFromDb: {
       on: {
         hydrateFromDbSuccess: 'initializing',

@@ -291,7 +291,6 @@ export type {
   ArweaveContentReadContext,
   ArweaveContentReadTransform,
 } from '@seedprotocol/arweave'
-export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
   setPublishExecutor,
   getPublishExecutor,

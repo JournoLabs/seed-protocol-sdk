@@ -4,7 +4,7 @@ import { Item } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { stageStorageContent, storageFileName } from '@/storageValue/content'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -51,7 +51,7 @@ testDescribe('storage value saves', () => {
   const createPost = async () => {
     const author = await createPublishedTestAuthor()
     const item = await Item.create({ modelName: 'Post', title: 'Storage values', author: author.seedLocalId } as any)
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     return item
   }

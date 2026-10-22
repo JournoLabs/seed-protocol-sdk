@@ -1,9 +1,10 @@
+import { waitFor } from 'xstate'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Item } from '@/Item/Item'
 import { Model } from '@/Model/Model'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -59,7 +60,7 @@ testDescribe('publish uses the schema for the exact definition', () => {
     // What a by-name lookup of `kicker` returns when EAS has `bytes32 kicker` too.
     setSchemaUidForSchemaDefinition({ text: 'kicker', schemaUid: BYTES32_KICKER_UID })
     for (const name of ['ExactDefWriter', 'ExactDefArticle']) {
-      await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
+      await waitForEntityReady(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
     }
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -69,9 +70,9 @@ testDescribe('publish uses the schema for the exact definition', () => {
 
   it('attests under `string dek`, not the schema the property found by name', async () => {
     const created = await Item.create({ modelName: 'ExactDefArticle', title: 't', dek: 'standfirst' } as any)
-    await waitForEntityIdle(created, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(created, { timeout: WAIT_TIMEOUT_MS })
     const item = (await Item.find({ seedLocalId: created.seedLocalId!, modelName: 'ExactDefArticle' }))!
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     const dek = item.properties.find((p) => p.propertyName === 'dek')!
     dek.getService().send({ type: 'updateContext', schemaUid: BYTES32_DEK_UID })
@@ -87,9 +88,9 @@ testDescribe('publish uses the schema for the exact definition', () => {
 
   const loadArticle = async (values: Record<string, unknown>) => {
     const created = await Item.create({ modelName: 'ExactDefArticle', title: 't', ...values } as any)
-    await waitForEntityIdle(created, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(created, { timeout: WAIT_TIMEOUT_MS })
     const item = (await Item.find({ seedLocalId: created.seedLocalId!, modelName: 'ExactDefArticle' }))!
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     return item
   }
@@ -97,11 +98,12 @@ testDescribe('publish uses the schema for the exact definition', () => {
   it('a rehydrated property looks its schema up by `string kicker`, not by the name alone', async () => {
     const item = await loadArticle({ kicker: 'News' })
     const kicker = item.properties.find((p) => p.propertyName === 'kicker')!
-    await waitForEntityIdle(kicker, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(kicker, { timeout: WAIT_TIMEOUT_MS })
     expect(kicker.schemaUid).toBeUndefined()
     // EAS sync rehydrates properties after writing metadata; that runs the initialize actor.
     kicker.getService().send({ type: 'rehydrateFromDb' })
-    await waitForEntityIdle(kicker, { timeout: WAIT_TIMEOUT_MS })
+    // The rehydrate runs in the machine (hydratingFromDb, initializing) and ends back in idle
+    await waitFor(kicker.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
     const stringKickerUid = await getEasSchemaUidForSchemaDefinition({ schemaText: 'string kicker' })
     expect(stringKickerUid).toMatch(/^0x[0-9a-f]{64}$/)
     expect(kicker.schemaUid).toBe(stringKickerUid)
@@ -109,7 +111,7 @@ testDescribe('publish uses the schema for the exact definition', () => {
 
   it('links a related draft under `bytes32 writer`, not the schema the property found by name', async () => {
     const writer = await Item.create({ modelName: 'ExactDefWriter', byline: 'Someone' } as any)
-    await waitForEntityIdle(writer, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(writer, { timeout: WAIT_TIMEOUT_MS })
     const item = await loadArticle({ writer: writer.seedLocalId })
     const writerProp = item.properties.find((p) => p.propertyName === 'writer' || p.propertyName === 'writerId')!
     writerProp.getService().send({ type: 'updateContext', schemaUid: STRING_WRITER_UID })

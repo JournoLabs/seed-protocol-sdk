@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createActor, createMachine } from 'xstate'
-import { of, type Subscription } from 'rxjs'
+import { of } from 'rxjs'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
@@ -20,7 +20,6 @@ const setup = (entity: ReturnType<typeof createIdleEntity>, getEntityId: () => P
     extractEntityIds: (rows) => rows.map((row: { id: string }) => row.id),
     updateContext,
     queryInitialData,
-    instanceState: new WeakMap([[entity, { liveQuerySubscription: null as Subscription | null }]]),
     loggerName: 'seedSdk:test:entityLiveQuery',
   })
   return { queryInitialData, updateContext }

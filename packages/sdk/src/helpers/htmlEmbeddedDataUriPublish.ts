@@ -9,7 +9,7 @@ import { getPublicArweaveRawUrl, normalizeRelationPropertyValue, resolveSeedIdsF
 import { getContentHash } from '@/helpers/crypto'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { Item } from '@/Item/Item'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { ModelPropertyDataTypes, normalizeDataType, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { storageSeedTransactionId } from '@/storageValue/resolve'
@@ -346,7 +346,7 @@ export async function createImageItemFromBytes(
     modelName: 'Image',
     modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
   })
-  await waitForEntityIdle(imageItem, { timeout: 60_000 })
+  await waitForEntityReady(imageItem, { timeout: 60_000 })
   const filePath = BaseFileManager.getFilesPath('images', embeddedImageFileName(imageItem.seedLocalId, mimeType))
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
   const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer

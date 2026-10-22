@@ -5,7 +5,7 @@ import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { generateId } from '@/helpers/generateId'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { currentPropertyRow, currentPropertyRows } from '@/db/read/currentPropertyRow'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { getPublishPendingDiff } from '@/db/read/getPublishPendingDiff'
@@ -50,7 +50,7 @@ testDescribe('current property row', () => {
   const createPostWithHistory = async () => {
     const author = await createPublishedTestAuthor()
     const item = await Item.create({ modelName: 'Post', title: 'published v1', author: author.seedLocalId } as any)
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     const seedLocalId = item.seedLocalId!
     const db = BaseDb.getAppDb()!
@@ -93,7 +93,7 @@ testDescribe('current property row', () => {
     item.unload()
     for (let i = 0; i < 20 && loadedBefore.getService().getSnapshot().status !== 'stopped'; i++) loadedBefore.unload()
     const loaded = (await ItemProperty.find({ seedLocalId, propertyName: 'title', modelName: 'Post' }))!
-    await waitForEntityIdle(loaded, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(loaded, { timeout: WAIT_TIMEOUT_MS })
     const loadedValue = loaded.value
     const loadedLocalId = loaded.localId
 
@@ -101,7 +101,7 @@ testDescribe('current property row', () => {
     loaded.getService().send({ type: 'updateContext', propertyValue: 'stale', renderValue: 'stale' })
     loaded.getService().send({ type: 'rehydrateFromDb' })
     await vi.waitFor(() => expect(loaded.value).not.toBe('stale'), { timeout: WAIT_TIMEOUT_MS })
-    await waitForEntityIdle(loaded, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(loaded, { timeout: WAIT_TIMEOUT_MS })
 
     return {
       values: {

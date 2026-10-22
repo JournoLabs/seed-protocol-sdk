@@ -3,7 +3,6 @@ import { GetCorrectIdReturn } from '@/types/helpers'
 import { BaseArweaveClient } from '@seedprotocol/arweave'
 
 export * from './FileManager/BaseFileManager'
-export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'

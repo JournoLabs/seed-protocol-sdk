@@ -8,7 +8,7 @@ import {
   createPublishedTestAuthor,
   waitForPropertyInstances,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { createMetadata } from '@/db/write/createMetadata'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -39,7 +39,7 @@ testDescribe('Html property saves in Node', () => {
 
   const createPost = async () => {
     const item = await Item.create({ modelName: 'Post', title: 'Node html post' })
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     const html = item.allProperties['bodyHtml']
     expect(html).toBeDefined()
@@ -181,7 +181,7 @@ testDescribe('Html property saves in Node', () => {
       bodyHtml: '<p>raw</p>',
     })
     const item = (await Item.find({ modelName: 'Post', seedLocalId })) as Item<any>
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
 
     const result = await validateItemForPublish(item)

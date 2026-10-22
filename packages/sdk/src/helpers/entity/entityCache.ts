@@ -191,9 +191,3 @@ export const evictionLog = {
     return false
   },
 }
-
-/** The old per-class cache entry. Goes when the last class moves to EntityCache. */
-export interface CacheEntry<T> {
-  instance: T
-  refCount: number
-}

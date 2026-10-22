@@ -18,8 +18,10 @@ import {
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
-const refCount = (id: string) =>
-  ((Item as any).instanceCache as Map<string, { refCount: number }>).get(id)?.refCount
+const refCount = (id: string) => {
+  const item = Item.cache.peek(id)
+  return item ? Item.cache.entryOf(item)?.refCount : undefined
+}
 
 const status = (item: IItem<any>) => item.getService().getSnapshot().status
 

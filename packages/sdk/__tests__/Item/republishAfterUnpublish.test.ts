@@ -71,10 +71,8 @@ testDescribe('republish after unpublish', () => {
       .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, 'title')))
     item.getService().send({ type: 'updateContext', latestVersionUid: oldVersionUid })
     // As for an item loaded by uid: the instance cache also holds it under its seed uid.
-    const cache = (Item as any).instanceCache as Map<string, { instance: unknown }>
-    const entry = cache.get(seedLocalId)
-    expect(entry).toBeDefined()
-    cache.set(oldSeedUid, entry!)
+    expect(Item.cache.peek(seedLocalId)).toBe(item)
+    Item.cache.addKey(item, oldSeedUid)
 
     // Unpublish, stamping like the publish package's revoke executor.
     setRevokeExecutor(async ({ seedLocalId: id }) => {
@@ -125,8 +123,8 @@ testDescribe('republish after unpublish', () => {
     expect((await getLatestPublishedVersionRow(seedLocalId))?.uid).toBe(newVersionUid)
 
     // The instance cache's uid alias follows the seed.
-    expect(cache.has(oldSeedUid)).toBe(false)
-    expect(cache.get(newSeedUid)).toBe(entry)
+    expect(Item.cache.peek(oldSeedUid)).toBeUndefined()
+    expect(Item.cache.peek(newSeedUid)).toBe(Item.cache.peek(seedLocalId))
     expect((await Item.find({ seedUid: newSeedUid } as any))?.seedLocalId).toBe(seedLocalId)
 
     // The old version stays revoked; the next patch publish attaches to the new seed and version.
@@ -364,9 +362,8 @@ testDescribe('republish after unpublish', () => {
       () => loaded.seedUid === syncedSeedUid && !loaded.isRevoked,
       'the item to observe a seed uid written elsewhere',
     )
-    const cache = (Item as any).instanceCache as Map<string, unknown>
-    expect(cache.has(newSeedUid)).toBe(false)
-    expect(cache.has(syncedSeedUid)).toBe(true)
+    expect(Item.cache.peek(newSeedUid)).toBeUndefined()
+    expect(Item.cache.peek(syncedSeedUid)).toBeDefined()
     loaded.unload()
   })
 
@@ -375,10 +372,8 @@ testDescribe('republish after unpublish', () => {
       title: 'No flash back',
     })
     const db = BaseDb.getAppDb()
-    const cache = (Item as any).instanceCache as Map<string, unknown>
-    const entry = cache.get(seedLocalId)
-    expect(entry).toBeDefined()
-    cache.set(oldSeedUid, entry!)
+    expect(Item.cache.peek(seedLocalId)).toBe(item)
+    Item.cache.addKey(item, oldSeedUid)
 
     // Unpublished; the item's seed liveQuery observes it.
     await updateSeedRevokedAt({ seedLocalId, revokedAt: Math.floor(Date.now() / 1000) })
@@ -418,8 +413,8 @@ testDescribe('republish after unpublish', () => {
       expect(item.seedUid).toBe(newSeedUid)
       expect(item.isRevoked).toBe(false)
       expect(seenUids.slice(seenUids.indexOf(newSeedUid))).not.toContain(oldSeedUid)
-      expect(cache.has(oldSeedUid)).toBe(false)
-      expect(cache.get(newSeedUid)).toBe(entry)
+      expect(Item.cache.peek(oldSeedUid)).toBeUndefined()
+      expect(Item.cache.peek(newSeedUid)).toBe(item)
 
       // The new uid lands in the DB; later changes to the row reach the item again.
       await item.persistSeedUid(publisher, Date.now())

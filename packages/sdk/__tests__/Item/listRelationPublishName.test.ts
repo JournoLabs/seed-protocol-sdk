@@ -8,7 +8,7 @@ import { generateId } from '@/helpers'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -74,7 +74,7 @@ testDescribe('List-of-relation EAS name', () => {
     staffUid = (await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32[] staff_identity_ids' }))!
     adminsUid = (await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32[] admin_identity_ids' }))!
     for (const name of ['Identity', 'Publication']) {
-      await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
+      await waitForEntityReady(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
     }
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -84,13 +84,13 @@ testDescribe('List-of-relation EAS name', () => {
 
   const createIdentity = async () => {
     const identity = await Item.create({ modelName: 'Identity', displayName: 'Someone' } as any)
-    await waitForEntityIdle(identity, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(identity, { timeout: WAIT_TIMEOUT_MS })
     return identity.seedLocalId!
   }
 
   const loadPublication = async (seedLocalId: string) => {
     const item = (await Item.find({ seedLocalId, modelName: 'Publication' }))!
-    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     return item
   }

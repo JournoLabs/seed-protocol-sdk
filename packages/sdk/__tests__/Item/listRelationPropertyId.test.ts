@@ -9,7 +9,7 @@ import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { properties } from '@/seedSchema'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -45,7 +45,7 @@ describe.sequential('List-of-Relation property_id', () => {
     const s = schema()
     await importJsonSchema({ contents: JSON.stringify(s) }, s.version)
     for (const name of ['Identity', 'Publication']) {
-      await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
+      await waitForEntityReady(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: WAIT_TIMEOUT_MS })
     }
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -55,7 +55,7 @@ describe.sequential('List-of-Relation property_id', () => {
 
   it('Item.create and an edit over a published row link the list row to its property', async () => {
     const identity = await Item.create({ modelName: 'Identity', schemaName: SCHEMA_NAME, displayName: 'Someone' } as any)
-    await waitForEntityIdle(identity, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(identity, { timeout: WAIT_TIMEOUT_MS })
 
     const pub = await Item.create({
       modelName: 'Publication',
@@ -63,7 +63,7 @@ describe.sequential('List-of-Relation property_id', () => {
       name: 'Pub',
       admins: [identity.seedLocalId],
     } as any)
-    await waitForEntityIdle(pub, { timeout: WAIT_TIMEOUT_MS })
+    await waitForEntityReady(pub, { timeout: WAIT_TIMEOUT_MS })
 
     const db = BaseDb.getAppDb()!
     const rowsFor = async () =>

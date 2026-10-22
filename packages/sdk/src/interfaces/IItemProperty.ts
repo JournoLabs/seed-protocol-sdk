@@ -19,7 +19,9 @@ export interface IItemProperty<_PropertyType = any> {
   readonly localStoragePath: string | void;
   readonly localStorageDir: string | void;
   readonly versionLocalId: string | undefined;
-  readonly status: any;
+  /** loading / ready / error */
+  readonly status: 'loading' | 'ready' | 'error';
+  waitForReady(options?: { timeout?: number }): Promise<void>;
   readonly alias: string | undefined;
   readonly refResolvedValue: string | undefined;
   value: any;

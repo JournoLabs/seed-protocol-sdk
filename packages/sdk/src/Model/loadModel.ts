@@ -66,49 +66,61 @@ const createPropertyInstances = async (propertyFileIds: string[], since: number)
  */
 export async function loadModel(context: ModelMachineContext, isStopped: () => boolean): Promise<LoadedModel> {
   const since = evictionLog.now()
-  {
-    const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
+  const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
 
-    if (!modelName || !schemaName) {
-      throw new Error('Model name and schema name are required')
-    }
+  if (!modelName || !schemaName) {
+    throw new Error('Model name and schema name are required')
+  }
 
-    // CRITICAL: Model instances load their data from database, not from Schema context.
-    // Schema is read-only with respect to Model instances.
+  // CRITICAL: Model instances load their data from database, not from Schema context.
+  // Schema is read-only with respect to Model instances.
 
-    const db = BaseDb.getAppDb()
-    let schemaFileId = id // id is now the schemaFileId (string)
-    let modelRecord: any = null
-    let foundBySchemaFileId = false // Track if model was found by schemaFileId
-    let existingNumbersFromSchemaContext: Set<number> | null = null // When we fall through (same name, different id), schema model occupies base name
+  const db = BaseDb.getAppDb()
+  let schemaFileId = id // id is now the schemaFileId (string)
+  let modelRecord: any = null
+  let foundBySchemaFileId = false // Track if model was found by schemaFileId
+  let existingNumbersFromSchemaContext: Set<number> | null = null // When we fall through (same name, different id), schema model occupies base name
 
-    // Step 1: Load from database FIRST (primary source of truth)
-    if (db) {
-      try {
-        // Try to find model by schemaFileId if provided
-        if (schemaFileId) {
-          const dbModels = await db
-            .select()
-            .from(modelsTable)
-            .where(eq(modelsTable.schemaFileId, schemaFileId))
-            .limit(1)
-          
-          if (dbModels.length > 0) {
-            modelRecord = dbModels[0]
-            foundBySchemaFileId = true
-            logger(`Found model "${modelName}" in database by schemaFileId "${schemaFileId}"`)
-          }
+  // Step 1: Load from database FIRST (primary source of truth)
+  if (db) {
+    try {
+      // Try to find model by schemaFileId if provided
+      if (schemaFileId) {
+        const dbModels = await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.schemaFileId, schemaFileId))
+          .limit(1)
+        
+        if (dbModels.length > 0) {
+          modelRecord = dbModels[0]
+          foundBySchemaFileId = true
+          logger(`Found model "${modelName}" in database by schemaFileId "${schemaFileId}"`)
         }
+      }
 
-        // If not found by ID, try by name
-        // But if we have a schemaFileId and the model found by name has a different schemaFileId,
-        // don't use it - we're creating a new model from a schema file with a specific ID
-        if (!modelRecord) {
-          // Model names are only unique per schema: prefer this schema's row, and otherwise only
-          // consider same-name rows that no schema claims yet (never another schema's model).
-          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-          let dbModels = await db
+      // If not found by ID, try by name
+      // But if we have a schemaFileId and the model found by name has a different schemaFileId,
+      // don't use it - we're creating a new model from a schema file with a specific ID
+      if (!modelRecord) {
+        // Model names are only unique per schema: prefer this schema's row, and otherwise only
+        // consider same-name rows that no schema claims yet (never another schema's model).
+        const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+        const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+        let dbModels = await db
+          .select({
+            id: modelsTable.id,
+            name: modelsTable.name,
+            schemaFileId: modelsTable.schemaFileId,
+            isEdited: modelsTable.isEdited,
+          })
+          .from(modelsTable)
+          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+          .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
+          .limit(1)
+        if (dbModels.length === 0) {
+          dbModels = await db
             .select({
               id: modelsTable.id,
               name: modelsTable.name,
@@ -116,318 +128,304 @@ export async function loadModel(context: ModelMachineContext, isStopped: () => b
               isEdited: modelsTable.isEdited,
             })
             .from(modelsTable)
-            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-            .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
+            .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            // Stubs only: an unlinked row with a schemaFileId is a deleted schema's leftover, not ours
+            .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
             .limit(1)
-          if (dbModels.length === 0) {
-            dbModels = await db
-              .select({
-                id: modelsTable.id,
-                name: modelsTable.name,
-                schemaFileId: modelsTable.schemaFileId,
-                isEdited: modelsTable.isEdited,
-              })
-              .from(modelsTable)
-              .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-              // Stubs only: an unlinked row with a schemaFileId is a deleted schema's leftover, not ours
-              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
-              .limit(1)
-          }
+        }
+        
+        if (dbModels.length > 0) {
+          const foundModel = dbModels[0]
+          const dbSchemaFileId = foundModel.schemaFileId
           
-          if (dbModels.length > 0) {
-            const foundModel = dbModels[0]
-            const dbSchemaFileId = foundModel.schemaFileId
-            
-            // CRITICAL: If we found a model in the database by name, check if there's already a cached instance
-            // with that schemaFileId. If so, we should use that instance's schemaFileId for the current instance.
-            // This handles the case where Model.create was called with a generated ID, but the model
-            // already exists in the database with a different ID. By updating the current instance's
-            // schemaFileId to match the database, both will point to the same cached instance.
-            // Skip for schema models (_idFromSchema): their id is authoritative, and a same-name row
-            // with a different id belongs to another schema (e.g. two schemas that each define "Post").
-            if (dbSchemaFileId && !(_idFromSchema && schemaFileId && schemaFileId !== dbSchemaFileId)) {
-              try {
-                const { Model } = await import('@/Model/Model')
-                if (Model.peek(dbSchemaFileId)) {
-                  logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
-                  // Update the current instance's schemaFileId to match the database
-                  // This ensures both instances point to the same cached instance
-                  modelRecord = foundModel
-                  schemaFileId = dbSchemaFileId
-                  logger(`Using existing cached instance with schemaFileId "${schemaFileId}" for model "${modelName}"`)
-                }
-              } catch (error) {
-                logger(`Error checking Model cache for schemaFileId "${dbSchemaFileId}": ${error}`)
-                // Fall through to normal processing
-              }
-            }
-            
-            // If we have a schemaFileId and it doesn't match the found model's schemaFileId,
-            // this is a new model - don't use the existing model (will be renamed if duplicate)
-            // UNLESS we found a cached instance above (in which case modelRecord is already set)
-            if (!modelRecord && schemaFileId && dbSchemaFileId && schemaFileId !== dbSchemaFileId) {
-              logger(`Model "${modelName}" found by name but has different schemaFileId (provided: "${schemaFileId}", db: "${dbSchemaFileId}"). Creating new model (will check for duplicates).`)
-              // Don't set modelRecord - we'll create a new model with potentially renamed name
-            } else if (!modelRecord && schemaFileId && !dbSchemaFileId) {
-              // We have a schemaFileId but the found model doesn't have one - this is a new model
-              // Don't reuse the existing model, create a new one (will be renamed if duplicate)
-              logger(`Model "${modelName}" found by name but found model has no schemaFileId. Creating new model with schemaFileId "${schemaFileId}" (will check for duplicates).`)
-              // Don't set modelRecord - we'll create a new model
-            } else if (!modelRecord) {
-              // Only reuse existing model if:
-              // 1. No schemaFileId was provided (loading existing model), OR
-              // 2. schemaFileId matches (same model)
-              logger(`Model "${modelName}" found by name, reusing existing model (schemaFileId: provided="${schemaFileId}", db="${dbSchemaFileId}")`)
-              modelRecord = foundModel
-              // Only use database schemaFileId if no id was explicitly provided
-              // If an id was provided, we should use it (it might be creating a new model with a specific ID)
-              if (!id && dbSchemaFileId) {
+          // CRITICAL: If we found a model in the database by name, check if there's already a cached instance
+          // with that schemaFileId. If so, we should use that instance's schemaFileId for the current instance.
+          // This handles the case where Model.create was called with a generated ID, but the model
+          // already exists in the database with a different ID. By updating the current instance's
+          // schemaFileId to match the database, both will point to the same cached instance.
+          // Skip for schema models (_idFromSchema): their id is authoritative, and a same-name row
+          // with a different id belongs to another schema (e.g. two schemas that each define "Post").
+          if (dbSchemaFileId && !(_idFromSchema && schemaFileId && schemaFileId !== dbSchemaFileId)) {
+            try {
+              const { Model } = await import('@/Model/Model')
+              if (Model.peek(dbSchemaFileId)) {
+                logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
+                // Update the current instance's schemaFileId to match the database
+                // This ensures both instances point to the same cached instance
+                modelRecord = foundModel
                 schemaFileId = dbSchemaFileId
-                logger(`Using database schemaFileId "${schemaFileId}" for model "${modelName}" (no ID was provided)`)
-              } else if (id) {
-                logger(`Preserving provided id (schemaFileId) "${schemaFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
+                logger(`Using existing cached instance with schemaFileId "${schemaFileId}" for model "${modelName}"`)
               }
-              logger(`Found model "${modelName}" in database by name, schemaFileId: "${schemaFileId}"`)
+            } catch (error) {
+              logger(`Error checking Model cache for schemaFileId "${dbSchemaFileId}": ${error}`)
+              // Fall through to normal processing
             }
           }
-        }
-
-        // If we found the model record, load its properties from database
-        if (modelRecord && modelRecord.id) {
-          const propertyRecords = await db
-            .select()
-            .from(propertiesTable)
-            .where(eq(propertiesTable.modelId, modelRecord.id))
-
-          // Properties are now loaded via liveQuery, not passed through context
-          // The property records are used by liveQuery to populate ModelProperty instances
-
-          // Pre-create ModelProperty instances for all property IDs to ensure they're cached
-          // This ensures that ModelProperty.getById() in Model.properties getter will find the instances
-          const propertyFileIds = propertyRecords
-            .map((record: { schemaFileId: string | null }) => record.schemaFileId)
-            .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
-
-          if (propertyFileIds.length > 0) {
-            // Not for a model stopped meanwhile (unloaded, or evicted with its schema)
-            if (!isStopped()) await createPropertyInstances(propertyFileIds, since)
-          }
-
-          // Generate schemaFileId if not set
-          if (!schemaFileId) {
-            schemaFileId = generateId()
-            logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
-          }
-
-          // Include _dbId from database record so properties can be created if needed
-          // Even if we found an existing model, we may still need to create properties
-          // if _pendingPropertyDefinitions are provided
           
-          // Track conflict detection metadata
-          const loadedAt = Date.now()
-          // Note: models table doesn't have updatedAt or version, so we use loadedAt for _dbUpdatedAt
-          // In the future, if models table gets these fields, we should use them
-          const dbUpdatedAt = loadedAt
-          
-          // CRITICAL: Include _liveQueryPropertyIds in loadOrCreateModelSuccess event
-          // This ensures the properties getter works immediately, even before _setupLiveQuerySubscription runs
-          // We already have the property IDs from the database query, so include them now
-          return {
-            id: schemaFileId,
-            _dbId: modelRecord.id,
-            _liveQueryPropertyIds: propertyFileIds,
-            _isEdited: modelRecord.isEdited ?? false,
-            _loadedAt: loadedAt,
-            _dbUpdatedAt: dbUpdatedAt,
+          // If we have a schemaFileId and it doesn't match the found model's schemaFileId,
+          // this is a new model - don't use the existing model (will be renamed if duplicate)
+          // UNLESS we found a cached instance above (in which case modelRecord is already set)
+          if (!modelRecord && schemaFileId && dbSchemaFileId && schemaFileId !== dbSchemaFileId) {
+            logger(`Model "${modelName}" found by name but has different schemaFileId (provided: "${schemaFileId}", db: "${dbSchemaFileId}"). Creating new model (will check for duplicates).`)
+            // Don't set modelRecord - we'll create a new model with potentially renamed name
+          } else if (!modelRecord && schemaFileId && !dbSchemaFileId) {
+            // We have a schemaFileId but the found model doesn't have one - this is a new model
+            // Don't reuse the existing model, create a new one (will be renamed if duplicate)
+            logger(`Model "${modelName}" found by name but found model has no schemaFileId. Creating new model with schemaFileId "${schemaFileId}" (will check for duplicates).`)
+            // Don't set modelRecord - we'll create a new model
+          } else if (!modelRecord) {
+            // Only reuse existing model if:
+            // 1. No schemaFileId was provided (loading existing model), OR
+            // 2. schemaFileId matches (same model)
+            logger(`Model "${modelName}" found by name, reusing existing model (schemaFileId: provided="${schemaFileId}", db="${dbSchemaFileId}")`)
+            modelRecord = foundModel
+            // Only use database schemaFileId if no id was explicitly provided
+            // If an id was provided, we should use it (it might be creating a new model with a specific ID)
+            if (!id && dbSchemaFileId) {
+              schemaFileId = dbSchemaFileId
+              logger(`Using database schemaFileId "${schemaFileId}" for model "${modelName}" (no ID was provided)`)
+            } else if (id) {
+              logger(`Preserving provided id (schemaFileId) "${schemaFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
+            }
+            logger(`Found model "${modelName}" in database by name, schemaFileId: "${schemaFileId}"`)
           }
         }
-      } catch (error) {
-        logger(`Error loading model from database: ${error}`)
-        // Fall through to create new model
       }
-    }
 
-    // Step 2: Fallback to Schema context (only if database doesn't have the model)
-    // This handles the case where model exists in schema file but not yet in database
-    try {
-      const { Schema } = await import('@/Schema/Schema')
-      // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
-      if (isStopped()) throw new Error('the model was unloaded while it loaded')
-      const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-      // A schema still loading: its models are known once it has loaded
-      await schema.waitForReady()
+      // If we found the model record, load its properties from database
+      if (modelRecord && modelRecord.id) {
+        const propertyRecords = await db
+          .select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelRecord.id))
 
-      const schemaContext = schema.getService().getSnapshot().context
-      // Check by name first; also check by schemaFileId so we recognize the schema model even when context is keyed differently or not yet updated
-      if (schemaContext.models) {
-        const byName = schemaContext.models[modelName] as { id?: string; properties?: Record<string, unknown> } | undefined
-        const schemaModelId = byName?.id ?? null
-        if (schemaFileId === schemaModelId) {
-          logger(`Found model "${modelName}" in Schema context (database fallback)`)
-          if (!schemaFileId) {
-            schemaFileId = generateId()
-            logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
-          }
-          return { id: schemaFileId }
+        // Properties are now loaded via liveQuery, not passed through context
+        // The property records are used by liveQuery to populate ModelProperty instances
+
+        // Pre-create ModelProperty instances for all property IDs to ensure they're cached
+        // This ensures that ModelProperty.getById() in Model.properties getter will find the instances
+        const propertyFileIds = propertyRecords
+          .map((record: { schemaFileId: string | null }) => record.schemaFileId)
+          .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
+
+        if (propertyFileIds.length > 0) {
+          // Not for a model stopped meanwhile (unloaded, or evicted with its schema)
+          if (!isStopped()) await createPropertyInstances(propertyFileIds, since)
         }
-        // Same name but different id: runtime create colliding with schema model name; fall through
-        if (byName) {
-          existingNumbersFromSchemaContext = new Set([0])
-        } else if (schemaFileId) {
-          // Schema context may not have model by name yet (e.g. still loading). If our id appears in any schema model, we're the schema model.
-          for (const def of Object.values(schemaContext.models)) {
-            if ((def as any)?.id === schemaFileId) {
-              logger(`Found model in Schema context by id "${schemaFileId}" (database fallback)`)
-              return { id: schemaFileId }
-            }
-          }
+
+        // Generate schemaFileId if not set
+        if (!schemaFileId) {
+          schemaFileId = generateId()
+          logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
+        }
+
+        // Include _dbId from database record so properties can be created if needed
+        // Even if we found an existing model, we may still need to create properties
+        // if _pendingPropertyDefinitions are provided
+        
+        // Track conflict detection metadata
+        const loadedAt = Date.now()
+        // Note: models table doesn't have updatedAt or version, so we use loadedAt for _dbUpdatedAt
+        // In the future, if models table gets these fields, we should use them
+        const dbUpdatedAt = loadedAt
+        
+        // CRITICAL: Include _liveQueryPropertyIds in loadOrCreateModelSuccess event
+        // This ensures the properties getter works immediately, even before _setupLiveQuerySubscription runs
+        // We already have the property IDs from the database query, so include them now
+        return {
+          id: schemaFileId,
+          _dbId: modelRecord.id,
+          _liveQueryPropertyIds: propertyFileIds,
+          _isEdited: modelRecord.isEdited ?? false,
+          _loadedAt: loadedAt,
+          _dbUpdatedAt: dbUpdatedAt,
         }
       }
     } catch (error) {
-      logger(`Error loading model from Schema context: ${error}`)
+      logger(`Error loading model from database: ${error}`)
       // Fall through to create new model
     }
+  }
 
-    // Step 3: Check for duplicate names in database before creating new model
-    // Skip duplicate check only if we found a model record to use (modelRecord is set)
-    // OR if the model was found by schemaFileId (preserving original name from schema file)
-    // OR if this is an internal schema (Seed Protocol) - internal schemas should preserve original names
-    // Otherwise, check for duplicates when creating a new model
-    // NOTE: We should NOT skip duplicate check just because schemaFileId exists - that could be a newly generated ID
-    // for a new model that needs to be renamed if it's a duplicate
-    let finalModelName = modelName
-    if (db) {
-      // Check if this is an internal schema (Seed Protocol)
-      const isInternal = isInternalSchema(schemaName)
-      
-      // Only skip duplicate check if:
-      // 1. We found a model record to use (modelRecord is set), OR
-      // 2. The model was found by schemaFileId (preserving original name from schema file), OR
-      // 3. This is an internal schema (internal schemas should preserve original names from schema files), OR
-      // 4. This instance was created with modelFileId from schema (_idFromSchema) - schema models keep their name
-      const shouldSkipDuplicateCheck = modelRecord !== null || foundBySchemaFileId || isInternal || !!_idFromSchema
-      
-      logger(`Duplicate check: modelRecord=${modelRecord !== null}, foundBySchemaFileId=${foundBySchemaFileId}, isInternal=${isInternal}, _idFromSchema=${!!_idFromSchema}, schemaFileId=${schemaFileId}, shouldSkip=${shouldSkipDuplicateCheck}`)
-      
-      if (!shouldSkipDuplicateCheck) {
+  // Step 2: Fallback to Schema context (only if database doesn't have the model)
+  // This handles the case where model exists in schema file but not yet in database
+  try {
+    const { Schema } = await import('@/Schema/Schema')
+    // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+    if (isStopped()) throw new Error('the model was unloaded while it loaded')
+    const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+    // A schema still loading: its models are known once it has loaded
+    await schema.waitForReady()
+
+    const schemaContext = schema.getService().getSnapshot().context
+    // Check by name first; also check by schemaFileId so we recognize the schema model even when context is keyed differently or not yet updated
+    if (schemaContext.models) {
+      const byName = schemaContext.models[modelName] as { id?: string; properties?: Record<string, unknown> } | undefined
+      const schemaModelId = byName?.id ?? null
+      if (schemaFileId === schemaModelId) {
+        logger(`Found model "${modelName}" in Schema context (database fallback)`)
+        if (!schemaFileId) {
+          schemaFileId = generateId()
+          logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
+        }
+        return { id: schemaFileId }
+      }
+      // Same name but different id: runtime create colliding with schema model name; fall through
+      if (byName) {
+        existingNumbersFromSchemaContext = new Set([0])
+      } else if (schemaFileId) {
+        // Schema context may not have model by name yet (e.g. still loading). If our id appears in any schema model, we're the schema model.
+        for (const def of Object.values(schemaContext.models)) {
+          if ((def as any)?.id === schemaFileId) {
+            logger(`Found model in Schema context by id "${schemaFileId}" (database fallback)`)
+            return { id: schemaFileId }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    logger(`Error loading model from Schema context: ${error}`)
+    // Fall through to create new model
+  }
+
+  // Step 3: Check for duplicate names in database before creating new model
+  // Skip duplicate check only if we found a model record to use (modelRecord is set)
+  // OR if the model was found by schemaFileId (preserving original name from schema file)
+  // OR if this is an internal schema (Seed Protocol) - internal schemas should preserve original names
+  // Otherwise, check for duplicates when creating a new model
+  // NOTE: We should NOT skip duplicate check just because schemaFileId exists - that could be a newly generated ID
+  // for a new model that needs to be renamed if it's a duplicate
+  let finalModelName = modelName
+  if (db) {
+    // Check if this is an internal schema (Seed Protocol)
+    const isInternal = isInternalSchema(schemaName)
+    
+    // Only skip duplicate check if:
+    // 1. We found a model record to use (modelRecord is set), OR
+    // 2. The model was found by schemaFileId (preserving original name from schema file), OR
+    // 3. This is an internal schema (internal schemas should preserve original names from schema files), OR
+    // 4. This instance was created with modelFileId from schema (_idFromSchema) - schema models keep their name
+    const shouldSkipDuplicateCheck = modelRecord !== null || foundBySchemaFileId || isInternal || !!_idFromSchema
+    
+    logger(`Duplicate check: modelRecord=${modelRecord !== null}, foundBySchemaFileId=${foundBySchemaFileId}, isInternal=${isInternal}, _idFromSchema=${!!_idFromSchema}, schemaFileId=${schemaFileId}, shouldSkip=${shouldSkipDuplicateCheck}`)
+    
+    if (!shouldSkipDuplicateCheck) {
+      try {
+        const lowerModelName = modelName.toLowerCase()
+        const existingNumbers = new Set<number>(existingNumbersFromSchemaContext ?? [])
+        
+        // Cached models first (an imported schema's may not have rows yet). Not this model:
+        // Model.create caches it before its load runs.
         try {
-          const lowerModelName = modelName.toLowerCase()
-          const existingNumbers = new Set<number>(existingNumbersFromSchemaContext ?? [])
-          
-          // Cached models first (an imported schema's may not have rows yet). Not this model:
-          // Model.create caches it before its load runs.
-          try {
-            const { Model } = await import('@/Model/Model')
-            for (const cachedModelName of Model.cachedModelNames(schemaName, schemaFileId)) {
-              const lowerCachedName = cachedModelName.toLowerCase()
-              if (lowerCachedName === lowerModelName) {
-                existingNumbers.add(0)
-              } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
-                const suffix = lowerCachedName.slice(lowerModelName.length + 1)
-                const number = parseInt(suffix, 10)
-                if (!isNaN(number) && suffix === number.toString()) existingNumbers.add(number)
-              }
+          const { Model } = await import('@/Model/Model')
+          for (const cachedModelName of Model.cachedModelNames(schemaName, schemaFileId)) {
+            const lowerCachedName = cachedModelName.toLowerCase()
+            if (lowerCachedName === lowerModelName) {
+              existingNumbers.add(0)
+            } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
+              const suffix = lowerCachedName.slice(lowerModelName.length + 1)
+              const number = parseInt(suffix, 10)
+              if (!isNaN(number) && suffix === number.toString()) existingNumbers.add(number)
             }
-          } catch (error) {
-            logger(`Error checking Model cache for duplicates: ${error}`)
-          }
-
-          // Also check database for models (in case they're persisted but not in Schema context)
-          if (db) {
-            const modelSchemaSchemaMod = await import('@/seedSchema/ModelSchemaSchema')
-            const { modelSchemas } = modelSchemaSchemaMod
-            const schemaSchemaMod = await import('@/seedSchema/SchemaSchema')
-            const { schemas: schemasTable } = schemaSchemaMod
-            
-            // Query all models for this schema to check for duplicates (case-insensitive)
-            logger(`Checking database for duplicate model names in schema "${schemaName}"`)
-            const allModelsForSchema = await db
-              .select({
-                name: modelsTable.name,
-              })
-              .from(modelsTable)
-              .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-              .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-              .where(eq(schemasTable.name, schemaName))
-            
-            logger(`Found ${allModelsForSchema.length} models in database for schema "${schemaName}": ${allModelsForSchema.map((m: { name: string | null }) => m.name).join(', ')}`)
-            if (allModelsForSchema.length === 0 && modelName.includes('Shared')) {
-              logger(`[DEBUG] No models found in database for schema "${schemaName}" when checking for duplicate "${modelName}"`)
-            }
-            
-            // Check for exact match (case-insensitive) or matches with number suffix
-            for (const dbModel of allModelsForSchema) {
-              const lowerDbName = dbModel.name.toLowerCase()
-              if (lowerDbName === lowerModelName) {
-                existingNumbers.add(0) // Base name exists
-                logger(`Found duplicate in database: "${dbModel.name}" matches "${modelName}"`)
-              } else if (lowerDbName.startsWith(lowerModelName + ' ')) {
-                // Check if it's the base name followed by a space and a number
-                const suffix = lowerDbName.slice(lowerModelName.length + 1)
-                const number = parseInt(suffix, 10)
-                if (!isNaN(number) && suffix === number.toString()) {
-                  existingNumbers.add(number)
-                  logger(`Found numbered variant in database: "${dbModel.name}" (number: ${number})`)
-                }
-              }
-            }
-          }
-          
-          // If duplicates found, generate unique name
-          logger(`Duplicate check results: existingNumbers=${Array.from(existingNumbers).join(', ')}, hasBaseName=${existingNumbers.has(0)}`)
-          if (existingNumbers.has(0)) {
-            let nextNumber = 1
-            while (existingNumbers.has(nextNumber)) {
-              nextNumber++
-            }
-            finalModelName = `${modelName} ${nextNumber}`
-            logger(`Found duplicate model name "${modelName}" in schema "${schemaName}", using unique name "${finalModelName}"`)
-          } else {
-            logger(`No duplicate found for model name "${modelName}" in schema "${schemaName}"`)
           }
         } catch (error) {
-          logger(`Error checking for duplicate model names: ${error}`)
-          // Continue with original name if check fails
+          logger(`Error checking Model cache for duplicates: ${error}`)
         }
-      } else {
-        if (foundBySchemaFileId) {
-          logger(`Preserving original model name "${modelName}" for model found by schemaFileId (schemaFileId: ${schemaFileId})`)
-        } else if (modelRecord) {
-          logger(`Using existing model name "${modelName}" from database (modelRecord found)`)
-        } else if (isInternal) {
-          logger(`Preserving original model name "${modelName}" for internal schema "${schemaName}" (skipping duplicate check)`)
+
+        // Also check database for models (in case they're persisted but not in Schema context)
+        if (db) {
+          const modelSchemaSchemaMod = await import('@/seedSchema/ModelSchemaSchema')
+          const { modelSchemas } = modelSchemaSchemaMod
+          const schemaSchemaMod = await import('@/seedSchema/SchemaSchema')
+          const { schemas: schemasTable } = schemaSchemaMod
+          
+          // Query all models for this schema to check for duplicates (case-insensitive)
+          logger(`Checking database for duplicate model names in schema "${schemaName}"`)
+          const allModelsForSchema = await db
+            .select({
+              name: modelsTable.name,
+            })
+            .from(modelsTable)
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(eq(schemasTable.name, schemaName))
+          
+          logger(`Found ${allModelsForSchema.length} models in database for schema "${schemaName}": ${allModelsForSchema.map((m: { name: string | null }) => m.name).join(', ')}`)
+          if (allModelsForSchema.length === 0 && modelName.includes('Shared')) {
+            logger(`[DEBUG] No models found in database for schema "${schemaName}" when checking for duplicate "${modelName}"`)
+          }
+          
+          // Check for exact match (case-insensitive) or matches with number suffix
+          for (const dbModel of allModelsForSchema) {
+            const lowerDbName = dbModel.name.toLowerCase()
+            if (lowerDbName === lowerModelName) {
+              existingNumbers.add(0) // Base name exists
+              logger(`Found duplicate in database: "${dbModel.name}" matches "${modelName}"`)
+            } else if (lowerDbName.startsWith(lowerModelName + ' ')) {
+              // Check if it's the base name followed by a space and a number
+              const suffix = lowerDbName.slice(lowerModelName.length + 1)
+              const number = parseInt(suffix, 10)
+              if (!isNaN(number) && suffix === number.toString()) {
+                existingNumbers.add(number)
+                logger(`Found numbered variant in database: "${dbModel.name}" (number: ${number})`)
+              }
+            }
+          }
         }
+        
+        // If duplicates found, generate unique name
+        logger(`Duplicate check results: existingNumbers=${Array.from(existingNumbers).join(', ')}, hasBaseName=${existingNumbers.has(0)}`)
+        if (existingNumbers.has(0)) {
+          let nextNumber = 1
+          while (existingNumbers.has(nextNumber)) {
+            nextNumber++
+          }
+          finalModelName = `${modelName} ${nextNumber}`
+          logger(`Found duplicate model name "${modelName}" in schema "${schemaName}", using unique name "${finalModelName}"`)
+        } else {
+          logger(`No duplicate found for model name "${modelName}" in schema "${schemaName}"`)
+        }
+      } catch (error) {
+        logger(`Error checking for duplicate model names: ${error}`)
+        // Continue with original name if check fails
+      }
+    } else {
+      if (foundBySchemaFileId) {
+        logger(`Preserving original model name "${modelName}" for model found by schemaFileId (schemaFileId: ${schemaFileId})`)
+      } else if (modelRecord) {
+        logger(`Using existing model name "${modelName}" from database (modelRecord found)`)
+      } else if (isInternal) {
+        logger(`Preserving original model name "${modelName}" for internal schema "${schemaName}" (skipping duplicate check)`)
       }
     }
-    
-    // Step 4: Create new empty model (not found in database or Schema context)
-    logger(`Creating new model "${finalModelName}" in schema "${schemaName}"`)
-    
-    // Generate schemaFileId for new model
-    if (!schemaFileId) {
-      schemaFileId = generateId()
-      logger(`Generated id (schemaFileId) "${schemaFileId}" for new model "${finalModelName}"`)
-    }
-    
-    if (finalModelName !== modelName) {
-      logger(`Model name "${modelName}" is taken in schema "${schemaName}"; using "${finalModelName}"`)
-    }
+  }
+  
+  // Step 4: Create new empty model (not found in database or Schema context)
+  logger(`Creating new model "${finalModelName}" in schema "${schemaName}"`)
+  
+  // Generate schemaFileId for new model
+  if (!schemaFileId) {
+    schemaFileId = generateId()
+    logger(`Generated id (schemaFileId) "${schemaFileId}" for new model "${finalModelName}"`)
+  }
+  
+  if (finalModelName !== modelName) {
+    logger(`Model name "${modelName}" is taken in schema "${schemaName}"; using "${finalModelName}"`)
+  }
 
-    // Mark schema as draft when a new model is created so saveNewVersion() can persist it
-    try {
-      const { Schema } = await import('@/Schema/Schema')
-      if (!isStopped()) {
-        const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
-        schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
-      }
-    } catch (err) {
-      logger(`Failed to mark schema as draft after creating model: ${err}`)
+  // Mark schema as draft when a new model is created so saveNewVersion() can persist it
+  try {
+    const { Schema } = await import('@/Schema/Schema')
+    if (!isStopped()) {
+      const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+      schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
     }
+  } catch (err) {
+    logger(`Failed to mark schema as draft after creating model: ${err}`)
+  }
 
-    return {
-      id: schemaFileId,
-      ...(finalModelName !== modelName && { modelName: finalModelName }),
-    }
+  return {
+    id: schemaFileId,
+    ...(finalModelName !== modelName && { modelName: finalModelName }),
   }
 }

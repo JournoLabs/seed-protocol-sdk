@@ -815,7 +815,7 @@ testDescribe('Item Integration Tests', () => {
       const item = await Item.create({ modelName: 'TestPost', schemaName, title: 'Peek' })
       await waitForItemIdle(item)
       const { seedLocalId } = item
-      const holds = () => (Item as any).instanceCache.get(seedLocalId)?.refCount
+      const holds = () => Item.cache.entryOf(Item.cache.peek(seedLocalId) ?? item)?.refCount
       const holdsBefore = holds()
 
       expect(Item.peekReady(seedLocalId)).toBe(Item.getById(seedLocalId))

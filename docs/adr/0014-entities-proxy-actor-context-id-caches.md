@@ -54,6 +54,23 @@ Known costs, recorded so the entity refactor can address them:
 
 A later ADR on the outbox and entity identity is expected to supersede parts of this one.
 
+## Amendment (2026-10-22, audit T1)
+
+The five classes now share one implementation of what this ADR left to each class
+(`helpers/entity/entityCache.ts`, `entityLifecycle.ts`):
+
+- **One cache entry per instance.** `EntityCache` stores an instance once under all its keys, its
+  id first, and finds it by key or by actor. The entry owns its keys, so a rename replaces them and
+  removal deletes stale aliases too. `peek` takes no hold; `hold`, `add({ hold: true })` and
+  `holdInstance` take one; `release` gives one back.
+- **Child holds.** A Schema holds its Models, a Model its ModelProperties, an Item its
+  ItemProperties, released when the parent is torn down.
+- **One teardown.** Unload, destroy and evict run the same teardown: leave the cache, release
+  child holds, run disposers (watches, object URLs), stop the actor.
+- **Load status instead of load states.** Each entity's load is an awaited function; `status` is
+  `loading`, `ready` or `error`, mirrored into the actor context as `_status` so actor subscribers
+  see it. Machines keep context and process states (validating, publishing, saving to schema).
+
 ## Alternatives considered
 
 - **`Object.defineProperty` per field** (the earlier design): needs every field known up front,

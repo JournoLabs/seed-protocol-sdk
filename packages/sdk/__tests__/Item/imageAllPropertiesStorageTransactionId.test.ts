@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Item } from '@/Item/Item'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -23,7 +23,7 @@ testDescribe('Image allProperties storageTransactionId key', () => {
 
   it('exposes storageTransactionId on allProperties after minimal Image create', async () => {
     const imageItem = await Item.create({ modelName: 'Image' })
-    await waitForEntityIdle(imageItem, { timeout: 60_000 })
+    await waitForEntityReady(imageItem, { timeout: 60_000 })
     const keys = Object.keys(imageItem.allProperties)
     expect(
       imageItem.allProperties.storageTransactionId,

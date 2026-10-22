@@ -1,5 +1,5 @@
 import { IItem, IItemProperty } from '@/interfaces'
-import { timed, timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
+import { timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import {
   INTERNAL_PROPERTY_NAMES,
@@ -52,18 +52,26 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { watchEntityRows } from '@/browser/db/changeFeed'
 import { properties as propertiesTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
 import { isStorageSeedRef } from '@/helpers/relationSeedRef'
-import { findEntity } from '@/helpers/entity/entityFind'
-import { unloadEntity } from '@/helpers/entity/entityUnload'
-import { ActorKeyedState } from '@/helpers/entity/entityState'
-import { isActorStopped, sameEntity } from '@/helpers/entity/entityCommon'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { EntityCache } from '@/helpers/entity/entityCache'
 import {
-  clearDestroySubscriptions,
-  forceRemoveFromCaches,
-  runDestroyLifecycle,
-} from '@/helpers/entity/entityDestroy'
+  DEFAULT_READY_TIMEOUT_MS,
+  destroyEntity,
+  entityStatus,
+  heldChildActors,
+  holdChild,
+  isEntityTornDown,
+  onEntityTeardown,
+  releaseChildHold,
+  releaseEntity,
+  runEntityLoad,
+  teardownEntity,
+  waitForEntityReady,
+} from '@/helpers/entity/entityLifecycle'
+import { whenDbReady } from '@/client/readiness'
+import { loadItem } from './loadItem'
 import { deleteItem } from '@/db/write/deleteItem'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
 import { eq, getTableColumns } from 'drizzle-orm'
@@ -146,11 +154,6 @@ const TRACKED_PROPERTIES = [
   'revokedAt',
 ] as const
 
-// Mutable state per Item instance
-const itemInstanceState = new ActorKeyedState<Item<any>, {
-  liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
-}>()
-
 /**
  * Seed uids an item has moved away from (a republish gives the item a new seed uid) whose seed row
  * may still hold them: the new uid is set on the item before its DB write lands, and until then the
@@ -161,49 +164,18 @@ const itemInstanceState = new ActorKeyedState<Item<any>, {
 const supersededSeedUids = new WeakMap<object, Set<string>>()
 
 /**
- * The ItemProperty instances an item holds, keyed by the item's actor, then by each property's
- * actor. An item takes one hold on each instance in its `propertyInstances` map while it is there
- * and releases it when the instance leaves the map or the item's actor stops. The SDK code that puts
- * instances in the map looks them up with `hold: false`, so these are their only item-owned holds.
+ * The item holds each ItemProperty in its `propertyInstances` map while it is there (a child hold,
+ * released when it leaves the map or the item is torn down). The SDK code that puts instances in
+ * the map looks them up with `hold: false`, so these are their only item-owned holds.
  */
-const propertyHolds = new WeakMap<object, Map<object, IItemProperty<any>>>()
-
-function syncPropertyHolds(itemService: object, propertyInstances: Map<PropertyKey, IItemProperty<any>> | undefined): void {
-  let held = propertyHolds.get(itemService)
-  if (!held) {
-    held = new Map()
-    propertyHolds.set(itemService, held)
-  }
+function syncPropertyHolds(item: Item<any>, propertyInstances: Map<PropertyKey, IItemProperty<any>> | undefined): void {
   const current = new Set<object>()
   for (const property of propertyInstances?.values() ?? []) {
-    const propertyService = property.getService()
-    current.add(propertyService)
-    if (!held.has(propertyService) && ItemProperty.retain(property)) held.set(propertyService, property)
+    current.add(property.getService())
+    holdChild(item, property as ItemProperty<any>, ItemProperty.cache)
   }
-  for (const [propertyService, property] of held) {
-    if (current.has(propertyService)) continue
-    held.delete(propertyService)
-    property.unload()
-  }
-}
-
-/** When the item's actor stops: its holds, then its properties nobody holds (see unloadUnheldForItem). */
-function releaseItemProperties(itemService: ActorRefFrom<typeof itemMachineSingle>): void {
-  releasePropertyHolds(itemService)
-  const { seedLocalId, seedUid } = itemService.getSnapshot().context
-  ItemProperty.unloadUnheldForItem([seedLocalId, seedUid])
-}
-
-function releasePropertyHolds(itemService: object): void {
-  const held = propertyHolds.get(itemService)
-  if (!held) return
-  propertyHolds.delete(itemService)
-  for (const property of held.values()) {
-    try {
-      property.unload()
-    } catch {
-      // Already stopped
-    }
+  for (const actor of heldChildActors(item)) {
+    if (!current.has(actor)) releaseChildHold(item, { getService: () => actor })
   }
 }
 
@@ -220,7 +192,8 @@ const pendingSeedUidWrites = new WeakMap<object, Promise<void>>()
 
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
-  protected static instanceCache: Map<string, { instance: Item<any>; refCount: number }> = new Map();
+  /** Cached under its seedLocalId and seed uid. */
+  static readonly cache = new EntityCache<Item<any>>()
   protected _subscription: Subscription | undefined;
   protected readonly _storageTransactionId: string | undefined;
   protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty>> = new BehaviorSubject({});
@@ -287,22 +260,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       this._propertiesSubject.next(propertiesObj)
     })
 
-    // Hold the properties in the map; release them all when the actor stops (last unload, destroy,
-    // eviction or error), whichever teardown path stops it.
-    const itemService = this._service
-    itemService.subscribe({
-      next: (snapshot) => syncPropertyHolds(itemService, snapshot.context?.propertyInstances),
-      complete: () => releaseItemProperties(itemService),
-      error: () => releaseItemProperties(itemService),
+    // Hold the properties in the map; teardown releases them (and strays nobody holds)
+    this._service.subscribe((snapshot) => syncPropertyHolds(this, snapshot.context?.propertyInstances))
+    onEntityTeardown(this, () => {
+      this._subscription?.unsubscribe()
+      const { seedLocalId, seedUid } = this._service.getSnapshot().context
+      ItemProperty.unloadUnheldForItem([seedLocalId, seedUid])
     })
 
     this._service.start()
 
-    // Initialize instance state in WeakMap
-    itemInstanceState.set(this, {
-      liveQuerySubscription: null,
-    })
-    
     // Set up liveQuery subscription for cross-instance updates
     this._setupLiveQuerySubscription()
 
@@ -377,57 +344,38 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
-  /** Prefer local id so list rows (local + uid) resolve the same cache entry as early draft loads. */
-  private static findItemInstanceCacheEntryByProps(
-    props: Partial<ItemData>,
-  ): { instance: Item<any>; refCount: number } | undefined {
-    const l = props.seedLocalId
-    const u = props.seedUid
-    if (typeof l === 'string' && l.length > 0) {
-      const e = this.instanceCache.get(l)
-      if (e) return e
+  /**
+   * Cache a new item under its ids and keep its keys in step with them (a seed uid arrives on
+   * publish, moves on republish), then start its load.
+   */
+  private static cacheAndLoad(instance: Item<any>): void {
+    const keys = () => {
+      const { seedLocalId, seedUid } = instance._getSnapshotContext()
+      return [seedLocalId, seedUid]
     }
-    if (typeof u === 'string' && u.length > 0) {
-      const e = this.instanceCache.get(u)
-      if (e) return e
-    }
-    return undefined
+    let current = keys().join('\u0000')
+    this.cache.add(instance, keys(), { hold: true })
+    const idWatch = instance._service.subscribe(() => {
+      const next = keys()
+      if (next.join('\u0000') === current || isEntityTornDown(instance)) return
+      current = next.join('\u0000')
+      this.cache.setKeys(instance, next)
+    })
+    onEntityTeardown(instance, () => idWatch.unsubscribe())
+    void runEntityLoad(instance, () => Item.load(instance))
   }
 
-  private static findItemInstanceCacheEntryById(
-    id: string,
-  ): { instance: Item<any>; refCount: number } | undefined {
-    const direct = this.instanceCache.get(id)
-    if (direct) return direct
-    for (const [, entry] of this.instanceCache) {
-      const ctx = entry.instance._getSnapshotContext() as any
-      if (ctx.seedLocalId === id || ctx.seedUid === id) return entry
-    }
-    return undefined
-  }
-
-  private static collectInstanceCacheKeysForInstance(instance: Item<any>): string[] {
-    const keys: string[] = []
-    for (const [k, v] of this.instanceCache) {
-      if (sameEntity(v.instance, instance)) keys.push(k)
-    }
-    return keys
-  }
-
-  private static registerItemInInstanceCache(instance: Item<any>): void {
-    const ctx = instance._getSnapshotContext() as any
-    const lid: string | undefined =
-      typeof ctx.seedLocalId === 'string' && ctx.seedLocalId.length > 0
-        ? ctx.seedLocalId
-        : undefined
-    const uid: string | undefined =
-      typeof ctx.seedUid === 'string' && ctx.seedUid.length > 0 ? ctx.seedUid : undefined
-    const entry = { instance, refCount: 1 }
-    if (lid) this.instanceCache.set(lid, entry)
-    if (uid && uid !== lid) this.instanceCache.set(uid, entry)
-    if (!lid && !uid) {
-      throw new Error('Item.registerItemInInstanceCache: missing seedLocalId and seedUid')
-    }
+  /**
+   * Load the item's seed, version and property rows into its context, then wait for its
+   * properties to load (Html and File content included), so a ready item reads its values.
+   */
+  private static async load(item: Item<any>): Promise<void> {
+    if (!(await whenDbReady())) throw new Error('Database not available')
+    const loaded = await loadItem(item._getSnapshotContext())
+    if (isEntityTornDown(item)) return
+    item._service.send({ type: 'loaded', item: loaded })
+    const properties = [...(item._getSnapshotContext().propertyInstances?.values() ?? [])]
+    await Promise.all(properties.map((property) => waitForEntityReady(property, { throwOnError: false })))
   }
 
   /**
@@ -517,7 +465,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   /**
    * Sets a tracked context property from the proxy. Setting `seedUid` to a different uid means a
    * new seed attestation (publishing again after unpublish): the revocation belonged to the old
-   * one, so `revokedAt` is cleared, and the instance cache's uid alias moves to the new uid.
+   * one, so `revokedAt` is cleared (the cache's uid key follows the context: see cacheAndLoad).
    */
   private static sendTrackedPropertyUpdate(target: Item<any>, prop: string, value: unknown): void {
     const previousSeedUid =
@@ -539,45 +487,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (replacesSeedUid) superseded.add(previousSeedUid!.toLowerCase())
       supersededSeedUids.set(target._service, superseded)
     }
-    if (replacesSeedUid) {
-      const entry = this.instanceCache.get(previousSeedUid!)
-      if (entry) {
-        this.instanceCache.delete(previousSeedUid!)
-        this.instanceCache.set(value as string, entry)
-      }
-    }
-  }
-
-  /** Drops one holder's reference. Returns true while other holders still have the instance. */
-  private static releaseItemInstanceCacheHold(instance: Item<any>): boolean {
-    const keys = this.collectInstanceCacheKeysForInstance(instance)
-    if (keys.length === 0) return false
-    const entry = this.instanceCache.get(keys[0])!
-    entry.refCount -= 1
-    if (entry.refCount <= 0) {
-      for (const k of keys) {
-        this.instanceCache.delete(k)
-      }
-      return false
-    }
-    return true
-  }
-
-  /**
-   * Idle, and not the shell the item machine can be in when it reaches `idle` before
-   * `propertyInstances` is merged (an item with a version but no property instances yet).
-   */
-  private static isItemSnapshotReadyForRead(snap: any): boolean {
-    if (!snap || !('value' in snap) || snap.value !== 'idle') {
-      return false
-    }
-    const ctx = snap.context || {}
-    const versionsCount = ctx.versionsCount ?? 0
-    const hasHeadVersion = !!ctx.latestVersionLocalId
-    if (versionsCount === 0 && !hasHeadVersion) {
-      return true
-    }
-    return (ctx.propertyInstances?.size ?? 0) > 0
   }
 
   /**
@@ -585,106 +494,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * that reads or messages the item and doesn't hand it to a caller.
    */
   static peek(id: string | null | undefined): Item<any> | undefined {
-    return id ? this.findItemInstanceCacheEntryById(id)?.instance : undefined
+    return this.cache.peek(id)
   }
 
   /**
-   * The cached Item for a seedLocalId or seedUid when it can be read right now: idle and hydrated,
-   * so at least what `Item.find()` would wait for. Otherwise undefined. Unlike `getById`, it takes
-   * no cache hold, so React hooks can call it during render.
+   * The cached Item for a seedLocalId or seedUid when it can be read right now (loaded, with its
+   * properties: `status` ready), so what `Item.find()` would wait for. Otherwise undefined. Unlike
+   * `getById`, it takes no cache hold, so React hooks can call it during render.
    */
   static peekReady(id: string | undefined): Item<any> | undefined {
-    if (!id) return undefined
-    const instance = this.findItemInstanceCacheEntryById(id)?.instance
-    if (!instance) return undefined
-    const snap = instance.getService().getSnapshot()
-    if ((snap as { status?: string }).status !== 'active') return undefined
-    return this.isItemSnapshotReadyForRead(snap) ? instance : undefined
-  }
-
-  /**
-   * Item machine can reach `idle` before `propertyInstances` is merged (race) or while
-   * child ItemProperty actors are still hydrating. useItems / Item.all must not return that shell.
-   */
-  private static async waitForItemInstanceReadyForRead(
-    item: Item<any>,
-    readyTimeout: number,
-  ): Promise<void> {
-    const label = `item ${item.seedLocalId ?? item.seedUid}`
-    await timedDb(`${label} ready: item idle`, () => waitForEntityIdle(item, { timeout: readyTimeout }))
-    const svc = item.getService()
-    try {
-      await timed(`${label} ready: property instances`, () => waitFor(
-        svc,
-        (snap: any) => {
-          if ('value' in snap && snap.value === 'error') {
-            throw new Error('Entity failed to load')
-          }
-          return Item.isItemSnapshotReadyForRead(snap)
-        },
-        { timeout: readyTimeout },
-      ))
-    } catch (e: any) {
-      if (e?.message === 'Entity failed to load') {
-        throw e
-      }
-      const msg = typeof e?.message === 'string' ? e.message : ''
-      const isWaitForTimeout =
-        msg.includes('Timeout') || msg.toLowerCase().includes('timed out')
-      if (!isWaitForTimeout) {
-        throw e
-      }
-      timingLogger(
-        `item ${item.seedLocalId ?? item.seedUid} not ready for read after ${readyTimeout}ms (no property instances); continuing`,
-      )
-    }
-    const snap = svc.getSnapshot() as any
-    const pis = snap.context?.propertyInstances as
-      | Map<string, { getService(): any }>
-      | undefined
-    if (!pis || pis.size === 0) {
-      return
-    }
-    await timedDb(`${label} ready: ${pis.size} properties idle`, () => Promise.all(
-      [...pis.values()].map((prop) =>
-        waitForEntityIdle(prop, {
-          timeout: readyTimeout,
-          throwOnError: false,
-        }),
-      ),
-    ))
-    if (timingLogger.enabled) {
-      const notIdle = [...pis.entries()]
-        .filter(([, prop]) => {
-          const propSnap = prop.getService().getSnapshot()
-          return propSnap.value !== 'idle' || propSnap.context?.isSaving
-        })
-        .map(([name]) => name)
-      if (notIdle.length > 0) {
-        timingLogger(
-          `item ${item.seedLocalId ?? item.seedUid}: properties still not idle after waiting up to ${readyTimeout}ms, continuing: ${notIdle.join(', ')}`,
-        )
-      }
-    }
-  }
-
-  private static itemCacheEntryLooksUnhydratedAfterIdle(
-    instance: Item<any>,
-    props: Partial<ItemData>,
-  ): boolean {
-    const snap = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
-    if (snap.value !== 'idle') return false
-    const mapSize = snap.context.propertyInstances?.size ?? 0
-    if (mapSize > 0) return false
-    const ctx = snap.context as any
-    const versionsCount = (props as any).versionsCount ?? ctx.versionsCount ?? 0
-    const hasVersionHead =
-      versionsCount > 0 ||
-      !!(props as any).latestVersionLocalId ||
-      !!ctx.latestVersionLocalId ||
-      !!(props as any).latestVersionUid ||
-      !!ctx.latestVersionUid
-    return hasVersionHead
+    const instance = this.cache.peek(id)
+    if (!instance || instance.getService().getSnapshot().status !== 'active') return undefined
+    return entityStatus(instance) === 'ready' ? instance : undefined
   }
 
   static async create<_T extends ModelValues<ModelSchema>>(
@@ -705,87 +526,37 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       props.modelName = model?.name ?? props.type
     }
     if (props.seedUid || props.seedLocalId) {
-      cacheReuse: {
-        const cachedEntry = this.findItemInstanceCacheEntryByProps(props)
-        if (cachedEntry) {
-          const instance = cachedEntry.instance
-          cachedEntry.refCount += 1
-          for (const [propertyName, propertyValue] of Object.entries(props)) {
-            const snapshot = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
-            const propertyInstances = snapshot.context.propertyInstances
-            if (!propertyInstances || !propertyInstances.has(propertyName)) {
-              continue
-            }
-            const propertyInstance = propertyInstances.get(propertyName)
-            if (!propertyInstance) {
-              continue
-            }
-            propertyInstance.getService().send({
-              type: 'updateContext',
-              propertyValue,
-            })
-          }
-          if (!waitForReady) return instance
-          try {
-            await this.waitForItemInstanceReadyForRead(instance, readyTimeout)
-          } catch (err) {
-            try {
-              instance.unload()
-            } catch {
-              /* best-effort cache cleanup */
-            }
-            throw err
-          }
-          if (
-            waitForReady &&
-            this.itemCacheEntryLooksUnhydratedAfterIdle(instance, props)
-          ) {
-            forceRemoveFromCaches(instance, {
-              getCacheKeys: () => this.collectInstanceCacheKeysForInstance(instance),
-              caches: [Item.instanceCache as Map<string, unknown>],
-            })
-            try {
-              unloadEntity(instance, {
-                getCacheKeys: () => [],
-                caches: [],
-                instanceState: itemInstanceState,
-                getService: (inst) => inst._service,
-                onUnload: (inst) => {
-                  inst._subscription?.unsubscribe()
-                },
-              })
-            } catch {
-              /* best-effort teardown for stale cached shell */
-            }
-            break cacheReuse
-          }
-          return instance
+      // Local id first, so list rows (local + uid) resolve the same instance as early draft loads
+      const cached = this.cache.peek(props.seedLocalId) ?? this.cache.peek(props.seedUid)
+      if (cached) {
+        this.cache.holdInstance(cached)
+        const propertyInstances = cached.getService().getSnapshot().context.propertyInstances
+        for (const [propertyName, propertyValue] of Object.entries(props)) {
+          propertyInstances?.get(propertyName)?.getService().send({ type: 'updateContext', propertyValue })
         }
-      }
-
-      if (!this.findItemInstanceCacheEntryByProps(props)) {
-        // Item no longer needs modelInstance - it loads properties from database independently
-        // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
-        const { latestVersionUid, ...propsWithoutVersionUid } = props
-        const propsWithModel = { ...propsWithoutVersionUid } as any
-        const newInstance = new Item(propsWithModel)
-        
-        const proxiedInstance = Item.wrapInProxy(newInstance)
-
-                this.registerItemInInstanceCache(proxiedInstance)
-        if (!waitForReady) return proxiedInstance
+        if (!waitForReady) return cached
         try {
-          await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
+          await waitForEntityReady(cached, { timeout: readyTimeout })
         } catch (err) {
-          try {
-            proxiedInstance.unload()
-          } catch {
-            /* best-effort cache cleanup */
-          }
+          cached.unload()
           throw err
         }
-        return proxiedInstance
+        return cached
       }
+
+      // Item no longer needs modelInstance - it loads properties from database independently
+      // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
+      const { latestVersionUid: _latestVersionUid, ...propsWithoutVersionUid } = props
+      const proxiedInstance = Item.wrapInProxy(new Item({ ...propsWithoutVersionUid } as any))
+      this.cacheAndLoad(proxiedInstance)
+      if (!waitForReady) return proxiedInstance
+      try {
+        await waitForEntityReady(proxiedInstance, { timeout: readyTimeout })
+      } catch (err) {
+        proxiedInstance.unload()
+        throw err
+      }
+      return proxiedInstance
     }
     if (!props.modelName) {
       throw new Error('Model name is required to create an item')
@@ -894,14 +665,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const { latestVersionUid, ...propsWithoutVersionUid } = props
     const propsWithModel = { ...propsWithoutVersionUid } as any
     const newInstance = new Item(propsWithModel)
-    
     const proxiedInstance = Item.wrapInProxy(newInstance)
-    
-        this.registerItemInInstanceCache(proxiedInstance)
+    this.cacheAndLoad(proxiedInstance)
     // Storage values must be saved before returning, so wait for readiness even when not requested.
     if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
     try {
-      await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
+      await waitForEntityReady(proxiedInstance, { timeout: readyTimeout })
       await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     } catch (err) {
       // A rejected create leaves nothing behind, so a retry doesn't make a second draft.
@@ -1010,13 +779,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return null
     }
     
-    const entry = this.findItemInstanceCacheEntryById(id)
-    if (entry) {
-      entry.refCount += 1
-      return entry.instance
-    }
-
-    return null
+    return this.cache.hold(id) ?? null
   }
 
   /**
@@ -1027,32 +790,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const uniqueIds = [
       ...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)),
     ]
-    const seenInstances = new Set<Item<any>>()
-
     for (const id of uniqueIds) {
-      const entry = this.findItemInstanceCacheEntryById(id)
-      if (entry && !seenInstances.has(entry.instance)) {
-        seenInstances.add(entry.instance)
-        const instance = entry.instance
-        const cacheKeys = this.collectInstanceCacheKeysForInstance(instance)
-
-        clearDestroySubscriptions(instance, {
-          instanceState: itemInstanceState,
-          onUnload: (inst) => (inst as Item<any>)._subscription?.unsubscribe(),
-        })
-
-        forceRemoveFromCaches(instance, {
-          getCacheKeys: () => cacheKeys,
-          caches: [Item.instanceCache as Map<string, unknown>],
-        })
-
-        try {
-          instance._service.stop()
-        } catch {
-          // Service may already be stopped
-        }
-      }
-
+      const instance = this.cache.peek(id)
+      if (instance) teardownEntity(instance, this.cache)
       ItemProperty.clearInstanceCacheForItem(id)
     }
   }
@@ -1113,7 +853,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    // Prefer local id so cache + findEntity align with Item.instanceCache (local-first, uid alias).
+    // Local id first: the cache's local-first key
     const id = seedLocalId || seedUid
     if (!id) {
       return undefined
@@ -1123,25 +863,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     try {
       return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
-        () =>
-          findEntity<Item<any>>(
-            {
-              getById: (id) => {
-                const instance = Item.getById(id) || undefined
-                cached = instance !== undefined
-                return instance
-              },
-              createById: async (id) => {
-                // Pass modelName to createById if available
-                return await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined)
-              },
-            },
-            { id },
-            {
-              waitForReady,
-              readyTimeout,
-            }
-          ),
+        async () => {
+          const held = Item.getById(id) ?? undefined
+          cached = held !== undefined
+          const item = held ?? (await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined))
+          if (item && waitForReady) await waitForEntityReady(item, { timeout: readyTimeout })
+          return item
+        },
         () => (cached ? '(cached)' : '(loaded)'),
       )
     } catch (error) {
@@ -1197,9 +925,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
     if (waitForReady && itemInstances.length > 0) {
       await Promise.all(
-        itemInstances.map((item) =>
-          this.waitForItemInstanceReadyForRead(item, readyTimeout),
-        ),
+        itemInstances.map((item) => waitForEntityReady(item, { timeout: readyTimeout })),
       )
     }
     signal?.throwIfAborted()
@@ -1214,20 +940,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    */
   static async rehydrateCachedItemsFromDbAfterEasSync(): Promise<void> {
     const appDb = BaseDb.getAppDb()
-    if (!appDb || Item.instanceCache.size === 0) {
+    if (!appDb || Item.cache.size === 0) {
       return
     }
 
     const { metadata } = await import('../seedSchema')
     const { eq, and } = await import('drizzle-orm')
 
-    const dedupedInstances = new Map<Item<any>, { instance: Item<any>; refCount: number }>()
-    for (const entry of Item.instanceCache.values()) {
-      dedupedInstances.set(entry.instance, entry)
-    }
-    const entries = [...dedupedInstances.values()]
     await Promise.all(
-      entries.map(async ({ instance }) => {
+      Item.cache.instances().map(async (instance) => {
         try {
           const svc = instance.getService()
           if (svc.getSnapshot().status !== 'active') {
@@ -1430,7 +1151,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (!normalized) return
     for (const seedLocalId of seedLocalIds) {
       // Not getById: that adds a cache hold the caller would never release.
-      const item = Item.findItemInstanceCacheEntryById(seedLocalId)?.instance
+      const item = Item.cache.peek(seedLocalId)
       if (!item) continue
       const status = item.getService().getSnapshot().status
       if (status === 'stopped' || status === 'done') continue
@@ -1613,6 +1334,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   // These getters are now handled by the reactive proxy
   // They read from the service context via the proxy
   // Keeping them for backward compatibility, but they delegate to serviceContext
+  /** `loading` until the item and its properties are loaded, then `ready` or `error`. */
+  get status(): 'loading' | 'ready' | 'error' {
+    return entityStatus(this)
+  }
+
+  /** Resolves once `status` is `ready`; rejects when the load failed or `timeout` ms pass. */
+  waitForReady(options?: { timeout?: number }): Promise<void> {
+    return waitForEntityReady(this, options)
+  }
+
   get seedLocalId(): string {
     return this.serviceContext.seedLocalId as string
   }
@@ -1968,57 +1699,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           return
         }
 
-        // In the browser the versions liveQuery below emits at once and its handler runs this same
-        // metadata read and property setup, so only Node (no liveQuery) does it here.
+        // Node has no change feed: only the version info. The item's load built its property
+        // instances (it found these rows), so nothing more is looked up here.
         if (currentVersionLocalId && !isBrowser) {
-          // Query initial metadata records for the latest version
-          const initialMetadata = await db
-            .select()
-            .from(metadata)
-            .where(
-              and(
-                eq(metadata.seedLocalId, watchedSeedLocalId),
-                eq(metadata.versionLocalId, currentVersionLocalId)
-              )
-            )
-
-          const initialMetadataIds = initialMetadata
-            .map((row: any) => row.localId || row.uid)
-            .filter((id: string | null | undefined): id is string => Boolean(id))
-
-          logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
-
-          // CRITICAL: Create ItemProperty instances BEFORE updating context
-          if (initialMetadataIds.length > 0) {
-            try {
-              const itemPropertyMod = await import('../ItemProperty/ItemProperty')
-              const { ItemProperty } = itemPropertyMod
-              const itemModelName = this._service.getSnapshot().context.modelName
-              const createPromises = initialMetadata.map(async (metaRow: any) => {
-                try {
-                  const property = await ItemProperty.find({
-                    propertyName: metaRow.propertyName,
-                    seedLocalId: watchedSeedLocalId,
-                    seedUid: this._getSnapshotContext().seedUid ?? seedUid,
-                    modelName: itemModelName,
-                    hold: false,
-                  })
-                  // The item stopped while the lookup ran: it can't take its hold, so nothing would
-                  if (property && isActorStopped(this._service)) ItemProperty.unloadUnheldForItem([property.seedLocalId, property.seedUid])
-                  if (property) {
-                    logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
-                  }
-                } catch (error) {
-                  logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
-                }
-              })
-              await Promise.all(createPromises)
-            } catch (error) {
-              logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
-            }
-          }
-
-          // Update context with latest version info
           sendToItemMachine({
             type: 'updateContext',
             latestVersionLocalId: currentVersionLocalId,
@@ -2097,6 +1780,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 try {
                   const propertyName = metadataRowPropertyKey(row, propertySchemas)
                   if (!propertyName) return
+                  // Already in the item's map (its load or constructor made it): nothing to look up
+                  if (this._getSnapshotContext().propertyInstances?.has(propertyName)) return
                   const property = await ItemProperty.find({
                     propertyName,
                     seedLocalId: watchedSeedLocalId,
@@ -2120,14 +1805,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             )
           }
 
-          const instanceState = itemInstanceState.get(this)
-          if (!instanceState) {
-            logger('[Item._setupLiveQuerySubscription] Instance state not found')
-            return
-          }
-
           // Unloaded or destroyed while setup awaited: watching now would leak the watches.
-          if (isActorStopped(this._service)) return
+          if (isEntityTornDown(this) || isActorStopped(this._service)) return
 
           // Re-read the seed row and the versions on each change to them (ADR 0020). Both run once
           // now too: the versions handler adds the property instances to the item's context.
@@ -2256,13 +1935,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             { onError: (error) => logger(`[Item._setupLiveQuerySubscription] Metadata read error: ${error}`) },
           )
 
-          instanceState.liveQuerySubscription = {
-            unsubscribe: () => {
-              seedsSubscription.unsubscribe()
-              versionsSubscription.unsubscribe()
-              propertiesSubscription.unsubscribe()
-            }
-          }
+          onEntityTeardown(this, () => {
+            seedsSubscription.unsubscribe()
+            versionsSubscription.unsubscribe()
+            propertiesSubscription.unsubscribe()
+          })
           
           logger(`[Item._setupLiveQuerySubscription] LiveQuery subscription set up for seedLocalId: ${seedLocalId}`)
         } else {
@@ -2306,33 +1983,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * instance to every caller, so the instance is stopped only when the last holder unloads it.
    */
   unload(): void {
-    try {
-      // Others (e.g. another hook showing the same item) still use it: keep it running.
-      if (Item.releaseItemInstanceCacheHold(this)) return
-      unloadEntity(this, {
-        getCacheKeys: () => [],
-        caches: [],
-        instanceState: itemInstanceState,
-        getService: (instance) => instance._service,
-        onUnload: (instance) => {
-          // Clean up additional subscription
-          instance._subscription?.unsubscribe()
-        },
-      })
-    } catch {
-      // Still try to clean up what we can
-      const instanceState = itemInstanceState.get(this)
-      if (instanceState?.liveQuerySubscription) {
-        instanceState.liveQuerySubscription.unsubscribe()
-        instanceState.liveQuerySubscription = null
-      }
-      this._subscription?.unsubscribe()
-      try {
-        this._service.stop()
-      } catch {
-        // Service might already be stopped
-      }
-    }
+    releaseEntity(this, Item.cache)
   }
 
   /**
@@ -2342,35 +1993,20 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const { assertItemOwned } = await import('@/helpers/ownership')
     await assertItemOwned(this)
     const context = this._getSnapshotContext()
-    const cacheKeys = Item.collectInstanceCacheKeysForInstance(this)
-
-    clearDestroySubscriptions(this, {
-      instanceState: itemInstanceState,
-      onUnload: (instance) => (instance as Item<any>)._subscription?.unsubscribe(),
-    })
-
-    forceRemoveFromCaches(this, {
-      getCacheKeys: () => cacheKeys,
-      caches: [Item.instanceCache as Map<string, unknown>],
-    })
-
-    await runDestroyLifecycle(this, {
-      getService: (instance) =>
-        instance._service as { send: (ev: unknown) => void; stop: () => void },
-      doDestroy: async () => {
-        if (!context.seedLocalId) {
-          await deleteItem({ seedUid: context.seedUid })
-          return
-        }
-        // Through the outbox (ADR 0019): after the item's pending edits, not before them
-        const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
-        startItemOutbox()
-        await appendOutboxOpAndWait({
-          seedLocalId: context.seedLocalId,
-          kind: 'delete',
-          value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
-        }).catch(throwItemWriteError)
-      },
+    // Out of the cache first; stopped (with its properties released) once the delete has applied
+    await destroyEntity(this, Item.cache, async () => {
+      if (!context.seedLocalId) {
+        await deleteItem({ seedUid: context.seedUid })
+        return
+      }
+      // Through the outbox (ADR 0019): after the item's pending edits, not before them
+      const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
+      startItemOutbox()
+      await appendOutboxOpAndWait({
+        seedLocalId: context.seedLocalId,
+        kind: 'delete',
+        value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
+      }).catch(throwItemWriteError)
     })
   }
 }

@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `isClientReadySnapshot` is the SDK's (re-exported unchanged). `useSchema`, `useItem`, `useItemProperty`, `useCreateItemProperty` and the create hooks (`useCreateSchema`, `useCreateModel`, `useCreateModelProperty`) follow the entity's load `status` (`loading` / `ready` / `error`) instead of its machine reaching `idle`, which the SDK's entity machines now are from the start.
+
 - A property save refetches `useItemProperties`' query once, when the change feed reports the row write (in Node, its liveQuery). `SeedProvider` refetched it on the `itemProperty.saved` event and again through `window.__SEED_INVALIDATE_ITEM_PROPERTIES__`, which it no longer sets. `invalidateItemPropertiesForItem` invalidates once and resolves when the refetch is done.
 - Init progress no longer has an 80% step: the SDK removed its `addModelsToStore` init state, which did nothing.
 - `SeedImage` stops showing an image once its property is cleared or points at another file. It kept the URLs it had found for the previous file.

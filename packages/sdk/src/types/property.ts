@@ -70,8 +70,9 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   modelName: string
   /** schemaFileId of the owning item's models row; scopes property-definition lookups to that model. */
   modelFileId?: string
-  isDbReady: boolean
   renderValue?: any
+  /** Mirror of the instance's load status (entityLifecycle), so actor subscribers see it change */
+  _status?: 'loading' | 'ready' | 'error'
   storageTransactionId?: string
   newValue?: ItemPropertyValueType
   /** Destroy failure from the last destroy() (read by destroy hooks). */

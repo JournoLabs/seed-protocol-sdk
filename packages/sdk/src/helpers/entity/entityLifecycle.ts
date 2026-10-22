@@ -203,17 +203,20 @@ export function evictEntities<T extends ActorBacked>(cache: EntityCache<T>, filt
 }
 
 /**
- * Delete an entity's rows. It leaves the cache first, so no lookup returns it meanwhile, and its
- * actor runs until the rows are gone (its watches see the delete). A `deleteRows` failure is
- * recorded on the actor (`destroyError`) and rethrown; the entity is torn down either way.
+ * Delete an entity's rows. By default it leaves the cache first, so no lookup returns it meanwhile;
+ * with `leaveCache: 'after'` it stays cached until the rows are gone, so a lookup that read a row
+ * before the delete finds it instead of building a new instance. Its actor runs until the rows are
+ * gone (its watches see the delete). A `deleteRows` failure is recorded on the actor
+ * (`destroyError`) and rethrown; the entity is torn down either way.
  */
 export async function destroyEntity<T extends ActorBacked>(
   instance: T,
   cache: EntityCache<T>,
   deleteRows: () => Promise<void>,
+  options: { leaveCache?: 'before' | 'after' } = {},
 ): Promise<void> {
   const actor = instance.getService() as Actor
-  cache.remove(instance)
+  if (options.leaveCache !== 'after') cache.remove(instance)
   actor.send?.({ type: 'destroyStarted' })
   try {
     await deleteRows()

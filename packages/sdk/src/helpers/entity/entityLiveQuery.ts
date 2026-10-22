@@ -1,7 +1,6 @@
-import { Observable, Subscription } from 'rxjs'
+import { Observable } from 'rxjs'
 import debug from 'debug'
 import { isActorStopped } from './entityCommon'
-import type { InstanceStateStore } from './entityState'
 import { isEntityTornDown, onEntityTeardown } from './entityLifecycle'
 
 /**
@@ -34,11 +33,6 @@ export interface LiveQueryConfig<T extends object> {
    * This ensures instances are in cache when context is updated
    */
   createChildInstances?: (ids: string[]) => Promise<void>
-  /**
-   * Instance state store (for storing subscription). Without one, the subscription ends when the
-   * entity is torn down (entityLifecycle).
-   */
-  instanceState?: InstanceStateStore<T, { liveQuerySubscription: Subscription | null }>
   /**
    * Logger name for debugging
    */
@@ -103,12 +97,6 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
         const queryResult = config.buildQuery(entityId)
         const query$ = queryResult instanceof Promise ? await queryResult : queryResult
         
-        const instanceState = config.instanceState?.get(instance)
-        if (config.instanceState && !instanceState) {
-          logger('Instance state not found')
-          return
-        }
-
         // Unloaded or destroyed while setup awaited: subscribing now would leak the query.
         if (isActorStopped(instance.getService()) || isEntityTornDown(instance)) return
 
@@ -116,7 +104,7 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
         const subscription = query$.subscribe({
           next: async (rows) => {
             // Check if instance state still exists (hasn't been cleaned up)
-            if (config.instanceState ? !config.instanceState.get(instance) : isEntityTornDown(instance)) {
+            if (isEntityTornDown(instance)) {
               logger('Instance state was cleaned up, skipping update')
               return
             }
@@ -147,8 +135,8 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
           },
         })
 
-        if (instanceState) instanceState.liveQuerySubscription = subscription
-        else onEntityTeardown(instance, () => subscription.unsubscribe())
+        // Ends when the entity is torn down
+        onEntityTeardown(instance, () => subscription.unsubscribe())
         logger(`LiveQuery subscription set up for entity ID: ${entityId}`)
       } else {
         logger('Skipping liveQuery subscription in Node.js environment')

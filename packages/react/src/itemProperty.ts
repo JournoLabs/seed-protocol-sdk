@@ -179,14 +179,15 @@ export function useItemProperty(
       if (!Object.is(ctx.renderValue, lastRenderValue) || !Object.is(ctx.propertyValue, lastPropertyValue)) {
         lastRenderValue = ctx.renderValue
         lastPropertyValue = ctx.propertyValue
-        wasIdle = snapshot.value === 'idle'
+        wasIdle = snapshot.value === 'idle' && ctx._status === 'ready'
         lastVersionAt = Date.now()
         clearTimeout(trailing)
         trailing = undefined
         bump()
         return
       }
-      const isIdle = snapshot.value === 'idle'
+      // Loaded and idle (not hydrating again)
+      const isIdle = snapshot.value === 'idle' && ctx._status === 'ready'
       if (isIdle) {
         // Idle snapshots repeat often; re-render only on arriving there.
         if (!wasIdle) {
@@ -741,13 +742,12 @@ export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
       return undefined
     }
 
-    const subscription = instance.getService().subscribe((snapshot: any) => {
-      if (snapshot?.value === 'error') {
-        const err = (snapshot.context as any)?._loadingError?.error ?? new Error('Failed to create item property')
-        setError(err instanceof Error ? err : new Error(String(err)))
+    const subscription = instance.getService().subscribe(() => {
+      if (instance.status === 'error') {
+        setError(new Error('Failed to create item property'))
         setIsLoading(false)
       }
-      if (snapshot?.value === 'idle') {
+      if (instance.status === 'ready') {
         setError(null)
         setIsLoading(false)
       }

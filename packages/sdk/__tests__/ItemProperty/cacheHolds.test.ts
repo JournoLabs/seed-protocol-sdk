@@ -115,12 +115,12 @@ testDescribe('ItemProperty cache holds', () => {
     expect(held).toBeDefined()
 
     Item.dropCachedInstancesForSeedIds([seedLocalId])
-    expect(ItemProperty.instanceCache.has(ItemProperty.cacheKey(seedLocalId, 'title'))).toBe(false)
+    expect(ItemProperty.cache.peek(ItemProperty.cacheKey(seedLocalId, 'title'))).toBeUndefined()
 
     // Its live query or a save can still update the held instance after the drop
     held!.getService().send({ type: 'updateContext', renderValue: 'changed after drop' })
     await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(ItemProperty.instanceCache.has(ItemProperty.cacheKey(seedLocalId, 'title'))).toBe(false)
+    expect(ItemProperty.cache.peek(ItemProperty.cacheKey(seedLocalId, 'title'))).toBeUndefined()
 
     const reloaded = await ItemProperty.find({ propertyName: 'title', seedLocalId })
     expect(reloaded).toBeDefined()
