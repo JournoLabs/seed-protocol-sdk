@@ -51,9 +51,8 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   timing.mark('metadata')
 
   if (!metadataRecord) {
-    // Metadata not found - this is a new property, will be created elsewhere.
-    // Still resolve propertyRecordSchema from Model so getSegmentedItemProperties and
-    // getPublishPayload can route and attest the property (e.g. title, description).
+    // No row yet: its first assignment writes one. The definition still comes from the model,
+    // since the setter checks and routes values by it (planPropertyWrite).
     let propertyRecordSchema: any = undefined
     const modelNameForNew = context.modelName
     if (modelNameForNew) {
