@@ -1034,12 +1034,12 @@ testDescribe('Model Integration Tests', () => {
       const model = Model.create('TestModel Status', schemaName, { waitForReady: false })
       
       // Status should be 'loading' initially
-      expect(['loading', 'idle']).toContain(model.status)
+      expect(['loading', 'ready']).toContain(model.status)
       
       await waitForModelSettled(model)
       
-      // Status should be 'idle' after loading
-      expect(model.status).toBe('idle')
+      // Status should be 'ready' after loading
+      expect(model.status).toBe('ready')
     })
   })
 

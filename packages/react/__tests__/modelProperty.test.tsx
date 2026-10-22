@@ -735,7 +735,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         properties: { summary: { dataType: 'Text' } },
         waitForReady: false,
       })
-      await xstateWaitFor(lateModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await lateModel.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: WAIT_TIMEOUT_MS })
       expect(propertyNameEl.textContent).toBe('summary')

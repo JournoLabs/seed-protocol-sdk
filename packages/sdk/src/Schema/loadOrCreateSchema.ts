@@ -9,7 +9,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { eq, desc } from 'drizzle-orm'
 import debug from 'debug'
-import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
+import { evictionLog } from '@/helpers/entity/entityCache'
 import { INTERNAL_SCHEMA_IDS, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 
 const logger = debug('seedSdk:schema:loadOrCreateSchema')
@@ -48,7 +48,7 @@ const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
 /**
  * Create Model instances for all model IDs to ensure they're cached
  */
-const createModelInstances = async (modelIds: string[], evictionEpoch: number): Promise<void> => {
+const createModelInstances = async (modelIds: string[], since: number): Promise<void> => {
   if (modelIds.length === 0) {
     return
   }
@@ -64,7 +64,7 @@ const createModelInstances = async (modelIds: string[], evictionEpoch: number): 
       try {
         // Not if the schema was evicted (Schema.destroy, test cleanup) since this check started
         const schemaHold = Model.takeSchemaHold(modelFileId)
-        const model = await Model.createById(modelFileId, { evictionEpoch, ...(!schemaHold && { hold: false as const }) })
+        const model = await Model.createById(modelFileId, { since, ...(!schemaHold && { hold: false as const }) })
         if (!model && schemaHold) Model.dropSchemaHold(modelFileId)
         if (model) {
           logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
@@ -154,7 +154,7 @@ const createSchema = async (schemaName: string): Promise<{ schema: SchemaFileFor
  * over the existing row.
  */
 export async function loadOrCreateSchema(schemaName: string): Promise<LoadedSchema> {
-  const evictionEpoch = currentEvictionEpoch()
+  const since = evictionLog.now()
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
   if (!schemaName) throw new Error('Schema name is required')
@@ -191,7 +191,7 @@ export async function loadOrCreateSchema(schemaName: string): Promise<LoadedSche
   logger(`Found schema record: name="${row.name}", isDraft=${row.isDraft}`)
   const { schema } = await resolveSchemaRow(row, db)
   const modelIds = row.id ? await getModelIdsForSchema(row.id) : []
-  await createModelInstances(modelIds, evictionEpoch)
+  await createModelInstances(modelIds, since)
   return {
     schema,
     schemaRecord: row,

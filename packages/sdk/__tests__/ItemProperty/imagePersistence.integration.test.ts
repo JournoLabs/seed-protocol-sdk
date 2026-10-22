@@ -158,7 +158,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('saves Blob to file and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with Blob image' })
     await waitForItemIdle(item)
@@ -190,7 +190,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('saves blob URL to file and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with blob URL image' })
     await waitForItemIdle(item)
@@ -224,7 +224,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('Image displays after reload when saved from Blob', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for reload test' })
     await waitForItemIdle(item)
@@ -260,7 +260,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('Image displays after reload when saved from blob URL', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for blob URL reload test' })
     await waitForItemIdle(item)
@@ -300,7 +300,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('data URL still works and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with data URL' })
     await waitForItemIdle(item)
@@ -337,7 +337,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('File input still works', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with File' })
     await waitForItemIdle(item)
@@ -374,7 +374,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('keeps two uploads with the same file name apart', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
     const upload = async (title: string, bytes: number[]) => {
       const item = await Item.create({ modelName: 'Post', schemaName, title })
@@ -415,7 +415,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   async function itemWithSavedImage(title: string) {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
     const item = await Item.create({ modelName: 'Post', schemaName, title })
     await waitForItemIdle(item)
     const property = item.properties.find(
@@ -499,7 +499,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it("clears a File with ''", async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with empty attachment' })
     await waitForItemIdle(item)
     const property = item.properties.find((p) => p.propertyName === 'attachment') as ItemProperty<any>
@@ -515,7 +515,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('refuses to clear a Boolean without retract, and leaves its value', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Featured post', featured: true })
     await waitForItemIdle(item)
     const property = item.properties.find((p) => p.propertyName === 'featured') as ItemProperty<any>

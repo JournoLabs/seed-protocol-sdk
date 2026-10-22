@@ -32,7 +32,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
-import { currentEvictionEpoch, finishSchemaDestroy, recordSchemaDestroy } from '@/helpers/entity/evictionEpoch'
+import { evictionLog } from '@/helpers/entity/entityCache'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
@@ -1053,18 +1053,14 @@ export class Schema {
     )
     // Clear edited flags on the cached ModelProperty instances of the edited keys, then on the rows
     // (schema, those properties, the schema's models) in one transaction.
-    const modelPropertyMod = await import('../ModelProperty/ModelProperty')
-    const { ModelProperty } = modelPropertyMod
-    const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-      instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
-    }
+    const { ModelProperty } = await import('../ModelProperty/ModelProperty')
     const thisSchemaName = this.schemaName
     const clearedKeys: Array<{ modelName: string; propertyName: string }> = []
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
       if (!modelName || !propertyName) continue
-      // Model names are only unique per schema: pick this schema's instance, which may be keyed by id.
-      const cachedInstance = [...ModelPropertyClass.instanceCache.values()].find(({ instance }) => {
+      // Model names are only unique per schema: pick this schema's instance
+      const [cachedInstance] = ModelProperty.cache.instances((instance) => {
         const ctx = instance.getService().getSnapshot().context
         return (
           ctx.modelName === modelName &&
@@ -1073,7 +1069,7 @@ export class Schema {
         )
       })
       if (!cachedInstance) continue
-      cachedInstance.instance.getService().send({ type: 'clearEdited' })
+      cachedInstance.getService().send({ type: 'clearEdited' })
       clearedKeys.push({ modelName, propertyName })
     }
 
@@ -1506,11 +1502,11 @@ export class Schema {
     // Until its rows are gone, nothing may re-create this schema's models. Its own actor stays live
     // till then, and its live query reacting to destroyStarted could read a model row the drained
     // write had just landed and re-create (and re-write) that model after the delete below.
-    if (schemaName) recordSchemaDestroy(schemaName)
+    const finishEviction = evictionLog.evict(schemaName ? [`schema:${schemaName}`] : [])
     try {
       await this._destroyRows(schemaFileId, schemaName, context.metadata?.name)
     } finally {
-      if (schemaName) finishSchemaDestroy(schemaName)
+      finishEviction()
     }
   }
 
@@ -1714,9 +1710,9 @@ export class Schema {
       },
       createChildInstances: async (ids) => {
         // One at a time: an eviction of this schema part way through stops the rest
-        const evictionEpoch = currentEvictionEpoch()
+        const since = evictionLog.now()
         for (const id of ids) {
-          await Model.createById(id, { evictionEpoch, hold: false })
+          await Model.createById(id, { since, hold: false })
         }
       },
       queryInitialData: async (schemaId) => {

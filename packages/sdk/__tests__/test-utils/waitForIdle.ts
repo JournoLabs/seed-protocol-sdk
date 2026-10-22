@@ -3,16 +3,27 @@ import { WAIT_TIMEOUT_MS } from './timeouts'
 
 // Imports only xstate and ./timeouts, not SDK source, so packages/react tests (which use the built SDK) can share it.
 
-export type HasService = { getService(): AnyActorRef }
+export type HasService = {
+  getService(): AnyActorRef
+  /** Entities on the shared lifecycle: resolves once loaded, rejects when the load failed */
+  waitForReady?: (options?: { timeout?: number }) => Promise<void>
+}
 
 /**
- * Waits for an entity's service (Schema, Model, Item, ItemProperty, ModelProperty) to reach `idle`,
- * and rejects if it lands in `error` first.
+ * Waits for an entity (Schema, Model, Item, ItemProperty, ModelProperty) to finish loading, then for
+ * its service to reach `idle`, and rejects if it lands in `error` first.
  *
  * The predicate must not throw: xstate's waitFor doesn't catch predicate errors, so a throw there
  * escapes as an uncaught exception on every later snapshot instead of failing the wait.
  */
 export async function waitForIdle(entity: HasService, label: string, timeout = WAIT_TIMEOUT_MS): Promise<void> {
+  if (entity.waitForReady) {
+    try {
+      await entity.waitForReady({ timeout })
+    } catch (error) {
+      throw new Error(`${label} failed to load: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const service = entity.getService()
   let snapshot
   try {
@@ -42,8 +53,8 @@ export const waitForModelPropertyIdle = (property: HasService, timeout?: number)
   waitForIdle(property, 'ModelProperty', timeout)
 
 /**
- * Waits for a Model to finish everything Model.create started: the first idle comes before its write,
- * and a model created with properties keeps them in _pendingPropertyDefinitions until they exist.
+ * Waits for a Model to finish everything Model.create started: its write, and the properties passed
+ * to it (kept in _pendingPropertyDefinitions until they exist).
  */
 export async function waitForModelSettled(model: HasService, timeout = WAIT_TIMEOUT_MS): Promise<void> {
   await waitForModelIdle(model, timeout)

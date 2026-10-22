@@ -98,8 +98,9 @@ export class EntityLoadError extends Error {
 }
 
 /**
- * Resolves once the entity is `ready`. Rejects when its load failed, it was torn down first, or
- * `timeout` ms pass; with `throwOnError: false` those resolve instead.
+ * Resolves once the entity is `ready`. Rejects with the load's error when it failed, with an
+ * EntityLoadError when it was torn down first or `timeout` ms pass; with `throwOnError: false` those
+ * resolve instead.
  */
 export async function waitForEntityReady(
   instance: ActorBacked,
@@ -120,11 +121,9 @@ export async function waitForEntityReady(
     }
   }
   if (lifecycle.status === 'error' && throwOnError) {
+    // The load's own error, so callers see why (a model whose properties couldn't be created)
     const cause = lifecycle.error
-    throw new EntityLoadError(
-      `Entity failed to load${cause instanceof Error ? `: ${cause.message}` : ''}`,
-      { cause },
-    )
+    throw cause instanceof Error ? cause : new EntityLoadError('Entity failed to load', { cause })
   }
 }
 

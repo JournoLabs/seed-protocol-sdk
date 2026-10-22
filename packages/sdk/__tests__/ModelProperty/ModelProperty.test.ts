@@ -1,3 +1,4 @@
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
@@ -893,12 +894,12 @@ testDescribe('ModelProperty Integration Tests', () => {
         const property = ModelProperty.create(propertyData, { waitForReady: false })
         
         // Status should be 'loading' initially or 'idle'
-        expect(['loading', 'idle']).toContain(property.status)
+        expect(['loading', 'ready']).toContain(property.status)
         
         await waitForModelPropertyIdle(property)
         
-        // Status should be 'idle' after loading
-        expect(property.status).toBe('idle')
+        // Status should be 'ready' after loading
+        expect(property.status).toBe('ready')
       }
     })
   })
@@ -1081,6 +1082,11 @@ testDescribe('ModelProperty Integration Tests', () => {
       
       if (propertyData) {
         // The model's own property: the model owns it, so the app's unload releases only its hold.
+        // Its model loads it first; created by the app before that, the model holds it once it does.
+        await waitUntilOrThrow(
+          () => ModelProperty.getById((propertyData as { id: string }).id) !== undefined,
+          'the model to load its property',
+        )
         const property = ModelProperty.create(propertyData, { waitForReady: false })
         const other = ModelProperty.create(propertyData, { waitForReady: false })
         expect(other).toBe(property)

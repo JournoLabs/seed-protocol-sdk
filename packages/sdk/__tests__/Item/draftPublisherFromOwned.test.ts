@@ -39,7 +39,7 @@ testDescribe('new drafts and owned addresses', () => {
       1,
     )
     const model = Model.create('Note', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {

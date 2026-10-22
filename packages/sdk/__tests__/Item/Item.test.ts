@@ -810,7 +810,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       const model = Model.create('TestPost', schemaName, { waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const item = await Item.create({ modelName: 'TestPost', schemaName, title: 'Peek' })
       await waitForItemIdle(item)
@@ -1046,7 +1046,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(staleSchema) }, staleSchema.version)
       const staleModel = Model.create('SharedPost', staleSchemaName, { modelFileId: staleModelId, waitForReady: false })
-      await waitFor(staleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await staleModel.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const db = BaseDb.getAppDb()
       const [staleSchemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, staleSchemaName))
@@ -1068,7 +1068,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
       const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const item = await Item.create({ modelName: 'SharedPost', title: 'Shared name' })
       await waitForItemIdle(item)
@@ -1086,7 +1086,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(otherSchema) }, otherSchema.version)
       const otherModel = Model.create('SharedPost', otherSchemaName, { modelFileId: otherModelId, waitForReady: false })
-      await waitFor(otherModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await otherModel.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       const schemaName = 'Test Schema Item Reimported Shared Name'
       const modelId = generateId()
@@ -1095,7 +1095,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
       const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+      await model.waitForReady({ timeout: WAIT_TIMEOUT_MS })
 
       // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
       // a deleted DB id (no properties) while the other schema's Model is still cached.
