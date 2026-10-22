@@ -11,18 +11,18 @@ import {
   type PremisEvent,
   type PremisFile,
 } from '@seedprotocol/archive'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import {
-  getPublicArweaveRawUrl,
-  normalizeRelationPropertyValue,
-  resolveSeedIdsFromRefString,
-} from '@seedprotocol/arweave'
-import {
+  getCanonicalItemPropertiesFromEas,
   getEasAttestationExplorerUrl,
   getEasChainDeployment,
   getEasReadChainId,
+  getItemVersionsFromEas,
+  getSeedsByUidsFromEas,
   isValidEasAttestationUid,
+  type Attestation,
 } from '@seedprotocol/eas'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
@@ -33,7 +33,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { findEmbeddedImageFilePath, SEED_PROPERTY_REF_PREFIX } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getExtensionForMimeType, resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { normalizeDataType } from '@/helpers/property'
-import { metadata, versions } from '@/seedSchema'
+import { versions } from '@/seedSchema'
 import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind } from '@/storageValue/resolve'
 
 /**
@@ -45,6 +45,13 @@ import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind } from
 export type ExportArchiveOptions = {
   /** Download Images, Files and Html bodies that aren't on this device. Default true. */
   fetch?: boolean
+  /**
+   * Build the bag every client gets for this Version: times and the attester come from EAS, the
+   * bag is dated with the Version's attestation, and nothing local to this device goes in. Needs
+   * the EAS indexer, and refuses a copy that is behind the chain, a bag that would leave anything
+   * out, and `sourceOrganization` or `baggingDate`. Default false.
+   */
+  reproducible?: boolean
   /** bag-info.txt Source-Organization, e.g. the publication. Left out when not given. */
   sourceOrganization?: string
   /** Bagging-Date and the time of the bag's own PREMIS events. Defaults to now. */
@@ -56,18 +63,38 @@ export type ArchiveOmission = { property: string; reason: string }
 
 export type ExportArchiveResult = { bag: Bag; omitted: ArchiveOmission[] }
 
-export type ArchiveExportErrorCode = 'not_published' | 'unpublished_changes'
+export type ArchiveExportErrorCode =
+  | 'not_published'
+  | 'unpublished_changes'
+  /** reproducible: this device's copy is behind what EAS has for the seed. */
+  | 'not_synced'
+  /** reproducible: the EAS indexer couldn't be read. */
+  | 'chain_unavailable'
+  /** reproducible: the bag would leave something out. */
+  | 'incomplete'
+  /** Options that can't go together. */
+  | 'invalid_options'
 
 /** The item can't be exported as it is. `code` says why. */
 export class ArchiveExportError extends Error {
   readonly code: ArchiveExportErrorCode
 
-  constructor(code: ArchiveExportErrorCode, message: string) {
-    super(message)
+  constructor(code: ArchiveExportErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options)
     this.name = 'ArchiveExportError'
     this.code = code
   }
 }
+
+/**
+ * Whose clock a time in the bag came from:
+ * - `chain-block`: the attestation's `timeCreated` as EAS reports it, the attesting chain's block time.
+ * - `local-record`: the attestation time this device recorded. For a row synced from EAS that is the
+ *   block time; for an attestation this device published, the block time when it could be read at
+ *   publish, otherwise this device's clock. The two can't be told apart afterwards.
+ * - `export-device`: this device's clock when it made the bag.
+ */
+export type ArchiveClockSource = 'chain-block' | 'local-record' | 'export-device'
 
 type ExportableItem = {
   seedLocalId: string
@@ -83,6 +110,18 @@ type ItemJsonProperty = {
   arweaveTransactionId?: string
   attestationUid?: string
   attestedAt?: string
+  attestedAtClock?: ArchiveClockSource
+}
+
+type Stamp = { iso: string; clock: ArchiveClockSource }
+
+/** What EAS has for the seed: its attestation, its Versions, and the current Version's properties. */
+type ChainRecord = {
+  seed: Attestation
+  /** The seed attester's Versions, oldest first, revoked ones included. */
+  versions: Attestation[]
+  /** Newest property attestation per property schema on the current Version. */
+  properties: Attestation[]
 }
 
 const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
@@ -90,6 +129,18 @@ const SOFTWARE_AGENT = '@seedprotocol/sdk exportArchive (https://github.com/Jour
 
 const isoFromMs = (ms: number | null | undefined): string | undefined =>
   typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : undefined
+
+const isoFromSeconds = (seconds: number): string => new Date(seconds * 1000).toISOString()
+
+const describeClock = (clock: ArchiveClockSource, chainId: number): string =>
+  clock === 'chain-block'
+    ? `EAS timeCreated, the block time on chain ${chainId}`
+    : clock === 'local-record'
+      ? 'attestation time recorded on the exporting device (block time, or that device’s clock when the block could not be read)'
+      : 'clock of the exporting device'
+
+const sameUid = (a: string | null | undefined, b: string | null | undefined): boolean =>
+  !!a && !!b && a.toLowerCase() === b.toLowerCase()
 
 const toBytes = async (data: Buffer | Blob): Promise<Uint8Array> =>
   typeof Blob !== 'undefined' && data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : new Uint8Array(data as Buffer)
@@ -118,6 +169,52 @@ const isUnpublishedEdit = (property: PublishGraphProperty): boolean => {
   return !!row && !property.deferred && !row.uid && row.derivedFromUid == null && hasValue(row.propertyValue)
 }
 
+const propertyUid = (property: PublishGraphProperty): string | undefined =>
+  property.row?.uid ?? property.row?.derivedFromUid ?? undefined
+
+/**
+ * Reads the seed's record from EAS and checks this device holds the same state: the newest live
+ * Version is the one being exported, and every property attestation that holds a current value
+ * on it is the one this device has.
+ */
+async function readChainRecord(
+  seedUid: string,
+  versionUid: string,
+  localPropertyUids: Set<string>,
+): Promise<ChainRecord> {
+  let seed: Attestation | undefined
+  let allVersions: Attestation[]
+  let properties: Attestation[]
+  try {
+    ;[seed] = await getSeedsByUidsFromEas({ uids: [seedUid], excludeRevoked: false })
+    allVersions = await getItemVersionsFromEas({ seedUids: [seedUid], excludeRevoked: false })
+    properties = await getCanonicalItemPropertiesFromEas({ versionUids: [versionUid], excludeRevoked: true })
+  } catch (error) {
+    throw new ArchiveExportError('chain_unavailable', `Couldn't read seed ${seedUid} from EAS`, { cause: error })
+  }
+  if (!seed || !sameUid(seed.id, seedUid)) {
+    throw new ArchiveExportError('not_synced', `EAS has no seed attestation ${seedUid}`)
+  }
+  const versionsOfSeed = allVersions
+    .filter((v) => sameUid(v.attester, seed!.attester))
+    .sort((a, b) => a.timeCreated - b.timeCreated || a.id.localeCompare(b.id))
+  const newestLive = versionsOfSeed.filter((v) => !v.revoked).at(-1)
+  if (!newestLive || !sameUid(newestLive.id, versionUid)) {
+    throw new ArchiveExportError(
+      'not_synced',
+      `The newest live Version on EAS is ${newestLive?.id ?? 'none'}, not ${versionUid}; sync the seed first`,
+    )
+  }
+  const missing = properties.filter((p) => !localPropertyUids.has(p.id.toLowerCase())).map((p) => p.id)
+  if (missing.length > 0) {
+    throw new ArchiveExportError(
+      'not_synced',
+      `Property attestations ${missing.join(', ')} on Version ${versionUid} aren't on this device; sync the seed first`,
+    )
+  }
+  return { seed, versions: versionsOfSeed, properties }
+}
+
 /**
  * Builds the bag for `item`'s current published state:
  *
@@ -128,13 +225,24 @@ const isUnpublishedEdit = (property: PublishGraphProperty): boolean => {
  * - `data/item.json`: every property's value, attestation uid and Arweave transaction.
  * - `metadata/dc.xml` and `metadata/premis.xml`.
  *
+ * Every time in the bag says whose clock it came from ({@link ArchiveClockSource}). With
+ * `reproducible`, every client with the same Version synced and the same schema gets the same
+ * bytes, so the same tagmanifest hash.
+ *
  * Throws {@link ArchiveExportError} `not_published` for an item without a live published version,
  * and `unpublished_changes` when a property holds a saved value that isn't published yet.
- * A file that can't be read or downloaded is left out and reported in `omitted`, not thrown.
+ * A file that can't be read or downloaded is left out and reported in `omitted`, not thrown,
+ * except with `reproducible`.
  */
 export async function exportArchive(item: ExportableItem, options: ExportArchiveOptions = {}): Promise<ExportArchiveResult> {
   const fetch = options.fetch ?? true
-  const now = options.baggingDate ?? new Date()
+  const reproducible = options.reproducible ?? false
+  if (reproducible && (options.sourceOrganization !== undefined || options.baggingDate !== undefined)) {
+    throw new ArchiveExportError(
+      'invalid_options',
+      'A reproducible bag takes no sourceOrganization or baggingDate: they would differ between clients',
+    )
+  }
   const graph = await getPublishGraph(item)
   const root = graph.root
   const seedRow = await findSeedRow({ localId: root.seedLocalId })
@@ -151,11 +259,35 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     )
   }
 
+  const localPropertyUids = new Set(
+    root.properties.map(propertyUid).filter((uid): uid is string => !!uid).map((uid) => uid.toLowerCase()),
+  )
+  const chainRecord = reproducible ? await readChainRecord(seedUid, version.uid, localPropertyUids) : undefined
+  const chainTimeByUid = new Map<string, number>(
+    chainRecord
+      ? [chainRecord.seed, ...chainRecord.versions, ...chainRecord.properties].map((a) => [a.id.toLowerCase(), a.timeCreated])
+      : [],
+  )
+  /** The time an attestation was made: from EAS when reproducible, else from the local row. */
+  const stampOf = (uid: string | undefined, localMs: number | null | undefined): Stamp | undefined => {
+    if (chainRecord) {
+      const seconds = uid ? chainTimeByUid.get(uid.toLowerCase()) : undefined
+      return seconds !== undefined ? { iso: isoFromSeconds(seconds), clock: 'chain-block' } : undefined
+    }
+    const iso = isoFromMs(localMs)
+    return iso ? { iso, clock: 'local-record' } : undefined
+  }
+
+  const versionStamp = stampOf(version.uid, version.attestationCreatedAt)
+  const bagStamp: Stamp = chainRecord
+    ? versionStamp!
+    : { iso: (options.baggingDate ?? new Date()).toISOString(), clock: 'export-device' }
+
   const chainId = getEasReadChainId()
   const chain = getEasChainDeployment(chainId)
   const explorerUrl = (uid: string) => (chain ? getEasAttestationExplorerUrl(chain, uid) : undefined)
   const schemaName = item.getService?.().getSnapshot().context.schemaName
-  const attester = seedRow?.publisher ?? undefined
+  const attester = chainRecord?.seed.attester ?? seedRow?.publisher ?? undefined
 
   const omitted: ArchiveOmission[] = []
   const payload: BagFile[] = []
@@ -179,10 +311,13 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   for (const property of root.properties) {
     const { key, definition: def, kind, row } = property
     const dataType = normalizeDataType(def.dataType) ?? String(def.dataType)
+    const attestationUid = propertyUid(property)
+    const stamp = stampOf(attestationUid, row?.attestationCreatedAt)
     const entry: ItemJsonProperty = {
       dataType,
-      attestationUid: row?.uid ?? row?.derivedFromUid ?? undefined,
-      attestedAt: isoFromMs(row?.attestationCreatedAt),
+      attestationUid,
+      attestedAt: stamp?.iso,
+      attestedAtClock: stamp?.clock,
     }
     properties[key] = entry
 
@@ -293,6 +428,13 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     properties[html.key]!.file = sourcePath
   }
 
+  if (reproducible && omitted.length > 0) {
+    throw new ArchiveExportError(
+      'incomplete',
+      `A reproducible bag can't leave anything out: ${omitted.map((o) => `${o.property} (${o.reason})`).join('; ')}`,
+    )
+  }
+
   const itemJson = {
     seedUid,
     versionUid: version.uid,
@@ -300,27 +442,31 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     modelName: root.modelName,
     chain: { id: chainId, name: chain?.name },
     attester,
-    properties,
+    reproducible,
+    properties: Object.fromEntries(Object.entries(properties).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     omitted,
   }
   payload.push({ path: 'item.json', bytes: encoder.encode(`${JSON.stringify(itemJson, null, 2)}\n`) })
   fileInfo.set('item.json', { mimeType: 'application/json' })
+  payload.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   // Descriptive metadata comes from the archive document, so nothing is guessed from property names.
   const primary = htmlSources[0]
   const doc = primary ? parseArchiveDocument(primary.text) : undefined
-  const versionDate = isoFromMs(version.attestationCreatedAt)
   const dc = dublinCoreXml({
     title: doc?.name,
     creator: doc?.authors,
     description: doc?.summary,
-    date: doc?.published ?? versionDate?.slice(0, 10),
+    date: doc?.published ?? versionStamp?.iso.slice(0, 10),
     type: 'Text',
     format: primary ? 'text/html' : undefined,
     identifier: [seedUid, explorerUrl(seedUid)].filter((v): v is string => !!v),
     source: doc?.url,
   })
 
+  const history = chainRecord
+    ? chainHistoryEvents(chainRecord, version.uid, chainId)
+    : await localHistoryEvents(root.seedLocalId, seedUid, root.properties, version, attester, chainId)
   const premis = premisXml({
     objects: [
       {
@@ -338,11 +484,14 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
           fixity: { 'SHA-256': digestHex('sha256', file.bytes), 'SHA-512': digestHex('sha512', file.bytes) },
           size: file.bytes.byteLength,
           formatName: info?.mimeType ?? 'application/octet-stream',
-          originalName: info?.arweaveTransactionId ? getPublicArweaveRawUrl(info.arweaveTransactionId) : undefined,
+          // ar:// rather than a gateway URL: the gateway is configured per device.
+          originalName: info?.arweaveTransactionId ? `ar://${info.arweaveTransactionId}` : undefined,
         }
       }),
     ],
-    events: [...(await historyEvents(root.seedLocalId, seedUid, version, attester)), ...bagEvents(now, seedUid)],
+    events: [...history, ...bagEvents(bagStamp, seedUid, chainId, reproducible)].sort(
+      (a, b) => a.dateTime.localeCompare(b.dateTime) || a.identifier.value.localeCompare(b.identifier.value),
+    ),
     agents: [
       ...(attester
         ? [{ identifiers: [{ type: 'EVM address', value: attester }], note: `EAS attester on chain ${chainId}` }]
@@ -360,6 +509,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   info.push(['EAS-Chain-Id', String(chainId)])
   if (chain?.name) info.push(['EAS-Chain-Name', chain.name])
   if (attester) info.push(['EAS-Attester', attester])
+  info.push(['Seed-Bag-Times', reproducible ? 'chain-block' : 'local-record'])
 
   const bag = createBag({
     payload,
@@ -368,26 +518,67 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       { path: 'metadata/premis.xml', bytes: encoder.encode(premis) },
     ],
     info,
-    baggingDate: now,
+    baggingDate: new Date(bagStamp.iso),
     softwareAgent: SOFTWARE_AGENT,
   })
   return { bag, omitted }
 }
 
+const historyAgents = (attester: string | undefined) =>
+  attester ? [{ type: 'EVM address', value: attester, role: 'attester' }] : []
+
 /**
- * The seed's attested history: its first live Version as creation, later Versions and property
- * attestations made after the current Version (patches) as modifications. Attestations without
- * a recorded time are left out, since PREMIS events need one.
+ * The seed's history as EAS has it: its first Version as creation, later Versions and the property
+ * attestations made after the current Version that hold its current values (patches) as
+ * modifications. Times are block times.
  */
-async function historyEvents(
+function chainHistoryEvents(record: ChainRecord, currentVersionUid: string, chainId: number): PremisEvent[] {
+  const agents = historyAgents(record.seed.attester)
+  const objects = [{ type: 'Seed Protocol seed UID', value: record.seed.id }]
+  const time = `Time: ${describeClock('chain-block', chainId)}.`
+  const events: PremisEvent[] = record.versions.map((v, index) => ({
+    identifier: { type: 'EAS attestation UID', value: v.id },
+    type: index === 0 ? 'creation' : 'modification',
+    dateTime: isoFromSeconds(v.timeCreated),
+    detail: `${index === 0 ? 'First Version attested' : 'New Version attested'}. ${time}`,
+    outcome: 'success',
+    outcomeNote: v.revoked && v.revocationTime ? `Version revoked at ${isoFromSeconds(v.revocationTime)}` : undefined,
+    agents,
+    objects,
+  }))
+  const current = record.versions.find((v) => sameUid(v.id, currentVersionUid))
+  for (const property of record.properties) {
+    if (!current || property.timeCreated <= current.timeCreated) continue
+    events.push({
+      identifier: { type: 'EAS attestation UID', value: property.id },
+      type: 'modification',
+      dateTime: isoFromSeconds(property.timeCreated),
+      detail: `Property schema ${property.schemaId} attested again on Version ${current.id}. ${time}`,
+      outcome: 'success',
+      agents,
+      objects,
+    })
+  }
+  return events
+}
+
+/**
+ * The same history from this device's rows. Versions come from the versions table; patches are the
+ * current properties whose attestation is newer than the current Version's. Attestations without a
+ * recorded time are left out, since PREMIS events need one.
+ */
+async function localHistoryEvents(
   seedLocalId: string,
   seedUid: string,
+  properties: PublishGraphProperty[],
   current: { uid: string; attestationCreatedAt: number | null },
   attester: string | undefined,
+  chainId: number,
 ): Promise<PremisEvent[]> {
   const db = BaseDb.getAppDb()
-  const agents = attester ? [{ type: 'EVM address', value: attester, role: 'attester' }] : []
+  const agents = historyAgents(attester)
   const objects = [{ type: 'Seed Protocol seed UID', value: seedUid }]
+  const time = `Time: ${describeClock('local-record', chainId)}.`
 
   type VersionRow = { uid: string | null; attestationCreatedAt: number | null; revokedAt: number | null }
   const versionRows = (
@@ -403,59 +594,55 @@ async function historyEvents(
     identifier: { type: 'EAS attestation UID', value: v.uid! },
     type: index === 0 ? 'creation' : 'modification',
     dateTime: isoFromMs(v.attestationCreatedAt)!,
-    detail: index === 0 ? 'First Version attested' : 'New Version attested',
+    detail: `${index === 0 ? 'First Version attested' : 'New Version attested'}. ${time}`,
     outcome: 'success',
-    outcomeNote: v.revokedAt ? `Version revoked at ${new Date(v.revokedAt * 1000).toISOString()}` : undefined,
+    outcomeNote: v.revokedAt ? `Version revoked at ${isoFromSeconds(v.revokedAt)}` : undefined,
     agents,
     objects,
   }))
 
   if (current.attestationCreatedAt) {
-    const patches = (await db
-      .select({ uid: metadata.uid, propertyName: metadata.propertyName, attestationCreatedAt: metadata.attestationCreatedAt })
-      .from(metadata)
-      .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.versionUid, current.uid)))) as {
-      uid: string | null
-      propertyName: string | null
-      attestationCreatedAt: number | null
-    }[]
-    for (const row of patches) {
-      if (!isValidEasAttestationUid(row.uid) || !row.attestationCreatedAt) continue
-      if (row.attestationCreatedAt <= current.attestationCreatedAt) continue
+    for (const property of properties) {
+      const row = property.row
+      const uid = row?.uid
+      if (!row || !isValidEasAttestationUid(uid) || !sameUid(row.versionUid, current.uid)) continue
+      if (!row.attestationCreatedAt || row.attestationCreatedAt <= current.attestationCreatedAt) continue
       events.push({
-        identifier: { type: 'EAS attestation UID', value: row.uid! },
+        identifier: { type: 'EAS attestation UID', value: uid! },
         type: 'modification',
         dateTime: isoFromMs(row.attestationCreatedAt)!,
-        detail: `Property ${row.propertyName} attested again on Version ${current.uid}`,
+        detail: `Property ${property.key} attested again on Version ${current.uid}. ${time}`,
         outcome: 'success',
         agents,
         objects,
       })
     }
   }
-  return events.sort((a, b) => a.dateTime.localeCompare(b.dateTime))
+  return events
 }
 
 /** The bag's own events: its checksums and the package itself. */
-const bagEvents = (now: Date, seedUid: string): PremisEvent[] => {
+const bagEvents = (stamp: Stamp, seedUid: string, chainId: number, reproducible: boolean): PremisEvent[] => {
   const agents = [{ type: 'software', value: '@seedprotocol/sdk', role: 'executing program' }]
   const objects = [{ type: 'Seed Protocol seed UID', value: seedUid }]
-  const dateTime = now.toISOString()
+  const time = reproducible
+    ? `Dated with the Version's attestation so every client builds the same bag; time: ${describeClock(stamp.clock, chainId)}.`
+    : `Time: ${describeClock(stamp.clock, chainId)}.`
   return [
     {
-      identifier: { type: 'bag event', value: `message-digest-${dateTime}` },
+      identifier: { type: 'bag event', value: `message-digest-${stamp.iso}` },
       type: 'message digest calculation',
-      dateTime,
-      detail: 'SHA-256 and SHA-512 of every payload and tag file',
+      dateTime: stamp.iso,
+      detail: `SHA-256 and SHA-512 of every payload and tag file. ${time}`,
       outcome: 'success',
       agents,
       objects,
     },
     {
-      identifier: { type: 'bag event', value: `package-${dateTime}` },
+      identifier: { type: 'bag event', value: `package-${stamp.iso}` },
       type: 'information package creation',
-      dateTime,
-      detail: 'BagIt 1.0 bag written by exportArchive',
+      dateTime: stamp.iso,
+      detail: `BagIt 1.0 bag written by exportArchive. ${time}`,
       outcome: 'success',
       agents,
       objects,

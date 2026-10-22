@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { mkdtemp, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
@@ -11,7 +11,8 @@ import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { versions } from '@/seedSchema'
+import { metadata, seeds, versions } from '@/seedSchema'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { ArchiveExportError, exportArchive } from '@/archive/exportArchive'
 import { rewriteHtmlEmbeddedImagesOnDisk } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { waitForPendingOutboxOps } from '@/outbox'
@@ -25,6 +26,19 @@ import {
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForIdle } from '../test-utils/waitForIdle'
 import { bagitPyRequired, findBagitPy, runBagitPy } from '../../../archive/__tests__/bagitPy'
+
+// EAS reads for reproducible bags; each test that needs them sets a fake chain.
+const chainMocks = vi.hoisted(() => ({
+  seeds: vi.fn(),
+  versions: vi.fn(),
+  properties: vi.fn(),
+}))
+vi.mock('@seedprotocol/eas', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getSeedsByUidsFromEas: (...args: unknown[]) => chainMocks.seeds(...args),
+  getItemVersionsFromEas: (...args: unknown[]) => chainMocks.versions(...args),
+  getCanonicalItemPropertiesFromEas: (...args: unknown[]) => chainMocks.properties(...args),
+}))
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
@@ -166,10 +180,13 @@ testDescribe('exportArchive', () => {
     expect(dc).toContain('<dc:date>2026-10-08</dc:date>')
     const premis = text(bag, 'metadata/premis.xml')
     expect(premis).toContain('<premis:eventDateTime>2026-10-08T21:00:00.000Z</premis:eventDateTime>')
-    expect(premis).toContain(`<premis:originalName>${imageUrl}</premis:originalName>`)
+    expect(premis).toContain(`<premis:originalName>ar://${IMAGE_TX}</premis:originalName>`)
+    expect(premis).toContain('Time: attestation time recorded on the exporting device')
+    expect(item.properties.title.attestedAtClock).toBe('local-record')
     const info = text(bag, 'bag-info.txt')
     expect(info).toContain('Source-Organization: Test Desk\n')
     expect(info).toContain(`Seed-Uid: ${post.seedUid}\n`)
+    expect(info).toContain('Seed-Bag-Times: local-record\n')
 
     const bagitPy = findBagitPy()
     if (bagitPy || bagitPyRequired()) {
@@ -202,4 +219,97 @@ testDescribe('exportArchive', () => {
     expect(error.code).toBe('unpublished_changes')
     expect(error.message).toContain('title')
   }, 120000)
+
+  describe('reproducible', () => {
+    const T0 = 1791500000 // Version attested, unix seconds
+    const ATTESTER = '0xDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDd'
+
+    /** A chain that agrees with the post's rows; the title was patched a minute after the Version. */
+    async function fakeChain(post: Item<any>, change: { newerVersion?: boolean; extraProperty?: boolean } = {}) {
+      const db = BaseDb.getAppDb()
+      const [version] = await db.select().from(versions).where(eq(versions.seedLocalId, post.seedLocalId))
+      const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))
+      const att = (id: string, timeCreated: number, extra: Record<string, unknown> = {}) => ({
+        id, attester: ATTESTER, timeCreated, revoked: false, revocationTime: 0, schemaId: `0x${'5'.repeat(64)}`, ...extra,
+      })
+      chainMocks.seeds.mockResolvedValue([att(post.seedUid!, T0)])
+      chainMocks.versions.mockResolvedValue([
+        att(version.uid, T0, { refUID: post.seedUid }),
+        ...(change.newerVersion ? [att(`0x${'7'.repeat(64)}`, T0 + 600, { refUID: post.seedUid })] : []),
+      ])
+      chainMocks.properties.mockResolvedValue([
+        ...rows
+          .filter((r: any) => r.uid && r.versionUid === version.uid)
+          .map((r: any) => att(r.uid, r.propertyName === 'title' ? T0 + 60 : T0, { refUID: version.uid })),
+        ...(change.extraProperty ? [att(`0x${'8'.repeat(64)}`, T0 + 120, { refUID: version.uid })] : []),
+      ])
+    }
+
+    /** What differs between two clients holding the same Version: recorded times and address case. */
+    async function actLikeAnotherClient(post: Item<any>) {
+      const db = BaseDb.getAppDb()
+      await db.update(versions).set({ attestationCreatedAt: Date.now() }).where(eq(versions.seedLocalId, post.seedLocalId))
+      await db.update(metadata).set({ attestationCreatedAt: Date.now() }).where(eq(metadata.seedLocalId, post.seedLocalId))
+      await db.update(seeds).set({ publisher: ATTESTER.toLowerCase() }).where(eq(seeds.localId, post.seedLocalId))
+    }
+
+    afterEach(() => {
+      chainMocks.seeds.mockReset()
+      chainMocks.versions.mockReset()
+      chainMocks.properties.mockReset()
+    })
+
+    it('gives the same bytes from two clients, with every time from the chain', async () => {
+      const post = await createPublishedPost()
+      await fakeChain(post)
+      const first = await exportArchive(post, { fetch: false, reproducible: true })
+      await actLikeAnotherClient(post)
+      const second = await exportArchive(post, { fetch: false, reproducible: true })
+
+      expect(validateBag(first.bag)).toEqual({ valid: true, errors: [] })
+      expect(text(second.bag, 'tagmanifest-sha256.txt')).toBe(text(first.bag, 'tagmanifest-sha256.txt'))
+      expect(second.bag.files.map((f) => [f.path, digestHex('sha256', f.bytes)])).toEqual(
+        first.bag.files.map((f) => [f.path, digestHex('sha256', f.bytes)]),
+      )
+
+      const versionIso = new Date(T0 * 1000).toISOString()
+      expect(text(first.bag, 'bag-info.txt')).toContain(`Bagging-Date: ${versionIso.slice(0, 10)}\n`)
+      expect(text(first.bag, 'bag-info.txt')).toContain(`EAS-Attester: ${ATTESTER}\n`)
+      expect(text(first.bag, 'bag-info.txt')).toContain('Seed-Bag-Times: chain-block\n')
+      const premis = text(first.bag, 'metadata/premis.xml')
+      expect(premis).toContain(`<premis:eventDateTime>${versionIso}</premis:eventDateTime>`)
+      expect(premis).toContain(`<premis:eventDateTime>${new Date((T0 + 60) * 1000).toISOString()}</premis:eventDateTime>`)
+      expect(premis).toContain('Time: EAS timeCreated, the block time on chain')
+      expect(premis).not.toContain('exporting device')
+      const item = JSON.parse(text(first.bag, 'data/item.json'))
+      expect(item.reproducible).toBe(true)
+      expect(item.properties.title).toMatchObject({ attestedAtClock: 'chain-block', attestedAt: new Date((T0 + 60) * 1000).toISOString() })
+
+      // The same changes do show in an ordinary export.
+      const local = await exportArchive(post, { fetch: false, baggingDate: new Date(T0 * 1000) })
+      expect(text(local.bag, 'tagmanifest-sha256.txt')).not.toBe(text(first.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('refuses a copy that is behind the chain', async () => {
+      const post = await createPublishedPost()
+      await fakeChain(post, { newerVersion: true })
+      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'not_synced' })
+      await fakeChain(post, { extraProperty: true })
+      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'not_synced' })
+    }, 120000)
+
+    it('refuses when EAS is unreachable, with local-only options, or when a file is missing', async () => {
+      const post = await createPublishedPost()
+      chainMocks.seeds.mockRejectedValue(new Error('indexer down'))
+      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'chain_unavailable' })
+      await expect(
+        exportArchive(post, { fetch: false, reproducible: true, sourceOrganization: 'Desk' }),
+      ).rejects.toMatchObject({ code: 'invalid_options' })
+
+      await fakeChain(post)
+      const image = contextOf(post, 'featureImage').refResolvedValue!
+      await unlink(BaseFileManager.getFilesPath('images', image))
+      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'incomplete' })
+    }, 120000)
+  })
 })
