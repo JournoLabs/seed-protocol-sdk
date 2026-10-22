@@ -22,9 +22,13 @@ Image metadata:
 
 ## How It Works
 
-1. **Content hit** — return cached body (or 304 if `If-None-Match` matches)
-2. **Content miss** — `getFeedItemsBySchemaName` → `@seedprotocol/query` (may hit collection cache) → optional image enrich → `createFeed` → store content
-3. **Archives / page > 1** — content-only keys with archive/page TTL; no feed-local item list cache
+Each cached body records a fingerprint of what it was built from: query's collection ETag (page 1), the resolved site config and the cache-bust value. A body is served only while the fingerprint still matches.
+
+1. **Page 1** — every request calls `@seedprotocol/query` first (one round of indexer requests when its collection is cached, none within `CACHE_MAX_AGE`). If the collection ETag is unchanged, the cached body is returned (or 304); otherwise items are enriched with image metadata, `createFeed` builds the body, and it is stored. The response ETag is derived from the collection ETag, so it stays the same across rebuilds of an unchanged feed, and `Cache-Control` max-age is `CACHE_MAX_AGE` (default 0: clients revalidate every time and get a 304 when nothing changed).
+2. **Page > 1 and archives** — the cached body is served without asking query until `CACHE_PAGE_TTL` / `CACHE_ARCHIVE_TTL` ends; the ETag is a hash of the body.
+3. **Errors** — if building fails, an unexpired cached body for the same URL is served with `X-Cache: STALE`.
+
+Image metadata changes alone do not change a page 1 body's fingerprint; the body picks them up on its next rebuild.
 
 ## Cache Storage
 
@@ -36,4 +40,4 @@ Do not confuse with query’s `collections/` and `items/` subdirectories in the 
 ## HTTP Conditional Requests
 
 - `ETag` / `If-None-Match` → 304
-- `Last-Modified` / `Cache-Control` on responses
+- `Last-Modified` / `Cache-Control` on responses; `X-Cache` is `HIT`, `MISS` or `STALE`

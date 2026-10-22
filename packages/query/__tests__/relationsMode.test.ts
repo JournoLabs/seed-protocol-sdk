@@ -178,26 +178,16 @@ describe('relations modes', () => {
     expect(data.author).toMatchObject({ seedUid: AUTHOR, name: 'Ada' })
   })
 
-  it('maps expandRelations to a mode, and relations wins over it', async () => {
+  it("defaults to 'expand'", async () => {
     expect(relationsModeOf(undefined)).toBe('expand')
-    expect(relationsModeOf({ expandRelations: true })).toBe('expand')
-    expect(relationsModeOf({ expandRelations: false })).toBe('urls')
-    expect(relationsModeOf({ expandRelations: true, relations: 'uids' })).toBe('uids')
-    expect(relationsModeOf({ expandRelations: false, relations: 'expand' })).toBe('expand')
-
-    expect(await assemble({ expandRelations: false })).toEqual(await assemble({ relations: 'urls' }))
-    expect(await assemble({ expandRelations: false, relations: 'expand' })).toEqual(
-      await assemble({ relations: 'expand' }),
-    )
+    expect(await assemble({})).toEqual(await assemble({ relations: 'expand' }))
   })
 
-  it('keeps the expandRelations cache keys and gives uids its own', () => {
+  it('gives each mode its own cache key', () => {
     expect(buildAssembleOptionsKey()).toBe('e1-h1')
     expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e1-h1')
     expect(buildAssembleOptionsKey({ relations: 'urls' })).toBe('e0-h1')
-    expect(buildAssembleOptionsKey({ expandRelations: false })).toBe('e0-h1')
     expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e2-h1')
-    expect(buildAssembleOptionsKey({ relations: 'uids', expandRelations: false })).toBe('e2-h1')
     expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e2-h0')
   })
 })

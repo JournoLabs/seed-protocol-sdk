@@ -36,7 +36,7 @@ describe('buildAssembleOptionsKey', () => {
 
   it('encodes false flags', () => {
     expect(
-      buildAssembleOptionsKey({ expandRelations: false, hydrateStorage: false }),
+      buildAssembleOptionsKey({ relations: 'urls', hydrateStorage: false }),
     ).toBe('e0-h0')
   })
 
@@ -180,7 +180,7 @@ describe('CacheManager collection + item', () => {
     expect(got?.optionsKey).toBe(KEY)
     expect(got?.dependencies).toEqual(deps('0xseed'))
 
-    const otherKey = buildAssembleOptionsKey({ expandRelations: false })
+    const otherKey = buildAssembleOptionsKey({ relations: 'urls' })
     expect(await cache.getItem('0xseed', otherKey)).toBeNull()
 
     await cache.clearItem('0xseed', KEY)

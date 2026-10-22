@@ -1,7 +1,6 @@
 import type { CachedFeedContent, CacheConfig, CacheContentKeyOptions, CachedImageMetadata } from './types';
 import { buildContentKey } from './types';
 import type { ImageMetadata } from '../types';
-import { generateContentETag } from '../utils/etag';
 
 /**
  * In-memory cache for serialized feed content and image metadata.
@@ -36,30 +35,14 @@ export class MemoryCache {
     return cached;
   }
 
-  setFeedContent(
+  /** Stores an entry as it is (ETag, lastModified and expiry kept), e.g. one read from disk. */
+  putFeedContent(
     schemaName: string,
     format: string,
-    content: string,
-    contentType: string,
+    cached: CachedFeedContent,
     contentKeyOptions?: CacheContentKeyOptions,
-    ttlOverride?: number
   ): void {
-    const key = buildContentKey(schemaName, format, contentKeyOptions);
-    const now = Math.floor(Date.now() / 1000);
-    const ttl = ttlOverride ?? this.config.ttl;
-    const expiresAt = now + ttl;
-
-    const etag = generateContentETag(schemaName, format, now, content.length);
-
-    const cachedContent: CachedFeedContent = {
-      content,
-      contentType,
-      etag,
-      lastModified: now,
-      expiresAt,
-    };
-
-    this.feedContentCache.set(key, cachedContent);
+    this.feedContentCache.set(buildContentKey(schemaName, format, contentKeyOptions), cached);
   }
 
   getImageMetadata(transactionId: string): ImageMetadata | null {

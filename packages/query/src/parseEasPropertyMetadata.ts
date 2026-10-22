@@ -36,10 +36,3 @@ export function parseEasPropertyMetadata(
   const metadata = parsed[0].value as EasPropertyMetadata
   return { ok: true, metadata }
 }
-
-/** @deprecated Use {@link parseEasPropertyMetadata} */
-export const parseEasPropertyMetadataForFeed = parseEasPropertyMetadata
-/** @deprecated Use {@link EasPropertyMetadata} */
-export type EasPropertyMetadataForFeed = EasPropertyMetadata
-/** @deprecated Use {@link ParseEasPropertyMetadataResult} */
-export type ParseEasPropertyMetadataForFeedResult = ParseEasPropertyMetadataResult
