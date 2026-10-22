@@ -1205,15 +1205,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // only. Missing it here, an Image, File, Html or Relation would come back from its row under
     // the stored name (`coverImageId`) as a second instance, and the item would swap it in and
     // unload the first one mid-save. Mutate the entry: it is shared by both keys.
-    const lookupKey = [keyByLocal, keyByUid].find((key) => key && this.instanceCache.has(key))
-    const cachedEntry = lookupKey ? this.instanceCache.get(lookupKey) : undefined
-    if (cachedEntry) {
+    const fromCache = (): ItemProperty<any> | undefined => {
+      const lookupKey = [keyByLocal, keyByUid].find((key) => key && this.instanceCache.has(key))
+      const cachedEntry = lookupKey ? this.instanceCache.get(lookupKey) : undefined
+      if (!cachedEntry) return undefined
       for (const key of [keyByLocal, keyByUid]) {
         if (key && !this.instanceCache.has(key)) this.instanceCache.set(key, cachedEntry)
       }
       if (hold !== false) cachedEntry.refCount += 1
-      foundProperty = cachedEntry.instance as ItemProperty<any>
-    } else {
+      return cachedEntry.instance as ItemProperty<any>
+    }
+    foundProperty = fromCache()
+    if (!foundProperty) {
       // Query database
       const row = await currentPropertyRow(
         { seedLocalId, seedUid },
@@ -1249,7 +1252,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         !!storedName &&
         (metadataStoredNameForms(propertyName, propertyRecordSchema as never).includes(storedName) ||
           getMetadataPropertyNamesForQuery(propertyName).includes(storedName))
-      foundProperty = ItemProperty.create(
+      // The item may have made the instance while the reads ran. Under the stored name, `create`
+      // wouldn't match it and would make a second one.
+      foundProperty = fromCache() ?? ItemProperty.create(
         { ...propertyData, propertyName: keepsStoredName ? storedName : propertyName, modelName, propertyRecordSchema },
         { waitForReady: false, hold },
       )
