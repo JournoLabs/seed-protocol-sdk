@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.9 (2026-10-22)
 
 - **Breaking:** `status` on `Model`, `Schema` and `ItemProperty` is the load status, `'loading'`, `'ready'` or `'error'`, not the actor's state value. An ItemProperty that was `'idle'` once loaded is `'ready'` (PermaPress `TipTap.tsx` compares `status === 'idle'`). `Item` gains `status`, and every entity has `waitForReady({ timeout })`. The state value is still `getService().getSnapshot().value`, and the entity machines no longer have `loading`, `waitingForDb` or `error` states: an actor is `idle` from the start, so waiting for `idle` no longer means loaded. Ready means loaded: an ItemProperty with a pending save is ready.
 - **Breaking:** removed `waitForEntityIdle` (use `entity.waitForReady()`), `Model.updateNameIndex`, the internal `Model.takeSchemaHold` / `dropSchemaHold` / `releaseSchemaHolds` and `ModelProperty.adoptForModel`.
@@ -123,6 +123,92 @@ All notable changes to this package are documented in this file.
   - The schema file API: `createSchema`, `readSchema`, `deleteModelFromSchema` and `deletePropertyFromModel`. Files written by `createSchema` were never loaded; change schemas through `Schema`, `Model` and `ModelProperty`.
   - `requestEasSyncFromEventBus` and the `EasSyncRequestSource` type. Nothing emitted the `syncDbWithEas` event it listened for; call `client.syncFromEas()` instead.
   - Unused types: `SeedInitBrowserProps`, `SeedInitBrowser`, `DbQueryResult`, `ResultObject`, `SqliteWasmResult`, `SqliteWasmCallback`, `ReturnObj`, `PublishRequestData`, `PropertyToUpdateWithSeed`, `GlobalMachineContext`, `PublishMachineContext`, `GetSchemaForModelEvent`, `HydrateExistingItemEvent`, `WebpackConfigContext`, `Environment` and `ClientCallback`.
+
+### Commits
+
+#### Breaking
+
+- feed: drop FEED_EXPAND_RELATIONS, always expand relations (583dc993)
+- query, feed: remove deprecated aliases (dfe0c27e)
+- use the tier-1 packages' clients and helpers instead of copies (00746953)
+- remove dead public types (0aaf33c7)
+- remove requestEasSyncFromEventBus and the 'event_bus' sync source (e6fdaad2)
+- remove the schema file CRUD API (9d25f81c)
+- remove the node entry's CLI and webpack exports (4369d49e)
+- remove the Markdown import (f17d9b90)
+- recreate databases older than 0.7.7, drop the legacy repairs (8bebbd1c)
+
+#### Features
+
+- write and read properties.definition (4769e193)
+- db: migration 0029 merges duplicate chain uids and adds unique keys (3885655e)
+- add properties.definition column (migration 0028) (453e216a)
+- Schema.find({ schemaName }), a lookup that creates nothing (3820b4e7)
+- arweave: DefaultArweaveClient with the preferred-gateway read loop (560cdf0d)
+- schemas.content_hash column for the applied schema file (bae9213b)
+
+#### Fixes
+
+- ItemProperty.find reuses an instance made while it read the row (839daa3d)
+- a sync-time conflict reaches a loaded property through the change feed (a77eadbf)
+- ItemProperty.find checks the cache under both ids (126e2226)
+- resolve the internal schema from its row, not a file (0342e628)
+- loadOrCreateModel waits for a loading Schema's string state (55a70bfc)
+- keep a pending ItemStorage value shown until its file lands (54e7db63)
+- publish time no longer waits on the metadata reads (82a33163)
+- query, feed: monthly archives use UTC month bounds (7fce0a25)
+- Node's first metadata read skips when the context changed meanwhile (d98bc0b4)
+- sync and publish recording write chain uids through the unique indexes (318758ad)
+- Node's first metadata read keeps a pending or newer value (21feb669)
+- eas: fetch only Version attestations as a seed's versions (a631a084)
+- drop unused seeds import and appDb in syncDbWithEas (285c93f0)
+- local query source labels seeds with their EAS schema name (f4c2a2bf)
+- loaded Items take publish times from their seed and version rows (a88cfa11)
+- publish: write public gateway URLs into published Html (f83bffd9)
+- publish: record a publish uid on the row whose value was attested (6c43bdb4)
+- reopen the database when another tab holds seed.db (b1fcb43f)
+- keep an ItemStorage value shown while its row points at the file (0cbdd8c3)
+- start SQLite's OPFS proxy from a blob inside SQLocal's worker (1b5f6898)
+
+#### Other
+
+- Item and ItemProperty on the shared entity lifecycle (9f7cf4e5)
+- Schema on the shared entity lifecycle (1aca3008)
+- Model and ModelProperty on the shared entity lifecycle (ba8ae7ba)
+- shared entity cache, lifecycle and client readiness (428c2c2d)
+- react: one item-properties refetch per property save (a082952a)
+- drop the change feed's liveQuery-era API (9e2dfedb)
+- loaded items watch their seed's metadata; the browser drops the post-sync rehydrate (d6cf0755)
+- getPublishGraph waits for the outbox, so every publish reader sees pending edits (685d6675)
+- build publish from rows with one graph walk (T11) (9e67b723)
+- drop empty-result retries and polls after awaited writes (T2) (1996f3a6)
+- the value setter appends its outbox op; rollback is the overlay (D2) (6495f5b1)
+- client init steps are awaited functions (T2) (36c928a7)
+- Schema load is one awaited function; validation is an assign (T2) (e3b477d1)
+- definition writes are one awaited saveDefinition (T2) (9fa7eaef)
+- one current-row reader and one storage-value pipeline (T5) (5549a4d5)
+- one definitions module writes schema, model, property and link rows (4a86acb2)
+- register NodeEasClient on the Node platform (ba3eb791)
+- load item and schema definitions from property rows (53622320)
+- read property definitions from their rows (3600450a)
+- Group rows without property_id with a same-named row that has one (76fe6b69)
+- eas: one EAS model-schema lookup and one model_uids rule (02e732aa)
+- Match metadata rows to their property by property_id (39c5191d)
+- one path from schema file to rows (applySchemaFile) (d4d05a37)
+- Clear a property: clear() and clear({ retract: true }) (ADR 0021) (fdd7e375)
+- map model types to models through modelNameForType (6a99d2cb)
+- inject the shared MIME sniffer and data-URL helpers into the workers (8820c557)
+- one model and seed-row resolver for every lookup (f8768d04)
+- ADR 0021: clearing a property; add metadata.retract (migration 0024) (90223275)
+- Refuse empty Image/File/Html values; restore the shown value on storage save errors (c59ee6f9)
+- Stop model loads from rewriting property rows and clearing is_edited (87eea50a)
+- Run the head-version regression test in the browser project too (d5030018)
+- Release the Item holds publish reads take on related items (097d8461)
+- Fix WebP sniff in the image resize worker (817ef090)
+- Pick the head version with one order in every reader (b69a9fe2)
+- Skip files already on disk in the bulk download; drop content_hash write and bulk resize (6ec6c496)
+- Match synced seeds through versions so a republish's old uid is not a second seed (4a7fdf3c)
+- Apply internal-only Schema updateContext events so draft saves keep _dbUpdatedAt (4ea04d06)
 
 ## 0.7.8 (2026-10-20)
 

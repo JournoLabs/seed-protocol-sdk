@@ -1,5 +1,13 @@
 # Changelog — @seedprotocol/feed-hyper
 
+## 0.7.9 (2026-10-22)
+
+### Commits
+
+#### Other
+
+- feed: import query helpers directly, FeedItem type, drop unused deps (a3079128)
+
 ## 0.7.5 (2026-10-17)
 
 ### Commits

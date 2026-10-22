@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.9 (2026-10-22)
 
 - On Node, `NodeEasClient` (registered by `@seedprotocol/eas/node` and `registerNodeEasPlatform`) sends EAS requests through its own undici `Agent` that offers only the X25519 and P-256 key-exchange groups and keeps idle connections for 30 s. Node 24.21+ also offers the post-quantum X25519MLKEM768 group by default; easscan doesn't support it, and with it each new connection's TLS handshake took about 1.45 s instead of about 175 ms. Node's fetch drops idle connections after 4 s, so most reads after a pause paid it. The process's TLS defaults and fetch's global dispatcher are unchanged. Under Bun or Deno undici is not loaded, and when the host has set a proxy or mock as fetch's global dispatcher (`setGlobalDispatcher`, `NODE_USE_ENV_PROXY`) EAS requests keep using it. Pass `new NodeEasClient({ dispatcher: false })` or `registerNodeEasPlatform({ easClient: { dispatcher: false } })` to use fetch's defaults, a `Dispatcher` of your own, or `dispatcherOptions: { ecdhCurve, keepAliveTimeoutMs }`. `createEasNodeDispatcher` builds the default one. `@seedprotocol/eas` now depends on `undici`; only the `./node` entry loads it.
 - `createEasGraphQLClient(url, timeoutMs?, { dispatcher? })` passes `dispatcher` to `fetch` on every request. `DefaultEasClient` passes none.
@@ -16,6 +16,23 @@ All notable changes to this package are documented in this file.
 ### Breaking
 
 - Removed `fetchEasSchemaUidBySchemaName` and `getEasSchemaUidBySchemaName`. Look a property schema up by its full definition with `getEasSchemaUidForExactDefinition`, and model schemas with `fetchEasModelSchemas`.
+
+### Commits
+
+#### Features
+
+- per-request timing log under DEBUG=seedEas:timing (a4ce6c3e)
+
+#### Fixes
+
+- load node:module through process.getBuiltinModule (8217b0fb)
+- fetch only Version attestations as a seed's versions (a631a084)
+
+#### Other
+
+- Node EAS requests use an undici Agent with X25519:P-256 and 30 s keep-alive (3fccb72f)
+- sdk: one EAS model-schema lookup and one model_uids rule (02e732aa)
+- Clear a property: clear() and clear({ retract: true }) (ADR 0021) (fdd7e375)
 
 ## 0.7.8 (2026-10-20)
 

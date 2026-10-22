@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.9 (2026-10-22)
 
 - `ensureEasSchemasForItem` registers the schemas of every seed the publish attests from the SDK's `getPublishGraph`, each definition once. It walked each related item's subtree again for every item that referred to it.
 - Recording passes each request's `versionLocalId` to `updateVersionUid` and each attestation's `_attestedValue` to `applyPropertyAttestationUidsFromPublish`, so both update the rows the payload was built from.
@@ -20,6 +20,24 @@ All notable changes to this project will be documented in this file.
 - `resolvePublishPayment(...).storage.path` and a cost estimate's `arweave.path` are always `'bundler'`. `chargedUploadBytes(work, uploadTo)` drops its `path` argument; `combinePublishCostEstimate` still accepts `arweavePath: 'bundler'`.
 - A publish saved mid-way through the L1 path (`creatingArweaveTransactions`, `sendingReimbursementRequest`, `pollingForConfirmation`, `uploadingData` or their `Phase2` states) is marked interrupted on restore instead of resuming; publish the item again.
 - The L1-finalize worker no longer restores data item ids that publish 0.7.4 and earlier overwrote with L1 ids. Databases that old are recreated by `@seedprotocol/sdk` (minimum upgrade-from version 0.7.7).
+
+### Commits
+
+#### Breaking
+
+- sdk: recreate databases older than 0.7.7, drop the legacy repairs (8bebbd1c)
+- upload only data items, remove the L1 reimbursement path (51301c01)
+
+#### Fixes
+
+- sdk: record a publish uid on the row whose value was attested (6c43bdb4)
+
+#### Other
+
+- sdk: build publish from rows with one graph walk (T11) (9e67b723)
+- eas, sdk: one EAS model-schema lookup and one model_uids rule (02e732aa)
+- revoke retracted properties after attesting; unpublish revokes the seed first (62759057)
+- Unload items the publish actors reload, and ensureEasSchemas' related items (deacc79f)
 
 ## 0.7.7 (2026-10-18)
 

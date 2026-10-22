@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.9 (2026-10-22)
 
 - Page 1 of a feed asks `@seedprotocol/query` on every request and rebuilds its cached body only when query's collection ETag changed, so new and changed posts appear on the next request instead of up to `CACHE_TTL` (an hour) later. Each request costs one round of indexer requests when query's collection is cached, none within `CACHE_MAX_AGE`. Page 1's `Cache-Control` max-age and s-maxage are now `CACHE_MAX_AGE` (default 0) instead of 3600, so clients and CDNs revalidate and get a 304 when nothing changed.
 - Feed ETags no longer change when an unchanged feed is rebuilt: page 1's comes from query's collection ETag, later pages' and archives' from the body. Before, every rebuild (each TTL) produced a new ETag.
@@ -25,6 +25,32 @@ All notable changes to this package are documented in this file.
 - `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
 - `express`, `@types/express` and `graphql-request` are no longer dependencies.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read; they never did anything.
+
+### Commits
+
+#### Breaking
+
+- remove FEED_SITE_URL and the item-link branches it fed (a74c5944)
+- start up through query, keep registered clients (091446a2)
+- drop FEED_EXPAND_RELATIONS, always expand relations (583dc993)
+- query: remove deprecated aliases (dfe0c27e)
+
+#### Features
+
+- key cached feed bodies on query's collection ETag (c8005844)
+- query: relations option with a uids mode that skips related seeds (57e6c5fd)
+
+#### Fixes
+
+- query: register NodeEasClient on Node when no EAS client is set (788627f6)
+- query: monthly archives use UTC month bounds (7fce0a25)
+- probe the enclosure image, not the item's own transaction (eb5f6a9e)
+- cache, image probe and pagination fixes from the audit (cb1ee8dc)
+
+#### Other
+
+- correct env var and rich-field docs (803c2bfc)
+- import query helpers directly, FeedItem type, drop unused deps (a3079128)
 
 ## 0.7.5 (2026-10-17)
 
