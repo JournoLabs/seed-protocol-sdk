@@ -134,7 +134,7 @@ export enum SeedModels {
 export const SEED_PROTOCOL_SCHEMA_NAME = 'Seed Protocol'
 export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
 
-/** Fired after `syncDbWithEas` persists EAS seeds/versions/metadata to SQLite (see `Item.rehydrateCachedItemsFromDbAfterEasSync`). */
+/** Fired, in every tab, after `syncDbWithEas` persists EAS seeds, versions and metadata to SQLite. */
 export const EAS_SEED_DATA_SYNCED_TO_DB_EVENT = 'easSeedDataSyncedToDb' as const
 
 /**

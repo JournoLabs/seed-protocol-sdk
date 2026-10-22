@@ -133,4 +133,48 @@ describe('two tabs of one app', () => {
       timeout: WAIT_TIMEOUT_MS,
     })
   }, 60000)
+
+  it("a synced property row on an existing version reaches the other tab's loaded item", async () => {
+    const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
+    open.push(a, b)
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+
+    const schemaName = `Tab Feed Schema ${Math.random().toString(36).slice(2, 8)}`
+    const id = () => Math.random().toString(16).slice(2, 12)
+    const now = new Date().toISOString()
+    const file = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: id(),
+      metadata: { name: schemaName, createdAt: now, updatedAt: now },
+      models: {
+        TabPost: {
+          id: id(),
+          properties: { title: { id: id(), type: 'Text' }, summary: { id: id(), type: 'Text' } },
+        },
+      },
+      enums: {},
+      migrations: [],
+    }
+    await tabs.callSeedTab(a, 'importSchema', JSON.stringify(file), file.version)
+    await tabs.callSeedTab(b, 'importSchema', JSON.stringify(file), file.version)
+
+    const { seedLocalId, versionLocalId } = await tabs.callSeedTab(a, 'createItem', 'TabPost', schemaName, {
+      title: 'first',
+    })
+    await tabs.callSeedTab(b, 'loadItem', seedLocalId)
+    await vi.waitFor(async () => expect(await tabs.callSeedTab(b, 'itemValues', seedLocalId)).toMatchObject({ title: 'first' }), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+
+    // What sync writes for a property attested on a version the item already has: a metadata row
+    // only. The property isn't in the model, so the item has no instance watching it yet (a model
+    // property's instance would see the row through its own watch).
+    await tabs.callSeedTab(a, 'insertSyncedProperty', seedLocalId, versionLocalId, 'TabPost', 'subtitle', 'synced')
+    await vi.waitFor(
+      async () => expect(await tabs.callSeedTab(b, 'itemValues', seedLocalId)).toMatchObject({ subtitle: 'synced' }),
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+    expect(await tabs.callSeedTab(b, 'rehydrateCalls')).toBe(0)
+  }, 60000)
 })

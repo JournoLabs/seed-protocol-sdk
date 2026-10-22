@@ -64,7 +64,8 @@ describe('events across tabs', () => {
   it("applies another tab's file changes and EAS sync here", async () => {
     startTabCoordination({ filesDir })
     const invalidated = vi.spyOn(BaseFileManager, 'invalidateCachedPaths')
-    const rehydrated = vi.spyOn(Item, 'rehydrateCachedItemsFromDbAfterEasSync').mockResolvedValue(undefined as never)
+    // Loaded items here see the sync's rows through the change feed, not a re-read on the relay.
+    const rehydrated = vi.spyOn(Item, 'rehydrateCachedItemsFromDbAfterEasSync')
     const filesChanged = vi.fn()
     const synced = vi.fn()
     eventEmitter.on(FILES_CHANGED_EVENT, filesChanged)
@@ -81,8 +82,7 @@ describe('events across tabs', () => {
         expect(synced).toHaveBeenCalled()
       }, { timeout: WAIT_TIMEOUT_MS })
       expect(invalidated).toHaveBeenCalledWith(paths)
-      // Cached Items reload before listeners hear the sync finished.
-      expect(rehydrated.mock.invocationCallOrder[0]).toBeLessThan(synced.mock.invocationCallOrder[0])
+      expect(rehydrated).not.toHaveBeenCalled()
     } finally {
       eventEmitter.off(FILES_CHANGED_EVENT, filesChanged)
       eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, synced)
