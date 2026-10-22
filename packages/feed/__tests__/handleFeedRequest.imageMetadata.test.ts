@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   BaseArweaveClient,
   resetArweaveReadGatewayForTests,
@@ -25,7 +28,12 @@ const PNG_1x1 = Uint8Array.from(
 )
 
 describe('handleFeedRequest image metadata', () => {
+  let cacheDir: string
+
   beforeEach(() => {
+    // Image metadata is cached on disk even with content caching off.
+    cacheDir = mkdtempSync(join(tmpdir(), 'feed-image-metadata-'))
+    process.env.CACHE_DIR = cacheDir
     vi.clearAllMocks()
     resetArweaveReadGatewayForTests()
     setResolvedSeedGatewayEndpoints(null)
@@ -39,7 +47,9 @@ describe('handleFeedRequest image metadata', () => {
     vi.unstubAllGlobals()
     delete process.env.CACHE_ENABLED
     delete process.env.IMAGE_METADATA_GATEWAYS
+    delete process.env.CACHE_DIR
     resetCacheManager()
+    rmSync(cacheDir, { recursive: true, force: true })
   })
 
   it("probes a post's feature image, not its own storage transaction", async () => {
