@@ -8,9 +8,8 @@ import { initializeFeedPlatform } from './bootstrap'
 import { loadFeedConfig } from './config'
 
 type SetFeedItemDefaultsOptions = {
-  itemUrlBase?: string
+  itemUrlBase: string
   itemUrlPath: string
-  siteUrl: string
 }
 
 const formatRfc822Date = (timestamp: number): string => {
@@ -29,14 +28,6 @@ const formatRfc822Date = (timestamp: number): string => {
   return `${day}, ${dayNum} ${month} ${year} ${hours}:${minutes}:${seconds} GMT`
 }
 
-const getCollectionPath = (schemaName: string): string => {
-  return schemaName === 'image'
-    ? 'images'
-    : schemaName === 'post'
-      ? 'posts'
-      : schemaName.toLowerCase() + 's'
-}
-
 /**
  * Set default values for feed items (title, link, guid, pubDate, dual-case keys).
  */
@@ -46,7 +37,7 @@ export const setFeedItemDefaults = (
   schemaName: string,
   options: SetFeedItemDefaultsOptions,
 ): void => {
-  const { itemUrlBase, itemUrlPath, siteUrl } = options
+  const { itemUrlBase, itemUrlPath } = options
 
   if (!item.title && !item.Title) {
     item.title = seedUid
@@ -75,27 +66,16 @@ export const setFeedItemDefaults = (
       : null
   const storageTransactionId = storageTransactionIdSnake || storageTransactionIdCamel
 
-  const collectionPath = getCollectionPath(schemaName)
   const validSeedUid =
     seedUid && typeof seedUid === 'string' && seedUid.trim() !== '' ? seedUid : 'unknown'
+  const attestationLink = `${itemUrlBase.replace(/\/$/, '')}/${itemUrlPath.replace(/^\//, '')}/${validSeedUid}`
 
-  let defaultLink: string
+  let defaultLink = attestationLink
   if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
     try {
       defaultLink = getArweaveUrlForTransaction(storageTransactionId)
     } catch (error) {
       console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)
-      if (itemUrlBase != null) {
-        defaultLink = `${itemUrlBase.replace(/\/$/, '')}/${(itemUrlPath ?? 'attestation/view').replace(/^\//, '')}/${validSeedUid}`
-      } else {
-        defaultLink = `${siteUrl.replace(/\/$/, '')}/${collectionPath}/${validSeedUid}`
-      }
-    }
-  } else {
-    if (itemUrlBase != null) {
-      defaultLink = `${itemUrlBase.replace(/\/$/, '')}/${(itemUrlPath ?? 'attestation/view').replace(/^\//, '')}/${validSeedUid}`
-    } else {
-      defaultLink = `${siteUrl.replace(/\/$/, '')}/${collectionPath}/${validSeedUid}`
     }
   }
 
@@ -300,7 +280,6 @@ function seedRecordsToFeedItems(
   const defaultsOptions: SetFeedItemDefaultsOptions = {
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
-    siteUrl: feedConfig.siteUrl,
   }
 
   return records.map((record) =>
@@ -308,23 +287,34 @@ function seedRecordsToFeedItems(
   )
 }
 
-export const getFeedItemsBySchemaName = async (
+/**
+ * Feed items for a page of the schema, with query's collection ETag when the collection cache
+ * answered (skip 0, cache enabled): it changes whenever a listed seed or what it was built from
+ * changes, so the feed can tell whether a cached body is still current.
+ */
+export const fetchFeedItemsBySchemaName = async (
   schemaName: string,
   options?: { limit?: number; skip?: number },
-): Promise<Record<string, unknown>[]> => {
+): Promise<{ items: Record<string, unknown>[]; etag?: string }> => {
   await initializeFeedPlatform()
-  const feedConfig = loadFeedConfig()
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
 
-  const { items } = await queryBySchema(schemaName, {
+  // Expanded relations give items their author names and image enclosures.
+  const { items, etag } = await queryBySchema(schemaName, {
     limit,
     skip,
-    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
+    relations: 'expand',
     hydrateStorage: true,
   })
-  return seedRecordsToFeedItems(schemaName, items)
+  return { items: seedRecordsToFeedItems(schemaName, items), etag }
 }
+
+export const getFeedItemsBySchemaName = async (
+  schemaName: string,
+  options?: { limit?: number; skip?: number },
+): Promise<Record<string, unknown>[]> =>
+  (await fetchFeedItemsBySchemaName(schemaName, options)).items
 
 export const getFeedItemsBySchemaNameForMonth = async (
   schemaName: string,
@@ -332,10 +322,9 @@ export const getFeedItemsBySchemaNameForMonth = async (
   month: number,
 ): Promise<Record<string, unknown>[]> => {
   await initializeFeedPlatform()
-  const feedConfig = loadFeedConfig()
 
   const records = await queryBySchemaForMonth(schemaName, year, month, {
-    relations: feedConfig.expandRelations === false ? 'urls' : 'expand',
+    relations: 'expand',
     hydrateStorage: true,
   })
   return seedRecordsToFeedItems(schemaName, records)

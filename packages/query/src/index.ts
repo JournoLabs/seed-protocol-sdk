@@ -84,13 +84,10 @@ export {
 
 export {
   parseEasPropertyMetadata,
-  parseEasPropertyMetadataForFeed,
 } from './parseEasPropertyMetadata.js'
 export type {
   EasPropertyMetadata,
-  EasPropertyMetadataForFeed,
   ParseEasPropertyMetadataResult,
-  ParseEasPropertyMetadataForFeedResult,
 } from './parseEasPropertyMetadata.js'
 
 export { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
@@ -98,35 +95,24 @@ export type { ParsedEasRelationPropertyName } from './parseEasRelationPropertyNa
 
 export {
   RICH_BODY_STORAGE_SCHEMAS,
-  FEED_RICH_BODY_STORAGE_SCHEMAS,
   isRichBodyStorageSchema,
-  isFeedRichBodyStorageSchema,
   richBodyModelPriority,
-  feedRichBodyModelPriority,
   getFieldStorageModels,
-  getFeedFieldStorageModels,
   getListElementStorageModels,
-  getFeedListElementStorageModels,
   setFieldStorageModel,
-  setFeedFieldStorageModel,
   setListElementStorageModels,
-  setFeedListElementStorageModels,
 } from './fieldStorageModel.js'
 export type {
   FieldStorageModels,
-  FeedFieldStorageModels,
   ListElementStorageModels,
-  FeedListElementStorageModels,
 } from './fieldStorageModel.js'
 
 export {
   enrichImageSeedClone,
-  enrichImageSeedCloneForFeed,
 } from './imageRelationEnrichment.js'
 
 export {
   hydrateArweaveRichTextInItems,
-  hydrateArweaveRichTextInFeedItems,
   isArweaveTransactionGatewayUrl,
   resetArweaveBodyCache,
 } from './hydrateArweaveRichText.js'

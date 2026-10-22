@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@seedprotocol\/eas$/, replacement: src('eas/src/index.ts') },
+      { find: /^@seedprotocol\/eas\/node$/, replacement: src('eas/src/node/index.ts') },
       { find: /^@seedprotocol\/arweave$/, replacement: src('arweave/src/index.ts') },
       { find: /^@seedprotocol\/arweave\/node$/, replacement: src('arweave/src/node/index.ts') },
       // @seedprotocol/eas's codegen imports these types as values (see packages/eas/vitest.config.ts)

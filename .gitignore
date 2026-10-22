@@ -159,3 +159,7 @@ docs/private/
 # Local deep-research output
 /research_notes/
 /reports/
+
+# Feed cache (CACHE_DIR default ./cache) from a feed server or tests run in the repo
+packages/*/cache/
+/cache/

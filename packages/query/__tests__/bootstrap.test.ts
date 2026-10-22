@@ -77,6 +77,21 @@ describe('Arweave client when none is registered', () => {
   })
 })
 
+describe('EAS client when none is registered', () => {
+  it.each([
+    ['node', 'NodeEasClient'],
+    ['browser', 'DefaultEasClient'],
+  ] as const)('the %s entry registers %s', async (entry, clientName) => {
+    const { eas, query } = await load(entry)
+    const configure = vi.spyOn(eas.BaseEasClient, 'configure')
+    await query.initializeQueryPlatform()
+    expect(configure.mock.calls.map(([impl]) => impl.constructor.name)).toContain(clientName)
+    expect(configure.mock.calls.map(([impl]) => impl.constructor.name)).not.toContain(
+      clientName === 'NodeEasClient' ? 'DefaultEasClient' : 'NodeEasClient',
+    )
+  })
+})
+
 describe('a second copy of eas / arweave', () => {
   it('throws when the SDK registered its clients on another copy of eas', async () => {
     const sdkCopy = await load('browser')

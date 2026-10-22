@@ -1,44 +1,23 @@
-import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '@seedprotocol/arweave'
-
-let initialized = false
+import { initializeQueryPlatform, teardownQueryPlatform } from '@seedprotocol/query'
 
 export type InitializeFeedPlatformOptions = {
   arweaveDomain?: string
 }
 
-function resolveFeedArweaveDomain(explicit?: string): string {
-  return explicit ?? resolveArweaveHostFromEnv() ?? DEFAULT_ARWEAVE_HOST
-}
-
-/** Register Node EAS + Arweave clients for feed generation (no full SDK client). */
+/**
+ * Make EAS and Arweave usable for feed generation (via `initializeQueryPlatform`). Clients a host
+ * app or the SDK already registered are kept; otherwise the Node EAS and Arweave clients are
+ * registered. `arweaveDomain` sets the Arweave host.
+ */
 export async function initializeFeedPlatform(
   options?: InitializeFeedPlatformOptions,
 ): Promise<void> {
-  if (initialized) return
-  const [{ registerNodeEasPlatform }, { registerNodeArweavePlatform }] = await Promise.all([
-    import('@seedprotocol/eas/node'),
-    import('@seedprotocol/arweave/node'),
-  ])
-  registerNodeEasPlatform()
-  const arweaveDomain = resolveFeedArweaveDomain(options?.arweaveDomain)
-  registerNodeArweavePlatform({ arweaveDomain })
-  if (options?.arweaveDomain) {
-    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
-    BaseArweaveClient.setHost(options.arweaveDomain)
-  }
-  initialized = true
+  await initializeQueryPlatform(options)
 }
 
-/** @deprecated Use initializeFeedPlatform */
-export const initializeSeedClient = initializeFeedPlatform
-
-export async function getClient(): Promise<{ isInitialized: () => boolean }> {
-  await initializeFeedPlatform()
-  return { isInitialized: () => initialized }
-}
-
-export async function teardownSeedClient(): Promise<void> {
-  initialized = false
+/** Lets the next initializeFeedPlatform call run again (tests). Registered clients stay. */
+export async function teardownFeedPlatform(): Promise<void> {
+  await teardownQueryPlatform()
 }
 
 export { DEFAULT_ARWEAVE_HOST } from '@seedprotocol/arweave'
