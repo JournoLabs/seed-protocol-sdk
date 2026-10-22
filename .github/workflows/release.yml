@@ -91,9 +91,6 @@ jobs:
         run: node scripts/build-packages.js bundler-core archive eas arweave query feed vite sdk react next
 
       - run: bun run test
-        env:
-          # Optional: the Arweave integration test asks this Hyper gateway first when it's set.
-          SEED_GATEWAY_HYPER_KEY: ${{ secrets.SEED_GATEWAY_HYPER_KEY }}
 
   publish:
     name: Publish to npm

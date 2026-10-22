@@ -2,7 +2,6 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import {
-  Item,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
   resolvePublishPayloadValues,
@@ -11,6 +10,7 @@ import {
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
+import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
 import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
@@ -62,31 +62,6 @@ const toBytesHex = (v: unknown): string => {
     return '0x' + Array.from(arr).map((b) => b.toString(16).padStart(2, '0')).join('')
   }
   return '0x'
-}
-
-const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
-  let item: IItem<any> | undefined
-  try {
-    item = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-  } catch {
-    // No-op
-  }
-  if (item) return item
-  return new Promise<IItem<any>>((resolve) => {
-    const interval = setInterval(() => {
-      try {
-        Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-          .then((found: IItem<any> | undefined) => {
-            if (found) {
-              clearInterval(interval)
-              resolve(found)
-            }
-          })
-      } catch {
-        // No-op
-      }
-    }, 200)
-  })
 }
 
 type RawAttestation = {

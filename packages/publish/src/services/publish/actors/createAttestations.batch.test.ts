@@ -72,8 +72,14 @@ const relatedImage = {
   seedUid: undefined as string | undefined,
   persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
 }
+/** The publishing item as Item.find loads it, for a publish restored with the item as plain data. */
+let reloadedPost: Record<string, unknown> | undefined
 const itemFind = mock(async (q: { seedLocalId?: string }) =>
-  q.seedLocalId === relatedImage.seedLocalId ? relatedImage : undefined,
+  q.seedLocalId === relatedImage.seedLocalId
+    ? relatedImage
+    : q.seedLocalId === 'postLocal02'
+      ? reloadedPost
+      : undefined,
 )
 
 mock.module('@seedprotocol/sdk', () => ({
@@ -208,5 +214,49 @@ describe('createAttestations: related items published in the same transaction', 
     expect(relatedImage.persistSeedUid.mock.calls[0]![0]).toBe(PUBLISHER)
 
     expect(result.publishedBatch?.seedUid?.toLowerCase()).toBe(POST_SEED)
+  })
+
+  // A restored publish carries the item as plain data; the actor loads it and releases that hold.
+  const runRestored = async (getPublishPayload: () => Promise<unknown>) => {
+    const unload = mock(() => {})
+    reloadedPost = {
+      seedLocalId: 'postLocal02',
+      seedUid: undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload,
+      persistSeedUid: mock(async () => {}),
+      unload,
+    }
+    const actor = createActor(createAttestations, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item: { seedLocalId: 'postLocal02' },
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    const outcome = await toPromise(actor).then(
+      () => 'done',
+      () => 'failed',
+    )
+    reloadedPost = undefined
+    return { outcome, unloads: unload.mock.calls.length }
+  }
+
+  test('releases the item it loaded when the publish succeeds', async () => {
+    expect(await runRestored(async () => requests())).toEqual({ outcome: 'done', unloads: 1 })
+  })
+
+  test('releases the item it loaded when the publish fails', async () => {
+    const result = await runRestored(async () => {
+      throw new Error('payload failed')
+    })
+    expect(result).toEqual({ outcome: 'failed', unloads: 1 })
   })
 })

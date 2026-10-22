@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
@@ -56,5 +56,51 @@ testDescribe('Item cache holds', () => {
     item.unload()
     expect(item.getService().getSnapshot().status).toBe('stopped')
     expect(Item.peekReady(item.seedLocalId)).toBeUndefined()
+  }, 30000)
+
+  it('find with hold: false loads the item without holding it', async () => {
+    const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'no hold' } as never)
+    const id = created.seedLocalId
+    Item.dropCachedInstancesForSeedIds([id])
+
+    const found = await Item.find({ seedLocalId: id, hold: false })
+    expect(found).toBeDefined()
+    expect(Item.cache.entryOf(found as Item<any>)?.refCount).toBe(0)
+    // A cached one too
+    expect(await Item.find({ seedLocalId: id, hold: false })).toBe(found)
+    expect(Item.cache.entryOf(found as Item<any>)?.refCount).toBe(0)
+
+    expect(Item.retain(found!)).toBe(true)
+    found!.unload()
+    expect(found!.getService().getSnapshot().status).toBe('stopped')
+    expect(Item.retain(found!)).toBe(false)
+  }, 30000)
+
+  it('find keeps no hold when the item is not ready in time', async () => {
+    const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'slow' } as never)
+    const id = created.seedLocalId
+    Item.dropCachedInstancesForSeedIds([id])
+    // Cached and still loading (its load waits for `finishLoad`), held once by this create
+    let finishLoad!: () => void
+    const gate = new Promise<void>((resolve) => (finishLoad = resolve))
+    const itemClass = Item as unknown as { load: (item: Item<any>) => Promise<void> }
+    const load = itemClass.load.bind(Item)
+    const spy = vi.spyOn(itemClass, 'load').mockImplementation(async (item) => {
+      await gate
+      return load(item)
+    })
+    try {
+      const loading = await Item.create({ seedLocalId: id, modelName: 'HoldPost' } as never, { waitForReady: false })
+      expect(loading.status).toBe('loading')
+
+      expect(await Item.find({ seedLocalId: id, readyTimeout: 1 })).toBeUndefined()
+      expect(Item.cache.entryOf(loading)?.refCount).toBe(1)
+      finishLoad()
+      await loading.waitForReady()
+      loading.unload()
+    } finally {
+      finishLoad()
+      spy.mockRestore()
+    }
   }, 30000)
 })

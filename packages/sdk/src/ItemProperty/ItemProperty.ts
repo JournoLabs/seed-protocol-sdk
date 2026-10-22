@@ -62,7 +62,8 @@ import {
   whenValidationLoaded,
   type PlannedWrite,
 } from './propertyWrite'
-import { propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
+import { getPropertyDefinitionsByFileId, propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
+import { addCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
 import type { PropertyType as PropertyRowType } from '@/seedSchema'
 import {
   ModelPropertyDataTypes,
@@ -799,6 +800,33 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
+  /** Takes a property definition read from its row, as the constructor takes the initial one. */
+  private _applyDefinition(propertyRecordSchema: SchemaPropertyType): void {
+    this._service.send({ type: 'updateContext', propertyRecordSchema })
+    this._dataType = normalizeDataType(propertyRecordSchema.dataType)
+    const isList = isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.List)
+    ;(this as any)._isList = isList
+    ;(this as any)._isRelation = isList
+      ? !!propertyRecordSchema.ref
+      : isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Relation)
+  }
+
+  /**
+   * Gives cached instances of these properties their rows' current definitions, after a schema
+   * change wrote the rows (refreshCachedProperties). An instance keeps the definition it loaded
+   * with otherwise: Node has no live query, and the browser's arrives some time after the write.
+   */
+  static async refreshDefinitions(propertyFileIds: string[]): Promise<void> {
+    const instances = this.cache.instances().filter((instance) => !isActorStopped(instance._service))
+    if (instances.length === 0) return
+    const definitions = await getPropertyDefinitionsByFileId(propertyFileIds)
+    for (const instance of instances) {
+      const fileId = instance._getSnapshotContext().propertyRecordSchema?.id
+      const definition = fileId ? definitions.get(fileId) : undefined
+      if (definition) instance._applyDefinition(definition as SchemaPropertyType)
+    }
+  }
+
   /**
    * Set up liveQuery subscription to watch for property schema changes in the properties table.
    * When ModelProperty dataType (or other schema fields) changes in the database, ItemProperty
@@ -881,25 +909,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             )
 
             logger(`[ItemProperty._setupPropertySchemaLiveQuery] Schema updated for ${propertyName}: dataType=${row.dataType}`)
-
-            this._service.send({
-              type: 'updateContext',
-              propertyRecordSchema,
-            })
-
-            // Update instance fields to match new schema (mirror constructor logic)
-            this._dataType = normalizeDataType(propertyRecordSchema.dataType)
-            if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Relation)) {
-              ;(this as any)._isRelation = true
-            } else {
-              ;(this as any)._isRelation = false
-            }
-            if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.List)) {
-              ;(this as any)._isList = true
-              ;(this as any)._isRelation = !!(propertyRecordSchema.ref)
-            } else {
-              ;(this as any)._isList = false
-            }
+            this._applyDefinition(propertyRecordSchema)
           },
           error: (error) => {
             logger(`[ItemProperty._setupPropertySchemaLiveQuery] LiveQuery error: ${error}`)
@@ -1871,3 +1881,5 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 }
+
+addCachedPropertyRefresher((propertyFileIds) => ItemProperty.refreshDefinitions(propertyFileIds))

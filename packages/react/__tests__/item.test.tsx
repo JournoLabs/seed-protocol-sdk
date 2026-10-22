@@ -1064,6 +1064,102 @@ describe('React Item Hooks Integration Tests', () => {
         })
       })
 
+      describe('useItem holds', () => {
+        const refCount = (item: IItem<any> | undefined) =>
+          item ? Item.cache.entryOf(item as Item<any>)?.refCount : undefined
+        /** The deferred release (useHeldItem) runs a tick after unmount. */
+        const afterRelease = () => new Promise((resolve) => setTimeout(resolve, 10))
+        const dropFromCache = (item: Item<any>) => {
+          Item.dropCachedInstancesForSeedIds([item.seedLocalId])
+          return item.seedLocalId
+        }
+
+        it('unloads an item it loaded once it unmounts', async () => {
+          const id = dropFromCache(testItem3!)
+          testItem3 = null
+          const log: ItemRender[] = []
+          const { unmount } = render(<UseItemRenderLog seedLocalId={id} log={log} />, {
+            container,
+            wrapper: SeedProviderWrapper,
+          })
+          await waitFor(() => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 3'), {
+            timeout: 15000,
+          })
+          const shown = Item.peek(id)
+          expect(refCount(shown)).toBe(1)
+
+          unmount()
+          await afterRelease()
+          expect(Item.peek(id)).toBeUndefined()
+          expect(shown!.getService().getSnapshot().status).toBe('stopped')
+        })
+
+        it('holds once per mounted hook and releases on unmount', async () => {
+          const id = testItem1!.seedLocalId
+          expect(refCount(testItem1!)).toBe(1)
+          const first = render(<UseItemRenderLog seedLocalId={id} log={[]} />, { container, wrapper: SeedProviderWrapper })
+          const second = document.createElement('div')
+          document.body.appendChild(second)
+          const other = render(<UseItemRenderLog seedLocalId={id} log={[]} />, {
+            container: second,
+            wrapper: SeedProviderWrapper,
+          })
+          await waitFor(() => expect(refCount(testItem1!)).toBe(3), { timeout: WAIT_TIMEOUT_MS })
+
+          // A refetch returning the same instance keeps one hold per hook
+          eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
+          await afterRelease()
+          expect(refCount(testItem1!)).toBe(3)
+
+          other.unmount()
+          await afterRelease()
+          expect(refCount(testItem1!)).toBe(2)
+          first.unmount()
+          await afterRelease()
+          expect(refCount(testItem1!)).toBe(1)
+        })
+
+        it('releases the previous item when the id changes', async () => {
+          const firstId = dropFromCache(testItem2!)
+          testItem2 = null
+          const secondId = testItem1!.seedLocalId
+          const { rerender } = render(<UseItemRenderLog seedLocalId={firstId} log={[]} />, {
+            container,
+            wrapper: SeedProviderWrapper,
+          })
+          await waitFor(() => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 2'), {
+            timeout: 15000,
+          })
+          rerender(<UseItemRenderLog seedLocalId={secondId} log={[]} />)
+          await waitFor(() => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 1'), {
+            timeout: 15000,
+          })
+          await afterRelease()
+          expect(Item.peek(firstId)).toBeUndefined()
+          expect(refCount(testItem1!)).toBe(2)
+        })
+
+        it('shows the new instance after the one it held is dropped', async () => {
+          const id = testItem1!.seedLocalId
+          const log: ItemRender[] = []
+          render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+          await waitFor(() => expect(refCount(testItem1!)).toBe(2), { timeout: WAIT_TIMEOUT_MS })
+          const dropped = testItem1!
+          dropFromCache(dropped)
+          testItem1 = null
+          await waitFor(
+            () => {
+              const replacement = Item.peek(id)
+              expect(replacement).toBeDefined()
+              expect(replacement).not.toBe(dropped)
+              expect(refCount(replacement)).toBe(1)
+            },
+            { timeout: 15000 },
+          )
+          expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 1')
+        })
+      })
+
       describe('useItems', () => {
         it('should update when new items are created', async () => {
           render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })

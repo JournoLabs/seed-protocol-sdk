@@ -74,9 +74,9 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     {
       queryKey,
       queryFn: async (): Promise<Item<T> | null> => {
-        // A ready cached item is what find() would return, minus the cache hold find() takes.
+        // No hold here: queries are shared by key, so each mounted hook holds what it shows (below).
         const found = (Item.peekReady(id) ??
-          (await Item.find({ modelName, seedLocalId, seedUid }))) as Item<T> | undefined
+          (await Item.find({ modelName, seedLocalId, seedUid, hold: false }))) as Item<T> | undefined
         if (found) return found
         logger('[useItem] no item found', modelName, id)
         // find() also returns undefined when the item doesn't settle in time; keep what we have,
@@ -99,6 +99,13 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   )
   const item = query.data ?? undefined
 
+  // One hold per mounted hook on the item it shows. An item that can't be held was stopped
+  // (unloaded, dropped by another tab or a purge): look it up again.
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
+  }, [queryClient])
+  useHeldItem(item, refetch)
+
   useEffect(() => {
     const onEasSynced = () => {
       setEasHydrationTick((n) => n + 1)
@@ -117,22 +124,26 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     setMachineError(null)
     if (!item) return
 
-    const subscription: Subscription = item.getService().subscribe((snapshot: any) => {
-      if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
-      if (item.status === 'error') {
-        setMachineError(new Error('Item service error'))
-        setIsMachineBusy(false)
-      } else if (item.status === 'ready' && snapshot.value === 'idle') {
-        hasSeenIdleRef.current = true
-        setIsMachineBusy(false)
-        setMachineError(null)
-      } else if (hasSeenIdleRef.current) {
-        // Only after idle, so the transitions find() already waited out don't count as loading.
-        setIsMachineBusy(true)
-      }
+    const subscription: Subscription = item.getService().subscribe({
+      // Stopped (unloaded elsewhere, dropped by another tab or a purge): look the item up again
+      complete: refetch,
+      next: (snapshot: any) => {
+        if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
+        if (item.status === 'error') {
+          setMachineError(new Error('Item service error'))
+          setIsMachineBusy(false)
+        } else if (item.status === 'ready' && snapshot.value === 'idle') {
+          hasSeenIdleRef.current = true
+          setIsMachineBusy(false)
+          setMachineError(null)
+        } else if (hasSeenIdleRef.current) {
+          // Only after idle, so the transitions find() already waited out don't count as loading.
+          setIsMachineBusy(true)
+        }
+      },
     })
     return () => subscription.unsubscribe()
-  }, [item])
+  }, [item, refetch])
 
   // Re-render when a property's value changes: the item reads them from its property instances,
   // which update without the item's own machine changing. The item adds instances as they load
@@ -183,6 +194,24 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     isLoading: (!!id && query.isPending) || isMachineBusy,
     error: machineError ?? (query.error as Error | null),
   }
+}
+
+/**
+ * Holds `item` while the component shows it. The release is deferred a tick: a StrictMode remount
+ * or a refetch returning the same instance takes its new hold before the old one is dropped, so
+ * the count never touches 0 in between. `onStopped` runs when the item can't be held.
+ */
+function useHeldItem(item: IItem<any> | undefined, onStopped: () => void): void {
+  useEffect(() => {
+    if (!item) return
+    if (!Item.retain(item)) {
+      onStopped()
+      return
+    }
+    return () => {
+      setTimeout(() => item.unload(), 0)
+    }
+  }, [item, onStopped])
 }
 
 type UseItemsReturn = {

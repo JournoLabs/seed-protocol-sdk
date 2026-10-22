@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `watchPublishCost` re-estimates after writes to the item's seed, version and property rows, through the SDK's change feed, where one runs (the browser). It compared the loaded property instances' values on every item update, so it missed edits made in another tab or to rows the loaded item hadn't read. In Node, which has no change feed, it still compares the loaded values. The new `watchRows` option replaces how rows are watched.
+- A publish restored from its saved record releases the Item it loads to create attestations once the step finishes or fails, on the multiPublish path too (the direct-EAS path already did). The item stayed held, so it was never unloaded. The lookup that waits for that item now runs one `Item.find` at a time; overlapping lookups each took a hold and only one was returned.
 - `usePublishCostEstimate` keeps showing the last estimate (as `isStale`) when it gets a new Item instance for the same `seedLocalId` and `publishMode`, until the new watcher's first estimate arrives. It showed `null` in between. `watchPublishCost` takes the estimate to start from as `previousEstimate`.
 - `watchPublishCost` retries a failed first estimate once after 5 s (`firstEstimateRetryMs`, 0 turns it off) and stays `isEstimating` until the retry settles. A failed first estimate left `estimate` null until the item changed or `refresh()` was called.
 

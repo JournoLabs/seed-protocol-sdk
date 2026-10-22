@@ -33,6 +33,16 @@ with `bun run test`; see `vite.config.js` for the three projects (NodeJS, browse
   a root `devDependencies` entry (as `js-yaml` and `parse5` have). Vite logs "Failed to resolve
   dependency: …, present in client 'optimizeDeps.include'" for entries it can't resolve.
 
+## Live network tests
+
+Files named `*.live.test.ts` call real services and are skipped unless `SEED_LIVE_NETWORK_TESTS=1`,
+so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
+arweave.net, asking the Hyper gateway first when `SEED_GATEWAY_HYPER_KEY` is set:
+
+```bash
+SEED_LIVE_NETWORK_TESTS=1 bunx vitest run --project NodeJS packages/sdk/__tests__/helpers/ArweaveClient/ArweaveClient.live.test.ts
+```
+
 ## Writing tests that stay fast
 
 - **Don't use fixed sleeps** (`await new Promise(r => setTimeout(r, N))`) to wait for something to
@@ -149,8 +159,7 @@ Desktop must allow at least 2 CPUs and 7 GB.
 
 The container runs at the host's architecture, which is arm64 on Apple Silicon, while GitHub runs
 x64. A Node patch release after the image was built isn't picked up until you remove the image
-(`docker image rm` the `seed-ci-local:*` tag). `SEED_GATEWAY_HYPER_KEY` is passed through when set
-in your shell; the Arweave integration test asks that Hyper gateway first, as in CI.
+(`docker image rm` the `seed-ci-local:*` tag).
 
 [act](https://github.com/nektos/act) can run the workflow file itself:
 

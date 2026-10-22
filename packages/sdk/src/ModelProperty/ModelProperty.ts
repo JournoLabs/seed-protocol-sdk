@@ -31,7 +31,7 @@ import {
   runEntityLoad,
   waitForEntityReady,
 } from '@/helpers/entity/entityLifecycle'
-import { setCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
+import { addCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
 import {
   definitionOnlyFields,
   getPropertyDefinition,
@@ -1325,4 +1325,4 @@ export class ModelProperty {
   }
 }
 
-setCachedPropertyRefresher((propertyFileIds) => ModelProperty.refreshFromDb(propertyFileIds))
+addCachedPropertyRefresher((propertyFileIds) => ModelProperty.refreshFromDb(propertyFileIds))

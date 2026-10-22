@@ -304,4 +304,55 @@ describe('watchPublishCost', () => {
     await advance(500)
     expect(estimateCalls).toBe(1)
   })
+
+  test('re-estimates on row writes once it watches rows, not on item updates', async () => {
+    const item = createMockItem()
+    let rowWrite: (() => void) | undefined
+    let unwatched = 0
+    let estimateCalls = 0
+    const handle = watchPublishCost(item, () => {}, {
+      itemIdleMs: 0,
+      priceRefreshMs: 0,
+      estimate: async () => {
+        estimateCalls += 1
+        return makeEstimate(estimateCalls)
+      },
+      watchRows: async (_item, onChange) => {
+        rowWrite = onChange
+        return () => {
+          unwatched += 1
+        }
+      },
+    })
+    await flush()
+    expect(estimateCalls).toBe(1)
+    // The loaded value changes before the row is written: the row write is what counts
+    item.setTitle('edit')
+    await flush()
+    expect(estimateCalls).toBe(1)
+    rowWrite!()
+    await flush()
+    expect(estimateCalls).toBe(2)
+    handle.dispose()
+    expect(unwatched).toBe(1)
+  })
+
+  test('compares item values when it cannot watch rows', async () => {
+    const item = createMockItem()
+    let estimateCalls = 0
+    const handle = watchPublishCost(item, () => {}, {
+      itemIdleMs: 0,
+      priceRefreshMs: 0,
+      estimate: async () => {
+        estimateCalls += 1
+        return makeEstimate(estimateCalls)
+      },
+      watchRows: async () => null,
+    })
+    await flush()
+    item.setTitle('edit')
+    await flush()
+    expect(estimateCalls).toBe(2)
+    handle.dispose()
+  })
 })
