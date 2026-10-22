@@ -290,7 +290,7 @@ The browser build stores files under the [Origin Private File System](https://de
 
 2. **Concurrent access** — Avoid reading the same OPFS path while another context still has it open for writing, or before a writer has finished closing/flushing. The SDK retries a narrow class of transient read errors (`NotReadableError` / Chromium’s “permission problems … reference” wording) and `waitForFileWithContent` keeps polling until timeout, but coordinating writers and readers in your app still reduces flakes.
 
-3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.5.6` / `1.2.9`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
+3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.7.7` / `1.2.14`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
 
 ## Next.js
 

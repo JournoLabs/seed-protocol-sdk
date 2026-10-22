@@ -5,6 +5,8 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
+- The browser client initialises without Iterator helpers (Chrome before 122, Firefox before 131, Safari before 18.4). `@zenfs/core` 2.5.6 called `Iterator.prototype.map` when it loaded, and init failed with `journalOperations.values(...).map is not a function`. `@zenfs/core` is now 2.7.7 and `@zenfs/dom` 1.2.14; an app that installs them beside the SDK needs the same versions.
+- Creating a file in an OPFS directory that SQLocal's worker or another tab made after this tab mounted no longer fails with `ENOENT ... (Out of sync!)`. The mount now adds such directories and files to ZenFS's in-memory copy when it first finds them. ZenFS 2.5.6 ignored that error only when the stack trace was in Chromium's format, so Firefox and Safari could already hit it.
 
 ## 0.7.9 (2026-10-22)
 
