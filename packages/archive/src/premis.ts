@@ -63,7 +63,8 @@ export type PremisAgentType = keyof typeof PREMIS_AGENT_TYPES
 export type PremisAgent = {
   identifiers: PremisIdentifier[]
   name?: string
-  type: PremisAgentType
+  /** Left out when unknown, e.g. an EVM address that may be a person or an organization. */
+  type?: PremisAgentType
   version?: string
   note?: string
 }
@@ -163,11 +164,13 @@ function agentXml(agent: PremisAgent): string {
     'premis:agent',
     agent.identifiers.map((id) => identifier(i, 'premis:agentIdentifier', id)).join('') +
       textElement(i, 'premis:agentName', agent.name) +
-      textElement(i, 'premis:agentType', agent.type, {
-        authority: 'agentType',
-        authorityURI: `${VOCABULARY}/agentType`,
-        valueURI: `${VOCABULARY}/agentType/${PREMIS_AGENT_TYPES[agent.type]}`,
-      }) +
+      (agent.type
+        ? textElement(i, 'premis:agentType', agent.type, {
+            authority: 'agentType',
+            authorityURI: `${VOCABULARY}/agentType`,
+            valueURI: `${VOCABULARY}/agentType/${PREMIS_AGENT_TYPES[agent.type]}`,
+          })
+        : '') +
       textElement(i, 'premis:agentVersion', agent.version) +
       textElement(i, 'premis:agentNote', agent.note),
   )

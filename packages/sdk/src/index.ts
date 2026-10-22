@@ -63,6 +63,14 @@ export type { IItem, IItemProperty } from './interfaces'
 export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
+export {
+  ArchiveExportError,
+  exportArchive,
+  type ArchiveExportErrorCode,
+  type ArchiveOmission,
+  type ExportArchiveOptions,
+  type ExportArchiveResult,
+} from './archive/exportArchive'
 export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {
