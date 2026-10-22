@@ -169,6 +169,8 @@ export default defineConfig({
             'client/schemaFileInit.test.ts',
             'helpers/easDirect.test.ts',
             'feed/**',
+            // Node-only: writes bags to disk and runs bagit.py; runs in NodeJS
+            'archive/**',
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],

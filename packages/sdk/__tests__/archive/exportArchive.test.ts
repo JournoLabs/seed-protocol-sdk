@@ -14,6 +14,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { ArchiveExportError, exportArchive } from '@/archive/exportArchive'
 import { rewriteHtmlEmbeddedImagesOnDisk } from '@/helpers/htmlEmbeddedDataUriPublish'
+import { waitForPendingOutboxOps } from '@/outbox'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   ensureModelUidsForGetPublishPayloadTest,
@@ -90,6 +91,8 @@ async function createPublishedPost(): Promise<Item<any>> {
   )
 
   // What publish leaves behind: the image's transaction id, and the placeholder rewritten to its URL.
+  // The image seed's row is written by the outbox; under load it can land after the waitFor above.
+  await waitForPendingOutboxOps()
   const imageItem = (await Item.find({ seedLocalId: contextOf(post, 'featureImage').propertyValue! }))!
   const st = imageItem.internalProperties['storageTransactionId'] ?? imageItem.allProperties['storageTransactionId']
   st!.value = IMAGE_TX
