@@ -54,7 +54,36 @@ describe('TolerantWebAccess', () => {
     expect(typeof (WebAccessFS.prototype as any)._loadHandles).toBe('function')
     expect(typeof (WebAccessFS.prototype as any)._loadMetadata).toBe('function')
     expect(typeof (WebAccessFS.prototype as any).crossCopy).toBe('function')
+    // touch() calls the Async mixin's touch under WebAccessFS's own.
+    expect(typeof Object.getPrototypeOf(WebAccessFS.prototype).touch).toBe('function')
     expect(Object.getPrototypeOf(TolerantWebAccessFS.prototype)).toBe(WebAccessFS.prototype)
+  })
+
+  // Real OPFS: this file also runs in Node with the fake handles above.
+  it.skipIf(typeof window === 'undefined')('caches a directory another context made after the mount, so files can be created in it', async () => {
+    const opfs = await navigator.storage.getDirectory()
+    const name = `twa-external-${Math.random().toString(36).slice(2, 10)}`
+    const root = await opfs.getDirectoryHandle(name, { create: true })
+    try {
+      const fs = (await TolerantWebAccess.create({ handle: root })) as TolerantWebAccessFS
+      await fs.ready()
+      // Made beside the mount, as SQLocal's worker makes `db/` or another tab makes a folder.
+      const db = await (await root.getDirectoryHandle('outside', { create: true })).getDirectoryHandle('db', { create: true })
+      await (await db.getFileHandle('existing.txt', { create: true })).createWritable().then(async (w) => {
+        await w.write('abc')
+        await w.close()
+      })
+
+      expect((await fs.stat('/outside/db')).mode & 0o170000).toBe(0o040000)
+      expect(fs._sync.existsSync('/outside/db')).toBe(true)
+      await fs.createFile('/outside/db/new.txt', { mode: 0o644, uid: 0, gid: 0 } as any)
+      expect(fs._sync.existsSync('/outside/db/new.txt')).toBe(true)
+
+      expect((await fs.stat('/outside/db/existing.txt')).size).toBe(3)
+      expect(fs._sync.statSync('/outside/db/existing.txt').size).toBe(3)
+    } finally {
+      await opfs.removeEntry(name, { recursive: true }).catch(() => {})
+    }
   })
 
   it('skips a file whose getFile() throws InvalidStateError and indexes it once readable', async () => {

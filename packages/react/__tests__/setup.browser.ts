@@ -1,3 +1,5 @@
+// First: deletes builtins the oldest supported browsers lack before any SDK module loads.
+import '../../sdk/__tests__/test-utils/oldestBrowser'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { cleanup, configure } from '@testing-library/react'
 

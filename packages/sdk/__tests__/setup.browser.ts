@@ -1,3 +1,5 @@
+// First: deletes builtins the oldest supported browsers lack before any SDK module loads.
+import './test-utils/oldestBrowser'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 
 /**

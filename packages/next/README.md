@@ -10,7 +10,7 @@ Use the SDK only in the browser in a Next.js app: in client components, initiali
 ## Installation
 
 ```bash
-npm install @seedprotocol/sdk @seedprotocol/react @zenfs/core@2.5.6 @zenfs/dom@1.2.9
+npm install @seedprotocol/sdk @seedprotocol/react @zenfs/core@2.7.7 @zenfs/dom@1.2.14
 npm install -D @seedprotocol/next
 ```
 
