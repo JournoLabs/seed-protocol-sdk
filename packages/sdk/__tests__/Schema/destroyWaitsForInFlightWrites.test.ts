@@ -41,29 +41,28 @@ testDescribe('Schema.destroy with a model write in flight', () => {
     const schema = Schema.create(schemaName, { waitForReady: false })
     await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 15000 })
 
-    const consoleError = vi.spyOn(console, 'error')
+    // Definition writes run in a transaction: the first one started is this model's write
+    const transaction = vi.spyOn(BaseDb, 'transaction')
     try {
       const model = Model.create('Runtime Article', schema, {
         properties: { body: { dataType: 'Text' } },
         waitForReady: false,
       })
       const modelFileId = model.id!
-      const writeProcess = (
-        await waitFor(model.getService(), (snapshot) => !!snapshot.context.writeProcess, { timeout: WAIT_TIMEOUT_MS })
-      ).context.writeProcess!
-      await waitFor(writeProcess, (snapshot) => snapshot.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
+      // Settles when the model's properties exist, or with why they don't
+      const created = Model.create('Runtime Article', schema, { modelFileId }).catch((error: Error) => error)
+      await vi.waitFor(() => expect(transaction).toHaveBeenCalled(), { timeout: WAIT_TIMEOUT_MS })
 
       await schema.destroy()
 
-      const writeErrors = consoleError.mock.calls
-        .map((args) => String(args[0]))
-        .filter((message) => message.includes('Write error'))
-      expect(writeErrors).toEqual([])
+      // The model was unloaded, so its create fails, but not because its schema row went first
+      const outcome = await created
+      expect(outcome instanceof Error ? outcome.message : '').not.toContain('does not exist in database')
       const db = BaseDb.getAppDb()!
       const leftover = await db.select().from(modelsTable).where(eq(modelsTable.schemaFileId, modelFileId))
       expect(leftover).toEqual([])
     } finally {
-      consoleError.mockRestore()
+      transaction.mockRestore()
     }
   }, 60000)
 })

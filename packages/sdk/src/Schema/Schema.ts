@@ -1655,7 +1655,7 @@ export class Schema {
       const { ModelProperty } = await import('../ModelProperty/ModelProperty')
       ModelProperty.evictForModels(evictedModelNames, schemaName)
       // Evicting stops new writes but not ones already running; let those land before deleting their rows
-      const { waitForInFlightWrites } = await import('../services/write/actors/writeToDatabase')
+      const { waitForInFlightWrites } = await import('../db/write/saveDefinition')
       await waitForInFlightWrites()
     }
 

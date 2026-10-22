@@ -587,7 +587,7 @@ async function getAddressConfigFromDb(): Promise<NormalizedAddressConfig | null>
 
 /**
  * Writes a runtime-created model: its models row (is_edited true when new), its model_schemas link
- * and the properties given, in one transaction.
+ * and the properties given, in one transaction. Returns the model's row id.
  * @param modelFileId - The model file ID (schema_file_id)
  * @param data - Model data including modelName, schemaId, and optional properties
  */
@@ -598,14 +598,14 @@ export async function writeModelToDb(
     schemaId: number
     properties?: { [name: string]: any }
   }
-): Promise<void> {
+): Promise<number> {
   if (!BaseDb.getAppDb()) throw new Error('Database not available')
   if (!data.schemaId || !Number.isInteger(data.schemaId) || data.schemaId <= 0) {
     throw new Error(`Invalid schemaId: ${data.schemaId}. Schema record must exist before creating join entry.`)
   }
   const { generateId } = await import('./generateId')
 
-  const { linked, schema } = await inDefinitionsTransaction(async (tx) => {
+  const { linked, schema, modelId } = await inDefinitionsTransaction(async (tx) => {
     const [schema] = await tx
       .select({ id: schemas.id, name: schemas.name, schemaFileId: schemas.schemaFileId })
       .from(schemas)
@@ -637,10 +637,11 @@ export async function writeModelToDb(
         { keepStoredSchemaFileId: true },
       )
     }
-    return { linked, schema }
+    return { linked, schema, modelId: model.id! }
   })
   if (linked) broadcastModelsInvalidate(schema)
   logger(`Wrote model ${data.modelName} (${modelFileId}) to database`)
+  return modelId
 }
 
 /**

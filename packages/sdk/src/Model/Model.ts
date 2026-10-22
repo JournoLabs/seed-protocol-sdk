@@ -1,5 +1,7 @@
-import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
+import { ActorRefFrom, createActor, SnapshotFrom, waitFor } from 'xstate'
 import { modelMachine, ModelMachineContext } from './service/modelMachine'
+import { createModelProperties } from './createModelProperties'
+import { saveDefinition } from '@/db/write/saveDefinition'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { Item } from '@/Item/Item'
 import type { CreateWaitOptions } from '@/types'
@@ -78,6 +80,55 @@ const modelInstanceState = new ActorKeyedState<Model, {
 // actor because callers hold the proxy, not the instance.
 const pendingPropertyCreation = new WeakMap<object, Promise<void>>()
 
+// Models writing their row or creating their properties, keyed by actor. Their own snapshot ends
+// the write, so the live query doesn't look their row up on its timer meanwhile.
+const modelWritesInFlight = new WeakSet<object>()
+
+/** The models row with this file id, if one exists. */
+const findModelRowId = async (modelFileId: string): Promise<number | undefined> => {
+  const db = BaseDb.getAppDb()
+  if (!db) return undefined
+  const [row] = await db
+    .select({ id: modelsTable.id })
+    .from(modelsTable)
+    .where(eq(modelsTable.schemaFileId, modelFileId))
+    .limit(1)
+  return row?.id
+}
+
+/**
+ * The schemas row a new model links to: the Schema instance's row (by row id, then file id), or
+ * with a schema name only, the row of that name.
+ */
+const findSchemaRowId = async (schemaInstance: any, schemaName: string): Promise<number | undefined> => {
+  const db = BaseDb.getAppDb()
+  if (!db) return undefined
+  const context = schemaInstance?._getSnapshotContext()
+  const lookups = schemaInstance
+    ? [
+        typeof context._dbId === 'number' ? eq(schemasTable.id, context._dbId) : undefined,
+        context.id ? eq(schemasTable.schemaFileId, context.id) : undefined,
+      ]
+    : [eq(schemasTable.name, schemaName)]
+  for (const where of lookups) {
+    if (!where) continue
+    const [row] = await db.select({ id: schemasTable.id }).from(schemasTable).where(where).limit(1)
+    if (row) return row.id
+  }
+  return undefined
+}
+
+/** The properties a model's write stores: those passed to Model.create, else its instances'. */
+const propertiesToWrite = (instance: Model): { [name: string]: any } => {
+  const pending = instance.getService().getSnapshot().context._pendingPropertyDefinitions
+  if (!pending) return modelPropertiesToObject(instance.properties || [])
+  const properties = JSON.parse(JSON.stringify(pending)) as { [name: string]: any }
+  for (const [name, definition] of Object.entries(properties)) {
+    if (definition.dataType && !definition.type) properties[name] = { ...definition, type: definition.dataType }
+  }
+  return properties
+}
+
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
 const TRACKED_PROPERTIES = [
@@ -105,33 +156,10 @@ export class Model {
     { instance: Model; refCount: number }
   > = new Map()
   
-  // Static tracking for pending writes
-  private static pendingWrites = new Map<string, {
-    modelFileId: string
-    schemaId: number
-    status: 'pending' | 'writing' | 'success' | 'error'
-    timestamp: number
-  }>()
-  
   // Cache client initialization state globally to avoid repeated checks
   private static cachedClientInitialized: boolean | null = null
   private static clientCheckTime: number = 0
   private static readonly CLIENT_CHECK_CACHE_MS = 50 // Cache for 50ms to avoid excessive checks
-  
-  static trackPendingWrite(modelFileId: string, schemaId: number): void {
-    this.pendingWrites.set(modelFileId, {
-      modelFileId,
-      schemaId,
-      status: 'pending',
-      timestamp: Date.now(),
-    })
-  }
-  
-  static getPendingModelIds(schemaId: number): string[] {
-    return Array.from(this.pendingWrites.entries())
-      .filter(([_, write]) => write.schemaId === schemaId && write.status !== 'error')
-      .map(([modelFileId]) => modelFileId)
-  }
   
   protected readonly _service: ModelService
 
@@ -168,22 +196,6 @@ export class Model {
     
     // Set up liveQuery subscription for cross-instance property updates
     this._setupLiveQuerySubscription()
-    
-    // Subscribe to refresh properties after they're created (for Node.js where liveQuery isn't available)
-    let previousState: string | undefined
-    this._service.subscribe((snapshot) => {
-      // Check if we just transitioned to idle from creatingProperties state
-      if (snapshot.value === 'idle' && previousState === 'creatingProperties') {
-        // Small delay to ensure properties are written to DB
-        setTimeout(() => {
-          this._refreshPropertiesFromDb().catch((error) => {
-            logger(`[Model constructor] Error refreshing properties: ${error}`)
-          })
-        }, 200)
-      }
-      previousState = snapshot.value as string
-    })
-
     // Note: Property getters/setters are now handled by the Proxy in create()
   }
 
@@ -216,26 +228,69 @@ export class Model {
   }
 
   /**
-   * Gives an idle, valid model the row someone else wrote for its id, the way its own write would
-   * (writeSuccess with the row's id, which goes on to create its properties from their rows).
-   * Returns false when there is no such row, so the model writes it.
+   * Writes the row of a model Model.create made, or adopts the row its schema import wrote for its
+   * id, then creates the properties passed to create from their rows. Rejects when the model fails
+   * validation, is unloaded, or its schema has no row.
    */
-  private static async adoptPersistedRow(instance: Model): Promise<boolean> {
-    const snapshot = instance.getService().getSnapshot()
-    if (snapshot.value !== 'idle' || snapshot.context._validationErrors?.length || !snapshot.context.id) {
-      return false
+  private static async persistNewModel(
+    instance: Model,
+    options: {
+      schemaInstance?: any
+      schemaName: string
+      persistedBy?: Promise<unknown>
+      adoptExistingRow: boolean
+      readyTimeout: number
+    },
+  ): Promise<void> {
+    const service = instance.getService()
+    const ensureRunning = () => {
+      // Unloaded or evicted (e.g. Schema.destroy): a stopped model writes nothing
+      if (isActorStopped(service)) throw new Error('the model was unloaded')
     }
-    const db = BaseDb.getAppDb()
-    if (!db) return false
-    const [row] = await db
-      .select({ id: modelsTable.id })
-      .from(modelsTable)
-      .where(eq(modelsTable.schemaFileId, snapshot.context.id))
-      .limit(1)
-    if (!row || isActorStopped(instance.getService())) return false
-    logger(`Model "${snapshot.context.modelName}" adopts model row ${row.id} written by its schema import`)
-    instance.getService().send({ type: 'writeSuccess', output: { _dbId: row.id } })
-    return true
+    // Loaded and validated. Stopping or a timeout end the wait too; the checks below report them.
+    await waitFor(service, (snapshot) => snapshot.value === 'idle' || snapshot.value === 'error', {
+      timeout: options.readyTimeout,
+    }).catch(() => {})
+    // The caller writes this model's rows; wait for that so two writers don't write them at once
+    await options.persistedBy?.catch(() => {})
+    ensureRunning()
+    const { value, context } = service.getSnapshot()
+    if (value === 'error') throw new Error('the model is in an error state')
+    if (value !== 'idle' || context._validationErrors?.length) throw new Error('the model failed validation')
+    if (!context.id) throw new Error('it has no id')
+
+    modelWritesInFlight.add(service)
+    try {
+      let dbId = options.adoptExistingRow ? await findModelRowId(context.id) : undefined
+      if (dbId === undefined) {
+        const schemaId = await findSchemaRowId(options.schemaInstance, options.schemaName)
+        if (!schemaId) throw new Error(`its schema "${options.schemaName}" was not found in the database`)
+        ensureRunning()
+        const current = service.getSnapshot().context
+        dbId = await saveDefinition({
+          type: 'model',
+          modelFileId: current.id!,
+          modelName: current.modelName,
+          schemaId,
+          properties: propertiesToWrite(instance),
+        })
+      } else {
+        logger(`Model "${context.modelName}" adopts model row ${dbId} written by its schema import`)
+      }
+      ensureRunning()
+      service.send({ type: 'updateContext', _dbId: dbId })
+
+      const definitions = service.getSnapshot().context._pendingPropertyDefinitions
+      if (definitions && Object.keys(definitions).length > 0) {
+        await createModelProperties(service, definitions)
+        ensureRunning()
+        service.send({ type: 'updateContext', _pendingPropertyDefinitions: undefined })
+        // Node has no live query to pick up the new property rows
+        await instance._refreshPropertiesFromDb()
+      }
+    } finally {
+      modelWritesInFlight.delete(service)
+    }
   }
 
   /**
@@ -536,53 +591,6 @@ export class Model {
       logger(`[Model.create] Created instance with _pendingPropertyDefinitions in initial context (${Object.keys(options.properties).length} properties) for model "${uniqueModelName}"`)
     }
 
-    // Called by the write trigger below when the properties will never be created
-    let failPropertyCreation: (reason: string) => void = () => {}
-    if (options?.properties && Object.keys(options.properties).length > 0) {
-      const service = newInstance.getService()
-      const propertyCreation = new Promise<void>((resolve, reject) => {
-        const subscription = service.subscribe({
-          next: (snapshot) => {
-            if (snapshot.value === 'idle' && !snapshot.context._pendingPropertyDefinitions) {
-              subscription.unsubscribe()
-              resolve()
-            } else if (snapshot.value === 'error') {
-              failPropertyCreation('the model is in an error state')
-            }
-          },
-          complete: () => failPropertyCreation('the model was unloaded'),
-        })
-        failPropertyCreation = (reason) => {
-          subscription.unsubscribe()
-          reject(new Error(`Model "${service.getSnapshot().context.modelName}" could not create its properties: ${reason}`))
-        }
-      })
-      // Only waitUntilReady reports this; without waitForReady nobody awaits it
-      propertyCreation.catch(() => {})
-      pendingPropertyCreation.set(service, propertyCreation)
-    }
-    
-    // Step 7: Set initial model data if provided
-    // Note: description is not supported - JSON files can have it but we ignore it at runtime
-    if (options) {
-      const updates: any = {}
-      
-      if (Object.keys(updates).length > 0) {
-        newInstance._service.send({
-          type: 'updateContext',
-          ...updates,
-        })
-        
-        // Initialize original values
-        // Note: properties are not stored in context, they're computed from ModelProperty instances
-        newInstance._service.send({
-          type: 'initializeOriginalValues',
-          originalValues: {},
-          isEdited: false,
-        })
-      }
-    }
-    
     // Wrap instance in Proxy for reactive property access. `name` is an alias for `modelName`.
     const sendUpdate = (target: Model, prop: string, value: unknown) => {
       if (prop === 'modelName') {
@@ -702,270 +710,25 @@ export class Model {
     const adoptExistingRow =
       !!options?.persistedBy || (typeof schemaNameOrSchema === 'string' && !hasProperties)
     if (shouldTriggerWrite) {
-      queueMicrotask(async () => {
-        try {
-          // Wait for model to reach idle state (validation complete)
-          await new Promise<void>((resolve) => {
-            // Cleared once the model settles: a pending timer kept Node scripts alive for 10 s.
-            const timer = setTimeout(() => {
-              subscription.unsubscribe()
-              resolve()
-            }, 10000)
-            const subscription = proxiedInstance._service.subscribe((snapshot) => {
-              // Wait for idle state (validation complete) or error state
-              if (snapshot.value === 'idle' || snapshot.value === 'error') {
-                clearTimeout(timer)
-                subscription.unsubscribe()
-                resolve()
-              }
-            })
-          })
-          
-          // The caller writes this model's rows; wait for that so two writers don't write them at once
-          if (options?.persistedBy) {
-            await options.persistedBy.catch(() => {})
-          }
-          // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
-          if (isActorStopped(proxiedInstance._service)) {
-            failPropertyCreation('the model was unloaded')
-            return
-          }
-          if (adoptExistingRow && (await Model.adoptPersistedRow(proxiedInstance))) {
-            return
-          }
-          // Only write if validation passed (model is in idle state, not error)
-          const finalSnapshot = proxiedInstance._service.getSnapshot()
-          if (finalSnapshot.value === 'idle' && (!finalSnapshot.context._validationErrors || finalSnapshot.context._validationErrors.length === 0)) {
-            logger(`Model validation passed, triggering write process`)
-            
-            // Get schema ID from schema instance or look it up by schema name
-            let schemaId: number | undefined
-            
-            if (schemaInstance) {
-              const schemaContext = (schemaInstance as any)._getSnapshotContext()
-              
-              // First, try to use _dbId directly from schema context (most reliable)
-              // But verify it exists in database before using it
-              if (schemaContext._dbId && typeof schemaContext._dbId === 'number' && schemaContext._dbId > 0) {
-                try {
-                  const db = BaseDb.getAppDb()
-                  
-                  if (db) {
-                    const verifySchema = await db
-                      .select({ id: schemasTable.id })
-                      .from(schemasTable)
-                      .where(eq(schemasTable.id, schemaContext._dbId))
-                      .limit(1)
-                    
-                    if (verifySchema.length > 0) {
-                      schemaId = schemaContext._dbId
-                      logger(`Using schema _dbId directly from Schema context: ${schemaId} (verified in database)`)
-                    } else {
-                      logger(`WARNING: Schema _dbId ${schemaContext._dbId} from context does not exist in database. Falling back to schemaFileId lookup.`)
-                    }
-                  }
-                } catch (error) {
-                  logger(`WARNING: Could not verify schema _dbId: ${error}. Falling back to schemaFileId lookup.`)
-                }
-              }
-              
-              // Fall back to database lookup by schemaFileId if _dbId wasn't available or invalid
-              if (!schemaId) {
-                // Fall back to database lookup by schemaFileId
-                const schemaFileId = schemaContext.id // id is the schemaFileId (string) in SchemaMachineContext
-                
-                if (schemaFileId) {
-                  try {
-                    const db = BaseDb.getAppDb()
-                    
-                    if (db) {
-                      const schemaRecords = await db
-                        .select()
-                        .from(schemasTable)
-                        .where(eq(schemasTable.schemaFileId, schemaFileId))
-                        .limit(1)
-                      
-                      if (schemaRecords.length > 0) {
-                        schemaId = schemaRecords[0].id
-                        logger(`Found schemaId ${schemaId} by schemaFileId lookup: ${schemaFileId}`)
-                      } else {
-                        logger(`WARNING: Schema not found in database by schemaFileId: ${schemaFileId}. Schema may not be fully loaded yet.`)
-                      }
-                    }
-                  } catch (error) {
-                    logger(`Error looking up schemaId: ${error}`)
-                  }
-                } else {
-                  logger(`WARNING: Schema instance has no schemaFileId (id) in context`)
-                }
-              }
-            } else if (schemaName) {
-              // If no schema instance but we have schema name, look it up by name
-              try {
-                const db = BaseDb.getAppDb()
-                
-                if (db) {
-                  const schemaRecords = await db
-                    .select()
-                    .from(schemasTable)
-                    .where(eq(schemasTable.name, schemaName))
-                    .limit(1)
-                  
-                  if (schemaRecords.length > 0) {
-                    schemaId = schemaRecords[0].id
-                    logger(`Found schemaId ${schemaId} by schema name lookup: ${schemaName}`)
-                  } else {
-                    logger(`WARNING: Schema not found in database by name: ${schemaName}`)
-                  }
-                }
-              } catch (error) {
-                logger(`Error looking up schemaId by name: ${error}`)
-              }
-            }
-            
-            // Validate schemaId before proceeding
-            if (!schemaId || !Number.isInteger(schemaId) || schemaId <= 0) {
-              logger(`ERROR: Invalid schemaId (${schemaId}) for model "${finalSnapshot.context.modelName}". Cannot trigger write process.`)
-              logger(`Schema context:`, {
-                schemaFileId: schemaInstance ? (schemaInstance as any)._getSnapshotContext().id : 'N/A',
-                _dbId: schemaInstance ? (schemaInstance as any)._getSnapshotContext()._dbId : 'N/A',
-                schemaName: schemaName || 'N/A',
-              })
-              failPropertyCreation(`its schema "${schemaName}" was not found in the database`)
-            } else if (finalSnapshot.context.id) {
-              // Verify schema exists in database before proceeding (additional safety check)
-              try {
-                const db = BaseDb.getAppDb()
-                
-                if (db) {
-                  const schemaCheck = await db
-                    .select({ id: schemasTable.id })
-                    .from(schemasTable)
-                    .where(eq(schemasTable.id, schemaId))
-                    .limit(1)
-                  
-                  if (schemaCheck.length === 0) {
-                    const errorMsg = `Schema with id ${schemaId} does not exist in database. Cannot create model "${finalSnapshot.context.modelName}".`
-                    logger(`ERROR: ${errorMsg}`)
-                    throw new Error(errorMsg)
-                  }
-                  logger(`Verified schema ${schemaId} exists in database before creating model "${finalSnapshot.context.modelName}"`)
-                } else {
-                  logger(`WARNING: Database not available for schema verification. Proceeding anyway.`)
-                }
-              } catch (error) {
-                // If it's our validation error, re-throw it
-                if (error instanceof Error && error.message.includes('does not exist in database')) {
-                  throw error
-                }
-                logger(`WARNING: Could not verify schema exists in database: ${error}. Proceeding anyway.`)
-              }
-              
-              const pendingModelFileId = finalSnapshot.context.id
-              const pendingSchemaId = schemaId
-              // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
-              // Retry a few times if writeProcess isn't available yet
-              let retries = 0
-              const maxRetries = 10
-              const checkAndSend = async () => {
-                // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
-                if (isActorStopped(proxiedInstance._service)) {
-                  failPropertyCreation('the model was unloaded')
-                  return
-                }
-                const currentSnapshot = proxiedInstance._service.getSnapshot()
-                if (currentSnapshot.context.writeProcess) {
-                  // Track pending write (only once it really starts: a stopped model leaves none behind)
-                  Model.trackPendingWrite(pendingModelFileId, pendingSchemaId) // id is now the schemaFileId (string)
-                  logger(`Triggering write process for model "${finalSnapshot.context.modelName}" (schemaId: ${schemaId})`)
-                  
-                  // Use pending property definitions if available, otherwise convert from ModelProperty instances
-                  let propertiesObject: { [name: string]: any } = {}
-                  if (currentSnapshot.context._pendingPropertyDefinitions) {
-                    // Use the original property definitions for the write
-                    // Convert dataType to type for validation compatibility
-                    propertiesObject = JSON.parse(JSON.stringify(currentSnapshot.context._pendingPropertyDefinitions))
-                    for (const [propName, propData] of Object.entries(propertiesObject)) {
-                      if (propData.dataType && !propData.type) {
-                        propertiesObject[propName] = {
-                          ...propData,
-                          type: propData.dataType,
-                        }
-                      }
-                    }
-                  } else {
-                    // Fallback: convert ModelProperty instances to object format
-                    const properties = proxiedInstance.properties || []
-                    propertiesObject = modelPropertiesToObject(properties)
-                  }
-                  
-                  // Set up subscription to writeProcess to detect write success BEFORE sending request
-                  const writeProcess = currentSnapshot.context.writeProcess
-                  
-                  // Check current state - if already in success, handle immediately
-                  const currentWriteState = writeProcess.getSnapshot()
-                  if (currentWriteState.value === 'success') {
-                    proxiedInstance._service.send({
-                      type: 'writeSuccess',
-                      output: currentWriteState.context.entityData,
-                    })
-                  } else {
-                    // Set up subscription to catch future state changes
-                    const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
-                      if (writeSnapshot.value === 'success') {
-                        writeSubscription.unsubscribe()
-                        const currentContext = proxiedInstance._service.getSnapshot().context
-                        logger(`[writeProcess subscription] Write succeeded, sending writeSuccess event. Has _pendingPropertyDefinitions: ${!!(currentContext._pendingPropertyDefinitions && Object.keys(currentContext._pendingPropertyDefinitions).length > 0)}`)
-                        // Send writeSuccess event to model machine
-                        proxiedInstance._service.send({
-                          type: 'writeSuccess',
-                          output: writeSnapshot.context.entityData,
-                        })
-                      } else if (writeSnapshot.value === 'error') {
-                        writeSubscription.unsubscribe()
-                        const errorContext = writeSnapshot.context
-                        logger(`Write process failed for model "${finalSnapshot.context.modelName}": ${errorContext.error?.message || 'Unknown error'}`)
-                        logger(`Write process error details:`, errorContext.error)
-                        logger(`Validation errors:`, errorContext.validationErrors)
-                        failPropertyCreation(`writing the model failed: ${errorContext.error?.message || 'Unknown error'}`)
-                      }
-                    })
-                  }
-                  
-                  proxiedInstance._service.send({
-                    type: 'requestWrite',
-                    data: {
-                      modelFileId: finalSnapshot.context.id, // id is now the schemaFileId (string)
-                      modelName: finalSnapshot.context.modelName,
-                      schemaName: finalSnapshot.context.schemaName,
-                      schemaId,
-                      properties: propertiesObject,
-                    },
-                  })
-                } else if (retries < maxRetries) {
-                  retries++
-                  setTimeout(checkAndSend, 50) // Retry after 50ms
-                } else {
-                  logger(`ERROR: writeProcess not available after ${maxRetries} retries for model "${finalSnapshot.context.modelName}"`)
-                  failPropertyCreation('its write process never started')
-                }
-              }
-              
-              // Start checking immediately, but also allow time for entry action to complete
-              setTimeout(checkAndSend, 0)
-            } else {
-              logger(`Cannot trigger write process: missing schemaId (${schemaId}) or id (${finalSnapshot.context.id})`)
-              failPropertyCreation('it has no id')
-            }
-          } else {
-            logger(`Model validation failed or model in error state, skipping write process`)
-            failPropertyCreation('the model failed validation')
-          }
-        } catch (error) {
-          logger(`Failed to trigger write process: ${error instanceof Error ? error.message : String(error)}`)
-          failPropertyCreation(error instanceof Error ? error.message : String(error))
-        }
+      const service = proxiedInstance.getService()
+      const persisted = Model.persistNewModel(proxiedInstance, {
+        schemaInstance,
+        schemaName,
+        persistedBy: options?.persistedBy,
+        adoptExistingRow,
+        readyTimeout,
       })
+      if (hasProperties) {
+        const propertyCreation = persisted.catch((error) => {
+          const reason = error instanceof Error ? error.message : String(error)
+          throw new Error(`Model "${service.getSnapshot().context.modelName}" could not create its properties: ${reason}`)
+        })
+        // Only waitUntilReady reports this; without waitForReady nobody awaits it
+        propertyCreation.catch(() => {})
+        pendingPropertyCreation.set(service, propertyCreation)
+      } else {
+        persisted.catch((error) => logger(`Model "${uniqueModelName}" was not written: ${error}`))
+      }
     }
     
     if (!waitForReady) return proxiedInstance
@@ -2185,12 +1948,8 @@ export class Model {
           schemaFileId: row.schemaFileId,
         }))
       },
-      // The model writes from its writeProcess child while itself idle; wait for that write to end.
-      canRetryEntityId: (model) => {
-        const writeProcess = model._getSnapshotContext().writeProcess
-        const writeState = writeProcess?.getSnapshot().value
-        return writeState !== 'validating' && writeState !== 'writing'
-      },
+      // The model writes its row while itself idle; wait for that write to end.
+      canRetryEntityId: (model) => !modelWritesInFlight.has(model.getService()),
       instanceState: modelInstanceState,
       loggerName: 'seedSdk:model:liveQuery',
     })

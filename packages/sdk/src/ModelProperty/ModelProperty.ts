@@ -8,6 +8,7 @@ import { BaseFileManager, generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
 import { resolveModelRecord } from '@/db/read/resolveModelRecord'
+import { saveDefinition } from '@/db/write/saveDefinition'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { Model } from '@/Model/Model'
 import { Schema } from '@/Schema/Schema'
@@ -724,8 +725,7 @@ export class ModelProperty {
     })
     this.indexCachedInstance(cacheKey, proxiedInstance)
 
-    // Trigger write process if property has modelId (or modelName) and id (schemaFileId)
-    // Wait for service to be ready (idle state) and have writeProcess spawned
+    // A property with a model (modelId or modelName) and an id (schemaFileId) writes its row
     const propertyFileId = propertyWithId.id // id is now the schemaFileId (string)
     const hasModelId = propertyWithId.modelId || propertyWithId.modelName
     // A _dbId means the data was loaded from an existing row (createById, getPropertySchema), so
@@ -744,157 +744,12 @@ export class ModelProperty {
       )
     }
     if (hasModelId && propertyFileId && !isPersisted) {
-      let resolveWrite!: () => void
-      let rejectWrite!: (error: Error) => void
-      writeDone = new Promise<void>((resolve, reject) => {
-        resolveWrite = resolve
-        rejectWrite = reject
-      })
-      // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
-      // Retry a few times if writeProcess isn't available yet
-      let retries = 0
-      const maxRetries = 10
-      const checkAndSend = async () => {
-        const service = proxiedInstance.getService()
-        const snapshot = service.getSnapshot()
-        // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
-        if (isActorStopped(service)) {
-          resolveWrite()
-          return
-        }
-        
-        if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
-          const writeProcess = snapshot.context.writeProcess
-          
-          // Resolve dbModelId - convert from string (modelFileId) to number (database ID) if needed
-          let resolvedModelId: number | undefined = undefined
-          
-          if (propertyWithId.modelId) {
-            if (typeof propertyWithId.modelId === 'number') {
-              resolvedModelId = propertyWithId.modelId
-            } else if (typeof propertyWithId.modelId === 'string') {
-              // modelId is a string (modelFileId), need to convert to database ID
-              try {
-                resolvedModelId = (await resolveModelRecord(undefined, { modelFileId: propertyWithId.modelId }))?.id
-                logger(`Converted modelFileId "${propertyWithId.modelId}" to database modelId: ${resolvedModelId}`)
-              } catch (error) {
-                logger(`Failed to convert modelFileId "${propertyWithId.modelId}" to database ID: ${error}`)
-                console.error(`[ModelProperty.create] Failed to convert modelFileId: ${error}`)
-              }
-            }
-          }
-          
-          // If we still don't have a modelId, try to resolve it from modelName
-          if (!resolvedModelId && propertyWithId.modelName) {
-            try {
-              // Get schemaName from context if available
-              // With a schema name only that schema's model counts (no name-only fallback)
-              const schemaName = snapshot.context._schemaName
-              resolvedModelId = (
-                await resolveModelRecord(propertyWithId.modelName, {
-                  modelFileId: propertyWithId.modelName,
-                  schemaName,
-                  strict: true,
-                })
-              )?.id
-              logger(`Resolved modelId for model "${propertyWithId.modelName}": ${resolvedModelId}`)
-            } catch (error) {
-              logger(`Failed to resolve modelId for model "${propertyWithId.modelName}": ${error}`)
-              console.error(`[ModelProperty.create] Failed to resolve modelId: ${error}`)
-            }
-          }
-          
-          if (!resolvedModelId) {
-            logger(`ERROR: Cannot write property "${property.name}" - no modelId available`)
-            console.error(`[ModelProperty.create] ERROR: Cannot write property "${property.name}" - no modelId available. modelId: ${propertyWithId.modelId}, modelName: ${propertyWithId.modelName}`)
-            // Don't clear pending write here - it might resolve later
-            rejectWrite(
-              new Error(
-                `Cannot write property "${property.name}": model ${propertyWithId.modelName ?? propertyWithId.modelId} has no database row`,
-              ),
-            )
-            return
-          }
-
-          // Resolving the modelId awaited the DB; the instance may have been stopped meanwhile
-          if (isActorStopped(service)) {
-            resolveWrite()
-            return
-          }
-          
-          // Track pending write now that we have the resolved modelId
-          this.trackPendingWrite(propertyFileId, resolvedModelId)
-          
-          logger(`Triggering write process for property "${property.name}" (modelId: ${resolvedModelId}, propertyFileId: ${propertyFileId})`)
-          
-          // Check current write state
-          const currentWriteState = writeProcess.getSnapshot()
-          
-          if (currentWriteState.value === 'success') {
-            // Write already succeeded
-            void this.completePendingWrite(propertyFileId, resolvedModelId)
-            resolveWrite()
-          } else {
-            // Set up subscription to catch future state changes
-            const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
-              if (writeSnapshot.value === 'success') {
-                writeSubscription.unsubscribe()
-                logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
-                void this.completePendingWrite(propertyFileId, resolvedModelId)
-                resolveWrite()
-              } else if (writeSnapshot.value === 'error') {
-                writeSubscription.unsubscribe()
-                const errorContext = writeSnapshot.context
-                logger(`Write process failed for property "${property.name}" (propertyFileId: ${propertyFileId}): ${errorContext.error?.message || 'Unknown error'}`)
-                logger(`Write process error details:`, errorContext.error)
-                // Mark pending write as error
-                this.clearPendingWrite(propertyFileId, 'error')
-                rejectWrite(
-                  new Error(
-                    `Failed to write property "${property.name}": ${errorContext.error?.message || 'Unknown error'}`,
-                  ),
-                )
-              }
-            })
-          }
-          
-          const propertyData = {
-            modelId: resolvedModelId,
-            name: property.name!,
-            dataType: property.dataType!,
-            refModelId: property.refModelId,
-            refValueType: property.refValueType,
-            required: property.required,
-            storageType: property.storageType,
-            localStorageDir: property.localStorageDir,
-            filenameSuffix: property.filenameSuffix,
-            // Stored in the row's definition column with the rest
-            ...definitionOnlyFields(propertyWithId),
-          }
-          
-          service.send({
-            type: 'requestWrite',
-            data: propertyData,
-          })
-        } else if (retries < maxRetries) {
-          retries++
-          setTimeout(checkAndSend, 50) // Retry after 50ms
-        } else {
-          logger(`ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
-          console.error(`[ModelProperty.create] ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
-          // Mark as error if we couldn't even start the write process
-          this.clearPendingWrite(propertyFileId, 'error')
-          rejectWrite(new Error(`Failed to write property "${property.name}": its write process never started`))
-        }
-      }
-      
-      // Start checking after a short delay to allow state machine to initialize
-      setTimeout(checkAndSend, 0)
+      writeDone = this.persistNewProperty(proxiedInstance, propertyWithId, propertyFileId)
     }
     
     if (!waitForReady) {
-      // Nobody awaits the write; failures are already logged above.
-      writeDone.catch(() => {})
+      // Nobody awaits the write
+      writeDone.catch((error) => logger(`${error}`))
       return proxiedInstance
     }
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -910,6 +765,77 @@ export class ModelProperty {
     return Promise.all([waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }), writeWithin]).then(
       () => proxiedInstance,
     )
+  }
+
+  /**
+   * Writes the row of a property ModelProperty.create made, under the model row its modelId (row id
+   * or file id) or modelName names. Resolves without writing once the instance is stopped; rejects
+   * when the model has no row or the write fails.
+   */
+  private static async persistNewProperty(
+    instance: ModelProperty,
+    property: Static<typeof TProperty>,
+    propertyFileId: string,
+  ): Promise<void> {
+    const service = instance.getService()
+    const findModelId = async (): Promise<number | undefined> => {
+      if (typeof property.modelId === 'number') return property.modelId
+      if (typeof property.modelId === 'string') {
+        const row = await resolveModelRecord(undefined, { modelFileId: property.modelId })
+        if (row?.id) return row.id
+      }
+      if (!property.modelName) return undefined
+      // With a schema name only that schema's model counts (no name-only fallback)
+      const row = await resolveModelRecord(property.modelName, {
+        modelFileId: property.modelName,
+        schemaName: service.getSnapshot().context._schemaName,
+        strict: true,
+      })
+      return row?.id
+    }
+    const modelId = await findModelId().catch((error) => {
+      logger(`Could not resolve the model of property "${property.name}": ${error}`)
+      return undefined
+    })
+    if (!modelId) {
+      throw new Error(
+        `Cannot write property "${property.name}": model ${property.modelName ?? property.modelId} has no database row`,
+      )
+    }
+    // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
+    if (isActorStopped(service)) return
+
+    this.trackPendingWrite(propertyFileId, modelId)
+    try {
+      await saveDefinition({
+        type: 'property',
+        propertyFileId,
+        data: () => {
+          // A rename made since create is written, not the name create got
+          const context = service.getSnapshot().context
+          return {
+            modelId,
+            name: context.name ?? property.name!,
+            dataType: context.dataType ?? property.dataType!,
+            refModelId: context.refModelId ?? property.refModelId,
+            refModelName: context.refModelName ?? property.refModelName,
+            refValueType: context.refValueType ?? property.refValueType,
+            required: context.required ?? property.required,
+            storageType: context.storageType ?? property.storageType,
+            localStorageDir: context.localStorageDir ?? property.localStorageDir,
+            filenameSuffix: context.filenameSuffix ?? property.filenameSuffix,
+            // Stored in the row's definition column with the rest
+            ...definitionOnlyFields(property),
+          }
+        },
+      })
+    } catch (error) {
+      this.clearPendingWrite(propertyFileId, 'error')
+      throw new Error(
+        `Failed to write property "${property.name}": ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    void this.completePendingWrite(propertyFileId, modelId)
   }
 
   /** Whether an idIndex entry still points at a cached instance with that id. */
