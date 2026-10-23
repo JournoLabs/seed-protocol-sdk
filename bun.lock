@@ -76,7 +76,7 @@
         "@graphql-codegen/cli": "^6.0.1",
         "@graphql-codegen/client-preset": "^5.2.2",
         "@graphql-codegen/introspection": "5.0.0",
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
         "vite": "^8.0.0",
@@ -108,7 +108,7 @@
         "@graphql-codegen/cli": "^6.0.1",
         "@graphql-codegen/client-preset": "^5.2.2",
         "@graphql-codegen/introspection": "5.0.0",
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
         "vite": "^8.0.0",
@@ -130,7 +130,7 @@
         "xmlbuilder2": "^4.0.3",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "typescript": "~5.9.3",
         "vite": "^8.0.0",
       },
@@ -138,6 +138,9 @@
     "packages/feed-hyper": {
       "name": "@seedprotocol/feed-hyper",
       "version": "0.7.9",
+      "bin": {
+        "seed-feed": "./dist/bin.js",
+      },
       "dependencies": {
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/feed": "workspace:*",
@@ -149,7 +152,7 @@
         "serve-drive": "^5.2.0",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/pluralize": "^0.0.33",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -160,13 +163,16 @@
     "packages/gateway-hyper": {
       "name": "@seedprotocol/gateway-hyper",
       "version": "0.7.9",
+      "bin": {
+        "seed-gateway": "./dist/bin.js",
+      },
       "dependencies": {
         "b4a": "^1.6.7",
         "hypercore-id-encoding": "^1.3.0",
         "hyperdht": "^6.20.0",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/node": "^24.10.1",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -242,7 +248,7 @@
       "devDependencies": {
         "@seedprotocol/react": "workspace:*",
         "@seedprotocol/sdk": "workspace:*",
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.3",
         "@vitejs/plugin-react": "^6.0.0",
@@ -275,7 +281,7 @@
         "pluralize": "^8.0.0",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/pluralize": "^0.0.33",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -377,7 +383,7 @@
       },
       "devDependencies": {
         "@seedprotocol/bundler-core": "workspace:*",
-        "@types/bun": "latest",
+        "@types/bun": "1.4.3",
         "@types/node": "^24.10.1",
         "@vitejs/plugin-react": "^6.0.0",
         "react": "^19.0.0",
@@ -3529,10 +3535,6 @@
 
     "@scure/bip32/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
-    "@seedprotocol/feed-hyper/@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
-
-    "@seedprotocol/gateway-hyper/@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
-
     "@sentry/core/tslib": ["tslib@1.14.1", "", {}, "sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg=="],
 
     "@sentry/hub/tslib": ["tslib@1.14.1", "", {}, "sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg=="],
@@ -4167,10 +4169,6 @@
 
     "@safe-global/safe-apps-sdk/viem/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
 
-    "@seedprotocol/feed-hyper/@types/bun/bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
-
-    "@seedprotocol/gateway-hyper/@types/bun/bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
-
     "@sentry/node/https-proxy-agent/agent-base": ["agent-base@6.0.2", "", { "dependencies": { "debug": "4" } }, "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ=="],
 
     "@solana-program/system/@solana/kit/@solana/accounts": ["@solana/accounts@5.5.1", "", { "dependencies": { "@solana/addresses": "5.5.1", "@solana/codecs-core": "5.5.1", "@solana/codecs-strings": "5.5.1", "@solana/errors": "5.5.1", "@solana/rpc-spec": "5.5.1", "@solana/rpc-types": "5.5.1" }, "peerDependencies": { "typescript": "^5.0.0" }, "optionalPeers": ["typescript"] }, "sha512-TfOY9xixg5rizABuLVuZ9XI2x2tmWUC/OoN556xwfDlhBHBjKfszicYYOyD6nbFmwTGYarCmyGIdteXxTXIdhQ=="],
@@ -4684,10 +4682,6 @@
     "@reown/appkit/viem/ox/eventemitter3": ["eventemitter3@5.0.1", "", {}, "sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA=="],
 
     "@safe-global/safe-apps-sdk/viem/ox/eventemitter3": ["eventemitter3@5.0.1", "", {}, "sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA=="],
-
-    "@seedprotocol/feed-hyper/@types/bun/bun-types/@types/node": ["@types/node@25.9.6", "", { "dependencies": { "undici-types": ">=7.24.0 <7.24.7" } }, "sha512-JR6Q/PV5DKFvjrGFVqQJdeG0qvsqQQLDa3TzFrqVwhqRXqwNaxPo2KYCtCQXpOdIulCouKwT7a6in9nFthBAzw=="],
-
-    "@seedprotocol/gateway-hyper/@types/bun/bun-types/@types/node": ["@types/node@25.9.6", "", { "dependencies": { "undici-types": ">=7.24.0 <7.24.7" } }, "sha512-JR6Q/PV5DKFvjrGFVqQJdeG0qvsqQQLDa3TzFrqVwhqRXqwNaxPo2KYCtCQXpOdIulCouKwT7a6in9nFthBAzw=="],
 
     "@solana-program/system/@solana/kit/@solana/accounts/@solana/codecs-core": ["@solana/codecs-core@5.5.1", "", { "dependencies": { "@solana/errors": "5.5.1" }, "peerDependencies": { "typescript": "^5.0.0" }, "optionalPeers": ["typescript"] }, "sha512-TgBt//bbKBct0t6/MpA8ElaOA3sa8eYVvR7LGslCZ84WiAwwjCY0lW/lOYsFHJQzwREMdUyuEyy5YWBKtdh8Rw=="],
 
