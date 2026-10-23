@@ -20,8 +20,15 @@ export interface EntityEntry<T> {
  * actor, so a raw instance and its proxy find the same entry.
  */
 export class EntityCache<T extends ActorBacked> {
+  /** Every cache made, one per entity class; client.stop() evicts them all (evictAllEntities). */
+  static readonly all = new Set<EntityCache<ActorBacked>>()
+
   private readonly byKey = new Map<string, EntityEntry<T>>()
   private readonly byActor = new WeakMap<object, EntityEntry<T>>()
+
+  constructor() {
+    EntityCache.all.add(this as unknown as EntityCache<ActorBacked>)
+  }
 
   /** Cache `instance` under `keys` (empty and duplicate keys are skipped). Returns its entry. */
   add(instance: T, keys: Array<string | null | undefined>, options: { hold: boolean }): EntityEntry<T> {
