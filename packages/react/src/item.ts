@@ -16,6 +16,7 @@ import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
 import type { IItem, IItemProperty, ItemCreateOptions, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
+import { useHeldEntities } from './useHeldEntities'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
 import { useSeedQueryClient } from './queryClient'
@@ -104,7 +105,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const refetch = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
   }, [queryClient])
-  useHeldItems(useMemo(() => (item ? [item] : []), [item]), refetch)
+  useHeldEntities(useMemo(() => (item ? [item] : []), [item]), retainItem, refetch)
 
   useEffect(() => {
     const onEasSynced = () => {
@@ -196,23 +197,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }
 }
 
-/**
- * Holds each item while the component shows it. The release is deferred a tick: a StrictMode
- * remount or a refetch returning the same instances takes its new holds before the old ones are
- * dropped, so a count never touches 0 in between. The cache's grace period covers that too, but
- * an app may configure it to 0. `onStopped` runs when an item can't be held.
- */
-function useHeldItems(items: readonly IItem<any>[], onStopped: () => void): void {
-  useEffect(() => {
-    const held = items.filter((item) => Item.retain(item))
-    if (held.length < items.length) onStopped()
-    return () => {
-      setTimeout(() => {
-        for (const item of held) item.unload()
-      }, 0)
-    }
-  }, [items, onStopped])
-}
+/** Item.retain, stable for useHeldEntities. */
+const retainItem = (item: IItem<any>) => Item.retain(item)
 
 const NO_ITEMS: IItem<any>[] = []
 
@@ -388,7 +374,7 @@ export const useItems: UseItems = ({
   const refetch = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
   }, [queryClient])
-  useHeldItems(items, refetch)
+  useHeldEntities(items, retainItem, refetch)
 
   // Watch the seeds table for changes
   const db = isClientReady ? BaseDb.getAppDb() : null

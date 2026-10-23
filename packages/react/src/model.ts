@@ -9,6 +9,7 @@ import { Subscription } from 'xstate'
 import { useQuery } from '@tanstack/react-query'
 import { useSeedQueryClient } from './queryClient'
 import { useCreateState } from './useCreateState'
+import { useHeldEntities } from './useHeldEntities'
 
 type UseModelsResult = {
   models: Model[]
@@ -28,6 +29,10 @@ type UseModels = (schemaId: UseModelsParams) => UseModelsResult
  * @returns Array of Model instances belonging to the schema
  */
 const getModelsQueryKey = (schemaId: UseModelsParams) => ['seed', 'models', schemaId] as const
+const NO_MODELS: Model[] = []
+/** Model.retain, stable for useHeldEntities. */
+const retainModel = (model: Model) => Model.retain(model)
+const isRunning = (model: Model) => model.getService().getSnapshot().status === 'active'
 
 export const useModels: UseModels = (schemaId) => {
   const isClientReady = useIsClientReady()
@@ -38,7 +43,7 @@ export const useModels: UseModels = (schemaId) => {
   const queryKey = useMemo(() => getModelsQueryKey(schemaId), [schemaId])
 
   const {
-    data: models = [],
+    data: models = NO_MODELS,
     isLoading,
     error: queryError,
   } = useQuery({
@@ -51,16 +56,24 @@ export const useModels: UseModels = (schemaId) => {
       // table still has rows; once it is empty (all deleted), [] is the answer.
       const prev = queryClient.getQueryData<Model[]>(queryKey)
       const tableIds = tableIdsRef.current
-      if (next.length === 0 && prev && prev.length > 0 && (!tableIds || tableIds.size > 0)) {
+      // Not when one of them stopped (destroyed, evicted): the hook must not show stopped models.
+      if (next.length === 0 && prev && prev.length > 0 && prev.every(isRunning) && (!tableIds || tableIds.size > 0)) {
         return prev
       }
       return next
     },
     enabled: isClientReady && !!schemaId,
   }, queryClient)
-  const displayModels = schemaId ? models : []
+  const displayModels = schemaId ? models : NO_MODELS
   const modelsRef = useRef<Model[]>(displayModels)
   modelsRef.current = displayModels
+
+  // One hold per mounted hook on each model it lists. A model that can't be held, or stops while
+  // listed (destroyed, evicted, client stop), is listed again.
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey })
+  }, [queryClient, queryKey])
+  useHeldEntities(displayModels, retainModel, refetch)
 
   // When a model is created, writeModelToDb posts to this channel; live query over join often doesn't re-run
   useEffect(() => {
@@ -183,6 +196,8 @@ export const useModel = (
   const [error, setError] = useState<Error | null>(null)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
   const [, setVersion] = useState(0) // Version counter to force re-renders
+  /** Bumped to look the model up again by id (it stopped while shown). */
+  const [lookupRevision, setLookupRevision] = useState(0)
 
   // If modelName is provided, treat first param as schemaId
   // Otherwise, treat first param as modelId
@@ -203,7 +218,7 @@ export const useModel = (
         setIsLoading(true)
         setError(null)
         // Use Model.createById which handles cache + DB lookup
-        const foundModel = await Model.createById(schemaIdOrModelId, { hold: false })
+        const foundModel = await Model.createById(schemaIdOrModelId)
         setModel(foundModel || undefined)
         setIsLoading(false)
         setError(null)
@@ -216,7 +231,11 @@ export const useModel = (
     }
 
     lookupModelById()
-  }, [isClientReady, isModelIdLookup, schemaIdOrModelId])
+  }, [isClientReady, isModelIdLookup, schemaIdOrModelId, lookupRevision])
+
+  // One hold per mounted hook on the model it shows by id (the name lookup's list is held by useModels)
+  const lookUpAgain = useCallback(() => setLookupRevision((revision) => revision + 1), [])
+  useHeldEntities(useMemo(() => (model ? [model] : NO_MODELS), [model]), retainModel, lookUpAgain)
 
   // Always call useModels (with null for an id lookup): hooks must run in the same order on
   // every render, and returning early before it crashed when modelName switched null <-> string.
@@ -282,6 +301,10 @@ export type UseCreateModelReturn = {
   resetError: () => void
 }
 
+/**
+ * Hook to create a Model with loading and error state. The model takes no hold: it stays cached
+ * until it is destroyed or evicted.
+ */
 export const useCreateModel = (): UseCreateModelReturn => {
   const { run, isLoading, error, resetError } = useCreateState('Failed to create model')
 
