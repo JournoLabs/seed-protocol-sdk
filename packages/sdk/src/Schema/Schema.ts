@@ -25,6 +25,7 @@ import { sameEntity } from '@/helpers/entity/entityCommon'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   evictEntities,
   isEntityTornDown,
@@ -235,6 +236,7 @@ export class Schema {
         }
       },
       sendUpdate: (instance, prop: string, value: any) => {
+        instance._assertLoaded(`set ${prop} on`)
         // Handle special property updates
         if (prop === 'name') {
           // Update both metadata.name and schemaName
@@ -605,6 +607,16 @@ export class Schema {
     return schemaInstances
   }
 
+  /** Throws EntityUnloadedError, naming the schema, when this instance was destroyed or evicted. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { schemaName, metadata, id } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} schema ${metadata?.name ?? schemaName ?? '?'} (${id ?? 'no id'}): this Schema instance was ` +
+        'destroyed or evicted. Look the schema up again (Schema.find).',
+    )
+  }
+
   getService(): SchemaService {
     return this._service
   }
@@ -835,6 +847,7 @@ export class Schema {
    * @returns The file path of the new schema version
    */
   async saveNewVersion(): Promise<string> {
+    this._assertLoaded('save a new version of')
     // Check for conflicts before saving
     const conflictCheck = await this._checkForConflicts()
     if (conflictCheck.hasConflict) {
@@ -1036,6 +1049,7 @@ export class Schema {
    * This refreshes the actor context with the latest data from the database
    */
   async reload(): Promise<void> {
+    this._assertLoaded('reload')
     logger(`Reloading schema ${this.schemaName} from database`)
     
     await runEntityLoad(this, () => Schema.load(this))
