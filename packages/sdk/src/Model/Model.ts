@@ -21,6 +21,7 @@ import { EntityCache, evictionLog } from '@/helpers/entity/entityCache'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   evictEntities,
   isEntityTornDown,
@@ -42,6 +43,15 @@ const saveDraftLogger = debug('seedSdk:model:saveDraftToDb')
 
 type ModelService = ActorRefFrom<typeof modelMachine>
 type ModelSnapshot = SnapshotFrom<typeof modelMachine>
+
+/**
+ * `hold` for Model lookups. A model stays cached whether or not anyone holds it (see `Model.cache`),
+ * so a hold only counts this caller; `unload()` gives it back.
+ */
+export type ModelHoldOption = {
+  /** Take a cache hold, released with `unload()`. Default false. */
+  hold?: boolean
+}
 
 // Lazy import cache for ModelProperty to avoid circular dependency
 // Eagerly start loading to minimize delay on first access
@@ -121,8 +131,12 @@ const TRACKED_PROPERTIES = [
 ] as const
 
 export class Model {
-  /** Cached under its id and `schemaName:modelName` (ADR 0014). */
-  static readonly cache = new EntityCache<Model>()
+  /**
+   * Cached under its id and `schemaName:modelName` (ADR 0014). Stays cached with no holds until it
+   * is destroyed or evicted (`unloadUnheld: false`): Model.resolve, findByModelType and sync read
+   * the cache synchronously.
+   */
+  static readonly cache = new EntityCache<Model>({ unloadUnheld: false })
 
   protected readonly _service: ModelService
 
@@ -328,9 +342,7 @@ export class Model {
       waitForReady: false
       /** @internal Schema import: see the implementation signature */
       persistedBy?: Promise<unknown>
-      /** @internal SDK lookups pass false: see the implementation signature */
-      hold?: false
-    },
+    } & ModelHoldOption,
   ): Model
   static create(
     modelName: string,
@@ -342,9 +354,7 @@ export class Model {
       registerWithSchema?: boolean
       waitForReady?: true
       readyTimeout?: number
-      /** @internal SDK lookups pass false: see the implementation signature */
-      hold?: false
-    },
+    } & ModelHoldOption,
   ): Promise<Model>
   static create(
     modelName: string,
@@ -360,12 +370,8 @@ export class Model {
        * row for its id by then, it writes as usual.
        */
       persistedBy?: Promise<unknown>
-      /**
-       * @internal false for SDK code that only looks the model up: no hold is taken, and a model
-       * loaded here is cached with none, so its users' last unload still stops it.
-       */
-      hold?: false
-    } & CreateWaitOptions,
+    } & CreateWaitOptions &
+      ModelHoldOption,
   ): Model | Promise<Model> {
     if (!modelName) {
       throw new Error('Model name is required')
@@ -373,7 +379,7 @@ export class Model {
 
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
-    const holds = options?.hold === false ? 0 : 1
+    const holds = options?.hold === true
 
     // Extract schema name and instance
     let schemaName: string
@@ -399,7 +405,7 @@ export class Model {
       if (holds) this.cache.holdInstance(cachedById)
       logger(`Model.create: Found instance in ID cache for "${modelName}" (ID: ${id})`)
       if (!waitForReady) return cachedById
-      return waitForEntityReady(cachedById, { timeout: readyTimeout }).then(() => cachedById)
+      return Model.readyOrRelease(cachedById, readyTimeout, holds)
     }
 
     // A runtime create (no id) gets a new model, numbered when the name is taken ("My Model 1");
@@ -424,6 +430,7 @@ export class Model {
 
     // Wrap instance in Proxy for reactive property access. `name` is an alias for `modelName`.
     const sendUpdate = (target: Model, prop: string, value: unknown) => {
+      target._assertLoaded(`set ${prop} on`)
       if (prop === 'modelName') {
         // Model name change - need to update Schema and database
         const context = target._getSnapshotContext()
@@ -494,7 +501,7 @@ export class Model {
     
     // A runtime create gets its name key once its load settles the name (it may be numbered)
     this.cache.add(proxiedInstance, [resolvedId, id ? modelKey(schemaName, uniqueModelName) : undefined], {
-      hold: holds === 1,
+      hold: holds,
     })
     logger(`Model.create: Created new instance for "${uniqueModelName}" (ID: ${id})`)
 
@@ -534,40 +541,56 @@ export class Model {
     })
 
     if (!waitForReady) return proxiedInstance
-    return waitForEntityReady(proxiedInstance, { timeout: readyTimeout }).then(() => proxiedInstance)
+    return Model.readyOrRelease(proxiedInstance, readyTimeout, holds)
+  }
+
+  /** The model once ready; a call that took a hold gives it back when the model isn't ready in time. */
+  private static async readyOrRelease(model: Model, timeout: number, held: boolean): Promise<Model> {
+    try {
+      await waitForEntityReady(model, { timeout })
+    } catch (error) {
+      if (held) model.unload()
+      throw error
+    }
+    return model
+  }
+
+  /** The cached Model with this modelFileId. Takes no hold unless `hold: true`. */
+  static getById(modelFileId: string, options?: ModelHoldOption): Model | undefined {
+    return options?.hold ? this.cache.hold(modelFileId) : this.cache.peek(modelFileId)
   }
 
   /**
-   * Get Model instance by modelFileId (O(1) lookup). Takes a hold on the instance; release it with
-   * `unload()`.
-   */
-  static getById(modelFileId: string): Model | undefined {
-    return this.cache.hold(modelFileId)
-  }
-
-  /**
-   * The cached Model with this modelFileId, without taking a hold. For SDK code that reads the
-   * model and doesn't hand it to a caller; callers that keep it use `getById`, `find` or `create`.
+   * The cached Model with this modelFileId, without taking a hold.
    */
   static peek(modelFileId: string): Model | undefined {
     return this.cache.peek(modelFileId)
   }
 
   /**
-   * Get Model instance by name (O(1) lookup via name→ID mapping). Takes a hold on the instance;
-   * release it with `unload()`.
+   * Takes one more hold on a cached, running instance, released with `unload()`. False (and no
+   * hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: Model): boolean {
+    return instance.getService().getSnapshot().status === 'active' && this.cache.holdInstance(instance)
+  }
+
+  /**
+   * Get Model instance by name (O(1) lookup via name→ID mapping). Takes no hold unless `hold: true`.
    *
    * @param modelName - The name of the model
    * @param schemaName - The schema name (optional, will query DB if not provided)
    * @returns The Model instance if found, undefined otherwise
    */
-  static getByName(modelName: string, schemaName?: string): Model | undefined {
+  static getByName(modelName: string, schemaName?: string, options?: ModelHoldOption): Model | undefined {
     const model = this.peekByName(modelName, schemaName)
-    return model && this.cache.holdInstance(model) ? model : undefined
+    if (!model) return undefined
+    if (options?.hold) this.cache.holdInstance(model)
+    return model
   }
 
   /**
-   * `getByName` without taking a hold. Without `schemaName` it searches every cached schema and
+   * The cached Model by name, without taking a hold. Without `schemaName` it searches every cached schema and
    * throws AmbiguousModelError when models from several schemas share the name; callers that know
    * the schema or model id should use Model.resolve() instead.
    */
@@ -671,14 +694,14 @@ export class Model {
           if (record?.modelName && record.schemaName && record.modelFileId) {
             // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
             if (evictionLog.evictedSince([`schema:${record.schemaName}`, `model:${record.modelFileId}`], since)) return undefined
-            return this.create(record.modelName, record.schemaName, { id: record.modelFileId, hold: false })
+            return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
           }
         } catch (error) {
           logger(`Model.resolveAsync: scoped lookup failed for "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
-    return modelName ? this.getByNameAsync(modelName, undefined, { hold: false }) : undefined
+    return modelName ? this.getByNameAsync(modelName) : undefined
   }
 
   /**
@@ -687,7 +710,7 @@ export class Model {
    * 
    * @param modelName - The name of the model
    * @param schemaName - Optional schema name (will query DB if not provided)
-   * @returns The Model instance if found, undefined otherwise. Takes a hold unless `hold: false`.
+   * @returns The Model instance if found, undefined otherwise. Takes no hold unless `hold: true`.
    */
   static async getByNameAsync(
     modelName: string,
@@ -698,13 +721,10 @@ export class Model {
        * schema since then makes this return undefined instead of re-creating the model. Defaults to now.
        */
       since?: number
-      /** @internal `hold: false` as for `create` */
-      hold?: false
-    },
+    } & ModelHoldOption,
   ): Promise<Model | undefined> {
     // First try cache
-    const cached =
-      options?.hold === false ? this.peekByName(modelName, schemaName) : this.getByName(modelName, schemaName)
+    const cached = this.getByName(modelName, schemaName, options)
     if (cached) {
       return cached
     }
@@ -734,7 +754,7 @@ export class Model {
       // Create model instance (will be cached)
       return this.create(resolved.name, recordSchemaName, {
         id: resolved.schemaFileId, // id is now the schemaFileId (string)
-        ...(options?.hold === false && { hold: false as const }),
+        hold: options?.hold,
       })
     } catch (error) {
       if (error instanceof AmbiguousModelError) throw error
@@ -748,7 +768,7 @@ export class Model {
    * Checks cache first, then database if not found
    * 
    * @param modelFileId - The model file ID to look up
-   * @returns The Model instance if found, undefined otherwise
+   * @returns The Model instance if found, undefined otherwise. Takes no hold unless `hold: true`.
    */
   static async createById(
     modelFileId: string,
@@ -759,16 +779,14 @@ export class Model {
        * of re-creating the model. Defaults to now.
        */
       since?: number
-      /** @internal `hold: false` as for `create` */
-      hold?: false
-    },
+    } & ModelHoldOption,
   ): Promise<Model | undefined> {
     if (!modelFileId) {
       return undefined
     }
 
     // Step 1: Check cache first (fast path)
-    const cached = options?.hold === false ? this.peek(modelFileId) : this.getById(modelFileId)
+    const cached = this.getById(modelFileId, options)
     if (cached) {
       logger(`Model.createById: Found instance in cache for ID "${modelFileId}"`)
       return cached
@@ -819,7 +837,7 @@ export class Model {
       logger(`Model.createById: Creating model "${modelName}" in schema "${schemaName}" from ID "${modelFileId}"`)
       return this.create(modelName, schemaName, {
         id: modelFileId, // id is now the schemaFileId (string)
-        ...(options?.hold === false && { hold: false as const }),
+        hold: options?.hold,
       })
     } catch (error) {
       logger(`Model.createById: Error looking up model by ID "${modelFileId}": ${error instanceof Error ? error.message : String(error)}`)
@@ -829,7 +847,8 @@ export class Model {
 
   /**
    * Find Model instance by modelFileId, modelName/schemaName, or both
-   * Waits for the model to be fully loaded (idle state) by default
+   * Waits for the model to be fully loaded (idle state) by default. Takes no hold unless
+   * `hold: true`; a call that throws (the model isn't ready in `readyTimeout`) keeps none.
    * @param options - Find options including lookup parameters and wait configuration
    * @returns Model instance if found, undefined otherwise
    */
@@ -839,19 +858,27 @@ export class Model {
     schemaName,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold = false,
   }: {
     modelFileId?: string
     modelName?: string
     schemaName?: string
     waitForReady?: boolean
     readyTimeout?: number
-  }): Promise<Model | undefined> {
+  } & ModelHoldOption): Promise<Model | undefined> {
     const model = modelFileId
-      ? (Model.getById(modelFileId) ?? (await Model.createById(modelFileId)))
+      ? await Model.createById(modelFileId, { hold })
       : modelName
-        ? (Model.getByName(modelName, schemaName) ?? (await Model.getByNameAsync(modelName, schemaName)))
+        ? await Model.getByNameAsync(modelName, schemaName, { hold })
         : undefined
-    if (model && waitForReady) await waitForEntityReady(model, { timeout: readyTimeout })
+    if (model && waitForReady) {
+      try {
+        await waitForEntityReady(model, { timeout: readyTimeout })
+      } catch (error) {
+        if (hold) model.unload()
+        throw error
+      }
+    }
     return model
   }
 
@@ -860,9 +887,9 @@ export class Model {
    * Queries database for all models with the given schemaId/schemaName and returns Model instances
    * 
    * @param schemaIdentifier - The schema file ID or schema name to get models for
-   * @returns Array of Model instances for the schema
+   * @returns Array of Model instances for the schema. Takes no holds unless `hold: true`.
    */
-  static async createBySchemaId(schemaIdentifier: string): Promise<Model[]> {
+  static async createBySchemaId(schemaIdentifier: string, options?: ModelHoldOption): Promise<Model[]> {
     if (!schemaIdentifier) {
       return []
     }
@@ -910,7 +937,7 @@ export class Model {
         }
 
         // Check cache first
-        const cached = this.getById(record.modelFileId)
+        const cached = this.getById(record.modelFileId, options)
         if (cached) {
           modelInstances.push(cached)
         } else {
@@ -918,6 +945,7 @@ export class Model {
           const model = this.create(record.modelName, record.schemaName, {
             id: record.modelFileId, // id is now the schemaFileId (string)
             waitForReady: false,
+            hold: options?.hold,
           }) as Model
           modelInstances.push(model)
         }
@@ -935,18 +963,21 @@ export class Model {
    * Get all Model instances, optionally filtered by schema.
    * When DB is available, loads from DB via getModelsData; otherwise returns from cache.
    * With waitForReady, waits for each model to be ready (idle, with any properties from Model.create
-   * created) and leaves out models that error or time out. Takes no holds: a caller that keeps a
-   * model uses `Model.find` or `Model.create`.
+   * created) and leaves out models that error or time out. Takes no holds unless `hold: true`.
    */
   static async all(
     schemaName?: string,
-    options?: { waitForReady?: boolean; readyTimeout?: number },
+    options?: { waitForReady?: boolean; readyTimeout?: number } & ModelHoldOption,
   ): Promise<Model[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold = false } = options ?? {}
+    const held = (models: Model[]) => {
+      if (hold) for (const model of models) this.cache.holdInstance(model)
+      return models
+    }
     const appDb = BaseDb.getAppDb()
 
     const inSchema = (model: Model) => !schemaName || model._getSnapshotContext().schemaName === schemaName
-    if (!appDb) return this.cache.instances(inSchema)
+    if (!appDb) return held(this.cache.instances(inSchema))
 
     const rows = await getModelsData(schemaName)
     const instances: Model[] = []
@@ -955,7 +986,7 @@ export class Model {
     for (const row of rows) {
       // A model can appear more than once (e.g. duplicate model_schemas links); return it once.
       if (row.schemaFileId && !seen.has(row.schemaFileId)) {
-        const instance = await this.createById(row.schemaFileId, { hold: false })
+        const instance = await this.createById(row.schemaFileId)
         if (instance && !seen.has(instance.id ?? row.schemaFileId)) {
           instances.push(instance)
           seen.add(instance.id ?? row.schemaFileId)
@@ -988,10 +1019,20 @@ export class Model {
           ),
         ),
       )
-      return instances.filter((_, i) => ready[i])
+      return held(instances.filter((_, i) => ready[i]))
     }
 
-    return instances
+    return held(instances)
+  }
+
+  /** Throws EntityUnloadedError, naming the model, when this instance was destroyed or evicted. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { modelName, schemaName, id } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} model ${schemaName ?? '?'}.${modelName ?? '?'} (${id ?? 'no id'}): this Model instance was ` +
+        'destroyed or evicted. Look the model up again (Model.find).',
+    )
   }
 
   getService(): ModelService {
@@ -1209,6 +1250,7 @@ export class Model {
    * @returns The created item instance
    */
   async create(values: Partial<ItemData> & Record<string, any>): Promise<Item<any>> {
+    this._assertLoaded('create an item of')
     if (!this.modelName) {
       throw new Error('Cannot create item: model name is not set on this Model instance')
     }
@@ -1228,6 +1270,7 @@ export class Model {
    * This refreshes the actor context with the latest data from the database
    */
   async reload(): Promise<void> {
+    this._assertLoaded('reload')
     logger(`Reloading model ${this.modelName} from database`)
     await runEntityLoad(this, () => Model.load(this))
     if (this.status === 'error') throw new Error('Failed to reload model from database')
@@ -1251,7 +1294,10 @@ export class Model {
     return evictedNames
   }
 
-  /** Release this caller's hold. The model is stopped and leaves the cache with its last hold. */
+  /**
+   * Release this caller's hold, if it took one. The model stays cached (see `Model.cache`); only
+   * `destroy`, eviction or client stop stop it.
+   */
   unload(): void {
     releaseEntity(this, Model.cache)
   }
@@ -1300,7 +1346,7 @@ export class Model {
         if (schemaName && modelName) {
           // Imported here, not at module load: Model and Schema import each other.
           const { Schema } = await import('@/Schema/Schema')
-          const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+          const schema = await Schema.find({ schemaName, waitForReady: false })
           const schemaContext = schema?.getService().getSnapshot().context
           if (schema && schemaContext?.models?.[modelName]) {
             const updatedModels = { ...schemaContext.models }

@@ -76,7 +76,7 @@ export const saveToSchema = fromCallback<
       const { Schema } = schemaMod
       // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
       if (isActorStopped(self)) return
-      const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+      const schema = await Schema.find({ schemaName, waitForReady: false })
       schema?.getService().send({
         type: 'markAsDraft',
         propertyKey: `${context.modelName}:${context.name}`,
