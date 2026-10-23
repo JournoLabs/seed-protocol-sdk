@@ -13,4 +13,10 @@ export interface IDb {
   liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]>
   /** Runs `fn` in one transaction; `fn` must run its queries on the `tx` it is given. */
   transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>
+  /**
+   * Closes the database (the browser's SQLocal worker, Node's libsql client), so its file is
+   * released, and forgets it: `getAppDb()` is undefined until the next `prepareDb`. A `prepareDb`
+   * still running finishes by closing what it opened. Safe to call when nothing is open.
+   */
+  close(): Promise<void>
 }

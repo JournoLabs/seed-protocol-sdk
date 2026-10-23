@@ -34,7 +34,8 @@ export type SeedClientGateProps = {
   /**
    * Called when client init fails; children stay hidden behind the loading UI. A
    * `FileSystemLockedError` (`code === 'OPFS_LOCKED'`) means another tab is using the app's
-   * storage: offer "close other tabs / retry", where retry calls `client.init` again.
+   * storage: offer "close other tabs / retry", where retry calls `client.init` again. An
+   * `UnsupportedBrowserError` (`code === 'BROWSER_UNSUPPORTED'`) means the browser is too old.
    */
   onInitError?: (err: unknown) => void
   /** Class for the root wrapper. e.g. "relative flex h-screen w-screen" */

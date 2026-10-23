@@ -49,7 +49,7 @@ let leader = false
 let leaderWaiters: Array<() => void> = []
 const messageHandlers = new Set<(message: TabMessage) => void>()
 
-/** Starts once per page; later calls (re-init) keep the first database. */
+/** Starts once per page until stopTabCoordination; later calls (re-init) keep the first database. */
 export function startTabCoordination({ filesDir, mode = 'coordinate' }: { filesDir: string; mode?: MultiTabMode }): void {
   if (state) return
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
@@ -122,11 +122,21 @@ export function withDbTabLock<T>(scope: string, fn: () => Promise<T>, options?: 
   return state ? withTabLock(`seed:${scope}:${state.dbKey}`, fn, options) : fn()
 }
 
-/** Tests only. Keeps message handlers: modules register theirs once per page. */
-export function resetTabCoordinationForTests(): void {
+/**
+ * Ends this tab's coordination (client.stop): hands leadership to another tab and closes the
+ * channel. The next startTabCoordination starts over, for whatever database init then opens.
+ * Keeps message handlers (modules register theirs once per page) and whenLeaderTab waiters, which
+ * resolve once this tab leads again.
+ */
+export function stopTabCoordination(): void {
   state?.releaseLeadership?.()
   state?.channel?.close()
   state = undefined
   leader = false
+}
+
+/** Tests only. */
+export function resetTabCoordinationForTests(): void {
+  stopTabCoordination()
   leaderWaiters = []
 }

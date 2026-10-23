@@ -204,6 +204,9 @@ export function outboxOpResult<T = unknown>(op: Pick<OutboxOp, 'result'>): T | u
 
 let started = false
 let paused = false
+/** Set by stopOutbox (client.stop) until the next startOutbox. */
+let stopped = false
+let stopTabMessages: (() => void) | undefined
 let draining: Promise<void> | undefined
 let drainAgain = false
 let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -217,7 +220,8 @@ const notBefore = new Map<string, number>()
 export function startOutbox(): void {
   if (started) return
   started = true
-  onTabMessage((message) => {
+  stopped = false
+  stopTabMessages = onTabMessage((message) => {
     if (message.type === 'outbox-nudge' && isLeaderTab()) scheduleDrain()
     if (message.type === 'outbox-settled') void recheckWaiters(message.opIds)
   })
@@ -226,7 +230,7 @@ export function startOutbox(): void {
 
 /** Drains soon in this tab (if it leads); calls made while a drain runs make it run once more. */
 function scheduleDrain(): void {
-  if (paused || !isLeaderTab()) return
+  if (paused || stopped || !isLeaderTab()) return
   if (draining) {
     drainAgain = true
     return
@@ -236,7 +240,7 @@ function scheduleDrain(): void {
       do {
         drainAgain = false
         await drainOutbox()
-      } while (drainAgain && !paused)
+      } while (drainAgain && !paused && !stopped)
     } catch (error) {
       logger('drain failed', error)
     } finally {
@@ -591,6 +595,24 @@ export async function waitForPendingOutboxOps(): Promise<void> {
 export async function getOutboxOps(opIds: string[]): Promise<OutboxOp[]> {
   if (opIds.length === 0) return []
   return BaseDb.getAppDb().select().from(pendingWrites).where(inArray(pendingWrites.opId, opIds))
+}
+
+/**
+ * Stops draining in this tab (client.stop): no new drain starts, retries are dropped, and this
+ * resolves once a drain that was running has finished. Ops stay pending in the database; the next
+ * startOutbox (any write after init) resumes them, as after a reload.
+ */
+export async function stopOutbox(): Promise<void> {
+  started = false
+  stopped = true
+  stopTabMessages?.()
+  stopTabMessages = undefined
+  if (retryTimer !== undefined) {
+    clearTimeout(retryTimer)
+    retryTimer = undefined
+  }
+  notBefore.clear()
+  while (draining) await draining
 }
 
 // --- Tests ------------------------------------------------------------------------------------

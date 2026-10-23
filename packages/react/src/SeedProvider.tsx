@@ -18,8 +18,9 @@ export type SeedProviderProps = {
   /** Addresses passed to `client.init` with `config`. See `SeedConstructorOptions.addresses`. */
   addresses?: SeedConstructorOptions['addresses']
   /**
-   * Called when `client.init` fails, e.g. with `DatabaseNotPersistentError` (`DB_NOT_PERSISTENT`)
-   * or `FileSystemLockedError` (`OPFS_LOCKED`). Without it the error is logged.
+   * Called when `client.init` fails, e.g. with `DatabaseNotPersistentError` (`DB_NOT_PERSISTENT`),
+   * `FileSystemLockedError` (`OPFS_LOCKED`) or `UnsupportedBrowserError` (`BROWSER_UNSUPPORTED`).
+   * Without it the error is logged.
    */
   onInitError?: (err: unknown) => void
   /** Optional: use your own QueryClient. If not provided, a default client with Seed options is created. */
