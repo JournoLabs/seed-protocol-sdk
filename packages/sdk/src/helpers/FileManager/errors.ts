@@ -1,3 +1,5 @@
+import type { BrowserFeature } from '@/helpers/browserSupport'
+
 /**
  * Thrown by client init when the browser file system can't be mounted because OPFS entries are
  * held by another context — usually another tab of the same app, or a worker from a page that
@@ -14,6 +16,25 @@ export class FileSystemLockedError extends Error {
       { cause },
     )
     this.name = 'FileSystemLockedError'
+  }
+}
+
+/**
+ * Thrown by client init in the browser when the browser lacks file system features the SDK needs,
+ * before anything is loaded or stored. `missing` lists them (see checkBrowserSupport). Hosts can
+ * check `code === 'BROWSER_UNSUPPORTED'` and ask the user to update the browser.
+ */
+export class UnsupportedBrowserError extends Error {
+  readonly code = 'BROWSER_UNSUPPORTED' as const
+  readonly missing: BrowserFeature[]
+
+  constructor(missing: BrowserFeature[]) {
+    super(
+      `This browser lacks features Seed needs (${missing.join(', ')}). ` +
+        `Seed supports Chrome and Edge 102, Firefox 114 and Safari 26 or later.`,
+    )
+    this.name = 'UnsupportedBrowserError'
+    this.missing = missing
   }
 }
 

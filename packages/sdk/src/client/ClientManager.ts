@@ -37,7 +37,15 @@ import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 import { registerClientActor } from '@/client/readiness'
-import { flushPendingEntityUnloads, setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
+import { setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
+import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { Model } from '@/Model/Model'
+import { ModelProperty } from '@/ModelProperty/ModelProperty'
+import { Schema } from '@/Schema/Schema'
+import { evictEntities } from '@/helpers/entity/entityLifecycle'
+import { stopOutbox } from '@/outbox/outbox'
+import { stopTabCoordination } from '@/helpers/tabCoordinator'
+import { whenCanonicalizeModelTypesSettled } from '@/db/canonicalizeModelTypes'
 
 const logger               = debug('seedSdk:client')
 
@@ -105,26 +113,54 @@ export const CLIENT_ALREADY_STOPPED_WARNING =
   'client.stop() or client.unload() was called after the client had already stopped; this call does nothing. ' +
   'Remove the extra call, or call client.init() before stopping again.'
 
-/** Shared by stop() and unload(). A repeat call after a stop warns and does nothing. */
-const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
+/** Set while a stop releases the client's resources; init waits for it. */
+let stopping: Promise<void> | undefined
+
+/**
+ * Shared by stop() and unload(). Stops the client in any state, including after a failed or
+ * unfinished init, then releases what it holds: the outbox drain, cached entities, this tab's
+ * leadership and the database (closed, so its file is released). A repeat call after a stop warns
+ * and does nothing.
+ */
+const stopClient = async ({ unsubscribe }: { unsubscribe: boolean }): Promise<void> => {
   if (clientManager.getSnapshot().status === 'stopped') {
     console.warn(CLIENT_ALREADY_STOPPED_WARNING)
     return
   }
-  ensureInitialized()
   activeInitConfig = undefined
   cancelAllRetriesWhenOnline()
   unregisterSeedQueryLocalSource()
   resetAddressesPersistedAnnouncement()
-  // Instances waiting out their grace period unload now, and the next init sets its own period
-  flushPendingEntityUnloads()
+  // The next init sets its own period. Instances waiting out this one are evicted with the rest
+  // (releaseClientResources), which cancels their timers.
   setEntityUnloadGraceMs(undefined)
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()
+  const releasing = releaseClientResources()
+  stopping = releasing
+  try {
+    await releasing
+  } finally {
+    if (stopping === releasing) stopping = undefined
+  }
+}
+
+const releaseClientResources = async (): Promise<void> => {
+  await stopOutbox()
+  await whenCanonicalizeModelTypesSettled()
+  // Before the database closes, so their live queries end first.
+  for (const cache of [Item.cache, ItemProperty.cache, ModelProperty.cache, Model.cache, Schema.cache]) {
+    evictEntities(cache as Parameters<typeof evictEntities>[0], () => true)
+  }
+  stopTabCoordination()
+  await BaseDb.close()
 }
 
 const coalescedInit = createCoalescedAsync(async (options: any) => {
+  // A stop still closing the database: open it again only once that's done.
+  if (stopping) await stopping
+
   // If the actor is stopped (e.g., from a previous failed test), restart it
   const snapshot = clientManager.getSnapshot()
   const currentState = snapshot.value as string
@@ -352,7 +388,12 @@ const clientInstance = {
     });
     return () => subscription.unsubscribe()
   },
+  /**
+   * Stops the client, from any state (a failed init too), and closes the database. Resolves once
+   * everything is released; `init` may be called right away and waits for that.
+   */
   stop: () => stopClient({ unsubscribe: false }),
+  /** As `stop`, and also ends the client's internal state subscription. */
   unload: () => stopClient({ unsubscribe: true }),
 }
 

@@ -14,7 +14,7 @@ import type { Sqlite3Method } from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
-import { startChangeFeed } from './changeFeed'
+import { startChangeFeed, stopChangeFeed } from './changeFeed'
 import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 import { Observable, ReplaySubject, distinctUntilChanged, finalize, share, throwError } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
@@ -27,6 +27,8 @@ export class BrowserDb implements IDb {
   sqlocalInstance: SQLocalDrizzle | undefined
   /** Live queries by SQL + params while they have subscribers; see liveQuery. */
   private sharedLiveQueries = new Map<string, Observable<unknown[]>>()
+  /** Bumped by close(), so a prepareDb that was running closes what it opened instead of keeping it. */
+  private openGeneration = 0
 
 
   getAppDb() {
@@ -84,7 +86,12 @@ export class BrowserDb implements IDb {
   }
 
   private async prepareDbLocked(filesDir: string) {
+    const generation = this.openGeneration
     try {
+      // A database left open by an init that failed after opening it: close it, or this would
+      // start a second SQLocal worker on the same file.
+      await this.closeOpenDb()
+
       // Copy drizzle migration files from src/db/drizzle to filesDir/db
       await this.copyDrizzleFiles(filesDir)
 
@@ -114,6 +121,13 @@ export class BrowserDb implements IDb {
       }
 
       const { sqlocalDrizzle, workerFailed } = await this.openPersistentSqlocal()
+      const closedMeanwhile = async () => {
+        if (generation === this.openGeneration) return
+        if (this.sqlocalInstance === sqlocalDrizzle) await this.closeOpenDb()
+        else await sqlocalDrizzle.destroy().catch(() => {})
+        throw new Error('The database was closed while it was being opened')
+      }
+      await closedMeanwhile()
 
       const { batchDriver } = sqlocalDrizzle
       const driver = countDbStatements(withSqliteBusyRetry(sqlocalDrizzle.driver))
@@ -139,6 +153,7 @@ export class BrowserDb implements IDb {
       await raceSqlocalStartup((async () => {
         await recreateIfOlderThanMinimumUpgradeVersion(db)
         await this.runMigrations(db)
+        await closedMeanwhile()
 
         this.appDb = db
 
@@ -152,6 +167,21 @@ export class BrowserDb implements IDb {
       logger('[Db.prepareDb] error', JSON.stringify(error))
       throw error
     }
+  }
+
+  async close(): Promise<void> {
+    this.openGeneration++
+    await this.closeOpenDb()
+  }
+
+  /** Destroys the SQLocal instance (its worker releases seed.db) and forgets the database. */
+  private async closeOpenDb(): Promise<void> {
+    stopChangeFeed()
+    const instance = this.sqlocalInstance
+    this.appDb = undefined
+    this.sqlocalInstance = undefined
+    this.sharedLiveQueries.clear()
+    if (instance) await instance.destroy().catch((error) => logger('[Db.close] destroy failed', error))
   }
 
   async connectToDb(_filesDir: string): Promise<string | undefined> {

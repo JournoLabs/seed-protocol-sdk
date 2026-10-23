@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { EntityCache, flushPendingEntityUnloads, setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
-import { isEntityTornDown, releaseEntity } from '@/helpers/entity/entityLifecycle'
+import { EntityCache, setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
+import { evictEntities, isEntityTornDown, releaseEntity } from '@/helpers/entity/entityLifecycle'
 
 /** Stands in for an entity: the cache only needs its actor. */
 function makeEntity() {
@@ -75,20 +75,19 @@ describe('EntityCache grace period', () => {
     expect(cache.entryOf(entity)?.refCount).toBe(0)
   })
 
-  it('flushPendingEntityUnloads tears down what waits, and removal cancels the wait', () => {
+  it('eviction tears down an instance waiting out its grace period and cancels its timer', () => {
+    vi.useFakeTimers()
     setEntityUnloadGraceMs(60_000)
     const cache = new EntityCache<Entity>()
     const waiting = makeEntity()
-    const removed = makeEntity()
     cache.add(waiting, ['a'], { hold: true })
-    cache.add(removed, ['b'], { hold: true })
     releaseEntity(waiting, cache)
-    releaseEntity(removed, cache)
-    cache.remove(removed)
+    expect(vi.getTimerCount()).toBe(1)
 
-    flushPendingEntityUnloads()
+    // As client.stop() does, before the database closes
+    evictEntities(cache, () => true)
     expect(waiting.actor.stopped).toBe(true)
-    expect(removed.actor.stopped).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   // Browser timers are numbers, with no unref

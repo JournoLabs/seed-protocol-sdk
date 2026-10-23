@@ -10,11 +10,12 @@
  */
 
 /**
- * Oldest browsers the tests stand in for, set by the Web APIs every client uses (per
- * @mdn/browser-compat-data): OPFS sync access handles for the database (Chrome 102), and
- * FileSystemFileHandle.createWritable for every OPFS file write (Firefox 111, Safari 26).
+ * Oldest supported browsers (docs/GETTING_STARTED.md, "Supported browsers"), set by the Web APIs
+ * every client uses (per @mdn/browser-compat-data): OPFS sync access handles for the database
+ * (Chrome 102), module workers for SQLocal (Firefox 114) and FileSystemFileHandle.createWritable
+ * for every OPFS file write (Safari 26).
  */
-export const SUPPORT_FLOOR = { chrome: 102, firefox: 111, safari: 26 } as const
+export const SUPPORT_FLOOR = { chrome: 102, firefox: 114, safari: 26 } as const
 
 /**
  * Builtins added in Chrome 110, Firefox 115, Safari 16.4 or later, with the version each browser

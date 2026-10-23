@@ -108,6 +108,9 @@ const localDbFilePath = (dbUrl: string): string | undefined => {
 
 export class NodeDb implements IDb {
   db: any
+  private client: ReturnType<typeof createClient> | undefined
+  /** Bumped by close(), so a prepareDb that was running closes what it opened instead of keeping it. */
+  private openGeneration = 0
 
 
   getAppDb() {
@@ -162,7 +165,10 @@ export class NodeDb implements IDb {
       fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
     }
 
+    const generation = this.openGeneration
+    this.closeOpenDb()
     const client = createClient({ url: dbUrl })
+    this.client = client
     // One connection for everything, transactions included (see singleConnectionTransactions)
     this.transactions = createSingleConnectionTransactions(client, schema)
     // Readers in other processes (a CLI on the same file) don't block a commit in WAL
@@ -172,10 +178,29 @@ export class NodeDb implements IDb {
     await recreateIfOlderThanMinimumUpgradeVersion(db)
     logger('[Db.prepareDb] running migrations from %s', outDir)
     await migrate(db, { migrationsFolder: outDir })
+    if (generation !== this.openGeneration) {
+      if (this.client === client) this.closeOpenDb()
+      else client.close()
+      throw new Error('The database was closed while it was being opened')
+    }
 
     this.db = db
 
     return this.db
+  }
+
+  async close(): Promise<void> {
+    this.openGeneration++
+    this.closeOpenDb()
+  }
+
+  /** Closes the libsql client and forgets the database. */
+  private closeOpenDb(): void {
+    const client = this.client
+    this.db = undefined
+    this.transactions = undefined
+    this.client = undefined
+    if (client && !client.closed) client.close()
   }
 
   async connectToDb(_pathToDir: string) {

@@ -21,19 +21,6 @@ export function setDefaultEntityUnloadGraceMs(ms: number): void {
   defaultUnloadGraceMs = Math.max(0, ms)
 }
 
-/** Teardowns waiting out their grace period, in every cache. */
-const pendingUnloads = new Map<EntityEntry<any>, () => void>()
-
-/** Tear down every instance waiting out its grace period now (client stop and unload). */
-export function flushPendingEntityUnloads(): void {
-  for (const [entry, teardown] of [...pendingUnloads]) {
-    if (entry.unloadTimer !== undefined) clearTimeout(entry.unloadTimer)
-    entry.unloadTimer = undefined
-    pendingUnloads.delete(entry)
-    teardown()
-  }
-}
-
 /** Anything with an actor: every entity class, and its reactive proxy (same actor). */
 export interface ActorBacked {
   getService(): object
@@ -150,14 +137,12 @@ export class EntityCache<T extends ActorBacked> {
     // A pending teardown must not keep a Node process running
     ;(timer as { unref?: () => void }).unref?.()
     entry.unloadTimer = timer
-    pendingUnloads.set(entry, teardown)
   }
 
   private cancelUnload(entry: EntityEntry<T>): void {
     if (entry.unloadTimer === undefined) return
     clearTimeout(entry.unloadTimer)
     entry.unloadTimer = undefined
-    pendingUnloads.delete(entry)
   }
 
   entryOf(instance: T): EntityEntry<T> | undefined {

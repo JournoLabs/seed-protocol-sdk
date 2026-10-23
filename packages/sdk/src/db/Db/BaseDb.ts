@@ -32,6 +32,11 @@ export abstract class BaseDb {
     return BaseDb.requireImpl().prepareDb(filesDir, config)
   }
 
+  /** Closes the app database; see IDb.close. Does nothing before configure(). */
+  static async close(): Promise<void> {
+    await BaseDb._impl?.close()
+  }
+
   static isAppDbReady(): boolean {
     if (!BaseDb._impl) {
       return false
