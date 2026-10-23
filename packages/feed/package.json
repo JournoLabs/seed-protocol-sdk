@@ -47,7 +47,7 @@
     "xmlbuilder2": "^4.0.3"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.3",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
   },
