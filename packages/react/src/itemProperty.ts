@@ -735,7 +735,9 @@ export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
     subscriptionRef.current?.unsubscribe()
     subscriptionRef.current = undefined
 
-    const instance = ItemProperty.create(props, { waitForReady: false })
+    // No hold: the hook can't release one. The property unloads after the grace period unless a
+    // hook showing it (useItemProperty) or the caller holds it.
+    const instance = ItemProperty.create(props, { waitForReady: false, hold: false })
     if (!instance) {
       setError(new Error('Failed to create item property'))
       setIsLoading(false)

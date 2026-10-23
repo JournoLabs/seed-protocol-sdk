@@ -37,6 +37,7 @@ import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 import { registerClientActor } from '@/client/readiness'
+import { setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
 import { evictAllEntities } from '@/helpers/entity/entityLifecycle'
 import { stopOutbox } from '@/outbox/outbox'
 import { stopTabCoordination } from '@/helpers/tabCoordinator'
@@ -126,6 +127,9 @@ const stopClient = async ({ unsubscribe }: { unsubscribe: boolean }): Promise<vo
   cancelAllRetriesWhenOnline()
   unregisterSeedQueryLocalSource()
   resetAddressesPersistedAnnouncement()
+  // The next init sets its own period. Instances waiting out this one are evicted with the rest
+  // (releaseClientResources), which cancels their timers.
+  setEntityUnloadGraceMs(undefined)
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()
@@ -188,6 +192,8 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
     })
   }
   
+  setEntityUnloadGraceMs(options?.config?.entityCache?.unloadGraceMs)
+
   // The root-level init handler moves to PLATFORM_CLASSES_INIT (stopping any running step) as
   // send() returns; the platformClassesInit step fills the context from options.
   clientManager.send({ type: 'init', options });

@@ -23,7 +23,7 @@ interface Lifecycle {
   listeners: Set<(status: EntityStatus) => void>
   disposers: Set<() => void>
   /** Holds this entity owns on other entities, by the child's actor (see holdChild). */
-  children: Map<object, () => void>
+  children: Map<object, (options?: { immediate?: boolean }) => void>
   tornDown: boolean
 }
 
@@ -131,6 +131,18 @@ export async function waitForEntityReady(
   }
 }
 
+/**
+ * A write or publish on an instance that was unloaded (no hold kept it past the grace period,
+ * or it was destroyed, evicted or dropped by another tab). Look it up again, and hold it while
+ * using it.
+ */
+export class EntityUnloadedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EntityUnloadedError'
+  }
+}
+
 /** Run `dispose` when the entity is torn down (unsubscribe a watch, revoke an object URL). */
 export function onEntityTeardown(instance: ActorBacked, dispose: () => void): void {
   const lifecycle = lifecycleOf(instance)
@@ -163,9 +175,10 @@ export function teardownEntity<T extends ActorBacked>(instance: T, cache: Entity
     lifecycle.error = new EntityLoadError('Entity was unloaded before it finished loading')
     lifecycle.settle()
   }
+  // At once: the parent already waited out its grace period, or was destroyed or evicted
   for (const release of lifecycle.children.values()) {
     try {
-      release()
+      release({ immediate: true })
     } catch {
       // A child that fails to release must not keep the rest held
     }
@@ -187,9 +200,16 @@ export function teardownEntity<T extends ActorBacked>(instance: T, cache: Entity
   }
 }
 
-/** Give back one hold; tear the entity down when it was the last. */
-export function releaseEntity<T extends ActorBacked>(instance: T, cache: EntityCache<T>): void {
-  if (cache.release(instance)) teardownEntity(instance, cache)
+/**
+ * Give back one hold. With the last one the entity is torn down after the grace period (at once
+ * with `immediate`, or when the grace period is 0); a hold taken meanwhile keeps it.
+ */
+export function releaseEntity<T extends ActorBacked>(
+  instance: T,
+  cache: EntityCache<T>,
+  options?: { immediate?: boolean },
+): void {
+  if (cache.release(instance, options)) teardownEntity(instance, cache)
 }
 
 /**
@@ -247,7 +267,7 @@ export function holdChild<C extends ActorBacked>(parent: ActorBacked, child: C, 
   const key = child.getService()
   if (lifecycle.children.has(key)) return true
   if (!childCache.holdInstance(child)) return false
-  lifecycle.children.set(key, () => releaseEntity(child, childCache))
+  lifecycle.children.set(key, (options) => releaseEntity(child, childCache, options))
   return true
 }
 

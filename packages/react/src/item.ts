@@ -104,7 +104,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const refetch = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
   }, [queryClient])
-  useHeldItem(item, refetch)
+  useHeldItems(useMemo(() => (item ? [item] : []), [item]), refetch)
 
   useEffect(() => {
     const onEasSynced = () => {
@@ -197,22 +197,24 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 }
 
 /**
- * Holds `item` while the component shows it. The release is deferred a tick: a StrictMode remount
- * or a refetch returning the same instance takes its new hold before the old one is dropped, so
- * the count never touches 0 in between. `onStopped` runs when the item can't be held.
+ * Holds each item while the component shows it. The release is deferred a tick: a StrictMode
+ * remount or a refetch returning the same instances takes its new holds before the old ones are
+ * dropped, so a count never touches 0 in between. The cache's grace period covers that too, but
+ * an app may configure it to 0. `onStopped` runs when an item can't be held.
  */
-function useHeldItem(item: IItem<any> | undefined, onStopped: () => void): void {
+function useHeldItems(items: readonly IItem<any>[], onStopped: () => void): void {
   useEffect(() => {
-    if (!item) return
-    if (!Item.retain(item)) {
-      onStopped()
-      return
-    }
+    const held = items.filter((item) => Item.retain(item))
+    if (held.length < items.length) onStopped()
     return () => {
-      setTimeout(() => item.unload(), 0)
+      setTimeout(() => {
+        for (const item of held) item.unload()
+      }, 0)
     }
-  }, [item, onStopped])
+  }, [items, onStopped])
 }
+
+const NO_ITEMS: IItem<any>[] = []
 
 type UseItemsReturn = {
   items: IItem<any>[]
@@ -288,6 +290,8 @@ const getItemsQueryKey = (
  * - Schema-backed fields on each `IItem` (e.g. list relation properties) read from the item
  *   machine and may be `undefined` until that property is loaded; normalize for forms
  *   (e.g. `Array.isArray(x) ? x : []`).
+ * - Each mounted hook holds the items it lists and releases one when it leaves the list or the
+ *   hook unmounts, so an item that no hook or caller holds is unloaded.
  */
 export const useItems: UseItems = ({
   modelName,
@@ -345,7 +349,7 @@ export const useItems: UseItems = ({
   }, [queryKey])
 
   const {
-    data: items = [],
+    data: items = NO_ITEMS,
     isLoading,
     isFetching,
     dataUpdatedAt,
@@ -354,7 +358,9 @@ export const useItems: UseItems = ({
     queryKey,
     queryFn: async ({ signal }) => {
       fetchesStartedRef.current++
+      // No hold here: queries are shared by key, so each mounted hook holds what it lists (below).
       const rows = await Item.all(modelName, deleted, {
+        hold: false,
         waitForReady: true,
         includeEas,
         addressFilter,
@@ -369,8 +375,20 @@ export const useItems: UseItems = ({
     // Local SQLite + live invalidation drive freshness; Seed’s default staleTime would keep a
     // mistaken initial [] “fresh” and block refetch when another subscriber mounts.
     staleTime: 0,
+    // Dropped once unused: its items are held only while a hook lists them, so a kept list would
+    // hand the next mount instances that were unloaded since.
+    gcTime: 0,
   })
   itemsRef.current = items
+
+  // One hold per mounted hook on each item it lists. An item that can't be held was stopped
+  // (unloaded, dropped by another tab or a purge): list again.
+  const queryKeyRef = useRef(queryKey)
+  queryKeyRef.current = queryKey
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
+  }, [queryClient])
+  useHeldItems(items, refetch)
 
   // Watch the seeds table for changes
   const db = isClientReady ? BaseDb.getAppDb() : null
@@ -512,8 +530,10 @@ export const useItems: UseItems = ({
 
 export type UseCreateItemReturn = {
   /**
-   * Calls `Item.create({ modelName, ...itemData }, options)`. A call made while another is in
-   * flight returns that call's promise (and its item) instead of creating a second one.
+   * Calls `Item.create({ modelName, ...itemData }, { hold: false, ...options })`: the item takes no
+   * hold, so it unloads after the grace period unless something holds it (a mounted `useItem`, or
+   * `options.hold: true`, released with `item.unload()`). A call made while another is in flight
+   * returns that call's promise (and its item) instead of creating a second one.
    */
   createItem: (
     modelName: string,
@@ -552,7 +572,12 @@ export const useCreateItem = (): UseCreateItemReturn => {
         try {
           const data = itemData ?? {}
           // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
-          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], options)
+          // No hold unless the caller asks for one: the hook can't release it. The item unloads after
+          // the grace period unless a hook showing it (useItem, useItems) or the caller holds it.
+          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], {
+            hold: false,
+            ...options,
+          })
           return (newItem ?? undefined) as Item<any> | undefined
         } catch (err) {
           logger('[useCreateItem] Error creating item:', err)

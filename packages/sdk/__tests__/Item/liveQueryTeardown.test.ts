@@ -79,7 +79,7 @@ describe.skipIf(typeof window === 'undefined')('Item watch teardown', () => {
     const item = await createPost('shared')
     const seedLocalId = item.seedLocalId
     await waitForItemWatches(seedLocalId)
-    const found = await Item.find({ seedLocalId })
+    const found = await Item.find({ seedLocalId, hold: true })
     expect(found).toBe(item)
 
     found!.unload()

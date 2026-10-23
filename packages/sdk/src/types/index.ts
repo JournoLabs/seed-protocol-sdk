@@ -84,6 +84,16 @@ export interface SeedConfig {
    * - object: the schema itself; only `metadata.name` and `models` are required
    */
   schema?: string | import('./import').SchemaFileInput
+  entityCache?: {
+    /**
+     * How long a loaded Schema, Model, Item or property no one holds stays cached before it is
+     * unloaded, in ms. A hold taken meanwhile (`Item.retain`, `find({ hold: true })`, a hook
+     * mounting) keeps the same instance. Default 60000. 0 unloads an instance as soon as its last
+     * hold is released. `destroy()`, cache clears, schema eviction, other tabs' removals and local
+     * purges unload at once whatever this is.
+     */
+    unloadGraceMs?: number
+  }
 }
 
 /**
@@ -142,4 +152,10 @@ export interface ItemCreateOptions extends CreateWaitOptions {
    * attested as-is; the values are then written unchecked.
    */
   validate?: boolean
+  /**
+   * Take a cache hold on the item (default true), released with `item.unload()`. With false the
+   * item is cached with no hold and unloads after the grace period
+   * (`SeedConfig.entityCache.unloadGraceMs`) unless something holds it first.
+   */
+  hold?: boolean
 }

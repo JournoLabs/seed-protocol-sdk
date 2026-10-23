@@ -10,7 +10,7 @@ export const BYTES32_LEN = 64
  */
 export const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
   for (;;) {
-    const item = await Item.find({ seedLocalId }).catch(() => undefined)
+    const item = await Item.find({ seedLocalId, hold: true }).catch(() => undefined)
     if (item) return item
     await new Promise((resolve) => setTimeout(resolve, 200))
   }

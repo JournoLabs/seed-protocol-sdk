@@ -289,7 +289,7 @@ export default defineConfig({
           env: {
             DEBUG: debugNamespaces,
           },
-          setupFiles: [],
+          setupFiles: ['./packages/sdk/__tests__/test-utils/noUnloadGrace.ts'],
           include: [
             'packages/sdk/__tests__/**/*.test.ts',
             'packages/feed/__tests__/**/*.test.ts',

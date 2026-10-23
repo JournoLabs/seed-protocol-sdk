@@ -13,6 +13,7 @@ mock.module('./ensureWalletThenPublish', () => ({
 }))
 
 const { publishItem, waitForPublishActor } = await import('./publishItem')
+const { Item } = await import('@seedprotocol/sdk')
 
 /** Stand-in publish actor: starts in `running`, moves on `finish` to the given state. */
 function fakePublishActor(endState: string, context: Record<string, unknown> = {}, final = true) {
@@ -32,7 +33,15 @@ function fakePublishActor(endState: string, context: Record<string, unknown> = {
   return actor
 }
 
-const item = { seedLocalId: 'seed-1' } as any
+/** Stand-in item: a running actor, not in the Item cache. */
+function fakeItem(seedLocalId: string) {
+  const actor = createActor(createMachine({}))
+  actor.start()
+  const instance: any = { seedLocalId, getService: () => actor }
+  instance.unload = () => Item.cache.release(instance)
+  return instance
+}
+const item = fakeItem('seed-1')
 
 afterEach(() => {
   readyMock.mockClear()
@@ -96,6 +105,23 @@ describe('publishItem', () => {
     const error = new Error('managed account unavailable')
     ensureResult = { outcome: 'managed_not_ready', error }
     await expect(publishItem(item)).rejects.toBe(error)
+  })
+
+  test('holds a cached item until the publish settles', async () => {
+    const cached = fakeItem('seed-held')
+    Item.cache.add(cached, ['seed-held'], { hold: true })
+    try {
+      const actor = fakePublishActor('success')
+      ensureResult = { outcome: 'started', publish: actor, started: Promise.resolve(actor) }
+      const done = publishItem(cached)
+      await Bun.sleep(0)
+      expect(Item.cache.entryOf(cached)?.refCount).toBe(2)
+      actor.send({ type: 'finish' })
+      await done
+      expect(Item.cache.entryOf(cached)?.refCount).toBe(1)
+    } finally {
+      Item.cache.remove(cached)
+    }
   })
 
   test('rejects when the seed is already publishing', async () => {

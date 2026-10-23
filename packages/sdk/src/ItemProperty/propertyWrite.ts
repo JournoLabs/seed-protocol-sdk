@@ -30,13 +30,16 @@ let validationLoading: Promise<void> | undefined
 /** Loads the validation module; resolves once the setter can check values (see planPropertyWrite). */
 export function whenValidationLoaded(): Promise<void> {
   if (validationService) return Promise.resolve()
-  validationLoading ??= import('@/Schema/service/validation/SchemaValidationService')
-    .then(({ SchemaValidationService }) => {
+  // async/await, not import().then: rollup's dynamic-import rewrite (rollup.config.mjs) only
+  // neutralizes the minified chunk-export read (`.then(n => n._)`) in this form
+  validationLoading ??= (async () => {
+    try {
+      const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
       validationService = new SchemaValidationService()
-    })
-    .finally(() => {
+    } finally {
       validationLoading = undefined
-    })
+    }
+  })()
   return validationLoading
 }
 

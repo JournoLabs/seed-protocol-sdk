@@ -1,5 +1,6 @@
 // First: deletes builtins the oldest supported browsers lack before any SDK module loads.
 import './test-utils/oldestBrowser'
+import './test-utils/noUnloadGrace'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 
 /**
