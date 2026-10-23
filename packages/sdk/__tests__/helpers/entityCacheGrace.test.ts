@@ -91,7 +91,8 @@ describe('EntityCache grace period', () => {
     expect(removed.actor.stopped).toBe(false)
   })
 
-  it('does not keep a Node process running while a teardown waits', () => {
+  // Browser timers are numbers, with no unref
+  it.skipIf(typeof window !== 'undefined')('does not keep a Node process running while a teardown waits', () => {
     setEntityUnloadGraceMs(60_000)
     const unref = vi.fn()
     const realSetTimeout = globalThis.setTimeout
