@@ -48,12 +48,14 @@ const probe = async (url: string): Promise<number | string> => {
 describe.skipIf(!runLive)('ArweaveClient against public gateways', () => {
   const probes: Probe[] = []
   let gateway: string | undefined
-  const previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
+  // Read in beforeAll: the browser project collects this file, and has no process.
+  let previousReadGateways: string | undefined
 
   // With SEED_GATEWAY_HYPER_KEY set, status checks ask our Hyper gateway first.
   let hyperTunnel: { baseUrl: string; close: () => Promise<void> } | undefined
 
   beforeAll(async () => {
+    previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
     for (const host of LIVE_GATEWAYS) {
       probes.push({
         host,

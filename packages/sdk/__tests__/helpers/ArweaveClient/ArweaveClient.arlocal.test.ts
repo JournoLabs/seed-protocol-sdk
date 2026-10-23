@@ -27,11 +27,12 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient against a local Arweave node', ()
   let node: LocalArweave
   let binaryTx: string
   let textTx: string
-  const previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
+  let previousReadGateways: string | undefined
   const realFetch = globalThis.fetch
   const offLocalRequests: string[] = []
 
   beforeAll(async () => {
+    previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
     // Any request that leaves this machine fails the test (see the last test).
     globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
