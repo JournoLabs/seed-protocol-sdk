@@ -284,6 +284,27 @@ async function main() {
 
 ## Browser: OPFS and hosting
 
+### Supported browsers
+
+| Browser | Minimum | Set by |
+| --- | --- | --- |
+| Chrome, Edge | 102 | OPFS sync access handles, which SQLite uses for the database |
+| Firefox | 114 | Module workers, which SQLocal starts the database in |
+| Safari (macOS and iOS) | 26 | `FileSystemFileHandle.createWritable`, which every file write uses |
+
+Versions are from MDN's browser compatibility data. On older browsers `client.init` fails with `UnsupportedBrowserError` (`code === 'BROWSER_UNSUPPORTED'`, `missing` lists what's absent) before it loads or stores anything. To check before init and show your own message, call `checkBrowserSupport()`:
+
+```ts
+import { checkBrowserSupport } from '@seedprotocol/sdk'
+
+const { supported, missing } = checkBrowserSupport()
+// missing: 'opfs' | 'opfs-writable' | 'web-locks' | 'cross-origin-isolation'
+```
+
+`cross-origin-isolation` is a hosting problem, not a browser version (see below). The check can't see what only exists inside workers, so Chrome 86–101 and Firefox 111–113 pass it and fail later in init.
+
+### Hosting
+
 The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Three integration notes:
 
 1. **Cross-origin isolation** — SQLite WASM / `SharedArrayBuffer` need the document to be cross-origin isolated. `seedVitePlugin()` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (plus `Cross-Origin-Resource-Policy: same-origin`) on the Vite **dev and preview** servers, including `writeHead` so React Router Framework Mode HTML still gets them. Production hosts must set the same headers themselves (nginx, Netlify `_headers`, etc.). Use `COEP: require-corp` if your WASM stack requires it. Opt out in Vite with `isolationHeaders: false`.
