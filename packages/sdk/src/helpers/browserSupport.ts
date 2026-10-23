@@ -19,7 +19,7 @@ export type BrowserSupport = {
  * Lists the browser features the SDK needs that this page lacks, so an app can ask the user to
  * update the browser (or fix its hosting headers) before calling `client.init`. Doesn't check
  * what only exists inside workers: OPFS sync access handles (Chrome 102) and module workers
- * (Firefox 114). Outside a browser everything is missing.
+ * (Firefox 114). Outside a browser the file system features are missing.
  */
 export function checkBrowserSupport(): BrowserSupport {
   const missing: BrowserFeature[] = []

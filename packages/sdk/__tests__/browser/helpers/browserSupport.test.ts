@@ -3,11 +3,24 @@ import { checkBrowserSupport } from '@/helpers/browserSupport'
 import { UnsupportedBrowserError } from '@/helpers/FileManager/errors'
 import { BrowserFileManager } from '@/browser/helpers/FileManager'
 
-const createWritable = Object.getOwnPropertyDescriptor(FileSystemFileHandle.prototype, 'createWritable')!
+const isBrowser = typeof window !== 'undefined'
 
-describe('checkBrowserSupport', () => {
+describe.skipIf(isBrowser)('checkBrowserSupport outside a browser', () => {
+  it('reports the file system features missing', () => {
+    // Node 24 has navigator.locks, so web-locks may not be listed.
+    const { supported, missing } = checkBrowserSupport()
+    expect(supported).toBe(false)
+    expect(missing).toEqual(expect.arrayContaining(['opfs', 'opfs-writable', 'cross-origin-isolation']))
+  })
+})
+
+describe.skipIf(!isBrowser)('checkBrowserSupport', () => {
+  const createWritable = isBrowser
+    ? Object.getOwnPropertyDescriptor(FileSystemFileHandle.prototype, 'createWritable')!
+    : undefined
+
   afterEach(() => {
-    Object.defineProperty(FileSystemFileHandle.prototype, 'createWritable', createWritable)
+    Object.defineProperty(FileSystemFileHandle.prototype, 'createWritable', createWritable!)
   })
 
   it('finds nothing missing in the test browser', () => {
