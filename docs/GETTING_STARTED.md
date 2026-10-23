@@ -31,7 +31,7 @@ await client.init({
 })
 ```
 
-Leaving `addresses` out keeps the addresses stored from an earlier session (the SDK warns once); `addresses: []` clears them. `client.init` runs once: calling it again with the same `config` resolves at once and applies any new `addresses`, while a different `config` throws (call `client.stop()` first). `client.onReady(cb)` also fires when the client is already ready.
+Leaving `addresses` out keeps the addresses stored from an earlier session (the SDK warns once); `addresses: []` clears them. `client.init` runs once: calling it again with the same `config` resolves at once and applies any new `addresses`, while a different `config` throws (`await client.stop()` first; it closes the database and drops cached entities). `client.onReady(cb)` also fires when the client is already ready.
 
 ### Address session
 
