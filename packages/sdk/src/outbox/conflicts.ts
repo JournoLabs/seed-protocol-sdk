@@ -245,11 +245,11 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
     const now = Date.now()
     const remoteAt = remote.attestationCreatedAt ?? 0
     const createdAt = Math.max(draft.createdAt ?? 0, remoteAt + 1)
-    // Written after the conflict: the change feed has no trigger on pending_writes, so this write
+    // Written with the conflict: the change feed has no trigger on pending_writes, so this write
     // is what makes a loaded property re-read and pick the conflict up (ADR 0020).
-    const keepDraftNewest = async (recordedConflict: boolean) => {
+    const keepDraftNewest = async (on: typeof db, recordedConflict: boolean) => {
       if (createdAt === draft.createdAt && !recordedConflict) return
-      await db.update(metadata).set({ createdAt }).where(eq(metadata.localId, draft.localId!))
+      await on.update(metadata).set({ createdAt }).where(eq(metadata.localId, draft.localId!))
     }
 
     // The attested value the draft replaced: the newest attested row that sync didn't just write
@@ -260,7 +260,7 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
     const remoteValue = remote.propertyValue ?? null
     const localValue = draft.propertyValue ?? null
     if (remoteValue === localValue || remoteValue === baseValue) {
-      await keepDraftNewest(false)
+      await keepDraftNewest(db, false)
       continue
     }
 
@@ -274,19 +274,23 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
       remoteUid: remote.uid!,
       opId,
     }
-    await db.insert(pendingWrites).values({
-      opId,
-      seedLocalId: draft.seedLocalId,
-      propertyName: draft.propertyName,
-      kind: 'set',
-      value: JSON.stringify({ newValue: localValue }),
-      baseRowId: draft.localId,
-      createdAt: now,
-      status: 'applied',
-      appliedAt: now,
-      conflict: JSON.stringify(conflict),
+    // One transaction: a reader that sees the conflict also sees the draft as the newest row, or it
+    // could show the synced value beside the conflict
+    await BaseDb.transaction(async (tx: typeof db) => {
+      await tx.insert(pendingWrites).values({
+        opId,
+        seedLocalId: draft.seedLocalId,
+        propertyName: draft.propertyName,
+        kind: 'set',
+        value: JSON.stringify({ newValue: localValue }),
+        baseRowId: draft.localId,
+        createdAt: now,
+        status: 'applied',
+        appliedAt: now,
+        conflict: JSON.stringify(conflict),
+      })
+      await keepDraftNewest(tx, true)
     })
-    await keepDraftNewest(true)
     eventEmitter.emit('itemProperty.conflict', conflict)
   }
 }

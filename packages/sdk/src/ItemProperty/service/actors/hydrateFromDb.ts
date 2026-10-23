@@ -27,21 +27,26 @@ export const hydrateFromDb = fromCallback<
 
   const _hydrateFromDb = async () => {
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
-    const row = await currentPropertyRow(
-      { seedLocalId, seedUid },
-      {
-        propertyId: context.propertyId,
-        propertyName,
-        modelName,
-        modelFileId: context.modelFileId,
-        dataType: normalizedDataType,
-        refValueType: normalizeDataType(propertyRecordSchema?.refValueType),
-      },
-    )
+    const read = () =>
+      currentPropertyRow(
+        { seedLocalId, seedUid },
+        {
+          propertyId: context.propertyId,
+          propertyName,
+          modelName,
+          modelFileId: context.modelFileId,
+          dataType: normalizedDataType,
+          refValueType: normalizeDataType(propertyRecordSchema?.refValueType),
+        },
+      )
+    let row = await read()
     if (!row) return
 
     const { getPropertyConflict } = await import('@/outbox/conflicts')
     const conflict = await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
+    // Sync records a conflict and moves its draft to newest in one transaction: a row read before
+    // the conflict may be the synced one
+    if (conflict) row = (await read()) ?? row
 
     // Only with a definition: without one, a row's refSeedType alone doesn't decide the display here
     const kind = propertyRecordSchema ? storedValueKind(propertyRecordSchema) : undefined
