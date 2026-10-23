@@ -134,7 +134,7 @@ export async function recordRelatedSeedUid(params: {
 }): Promise<void> {
   const { seedLocalId, seedUid, publisherAddress, attestationCreatedAtMs } = params
   try {
-    const related = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
+    const related = await Item.find({ seedLocalId, hold: true } as Parameters<typeof Item.find>[0])
     if (!related) {
       logger('related item %s not found; its seed uid is not recorded', seedLocalId)
       return

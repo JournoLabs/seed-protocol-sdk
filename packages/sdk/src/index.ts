@@ -82,6 +82,7 @@ export {
   type ItemCreateProblem,
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'
+export { EntityUnloadedError } from './helpers/entity/entityLifecycle'
 export type { ValidationError, ValidationResult } from './Schema/validation'
 export { DatabaseNotPersistentError, FileSystemLockedError } from './helpers/FileManager/errors'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'

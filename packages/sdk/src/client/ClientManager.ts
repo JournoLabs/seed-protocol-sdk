@@ -37,6 +37,7 @@ import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 import { registerClientActor } from '@/client/readiness'
+import { flushPendingEntityUnloads, setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
 
 const logger               = debug('seedSdk:client')
 
@@ -115,6 +116,9 @@ const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
   cancelAllRetriesWhenOnline()
   unregisterSeedQueryLocalSource()
   resetAddressesPersistedAnnouncement()
+  // Instances waiting out their grace period unload now, and the next init sets its own period
+  flushPendingEntityUnloads()
+  setEntityUnloadGraceMs(undefined)
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()
@@ -158,6 +162,8 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
     })
   }
   
+  setEntityUnloadGraceMs(options?.config?.entityCache?.unloadGraceMs)
+
   // The root-level init handler moves to PLATFORM_CLASSES_INIT (stopping any running step) as
   // send() returns; the platformClassesInit step fills the context from options.
   clientManager.send({ type: 'init', options });

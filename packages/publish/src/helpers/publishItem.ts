@@ -1,4 +1,4 @@
-import type { IItem, ItemPublishOptions } from '@seedprotocol/sdk'
+import { Item, type IItem, type ItemPublishOptions } from '@seedprotocol/sdk'
 import type { ActorRef } from 'xstate'
 import type { CreatePublishOptions } from '../config'
 import { PublishManager } from '../services/publishManager'
@@ -93,6 +93,17 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
  * publish fails.
  */
 export async function publishItem(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
+  // Held until the publish settles: an item the caller looked up without a hold would otherwise
+  // unload after the grace period, mid-upload
+  const held = Item.retain(item)
+  try {
+    await runPublishItem(item, options)
+  } finally {
+    if (held) item.unload()
+  }
+}
+
+async function runPublishItem(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
   // Node does not auto-start the manager; createPublish waits for it to be active.
   await PublishManager.ready()
   const result = await ensureWalletThenPublish(item as any, options as CreatePublishOptions | undefined)

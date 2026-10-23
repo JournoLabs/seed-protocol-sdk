@@ -34,6 +34,7 @@ import { EntityCache } from '@/helpers/entity/entityCache'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   isEntityTornDown,
   onEntityTeardown,
@@ -224,10 +225,12 @@ type ItemPropertyFindProps = {
 
 type ItemPropertyHoldOption = {
   /**
-   * @internal false for SDK code that hands the instance to an owner that takes its own hold (an
-   * Item's property map): no hold is taken, and a new instance is cached with none.
+   * Take a cache hold, released with `unload()`. `create` holds by default; `find` and `all` don't:
+   * a property no one holds unloads after the grace period (`SeedConfig.entityCache.unloadGraceMs`).
+   * SDK code that hands a new instance to an owner taking its own hold (an Item's property map)
+   * creates it with false.
    */
-  hold?: false
+  hold?: boolean
 }
 
 export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
@@ -980,6 +983,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
     if (cached) {
       if (holds) this.cache.holdInstance(cached)
+      else this.cache.keepUnheld(cached)
       for (const key of [keyByLocal, keyByUid]) this.cache.addKey(cached, key)
       this.syncFromRow(cached, props)
       // On cache hit, do not sync propertyValue: refetches can race with in-memory updates (e.g. save()).
@@ -1122,7 +1126,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return undefined
   }
 
-  /** Takes a hold on the instance it returns: release it with `unload()`. */
+  /**
+   * The property's instance, loaded from its row when it isn't cached. Takes no hold unless
+   * `hold: true` (release it with `unload()`).
+   */
   static async find({
     propertyName,
     seedLocalId,
@@ -1130,7 +1137,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     modelName: modelNameOption,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
-    hold,
+    hold = false,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1151,7 +1158,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
       if (!cached) return undefined
       for (const key of [keyByLocal, keyByUid]) this.cache.addKey(cached, key)
-      if (hold !== false) this.cache.holdInstance(cached)
+      if (hold) this.cache.holdInstance(cached)
+      else this.cache.keepUnheld(cached)
       return cached
     }
     foundProperty = fromCache()
@@ -1213,13 +1221,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   /**
    * Get all ItemProperty instances for an item.
    * Loads property data via getItemProperties, creates instances via create, optionally waits for idle.
-   * Takes a hold on each instance, as `create` does.
+   * Takes no holds unless `hold: true`, as `find`.
    */
   static async all(
     params: { seedLocalId?: string; seedUid?: string },
     options?: { waitForReady?: boolean; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold = false } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
@@ -1511,6 +1519,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * any tab, else its stored row.
    */
   setValue(value: any): void {
+    this._assertLoaded('set')
     // An empty Image, File or Html value has nothing to store: it clears the property
     if ((value == null || (typeof value === 'string' && value.trim() === '')) && this._holdsStorageSeed(this._getSnapshotContext())) {
       this._assign(null, { retract: false })
@@ -1780,6 +1789,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * ItemPropertySaveValidationError when the value broke a rule and was not written.
    */
   async save(): Promise<void> {
+    this._assertLoaded('save')
     const ctx = this._getSnapshotContext()
     const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
     const { assertItemOwned } = await import('@/helpers/ownership')
@@ -1815,6 +1825,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * Every cache key holding this instance: its item's local id and seed uid, and the name it had
    * before a rename (List of relation). They share one entry.
    */
+  /** Throws EntityUnloadedError, naming the property and its item, when this instance was unloaded. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { seedLocalId, seedUid, modelName, propertyName } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} ${modelName ?? '?'}.${propertyName ?? '?'} of item ${seedLocalId ?? seedUid ?? '(no id)'}: ` +
+        'this ItemProperty instance was unloaded. Look the item or property up again, and hold it while you use it.',
+    )
+  }
+
   /** Releases this caller's hold; the last one stops the property and drops it from the cache. */
   unload() {
     releaseEntity(this, ItemProperty.cache)

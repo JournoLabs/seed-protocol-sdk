@@ -199,7 +199,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 /**
  * Holds each item while the component shows it. The release is deferred a tick: a StrictMode
  * remount or a refetch returning the same instances takes its new holds before the old ones are
- * dropped, so a count never touches 0 in between. `onStopped` runs when an item can't be held.
+ * dropped, so a count never touches 0 in between. The cache's grace period covers that too, but
+ * an app may configure it to 0. `onStopped` runs when an item can't be held.
  */
 function useHeldItems(items: readonly IItem<any>[], onStopped: () => void): void {
   useEffect(() => {
@@ -529,8 +530,10 @@ export const useItems: UseItems = ({
 
 export type UseCreateItemReturn = {
   /**
-   * Calls `Item.create({ modelName, ...itemData }, options)`. A call made while another is in
-   * flight returns that call's promise (and its item) instead of creating a second one.
+   * Calls `Item.create({ modelName, ...itemData }, { hold: false, ...options })`: the item takes no
+   * hold, so it unloads after the grace period unless something holds it (a mounted `useItem`, or
+   * `options.hold: true`, released with `item.unload()`). A call made while another is in flight
+   * returns that call's promise (and its item) instead of creating a second one.
    */
   createItem: (
     modelName: string,
@@ -569,7 +572,12 @@ export const useCreateItem = (): UseCreateItemReturn => {
         try {
           const data = itemData ?? {}
           // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
-          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], options)
+          // No hold unless the caller asks for one: the hook can't release it. The item unloads after
+          // the grace period unless a hook showing it (useItem, useItems) or the caller holds it.
+          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], {
+            hold: false,
+            ...options,
+          })
           return (newItem ?? undefined) as Item<any> | undefined
         } catch (err) {
           logger('[useCreateItem] Error creating item:', err)
