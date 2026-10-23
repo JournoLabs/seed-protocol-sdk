@@ -1098,20 +1098,23 @@ testDescribe('ModelProperty Integration Tests', () => {
         expect(property.getService().getSnapshot().status).toBe('active')
         expect(ModelProperty.getById(property.id!)).toBe(property)
 
-        // A property only the app holds: stopped once its last holder unloads it.
+        // A property only the app holds: its last unload keeps it cached (definitions stay cached
+        // without holds); evicting its model's properties stops it.
         const appOnly = ModelProperty.create(
           { ...propertyData, name: 'appOnly', id: generateId(), _propertyFileId: undefined } as any,
-          { waitForReady: false },
+          { waitForReady: false, hold: true },
         )
         const appOnlyAgain = ModelProperty.create(
           { ...propertyData, name: 'appOnly', id: appOnly.id, _propertyFileId: undefined } as any,
-          { waitForReady: false },
+          { waitForReady: false, hold: true },
         )
         expect(appOnlyAgain).toBe(appOnly)
         await waitForModelPropertyIdle(appOnly)
         appOnly.unload()
-        expect(appOnly.getService().getSnapshot().status).toBe('active')
         appOnlyAgain.unload()
+        expect(appOnly.getService().getSnapshot().status).toBe('active')
+        expect(ModelProperty.getById(appOnly.id!)).toBe(appOnly)
+        ModelProperty.evictForModels([modelName], schemaName)
         expect(appOnly.getService().getSnapshot().status).toBe('stopped')
       }
     })

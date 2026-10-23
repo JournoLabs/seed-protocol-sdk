@@ -139,9 +139,9 @@ export async function createModelProperties(
             ? propertyRecord.id
             : undefined, // Already persisted: skip the write
       } as any,
-      { schemaName, hold: false },
+      { schemaName },
     ) // Use 'as any' because _propertyFileId is not in TProperty type
-    // The model keeps its properties; an app's unload of the same instance doesn't stop them.
+    // The model holds its properties (a child hold), released when the model is destroyed or evicted
     ModelProperty.holdForModel(property, model)
   }
 

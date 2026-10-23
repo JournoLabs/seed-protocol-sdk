@@ -65,7 +65,7 @@ const createModelInstances = async (modelIds: string[], since: number, owner?: A
     const createPromises = modelIds.map(async (modelFileId) => {
       try {
         // Not if the schema was evicted (Schema.destroy, test cleanup) since this check started
-        const model = await Model.createById(modelFileId, { since, hold: false })
+        const model = await Model.createById(modelFileId, { since })
         if (model && owner) holdChild(owner, model, Model.cache)
         if (model) {
           logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)

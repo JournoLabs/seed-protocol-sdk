@@ -49,6 +49,12 @@ export interface EntityEntry<T> {
  * instance. With a grace period of 0, the last release tears it down at once and an entry that
  * never had a hold stays cached until it is evicted. Removing an entry (teardown, destroy,
  * eviction) cancels its timer.
+ *
+ * A cache made with `unloadUnheld: false` (the definition classes: Schema, Model, ModelProperty)
+ * never tears an entry down for having no holds: it stays cached until it is destroyed, evicted or
+ * the client stops. Holds are still counted there, and releasing the last one does nothing, except
+ * an `immediate` release: its owner was destroyed or evicted (a Schema's models, a Model's
+ * properties), and a child no one else holds goes with it.
  */
 export class EntityCache<T extends ActorBacked> {
   /** Every cache made, one per entity class; client.stop() evicts them all (evictAllEntities). */
@@ -57,7 +63,11 @@ export class EntityCache<T extends ActorBacked> {
   private readonly byKey = new Map<string, EntityEntry<T>>()
   private readonly byActor = new WeakMap<object, EntityEntry<T>>()
 
-  constructor() {
+  /** False: an entry with no holds stays cached (see the class comment). */
+  readonly unloadUnheld: boolean
+
+  constructor(options: { unloadUnheld?: boolean } = {}) {
+    this.unloadUnheld = options.unloadUnheld !== false
     EntityCache.all.add(this as unknown as EntityCache<ActorBacked>)
   }
 
@@ -105,7 +115,8 @@ export class EntityCache<T extends ActorBacked> {
    * Give back one hold. True when the instance should be torn down now: its last hold went and
    * there is no grace period (or `immediate`), or it isn't cached at all (evicted while the caller
    * held it). After the last hold with a grace period, the teardown is scheduled instead. An
-   * instance with no holds (a caller that never held it) is left as it is.
+   * instance with no holds (a caller that never held it) is left as it is, and so is an instance of
+   * a cache made with `unloadUnheld: false` unless the release is `immediate`.
    */
   release(instance: T, options: { immediate?: boolean } = {}): boolean {
     const entry = this.entryOf(instance)
@@ -113,7 +124,9 @@ export class EntityCache<T extends ActorBacked> {
     if (entry.refCount <= 0) return false
     entry.refCount -= 1
     if (entry.refCount > 0) return false
-    if (options.immediate || entityUnloadGraceMs() === 0) return true
+    if (options.immediate) return true
+    if (!this.unloadUnheld) return false
+    if (entityUnloadGraceMs() === 0) return true
     this.scheduleUnload(entry)
     return false
   }
@@ -124,7 +137,7 @@ export class EntityCache<T extends ActorBacked> {
    */
   keepUnheld(instance: T): void {
     const entry = this.entryOf(instance)
-    if (entry && entry.refCount <= 0 && entityUnloadGraceMs() > 0) this.scheduleUnload(entry)
+    if (entry && entry.refCount <= 0 && this.unloadUnheld && entityUnloadGraceMs() > 0) this.scheduleUnload(entry)
   }
 
   private addHold(entry: EntityEntry<T>): void {

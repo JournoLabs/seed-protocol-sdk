@@ -1031,7 +1031,7 @@ testDescribe('Schema Integration Tests', () => {
     })
 
     describe('unload()', () => {
-      it('should unload schema and clean up resources', async () => {
+      it('unload keeps the schema running; eviction stops it', async () => {
         const schemaName = 'Test Schema Unload'
         const testSchema = createTestSchema(schemaName)
 
@@ -1044,12 +1044,12 @@ testDescribe('Schema Integration Tests', () => {
         const snapshotBefore = schema.getService().getSnapshot()
         expect(snapshotBefore.status).toBe('active')
         
-        // Unload
+        // A definition stays cached without holds: unload only gives back a hold
         schema.unload()
-        
-        // Verify service is stopped
-        const snapshotAfter = schema.getService().getSnapshot()
-        expect(snapshotAfter.status).toBe('stopped')
+        expect(schema.getService().getSnapshot().status).toBe('active')
+
+        Schema.evict(schemaName)
+        expect(schema.getService().getSnapshot().status).toBe('stopped')
       })
     })
   })

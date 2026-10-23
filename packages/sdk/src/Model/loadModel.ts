@@ -253,7 +253,7 @@ export async function loadModel(context: ModelMachineContext, isStopped: () => b
     const { Schema } = await import('@/Schema/Schema')
     // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
     if (isStopped()) throw new Error('the model was unloaded while it loaded')
-    const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+    const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
     // A schema still loading: its models are known once it has loaded
     await schema.waitForReady()
 
@@ -417,7 +417,7 @@ export async function loadModel(context: ModelMachineContext, isStopped: () => b
   try {
     const { Schema } = await import('@/Schema/Schema')
     if (!isStopped()) {
-      const schema = Schema.create(schemaName, { waitForReady: false, hold: false }) as import('@/Schema/Schema').Schema
+      const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
       schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
     }
   } catch (err) {

@@ -76,7 +76,7 @@ export const validateProperty = fromCallback<
     if (isActorStopped(self)) return
     if (fullContext._schemaName && fullContext.modelName) {
       try {
-        const schema = await Schema.find({ schemaName: fullContext._schemaName, waitForReady: false, hold: false })
+        const schema = await Schema.find({ schemaName: fullContext._schemaName, waitForReady: false })
         if (!schema) throw new Error(`No schema named "${fullContext._schemaName}"`)
         const schemaSnapshot = schema.getService().getSnapshot()
         const schemaStatus = schemaSnapshot.value

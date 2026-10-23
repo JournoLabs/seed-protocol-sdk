@@ -7,7 +7,7 @@ import { waitUntilOrThrow } from '../test-utils/waitUntil'
 /**
  * A schema is cached under its file id and its current name (G13-6). Before, a rename left the
  * cache on the old name, so `Schema.create(new)` loaded a second instance for the same row, and an
- * instance created again after an unload never got its id key, so lookups by id missed it.
+ * instance created again after an eviction never got its id key, so lookups by id missed it.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -35,24 +35,20 @@ testDescribe('Schema cache keys', () => {
     expect(byNewName).toBe(schema)
     expect(Schema.peek(oldName)).toBeUndefined()
 
-    byNewName.unload()
-    expect(schema.getService().getSnapshot().status).not.toBe('stopped')
-    schema.unload()
-    expect(schema.getService().getSnapshot().status).toBe('stopped')
+    expect(schema.getService().getSnapshot().status).toBe('active')
   }, 30000)
 
-  it('a schema created again after an unload is cached under its id', async () => {
+  it('a schema created again after an eviction is cached under its id', async () => {
     const name = freshName()
     const first = await Schema.create(name, { waitForReady: true })
     const schemaFileId = first.id!
     expect(Schema.peek(schemaFileId)).toBe(first)
-    first.unload()
+    Schema.evict(name)
     expect(Schema.peek(schemaFileId)).toBeUndefined()
 
     const second = await Schema.create(name, { waitForReady: true })
     expect(second).not.toBe(first)
     expect(second.id).toBe(schemaFileId)
     expect(Schema.peek(schemaFileId)).toBe(second)
-    second.unload()
   }, 30000)
 })

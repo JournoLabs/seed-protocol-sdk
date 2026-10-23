@@ -13,8 +13,12 @@ import { Model } from '@seedprotocol/sdk'
 import { useQuery } from "@tanstack/react-query"
 import { useSeedQueryClient } from "./queryClient"
 import { useCreateState } from "./useCreateState"
+import { useHeldEntities } from "./useHeldEntities"
 import { getSchemaNameFromId } from '@seedprotocol/sdk'
 
+const NO_PROPERTIES: ModelProperty[] = []
+/** ModelProperty.retain, stable for useHeldEntities. */
+const retainProperty = (property: ModelProperty) => ModelProperty.retain(property)
 
 type UseModelPropertiesResult = {
   modelProperties: ModelProperty[]
@@ -73,7 +77,7 @@ export const useModelProperties = (
   )
 
   const {
-    data: modelProperties = [],
+    data: modelProperties = NO_PROPERTIES,
     isLoading,
     error: queryError,
   } = useQuery({
@@ -81,6 +85,13 @@ export const useModelProperties = (
     queryFn: () => ModelProperty.all(modelId!, { waitForReady: true }),
     enabled: isClientReady && !!modelId,
   }, queryClient)
+
+  // One hold per mounted hook on each property it lists. A property that can't be held, or stops
+  // while listed (destroyed, evicted), is listed again.
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: modelPropertiesQueryKey })
+  }, [queryClient, modelPropertiesQueryKey])
+  useHeldEntities(modelProperties, retainProperty, refetch)
 
   const db = isClientReady ? BaseDb.getAppDb() : null
   const propertiesQuery = useMemo(() => {
@@ -190,7 +201,7 @@ const getPropertySchemaByModelFileId = async (
   propertyName: string
 ): Promise<ReturnType<typeof getPropertySchema>> => {
   // Get model by modelFileId
-  const model = await Model.createById(modelFileId, { hold: false })
+  const model = await Model.createById(modelFileId)
   if (!model) {
     return undefined
   }
@@ -344,7 +355,7 @@ export function useModelProperty(...args: Array<string | null | undefined>) {
         propertyData = await getPropertySchemaByModelFileId(lookupMode.modelFileId, lookupMode.propertyName)
         
         // Get modelName from model (needed for ModelProperty.create)
-        const model = await Model.createById(lookupMode.modelFileId, { hold: false })
+        const model = await Model.createById(lookupMode.modelFileId)
         resolvedModelName = model?.modelName ?? (model as any)?.name
       } else {
         // lookupMode.type === 'schemaId'
@@ -363,6 +374,7 @@ export function useModelProperty(...args: Array<string | null | undefined>) {
       }
 
       if (propertyData && resolvedModelName) {
+        // No hold: the hook holds what it shows (below), once per mount
         const createdProperty = ModelProperty.create(
           { ...propertyData, modelName: resolvedModelName },
           { waitForReady: false }
@@ -396,6 +408,10 @@ export function useModelProperty(...args: Array<string | null | undefined>) {
     }
     updateModelProperty()
   }, [shouldLoad, updateModelProperty])
+
+  // One hold per mounted hook on the property it shows; one that stops while shown is looked up again
+  const lookUpAgain = useCallback(() => void updateModelProperty({ quiet: true }), [updateModelProperty])
+  useHeldEntities(useMemo(() => (modelProperty ? [modelProperty] : NO_PROPERTIES), [modelProperty]), retainProperty, lookUpAgain)
 
   // A schemaId/modelFileId lookup reads the model's properties, which can still be loading (or the
   // property not yet written) when the hook mounts. Nothing would ask again, so retry a few times
@@ -470,7 +486,7 @@ export type UseCreateModelPropertyReturn = {
  * Hook to create a ModelProperty with loading and error state.
  * create(schemaId, modelName, property) creates a new property on the model. schemaId is a schema
  * name, schema file id or "name-version"; it is resolved to a stored schema name first, so create
- * returns a promise.
+ * returns a promise. The property takes no hold: it stays cached until it is destroyed or evicted.
  */
 export const useCreateModelProperty = (): UseCreateModelPropertyReturn => {
   const { runAsync, isLoading, error, resetError } = useCreateState(

@@ -71,6 +71,20 @@ The five classes now share one implementation of what this ADR left to each clas
   `loading`, `ready` or `error`, mirrored into the actor context as `_status` so actor subscribers
   see it. Machines keep context and process states (validating, publishing, saving to schema).
 
+## Amendment (2026-10-23, hold defaults)
+
+Lookups take no hold unless called with `hold: true`; React hooks hold what they show once per
+mounted hook. What happens to an instance no one holds depends on its class:
+
+- **Item and ItemProperty** unload after a grace period (`SeedConfig.entityCache.unloadGraceMs`,
+  default 60 s). A hold taken within it keeps the same instance.
+- **Schema, Model and ModelProperty** stay cached until they are destroyed or evicted, or the client
+  stops (`new EntityCache({ unloadUnheld: false })`). `Model.resolve`, `Model.findByModelType` and
+  sync read the cached models synchronously and treat them as every local model: under the grace
+  period, a model loaded without a hold dropped out after 60 s, and sync stored EAS names as seed
+  types. Definitions are few, and reloading one costs tens of milliseconds, so keeping them costs
+  little. When a parent is destroyed or evicted, children only it held still go with it.
+
 ## Alternatives considered
 
 - **`Object.defineProperty` per field** (the earlier design): needs every field known up front,
