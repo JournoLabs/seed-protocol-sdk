@@ -103,4 +103,59 @@ testDescribe('Item cache holds', () => {
       spy.mockRestore()
     }
   }, 30000)
+
+  it('all with hold: false lists the items without holding them', async () => {
+    const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'listed' } as never)
+    const id = created.seedLocalId
+    created.unload()
+    const refCount = (item: Item<any>) => Item.cache.entryOf(item)?.refCount
+
+    const listed = await Item.all('HoldPost', false, {
+      schemaName: SCHEMA_NAME,
+      includeEas: true,
+      addressFilter: 'all',
+      waitForReady: true,
+      hold: false,
+    })
+    const item = listed.find((i) => i.seedLocalId === id)
+    expect(item).toBeDefined()
+    expect(item).not.toBe(created)
+    expect(refCount(item!)).toBe(0)
+
+    // The default holds each item once
+    const held = await Item.all('HoldPost', false, { schemaName: SCHEMA_NAME, waitForReady: true })
+    expect(held).toContain(item)
+    expect(refCount(item!)).toBe(1)
+    for (const i of held) i.unload()
+    expect(item!.getService().getSnapshot().status).toBe('stopped')
+  }, 30000)
+
+  it('all keeps no holds when an item is not ready in time', async () => {
+    const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'slow list' } as never)
+    const id = created.seedLocalId
+    Item.dropCachedInstancesForSeedIds([id])
+    let finishLoad!: () => void
+    const gate = new Promise<void>((resolve) => (finishLoad = resolve))
+    const itemClass = Item as unknown as { load: (item: Item<any>) => Promise<void> }
+    const load = itemClass.load.bind(Item)
+    const spy = vi.spyOn(itemClass, 'load').mockImplementation(async (item) => {
+      await gate
+      return load(item)
+    })
+    try {
+      const loading = await Item.create({ seedLocalId: id, modelName: 'HoldPost' } as never, { waitForReady: false })
+      expect(loading.status).toBe('loading')
+
+      await expect(
+        Item.all('HoldPost', false, { schemaName: SCHEMA_NAME, waitForReady: true, readyTimeout: 1 }),
+      ).rejects.toThrow()
+      expect(Item.cache.entryOf(loading)?.refCount).toBe(1)
+      finishLoad()
+      await loading.waitForReady()
+      loading.unload()
+    } finally {
+      finishLoad()
+      spy.mockRestore()
+    }
+  }, 30000)
 })

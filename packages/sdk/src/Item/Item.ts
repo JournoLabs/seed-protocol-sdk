@@ -903,10 +903,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return item.getService().getSnapshot().status === 'active' && this.cache.holdInstance(item)
   }
 
+  /**
+   * The items of a model (every model when `modelName` is omitted), newest first. Each item comes
+   * with a cache hold the caller releases with `unload()`, unless `hold: false`: then the items
+   * stay cached with whatever holds others have (`useItems` holds what it lists with
+   * `Item.retain`). When the call throws (aborted, an item not ready in `readyTimeout`), it keeps
+   * none of the holds it took.
+   */
   static async all(
     modelName?: string,
     deleted?: boolean,
     options?: {
+      /** Take a cache hold on each returned item (default true). */
+      hold?: boolean
       waitForReady?: boolean
       readyTimeout?: number
       includeEas?: boolean
@@ -915,14 +924,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId?: string
       /** ... or the schema that defines it. */
       schemaName?: string
-      /**
-       * Stops building items once aborted and rejects with the signal's reason. Items already
-       * built stay loaded.
-       */
+      /** Stops building items once aborted and rejects with the signal's reason. */
       signal?: AbortSignal
     },
   ): Promise<Item<any>[]> {
     const {
+      hold = true,
       waitForReady = false,
       readyTimeout = DEFAULT_READY_TIMEOUT_MS,
       includeEas = false,
@@ -934,26 +941,26 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     signal?.throwIfAborted()
     const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
-    // Built without waiting; with waitForReady the items are then awaited together, below.
-    for (const itemData of itemsData) {
-      signal?.throwIfAborted()
-      itemInstances.push(
-        await Item.create(
-          {
-            ...itemData,
-            modelName,
-          },
-          { waitForReady: false },
-        ),
-      )
-    }
+    try {
+      // Built without waiting; with waitForReady the items are then awaited together, below.
+      for (const itemData of itemsData) {
+        signal?.throwIfAborted()
+        const item = await Item.create({ ...itemData, modelName }, { waitForReady: false })
+        // create holds what it returns; without a hold the item stays cached, held by no one
+        if (!hold) Item.cache.release(item)
+        itemInstances.push(item)
+      }
 
-    if (waitForReady && itemInstances.length > 0) {
-      await Promise.all(
-        itemInstances.map((item) => waitForEntityReady(item, { timeout: readyTimeout })),
-      )
+      if (waitForReady && itemInstances.length > 0) {
+        await Promise.all(
+          itemInstances.map((item) => waitForEntityReady(item, { timeout: readyTimeout })),
+        )
+      }
+      signal?.throwIfAborted()
+    } catch (error) {
+      if (hold) for (const item of itemInstances) item.unload()
+      throw error
     }
-    signal?.throwIfAborted()
 
     return orderBy(itemInstances, ['createdAt'], ['desc'])
   }
