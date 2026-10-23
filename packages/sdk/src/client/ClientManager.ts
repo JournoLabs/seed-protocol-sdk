@@ -37,11 +37,7 @@ import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 import { registerClientActor } from '@/client/readiness'
-import { ItemProperty } from '@/ItemProperty/ItemProperty'
-import { Model } from '@/Model/Model'
-import { ModelProperty } from '@/ModelProperty/ModelProperty'
-import { Schema } from '@/Schema/Schema'
-import { evictEntities } from '@/helpers/entity/entityLifecycle'
+import { evictAllEntities } from '@/helpers/entity/entityLifecycle'
 import { stopOutbox } from '@/outbox/outbox'
 import { stopTabCoordination } from '@/helpers/tabCoordinator'
 import { whenCanonicalizeModelTypesSettled } from '@/db/canonicalizeModelTypes'
@@ -146,9 +142,7 @@ const releaseClientResources = async (): Promise<void> => {
   await stopOutbox()
   await whenCanonicalizeModelTypesSettled()
   // Before the database closes, so their live queries end first.
-  for (const cache of [Item.cache, ItemProperty.cache, ModelProperty.cache, Model.cache, Schema.cache]) {
-    evictEntities(cache as Parameters<typeof evictEntities>[0], () => true)
-  }
+  evictAllEntities()
   stopTabCoordination()
   await BaseDb.close()
 }

@@ -1,4 +1,4 @@
-import type { ActorBacked, EntityCache } from './entityCache'
+import { EntityCache, type ActorBacked } from './entityCache'
 
 /**
  * Where an entity is in its load: `loading` until its row and definition are read, then `ready`,
@@ -200,6 +200,14 @@ export function evictEntities<T extends ActorBacked>(cache: EntityCache<T>, filt
   const evicted = cache.instances(filter)
   for (const instance of evicted) teardownEntity(instance, cache)
   return evicted
+}
+
+/**
+ * Stop and drop every cached entity of every class, whoever holds it (client.stop()). Reaches the
+ * caches through EntityCache.all, so callers needn't import the entity classes.
+ */
+export function evictAllEntities(): void {
+  for (const cache of EntityCache.all) evictEntities(cache, () => true)
 }
 
 /**
