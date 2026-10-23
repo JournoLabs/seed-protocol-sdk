@@ -74,11 +74,12 @@ describe.skipIf(!runLive)('ArweaveClient against public gateways', () => {
     if (!key) return
     try {
       const { connectTunnel } = await import('@seedprotocol/gateway-hyper')
-      hyperTunnel = await connectTunnel({ key, host: '127.0.0.1', port: 0, connectTimeoutMs: 20000 })
+      const tunnel = await connectTunnel({ key, host: '127.0.0.1', port: 0, connectTimeoutMs: 20000 })
+      hyperTunnel = tunnel
       // The tunnel dials the operator on its first request; only use it once that request works.
-      const info = await fetch(`${hyperTunnel.baseUrl}/info`, { signal: AbortSignal.timeout(25000) })
+      const info = await fetch(`${tunnel.baseUrl}/info`, { signal: AbortSignal.timeout(25000) })
       if (!info.ok) throw new Error(`GET /info through the tunnel returned ${info.status}`)
-      setPreferredArweaveReadBaseUrls([hyperTunnel.baseUrl])
+      setPreferredArweaveReadBaseUrls([tunnel.baseUrl])
     } catch (error) {
       console.warn('[ArweaveClient live] Hyper gateway unavailable, using public gateways:', error)
       await hyperTunnel?.close().catch(() => {})
@@ -107,7 +108,7 @@ describe.skipIf(!runLive)('ArweaveClient against public gateways', () => {
 
   it('reads the known transaction and its tags', async () => {
     const data = await BaseArweaveClient.getTransactionData(KNOWN_TX_ID)
-    expect((data as Uint8Array).byteLength).toBeGreaterThan(0)
+    expect(typeof data === 'string' ? data.length : data.byteLength).toBeGreaterThan(0)
     const tags = await BaseArweaveClient.getTransactionTags(KNOWN_TX_ID)
     expect(tags.some((t) => t.name === 'Content-Type')).toBe(true)
   }, NETWORK_TIMEOUT)
@@ -115,7 +116,7 @@ describe.skipIf(!runLive)('ArweaveClient against public gateways', () => {
   it('downloads the known transaction', async () => {
     const [result] = await BaseArweaveClient.downloadFiles({ transactionIds: [KNOWN_TX_ID] })
     expect(result).toMatchObject({ transactionId: KNOWN_TX_ID, success: true })
-    expect(result!.data!.byteLength).toBeGreaterThan(0)
+    expect(result!.data!.length).toBeGreaterThan(0)
   }, NETWORK_TIMEOUT)
 
   it('prices a new transaction with the gateway', async () => {
