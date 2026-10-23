@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `DEFAULT_ARWEAVE_GATEWAYS` no longer lists `arweave.dev` and `g8way.io`. Neither domain resolves on public DNS (Cloudflare and Google returned SERVFAIL on 2026-10-22), so a read that fell back to them failed at DNS before trying the next gateway. The list is now `ar.seedprotocol.io`, `arweave.net`, `permagate.io`, `zigza.xyz`. Set `ARWEAVE_READ_GATEWAYS` to use others.
+
 ## 0.7.9 (2026-10-22)
 
 - New `DefaultArweaveClient`, exported from the root entry: the fetch-based client for Node and browsers. `getTransactionData` reads `/raw` from the preferred read gateways (`setPreferredArweaveReadBaseUrls`) before the configured host, unless the caller asks for undecoded data. arweave-js is loaded on first use (the data fallback and `createTransaction`), so the root entry does not import it. `NodeArweaveClient` extends it, so Node reads try the preferred gateways too.

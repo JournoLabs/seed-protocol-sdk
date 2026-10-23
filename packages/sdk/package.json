@@ -158,6 +158,7 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-typescript": "^12.1.2",
     "@seedprotocol/vite": "workspace:*",
+    "arlocal": "1.1.66",
     "better-sqlite3": "^12.5.0",
     "eventemitter3": "^5.0.1",
     "magic-string": "^0.30.21",

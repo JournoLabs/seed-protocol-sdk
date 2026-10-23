@@ -54,7 +54,7 @@ describe('getArweaveReadGatewayHostsForPrimary', () => {
     const hosts = getArweaveReadGatewayHostsForPrimary('arweave.net')
     expect(hosts[0]).toBe('arweave.net')
     expect(hosts).not.toContain(DEFAULT_ARWEAVE_HOST)
-    expect(hosts).toContain('g8way.io')
+    expect(hosts).toContain('zigza.xyz')
   })
 })
 
