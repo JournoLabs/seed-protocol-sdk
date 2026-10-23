@@ -656,11 +656,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // A pending edit settles the conflict when it applies, so an overlaid row shows none.
         // `assignSeq` marks a read begun before an assignment in this tab: it may predate that op,
         // which the context already shows, so the feed drops it.
+        // Sync records a conflict and moves its draft to newest in one transaction, so a row read
+        // before the conflict may be the synced one: read the row again once a conflict shows.
         const readRow = async () => {
           const assignSeq = this._assignSeq
-          const row = await currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+          const read = () =>
+            currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+          let row = await read()
           if (!row) return row
           const conflict = row.overlaid ? null : await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
+          if (conflict) row = (await read()) ?? row
           return { ...row, conflict, assignSeq }
         }
 
