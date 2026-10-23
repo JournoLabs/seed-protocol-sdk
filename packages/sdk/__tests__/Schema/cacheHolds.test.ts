@@ -7,12 +7,12 @@ import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
- * Schema.create and Schema.find each take one hold on the cached instance, released by one unload.
- * A schema is cached under its name and, once loaded, its file id; a hold taken under either is one
- * hold on the instance. SDK code that only looks the schema up (Model and ModelProperty writes,
- * validation) must not take one.
+ * Schema lookups take a hold only with `hold: true`, released by one unload. A schema is cached
+ * under its name and, once loaded, its file id; a hold taken under either is one hold on the
+ * instance. A schema stays cached when its last hold goes; eviction or destroy stops it.
  *
- * A schema holds each model it loads once, and its last unload releases those holds.
+ * A schema holds each model it loads once; evicting the schema releases those holds, and a model
+ * no one else holds stops with it.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -29,57 +29,62 @@ testDescribe('Schema cache holds', () => {
   const freshName = () => `Schema Holds ${generateId()}`
   const status = (schema: Schema) => schema.getService().getSnapshot().status
 
-  it("the creator's unload stops a new schema", async () => {
+  const refCount = (schema: Schema) => Schema.cache.entryOf(schema)?.refCount
+
+  it('create takes no hold unless hold: true', async () => {
     const schema = await Schema.create(freshName(), { waitForReady: true })
-    schema.unload()
-    expect(status(schema)).toBe('stopped')
+    expect(refCount(schema)).toBe(0)
+    const held = await Schema.create(schema.schemaName!, { waitForReady: true, hold: true })
+    expect(held).toBe(schema)
+    expect(refCount(schema)).toBe(1)
+    held.unload()
+    expect(refCount(schema)).toBe(0)
   }, 30000)
 
-  it('two creates need two unloads', async () => {
+  it('the last unload keeps a schema running; eviction stops it', async () => {
     const name = freshName()
-    const first = await Schema.create(name, { waitForReady: true })
-    const second = await Schema.create(name, { waitForReady: true })
+    const first = await Schema.create(name, { waitForReady: true, hold: true })
+    const second = await Schema.create(name, { waitForReady: true, hold: true })
     expect(second).toBe(first)
 
     second.unload()
-    expect(status(first)).not.toBe('stopped')
     first.unload()
+    expect(status(first)).toBe('active')
+    expect(Schema.peek(name)).toBe(first)
+
+    Schema.evict(name)
     expect(status(first)).toBe('stopped')
+    expect(Schema.peek(name)).toBeUndefined()
   }, 30000)
 
-  it('holds taken by name and by file id are released together', async () => {
+  it('holds taken by name and by file id are holds on one instance', async () => {
     const name = freshName()
-    const byName = await Schema.create(name, { waitForReady: true })
+    const byName = await Schema.create(name, { waitForReady: true, hold: true })
     const schemaFileId = byName.id
     expect(schemaFileId).toBeTruthy()
-    const byId = await Schema.find({ schemaFileId: schemaFileId! })
+    const byId = await Schema.find({ schemaFileId: schemaFileId!, hold: true })
     expect(byId).toBe(byName)
+    expect(refCount(byName)).toBe(2)
 
     byId!.unload()
-    expect(status(byName)).not.toBe('stopped')
     byName.unload()
-    expect(status(byName)).toBe('stopped')
+    expect(refCount(byName)).toBe(0)
 
-    // Neither cache may still hand out the stopped instance.
+    // After an eviction, neither key hands out the stopped instance
+    Schema.evict(name)
     const again = await Schema.create(name, { waitForReady: true })
-    expect(status(again)).not.toBe('stopped')
-    const againById = await Schema.find({ schemaFileId: schemaFileId! })
-    expect(againById).toBe(again)
-    againById!.unload()
-    again.unload()
+    expect(status(again)).toBe('active')
+    expect(await Schema.find({ schemaFileId: schemaFileId! })).toBe(again)
   }, 30000)
 
   it('creating a model in the schema takes no hold on it', async () => {
     const name = freshName()
     const schema = await Schema.create(name, { waitForReady: true })
-    const model = await Model.create('HoldNote', name, {
+    await Model.create('HoldNote', name, {
       properties: { title: { dataType: 'Text' } },
       waitForReady: true,
     })
-    model.unload()
-
-    schema.unload()
-    expect(status(schema)).toBe('stopped')
+    expect(refCount(schema)).toBe(0)
   }, 30000)
 
   const importSchemaWithModel = async () => {
@@ -99,27 +104,32 @@ testDescribe('Schema cache holds', () => {
     const schema = await Schema.create(name, { waitForReady: true })
     const [model] = await Model.all(name, { waitForReady: true })
     expect(model.id).toBe(modelFileId)
-    return { schema, model, modelFileId }
+    return { name, schema, model, modelFileId }
   }
 
-  it("the schema's last unload releases its models", async () => {
-    const { schema, model } = await importSchemaWithModel()
+  it('evicting a schema stops the models only it holds', async () => {
+    const { name, schema, model } = await importSchemaWithModel()
+    expect(Model.cache.entryOf(model)?.refCount).toBe(1)
 
-    schema.unload()
+    Schema.evict(name)
 
     expect(status(schema)).toBe('stopped')
     expect(model.getService().getSnapshot().status).toBe('stopped')
   }, 30000)
 
-  it("a model the caller holds outlives its schema's unload", async () => {
-    const { schema, model, modelFileId } = await importSchemaWithModel()
-    const held = await Model.find({ modelFileId })
+  it("a model the caller holds outlives its schema's eviction", async () => {
+    const { name, schema, model, modelFileId } = await importSchemaWithModel()
+    const held = await Model.find({ modelFileId, hold: true })
     expect(held).toBe(model)
 
-    schema.unload()
-    expect(model.getService().getSnapshot().status).not.toBe('stopped')
+    Schema.evict(name)
+    expect(status(schema)).toBe('stopped')
+    expect(model.getService().getSnapshot().status).toBe('active')
 
+    // Its last hold going keeps it cached too
     held!.unload()
+    expect(model.getService().getSnapshot().status).toBe('active')
+    Model.evictForSchema(name)
     expect(model.getService().getSnapshot().status).toBe('stopped')
   }, 30000)
 })

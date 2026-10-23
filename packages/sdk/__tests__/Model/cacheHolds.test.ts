@@ -7,12 +7,11 @@ import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
- * Model.create, Model.find and Model.getById each take one hold on the cached instance, released by
- * one unload. Lookups that don't hand the model to a caller (schema.models, Model.resolve and the
- * other synchronous cache reads) must not take one: a hold nobody releases keeps the model running
- * after its real holders unload it.
+ * Model lookups take a hold only with `hold: true`, released by one unload. Lookups that don't
+ * hand the model to a caller (schema.models, Model.resolve and the other synchronous cache reads)
+ * never take one. A model stays cached when its last hold goes; eviction or destroy stops it.
  *
- * The models here are created at runtime, so their creator's hold is the only one.
+ * The models here are created at runtime, so no schema holds them.
  */
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -56,25 +55,26 @@ testDescribe('Model cache holds', () => {
     return { model, modelName }
   }
 
-  const expectStopped = (model: Model) => {
-    expect(model.getService().getSnapshot().status).toBe('stopped')
-  }
+  const refCount = (model: Model) => Model.cache.entryOf(model)?.refCount
 
-  it("the creator's unload stops a runtime model", async () => {
-    const { model } = await createRuntimeModel()
+  it("a runtime model stays cached after its creator's unload", async () => {
+    const { model, modelName } = await createRuntimeModel()
+    expect(refCount(model)).toBe(0)
     model.unload()
-    expectStopped(model)
+    expect(model.getService().getSnapshot().status).toBe('active')
+    expect(Model.peekByName(modelName, SCHEMA_NAME)).toBe(model)
   }, 30000)
 
-  it('Model.getById takes a hold that one unload releases', async () => {
+  it('Model.getById takes a hold with hold: true, released by one unload', async () => {
     const { model } = await createRuntimeModel()
-    const byId = Model.getById(model.id!)
-    expect(byId).toBe(model)
+    expect(Model.getById(model.id!)).toBe(model)
+    expect(refCount(model)).toBe(0)
 
+    const byId = Model.getById(model.id!, { hold: true })
+    expect(byId).toBe(model)
+    expect(refCount(model)).toBe(1)
     byId!.unload()
-    expect(model.getService().getSnapshot().status).not.toBe('stopped')
-    model.unload()
-    expectStopped(model)
+    expect(refCount(model)).toBe(0)
   }, 30000)
 
   it('reading schema.models takes no hold', async () => {
@@ -83,10 +83,7 @@ testDescribe('Model cache holds', () => {
     for (let i = 0; i < 3; i++) {
       expect(schema.models.map((m) => m.id)).toContain(model.id)
     }
-    schema.unload()
-
-    model.unload()
-    expectStopped(model)
+    expect(refCount(model)).toBe(0)
   }, 30000)
 
   it('synchronous cache lookups take no hold', async () => {
@@ -95,8 +92,6 @@ testDescribe('Model cache holds', () => {
     expect(Model.resolve(modelName, { schemaName: SCHEMA_NAME })).toBe(model)
     expect(Model.findByModelType(modelName)).toBe(model)
     expect(Model.getCachedInstancesForSchema(SCHEMA_NAME)).toContain(model)
-
-    model.unload()
-    expectStopped(model)
+    expect(refCount(model)).toBe(0)
   }, 30000)
 })

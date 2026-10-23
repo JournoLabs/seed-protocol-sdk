@@ -1133,7 +1133,7 @@ testDescribe('Model Integration Tests', () => {
   })
 
   describe('Model unload', () => {
-    it('should unload model and clean up resources', async () => {
+    it('unload releases a hold but keeps the model running; eviction stops it', async () => {
       const schemaName = 'Test Schema Model Unload'
       const testSchema = createTestSchema(schemaName)
 
@@ -1146,12 +1146,12 @@ testDescribe('Model Integration Tests', () => {
       const snapshotBefore = model.getService().getSnapshot()
       expect(snapshotBefore.status).toBe('active')
       
-      // Unload
+      // A definition stays cached without holds: unload only gives back a hold
       model.unload()
-      
-      // Verify service is stopped
-      const snapshotAfter = model.getService().getSnapshot()
-      expect(snapshotAfter.status).toBe('stopped')
+      expect(model.getService().getSnapshot().status).toBe('active')
+
+      Model.evictForSchema(schemaName)
+      expect(model.getService().getSnapshot().status).toBe('stopped')
     })
   })
 
