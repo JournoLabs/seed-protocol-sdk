@@ -3,6 +3,12 @@ export { encodePublicKeyZ32, decodePublicKey, loadOrCreateOperatorKeypair } from
 export { serveTunnel } from './tunnel/serve'
 export { createAllowlist } from './tunnel/allowlist'
 export type {
+  TunnelEvent,
+  TunnelEventListener,
+  TunnelEventName,
+  UpstreamPhase,
+} from './tunnel/events'
+export type {
   Allowlist,
   AllowlistOptions,
   AllowlistStream,
@@ -19,7 +25,7 @@ export {
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './tunnel/session'
 export type { TunnelRequestOptions, TunnelSession, TunnelSessionOptions } from './tunnel/session'
-export { DEFAULT_UPSTREAM_TIMEOUT_MS } from './tunnel/proxy'
+export { DEFAULT_UPSTREAM_TIMEOUT_MS, upstreamRequestHeaders } from './tunnel/proxy'
 export {
   TunnelConnectTimeoutError,
   TunnelTimeoutError,

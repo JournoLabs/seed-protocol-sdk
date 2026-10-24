@@ -4,7 +4,13 @@
 import path from 'node:path'
 import process from 'node:process'
 import { parseArgs } from 'node:util'
-import { connectTunnel, createAllowlist, loadOrCreateOperatorKeypair, serveTunnel } from './index'
+import {
+  connectTunnel,
+  createAllowlist,
+  loadOrCreateOperatorKeypair,
+  serveTunnel,
+  type TunnelEvent,
+} from './index'
 
 const DEFAULT_OPERATOR_KEY_FILE = path.join('.seed', 'gateway-tunnel', 'operator.key.json')
 
@@ -16,6 +22,8 @@ const USAGE = `Usage:
       Answers 504 when the upstream is idle for --upstream-timeout-ms (0 disables).
       With --allow-keys or --allow-ips, only clients whose public key or address is listed
       can connect. A client on the operator's LAN shows its LAN address.
+      --trace logs each stream and request event as a \`tunnel-trace <event> key=value\` line.
+      --request-id-header <name> sends each request's id upstream under that header.
 
   seed-gateway connect <key> [--host 127.0.0.1] [--port 1984] [--request-timeout-ms 60000]
                        [--key-file <path>]
@@ -46,6 +54,21 @@ function parseCount(value: string | undefined, flag: string): number | undefined
   const count = Number(value)
   if (!Number.isInteger(count) || count < 1) fail(`${flag} must be a whole number of at least 1`)
   return count
+}
+
+/** One `tunnel-trace` line per event: ISO time, event name, then `key=value` fields. */
+export function formatTunnelEvent(event: TunnelEvent, now = new Date()): string {
+  const parts = [now.toISOString(), 'tunnel-trace', event.name]
+  for (const [key, value] of Object.entries(event)) {
+    if (key === 'name' || value === undefined || value === null) continue
+    const text = String(value)
+    parts.push(`${key}=${/[\s"=]/.test(text) ? JSON.stringify(text) : text}`)
+  }
+  return parts.join(' ')
+}
+
+function logTunnelEvent(event: TunnelEvent): void {
+  console.log(formatTunnelEvent(event))
 }
 
 function splitList(value: string | undefined): string[] {
@@ -89,6 +112,8 @@ export async function main(argv: string[]): Promise<void> {
       'max-streams': { type: 'string' },
       'allow-keys': { type: 'string' },
       'allow-ips': { type: 'string' },
+      trace: { type: 'boolean', default: false },
+      'request-id-header': { type: 'string' },
     },
   })
 
@@ -104,6 +129,8 @@ export async function main(argv: string[]): Promise<void> {
       upstream,
       keyFile,
       allowlist,
+      onEvent: values.trace ? logTunnelEvent : undefined,
+      requestIdHeader: values['request-id-header']?.trim() || undefined,
       upstreamTimeoutMs: parseMs(values['upstream-timeout-ms'], '--upstream-timeout-ms'),
     })
     console.log(`[Seed Protocol] Operator key (z32): ${session.key}`)

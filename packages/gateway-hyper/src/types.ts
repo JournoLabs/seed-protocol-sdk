@@ -1,4 +1,5 @@
 import type { AllowlistOptions } from './tunnel/allowlist'
+import type { TunnelEventListener } from './tunnel/events'
 
 export type TunnelMeta = {
   method: string
@@ -37,6 +38,17 @@ export type ServeTunnelOptions = {
    * throw. See `createAllowlist` for which address is checked.
    */
   allowlist?: AllowlistOptions
+  /**
+   * Receives an event at each step of each stream and request (see `TunnelEvent`), for
+   * logging or tracing. Called synchronously; a throw is dropped. Unset, no tracing state is
+   * kept.
+   */
+  onEvent?: TunnelEventListener
+  /**
+   * Send each request's id upstream under this header (e.g. `x-seed-tunnel-request-id`), so
+   * upstream logs can be matched to `onEvent` events. Replaces any value the client sent.
+   */
+  requestIdHeader?: string
 }
 
 export type ServeTunnelResult = {
