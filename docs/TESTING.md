@@ -33,10 +33,33 @@ with `bun run test`; see `vite.config.js` for the three projects (NodeJS, browse
   a root `devDependencies` entry (as `js-yaml` and `parse5` have). Vite logs "Failed to resolve
   dependency: …, present in client 'optimizeDeps.include'" for entries it can't resolve.
 
-## Live network tests
+## No network in tests
+
+Tests reach only this machine: localhost, `*.localhost` and loopback addresses. A request to any
+other host fails, and so does the test that made it, even when the code under test caught the
+error. A test that read from arweave.net on every run flaked whenever the gateway was slow.
+
+- **Node:** `packages/sdk/__tests__/test-utils/noNetwork.node.ts`, a setup file of the NodeJS
+  project and of every package's `vitest.config.ts`, blocks TCP connections
+  (`net.Socket.prototype.connect`, which http, https, undici, `fetch` and `WebSocket` use) and
+  wraps `fetch` and `WebSocket` for a message naming the URL. `packages/publish/bunfig.toml`
+  preloads `noNetwork.bun.ts`, the same guard for `bun test`.
+- **Browser:** `noNetwork.browser.ts`, imported by both `setup.browser.ts` files, wraps `fetch`,
+  `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon`. Chromium's
+  `--host-resolver-rules` (set in `vite.config.js`) fails DNS for every other host, which covers
+  workers and `<img>` loads; those fail without a message naming them.
+- **The EAS indexer is empty.** The guards answer easscan GraphQL queries with no attestations and
+  no schemas, as a chain with nothing on it would. Without that, most SDK tests sent schema
+  lookups to optimism-sepolia.easscan.org on every save. A test of EAS reads stubs `fetch` or the
+  EAS client itself, which replaces the empty answer.
+
+To fix a blocked request, mock it at the network boundary: stub `fetch`, configure a mock client
+(`MockArweaveClient`), or start a local server.
+
+### Live network tests
 
 Files named `*.live.test.ts` call real services and are skipped unless `SEED_LIVE_NETWORK_TESTS=1`,
-so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
+which also turns the guards off, so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
 arweave.net, asking the Hyper gateway first when `SEED_GATEWAY_HYPER_KEY` is set:
 
 ```bash

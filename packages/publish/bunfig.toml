@@ -1,0 +1,3 @@
+# No network in tests (see that file).
+[test]
+preload = ["../sdk/__tests__/test-utils/noNetwork.bun.ts"]

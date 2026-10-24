@@ -102,6 +102,8 @@
         "__tests__/setup.browser.ts",
         "__tests__/globalSetup.node.ts",
         "__tests__/test-utils/noUnloadGrace.ts",
+        // Setup files of the package vitest configs and publish's bunfig.toml.
+        "__tests__/test-utils/noNetwork.*.ts",
         // Type tests, compiled by tsconfig.typetests.json.
         "__tests__/types/**/*.ts",
         // Loaded by __tests__/e2e/multiTab/tab.html.
