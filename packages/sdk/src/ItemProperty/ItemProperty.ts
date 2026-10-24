@@ -1542,8 +1542,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    *   Versions stop showing the value too. Revocation is permanent.
    * @throws ClearNotSupportedError for a Boolean or Date property without `retract`: their EAS types
    *   have no empty value.
+   * @throws EntityUnloadedError when this instance was unloaded; nothing is written.
    */
   async clear(options: { retract?: boolean } = {}): Promise<void> {
+    this._assertLoaded('clear')
     const retract = options.retract === true
     const context = this._getSnapshotContext()
     const dataType = normalizeDataType(this._dataType ?? context.propertyRecordSchema?.dataType)
