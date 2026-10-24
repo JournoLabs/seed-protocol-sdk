@@ -1,5 +1,5 @@
 import { client as seedClient } from '@seedprotocol/sdk'
-import type { PublishWallet, SeedSigner, SeedTxSender } from './seedSigner'
+import type { PublishWallet } from './seedSigner'
 
 export type PublishWalletSession = PublishWallet & {
   /** Addresses to treat as owned in the Seed SDK (EOA + smart account, etc.). */
@@ -96,14 +96,4 @@ export async function clearPublishWallet(): Promise<void> {
   } catch (err) {
     console.warn('[publishWalletRegistry] Failed to clear seed client owned addresses:', err)
   }
-}
-
-/** Convenience for callers that only need signing. */
-export function getRegisteredSigner(): SeedSigner | null {
-  return session?.signer ?? null
-}
-
-/** Convenience for callers that only need sending. */
-export function getRegisteredTxSender(): SeedTxSender | null {
-  return session?.txSender ?? null
 }

@@ -1,7 +1,6 @@
 import { Item, type IItem } from '@seedprotocol/sdk'
 
 export const ZERO_BYTES32 = '0x' + '0'.repeat(64)
-export const BYTES32_LEN = 64
 
 /**
  * The Item for a seedLocalId, looked up every 200 ms until it loads. Takes one cache hold, which

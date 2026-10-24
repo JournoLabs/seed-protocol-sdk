@@ -7,14 +7,10 @@ export { getCachedMarketRates, resetMarketRateCache, type MarketRates } from './
 export { PUBLISH_GAS_HEURISTICS, heuristicPublishGas } from './gasHeuristics'
 export {
   watchPublishCost,
-  itemPublishFingerprint,
   type WatchPublishCostOptions,
   type WatchPublishCostHandle,
-  type WatchPublishCostSnapshot,
 } from './watchPublishCost'
 export type {
   PublishCostEstimate,
   EstimatePublishCostOptions,
-  PublishWorkSummary,
-  PublishMode,
 } from './types'

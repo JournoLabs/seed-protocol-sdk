@@ -137,7 +137,3 @@ export function getRemoteQueryDataSource(): QueryDataSource {
   return remoteSingleton
 }
 
-/** Tests only. */
-export function resetRemoteQueryDataSource(): void {
-  remoteSingleton = null
-}

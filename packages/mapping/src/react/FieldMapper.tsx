@@ -285,5 +285,3 @@ export function FieldMapper({
     </div>
   )
 }
-
-export default FieldMapper

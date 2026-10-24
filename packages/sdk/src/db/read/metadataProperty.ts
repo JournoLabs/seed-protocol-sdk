@@ -224,7 +224,7 @@ export function sameMetadataProperty(
   return !!a.propertyName && a.propertyName === b.propertyName
 }
 
-export { metadataPropertyGroupKeys, METADATA_PROPERTY_GROUP_KEY_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
+export { METADATA_PROPERTY_GROUP_KEY_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 
 /**
  * The schema key of a metadata row's property (properties.name through property_id), as a column

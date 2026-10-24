@@ -1,4 +1,5 @@
 import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from 'xstate'
+import type { DeleteOp } from '@/outbox'
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
@@ -1482,7 +1483,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         seedLocalId,
         propertyName,
         kind: 'delete',
-        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     }
     await markPropertyConflictsResolved(seedLocalId, propertyName)
@@ -1878,7 +1879,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         seedLocalId,
         propertyName,
         kind: 'delete',
-        value: { mode: 'property', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'property', propertyNames: [propertyName] } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     } else if (db) {
       const seedSchemaMod = await import('../seedSchema')

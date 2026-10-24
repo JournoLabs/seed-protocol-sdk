@@ -1,6 +1,6 @@
 export { usePublishProcess } from './usePublishProcess'
 export { useCanPublishItem } from './useCanPublishItem'
-export { useItemPublishStatus, type PublishProcessRecord } from './useItemPublishStatus'
+export { useItemPublishStatus } from './useItemPublishStatus'
 export {
   usePublishProcesses,
   usePublishProcessesForSeed,

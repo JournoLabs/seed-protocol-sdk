@@ -1,0 +1,210 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/**/*.{js,ts,mjs}",
+        "vite.config.js"
+      ],
+      "project": [
+        "scripts/**/*.{js,ts,mjs}"
+      ]
+    },
+    "packages/archive": {
+      "entry": [
+        "src/index.ts",
+        "src/node/index.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/arweave": {
+      "entry": [
+        "src/index.ts",
+        "src/node/index.ts",
+        "codegen.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ],
+      "ignore": [
+        "src/graphql/gql/**"
+      ],
+      "ignoreDependencies": [
+        "@graphql-codegen/introspection"
+      ]
+    },
+    "packages/bundler-core": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/eas": {
+      "entry": [
+        "src/index.ts",
+        "src/node/index.ts",
+        "codegen.ts",
+        "src/graphql/fragments/*.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ],
+      "ignore": [
+        "src/graphql/gql/**"
+      ]
+    },
+    "packages/feed": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/feed-hyper": {
+      "entry": [
+        "src/index.ts",
+        "src/bin.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/gateway-hyper": {
+      "entry": [
+        "src/index.ts",
+        "src/bin.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/mapping": {
+      "entry": [
+        "src/index.ts",
+        "src/react.ts",
+        "__tests__/**/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "__tests__/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/next": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/publish": {
+      "entry": [
+        "src/index.ts",
+        "src/thirdweb.ts",
+        "src/**/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "test-utils/**/*.ts"
+      ]
+    },
+    "packages/query": {
+      "entry": [
+        "src/index.ts",
+        "src/index.node.ts",
+        "src/node/index.ts",
+        "__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    },
+    "packages/react": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.{ts,tsx}",
+        "__tests__/setup.browser.ts",
+        "__tests__/react-app/src/main.tsx"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "__tests__/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/sdk": {
+      "entry": [
+        "src/index.ts",
+        "src/node/index.ts",
+        "src/vite/index.ts",
+        "src/drizzle/index.ts",
+        "src/platform/index.ts",
+        "src/platform/index.node.ts",
+        "src/platform/index.browser.ts",
+        "src/node/easLodashRegister.js",
+        "scripts/*.{ts,mjs}",
+        "__tests__/**/*.test.{ts,tsx}",
+        "__tests__/**/*.test-d.ts",
+        "__tests__/setup.browser.ts",
+        "__tests__/globalSetup.node.ts",
+        "__tests__/test-utils/noUnloadGrace.ts",
+        "__tests__/types/**/*.ts",
+        "__tests__/e2e/multiTab/tab.ts",
+        "__tests__/test-utils/generate-fixture-files.ts",
+        "__tests__/Schema/debug-schema-models.ts",
+        "src/db/configs/migrations.config.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,js}",
+        "__tests__/**/*.{ts,tsx}",
+        "scripts/**/*.{ts,mjs}"
+      ],
+      "ignore": [
+        "src/db/drizzle/**",
+        "src/browser/db/drizzleFiles.ts"
+      ]
+    },
+    "packages/vite": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.ts",
+        "__tests__/fixtures/**/*.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "__tests__/**/*.ts"
+      ]
+    }
+  },
+  "ignoreExportsUsedInFile": true,
+  "ignoreIssues": {
+    "packages/sdk/src/seedSchema/*.ts": [
+      "exports",
+      "types"
+    ]
+  },
+  "ignoreBinaries": [
+    "xmllint"
+  ]
+}

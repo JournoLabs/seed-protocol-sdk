@@ -1,4 +1,5 @@
 import { IItem, IItemProperty } from '@/interfaces'
+import type { DeleteOp, DeleteResult } from '@/outbox'
 import { timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import {
@@ -715,10 +716,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     try {
       const { appendOutboxOpAndWait, deleteFiles, startItemOutbox } = await import('@/outbox')
       startItemOutbox()
-      const applied = await appendOutboxOpAndWait<import('@/outbox').DeleteResult>({
+      const applied = await appendOutboxOpAndWait<DeleteResult>({
         seedLocalId,
         kind: 'delete',
-        value: { mode: 'discard' } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'discard' } satisfies DeleteOp,
       })
       if (!applied.superseded) await deleteFiles(applied.result?.filePaths ?? [])
     } catch (error) {
@@ -2059,7 +2060,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       await appendOutboxOpAndWait({
         seedLocalId: context.seedLocalId,
         kind: 'delete',
-        value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'item' } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     })
   }

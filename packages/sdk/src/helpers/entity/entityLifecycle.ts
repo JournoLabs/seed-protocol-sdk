@@ -48,11 +48,6 @@ export function entityStatus(instance: ActorBacked): EntityStatus {
   return lifecycleOf(instance).status
 }
 
-/** The load error when `entityStatus` is `error`. */
-export function entityError(instance: ActorBacked): unknown {
-  return lifecycleOf(instance).error
-}
-
 export function setEntityStatus(instance: ActorBacked, status: EntityStatus, error?: unknown): void {
   const lifecycle = lifecycleOf(instance)
   if (lifecycle.tornDown) return

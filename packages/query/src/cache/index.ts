@@ -2,18 +2,9 @@ import { CacheManager } from './CacheManager.js'
 import { loadQueryCacheConfig } from './config.js'
 import type { PersistentCache, QueryCacheConfig } from './types.js'
 
-export { CacheManager, configurePersistentCacheFactory } from './CacheManager.js'
-export { MemoryCache } from './MemoryCache.js'
+export { CacheManager } from './CacheManager.js'
 export { loadQueryCacheConfig } from './config.js'
-export {
-  generateETag,
-  generateCollectionETag,
-  generateItemETag,
-} from './etag.js'
-export {
-  buildAssembleOptionsKey,
-  sanitizeSeedUidForPath,
-} from './types.js'
+export { buildAssembleOptionsKey } from './types.js'
 export type {
   CachedCollectionData,
   CachedItemData,

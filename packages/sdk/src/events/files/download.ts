@@ -22,6 +22,7 @@ import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
 import { getCompositeChildPaths } from '@/db/read/getCompositeChildPaths'
 import { throttle } from 'lodash-es'
+import type { DownloadAllFilesResult } from '@/helpers/FileManager/IFileManager'
 
 
 const logger = debug('seedSdk:files:download')

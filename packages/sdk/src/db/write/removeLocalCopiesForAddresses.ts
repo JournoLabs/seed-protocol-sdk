@@ -133,18 +133,3 @@ export async function hardDeleteLocalSeedsByLocalIds(
 
   await appDb.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
 }
-
-/**
- * Hard-delete local on-chain seed copies for the given publisher addresses.
- * Drafts (no uid and no attestationRaw) are kept. Does not touch schemas, app_state, or chain.
- */
-export async function removeLocalCopiesForAddresses(
-  addresses: string[],
-): Promise<RemoveLocalCopiesResult> {
-  const matched = await findLocalOnchainCopiesForAddresses(addresses)
-  if (matched.removedSeedLocalIds.length === 0) {
-    return matched
-  }
-  await hardDeleteLocalSeedsByLocalIds(matched.removedSeedLocalIds)
-  return matched
-}

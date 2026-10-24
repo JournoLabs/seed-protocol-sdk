@@ -1,4 +1,3 @@
-import type { ActorRefFrom } from 'xstate'
 import { setup, assign } from 'xstate'
 import {
   ArweaveTransactionInfo,
@@ -509,4 +508,3 @@ export const publishMachine = setup({
   },
 })
 
-export type PublishActor = ActorRefFrom<typeof publishMachine>
