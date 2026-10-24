@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - Page 1 of a feed asks `@seedprotocol/query` on every request and rebuilds its cached body only when query's collection ETag changed, so new and changed posts appear on the next request instead of up to `CACHE_TTL` (an hour) later. Each request costs one round of indexer requests when query's collection is cached, none within `CACHE_MAX_AGE`. Page 1's `Cache-Control` max-age and s-maxage are now `CACHE_MAX_AGE` (default 0) instead of 3600, so clients and CDNs revalidate and get a 304 when nothing changed.

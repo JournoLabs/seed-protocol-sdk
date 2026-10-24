@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.10 (2026-10-24)
 
 - New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
 - The browser client initialises without Iterator helpers (Chrome before 122, Firefox before 131, Safari before 18.4). `@zenfs/core` 2.5.6 called `Iterator.prototype.map` when it loaded, and init failed with `journalOperations.values(...).map is not a function`. `@zenfs/core` is now 2.7.7 and `@zenfs/dom` 1.2.14; an app that installs them beside the SDK needs the same versions.
@@ -19,6 +19,33 @@ All notable changes to this package are documented in this file.
 - `unload()` on an instance no one holds does nothing. It stopped the instance even when the caller had never held it.
 - Assigning a property, `setValue`, `save`, `publish` or `unpublish` on an unloaded Item or ItemProperty instance throws `EntityUnloadedError` (exported), whose message names the item. So do assigning a property, `saveNewVersion`, `reload`, `model.create` and `modelProperty.save` on a destroyed or evicted Schema, Model or ModelProperty, naming it. Assignments did nothing and `publish()` never settled. Reads still return the last values.
 - `Item.retain(item)` takes a hold on a cached, running instance (false when it was stopped); so do `Schema.retain`, `Model.retain` and `ModelProperty.retain`. `Item.find` no longer keeps the hold it took when the item isn't ready within `readyTimeout`: it returned `undefined` and left the item held. When `Item.all` with `hold: true` throws (aborted by `signal`, or an item not ready within `readyTimeout` with `waitForReady`), it releases the holds it took; before, those items stayed held.
+
+### Commits
+
+#### Features
+
+- unload grace period and no-hold lookups by default (504f56dc)
+- state supported browsers, add checkBrowserSupport() (76447831)
+- exportArchive writes a published item as a BagIt bag (a8f5563e)
+- archive: add @seedprotocol/archive with BagIt bags, PREMIS, Dublin Core and an h-entry reader (9a88ae10)
+
+#### Fixes
+
+- a property never shows the synced value beside its sync conflict (da9afc01)
+- writes on a destroyed or evicted Schema throw EntityUnloadedError (8287922c)
+- definitions stay cached without holds; lookups take no hold (a2d3024d)
+- load the validation module with await, not import().then (9b1a045a)
+- evict entity caches on stop without importing the classes (fecfd304)
+- client.stop() closes the database and drops cached entities (006b0240)
+- react: useItems holds its items once per mounted hook (2a0a9492)
+- load without Iterator helpers (ZenFS 2.7.7) (f88840eb)
+- react: useItem holds its item once per mounted hook (8e9202d8)
+- loaded item properties take a changed definition at once (c2004e04)
+- keep refValueType for a schema file's single Relation (790a447a)
+
+#### Other
+
+- loadProperty comment names what reads a new property's definition (f7ff0798)
 
 ## 0.7.9 (2026-10-22)
 

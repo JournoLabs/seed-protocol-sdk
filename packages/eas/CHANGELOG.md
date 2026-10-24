@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - On Node, `NodeEasClient` (registered by `@seedprotocol/eas/node` and `registerNodeEasPlatform`) sends EAS requests through its own undici `Agent` that offers only the X25519 and P-256 key-exchange groups and keeps idle connections for 30 s. Node 24.21+ also offers the post-quantum X25519MLKEM768 group by default; easscan doesn't support it, and with it each new connection's TLS handshake took about 1.45 s instead of about 175 ms. Node's fetch drops idle connections after 4 s, so most reads after a pause paid it. The process's TLS defaults and fetch's global dispatcher are unchanged. Under Bun or Deno undici is not loaded, and when the host has set a proxy or mock as fetch's global dispatcher (`setGlobalDispatcher`, `NODE_USE_ENV_PROXY`) EAS requests keep using it. Pass `new NodeEasClient({ dispatcher: false })` or `registerNodeEasPlatform({ easClient: { dispatcher: false } })` to use fetch's defaults, a `Dispatcher` of your own, or `dispatcherOptions: { ecdhCurve, keepAliveTimeoutMs }`. `createEasNodeDispatcher` builds the default one. `@seedprotocol/eas` now depends on `undici`; only the `./node` entry loads it.

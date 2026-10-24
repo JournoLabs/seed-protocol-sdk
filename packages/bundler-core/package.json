@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/bundler-core",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "private": true,
   "description": "Internal: settings shared by @seedprotocol/vite and @seedprotocol/next. Inlined into both at build time; never published.",
   "type": "module",

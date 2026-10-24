@@ -2,13 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.10 (2026-10-24)
 
 - `publishItem` (the executor behind `item.publish()`) holds the item until the publish settles, so an item the caller looked up without a hold doesn't unload mid-publish after the SDK's grace period. The publish steps that look an item up themselves take an explicit hold (`Item.find({ hold: true })`), since `find` no longer holds by default.
 - `watchPublishCost` re-estimates after writes to the item's seed, version and property rows, through the SDK's change feed, where one runs (the browser). It compared the loaded property instances' values on every item update, so it missed edits made in another tab or to rows the loaded item hadn't read. In Node, which has no change feed, it still compares the loaded values. The new `watchRows` option replaces how rows are watched.
 - A publish restored from its saved record releases the Item it loads to create attestations once the step finishes or fails, on the multiPublish path too (the direct-EAS path already did). The item stayed held, so it was never unloaded. The lookup that waits for that item now runs one `Item.find` at a time; overlapping lookups each took a hold and only one was returned.
 - `usePublishCostEstimate` keeps showing the last estimate (as `isStale`) when it gets a new Item instance for the same `seedLocalId` and `publishMode`, until the new watcher's first estimate arrives. It showed `null` in between. `watchPublishCost` takes the estimate to start from as `previousEstimate`.
 - `watchPublishCost` retries a failed first estimate once after 5 s (`firstEstimateRetryMs`, 0 turns it off) and stays `isEstimating` until the retry settles. A failed first estimate left `estimate` null until the item changed or `refresh()` was called.
+
+### Commits
+
+#### Features
+
+- sdk: unload grace period and no-hold lookups by default (504f56dc)
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+- createAttestations releases the item it reloads (4fc2ab6f)
+- watchPublishCost re-estimates on row writes (0b1d44ac)
+- keep the cost estimate across a new Item instance, retry a failed first estimate (6d00fd2d)
 
 ## 0.7.9 (2026-10-22)
 

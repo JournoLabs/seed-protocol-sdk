@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/gateway-hyper",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "HyperDHT HTTP tunnel that exposes a Seed Protocol gateway and upload API through a local sidecar or app-server proxy",
   "keywords": [
     "seed-protocol",

@@ -1,5 +1,13 @@
 # Changelog — @seedprotocol/feed-hyper
 
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 ### Commits

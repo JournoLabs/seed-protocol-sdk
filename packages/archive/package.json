@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/archive",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Standards-based archive packaging for Seed Protocol items: BagIt (RFC 8493) bags with SHA-256/SHA-512 manifests, Dublin Core and PREMIS metadata, and an h-entry archive document reader",
   "keywords": [
     "seed-protocol",

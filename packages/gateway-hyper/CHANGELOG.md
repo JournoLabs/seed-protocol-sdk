@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.10 (2026-10-24)
 
 - `serveTunnel` takes `allowlist: { keys, ips }` and `seed-gateway serve` takes
   `--allow-keys` and `--allow-ips`. A client whose public key or address (IP or CIDR) is
@@ -24,6 +24,25 @@ All notable changes to this package are documented in this file.
   ADR 0024 and "Raw TCP mode" in docs/GATEWAY_HYPER.md.
 - `seed-gateway connect` takes `--connect-timeout-ms`, and `--port 0` picks a free port instead
   of falling back to 1984.
+
+### Commits
+
+#### Features
+
+- raw TCP tunnel mode (2aa0c031)
+- serveTunnel events and per-request id header (188a3075)
+- connection allowlist for serveTunnel (477bbabb)
+- persistent client keys for connectTunnel and createGatewayProxy (5655b04e)
+- bootstrap option for private or local HyperDHT networks (60a343c2)
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
+#### Other
+
+- ADR 0024 raw TCP mode; tracing and raw mode runbook (87cd7e95)
+- allowlist and client key runbook, changelog notes (9023086f)
 
 ## 0.7.6 (2026-10-17)
 

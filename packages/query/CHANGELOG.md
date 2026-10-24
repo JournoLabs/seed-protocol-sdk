@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - On Node, `initializeQueryPlatform` registers `NodeEasClient` when no EAS client is registered, as it already did for the Arweave client. Before, a process that used query without the SDK got `DefaultEasClient`, which doesn't use `NodeEasClient`'s TLS and keep-alive settings, so every new connection to easscan on Node 24.21+ paid the ~1.45 s handshake.

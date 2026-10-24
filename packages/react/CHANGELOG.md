@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.10 (2026-10-24)
 
 - **Breaking:** `useItem` holds the Item it shows once per mounted hook and releases it when the hook unmounts or shows another item, so an item no hook or caller holds is unloaded. Before, each lookup that missed the instance cache took a hold that was never released, and no item `useItem` loaded was ever unloaded. Code that keeps an Item from `useItem` after the component unmounts must hold it itself (`Item.find({ hold: true })` or `Item.retain`, then `unload()` when done).
 - **Breaking:** `useItems` holds each item it lists once per mounted hook and releases it when the item leaves the list or the hook unmounts, so an item shown only by a list is unloaded when the list unmounts. Before, every fetch took one more hold on each listed item and none was released, so no listed item was ever unloaded. Code that keeps an Item from `useItems` after the list unmounts must hold it itself (`Item.find({ hold: true })` or `Item.retain`, then `unload()` when done). With the SDK's grace period (`entityCache.unloadGraceMs`, default 60 s), an item unloads that long after the last hook showing it unmounts. The list's query is dropped as soon as no hook uses it (`gcTime: 0`), and a list that includes a stopped instance, or whose item stops while listed, is fetched again (`useItem` looks its item up again the same way).
@@ -10,6 +10,20 @@ All notable changes to this package are documented in this file.
 - **Breaking:** `useCreateModel` and `useCreateModelProperty` create without a cache hold. They held every model and property they created, or looked up, and never released it.
 - **Breaking:** `useCreateItem` and `useCreateItemProperty` create without a cache hold (pass `hold: true` in `useCreateItem`'s options to take one, and `unload()` it when done). They held every instance they created and never released it. A created item that no hook shows unloads after the SDK's grace period (`entityCache.unloadGraceMs`, default 60 s).
 - `useItem` looks the item up again when the instance it shows is stopped (dropped by another tab, a local purge or `destroy`). It kept showing the stopped instance until the next sync.
+
+### Commits
+
+#### Features
+
+- sdk: unload grace period and no-hold lookups by default (504f56dc)
+- sdk: state supported browsers, add checkBrowserSupport() (76447831)
+
+#### Fixes
+
+- definition hooks hold what they show; no leaked create holds (0dbe7b6c)
+- useItems holds its items once per mounted hook (2a0a9492)
+- sdk: load without Iterator helpers (ZenFS 2.7.7) (f88840eb)
+- useItem holds its item once per mounted hook (8e9202d8)
 
 ## 0.7.9 (2026-10-22)
 

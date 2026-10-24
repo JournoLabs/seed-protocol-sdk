@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/mapping",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Map markdown and RSS/Atom sources onto Seed Protocol model properties: headless mapping helpers plus an optional React FieldMapper UI",
   "keywords": [
     "seed-protocol",

@@ -1,5 +1,13 @@
 # @seedprotocol/vite
 
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.6 (2026-10-17)
 
 - **Breaking: `seedVitePlugin()` defaults cut to what the SDK needs.** By default it now sets cross-origin isolation headers, `worker.format: 'es'`, `optimizeDeps.rolldownOptions.output.strictExecutionOrder: true` (drizzle-orm's dev pre-bundle failed with `Cannot read properties of undefined (reading 'Symbol')` when the app imports `@seedprotocol/sdk/drizzle`), and, for Seed packages linked from outside the app, `resolve.dedupe` and `server.fs.allow`. [VITE_RENDERER.md](VITE_RENDERER.md) lists what each setting is for and how that was tested, plus upgrade steps.
