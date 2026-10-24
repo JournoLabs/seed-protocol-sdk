@@ -297,6 +297,7 @@ export default defineConfig({
             // Other publish tests use bun:test and run via `bun run --filter @seedprotocol/publish test`.
             'packages/publish/src/services/publish/actors/createArweaveDataItemsPhase2.test.ts',
             'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',
+            'packages/publish/src/services/publish/helpers/ensureEasSchemas.savedRowSchemaUid.test.ts',
             'packages/react/__tests__/**/*.node.test.tsx',
           ],
           // Paths are relative to `dir: '.'` (the repo root). The old `node/**`-style patterns were written for

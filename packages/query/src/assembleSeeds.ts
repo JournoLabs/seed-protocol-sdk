@@ -164,15 +164,11 @@ async function processItemProperty(
     return
   }
 
-  const schemaUid = property.schemaId
-  setSchemaUidForSchemaDefinition({
-    text: propertyNameSnake,
-    schemaUid,
-  })
-
   let isRelation = false
   let isList = false
   const easType = metadata.type
+  // A one-field attestation's schema is exactly `<type> <name>`.
+  if (easType) setSchemaUidForSchemaDefinition({ text: `${easType} ${propertyNameSnake}`, schemaUid: property.schemaId })
   // A removed property (ADR 0021): absent from the seed, and a zero uid is no related seed
   if (isEasEmptyValue(easType, metadata.value)) return
   const isBytes32Relation =
