@@ -233,7 +233,7 @@ const twin = seedTwinConfig(twinJson)
 
 initPublish({
   ...twin.publish, // chain 31337, rpcUrl, addresses, executor, thirdweb: { bundlerUrl, sponsorGas: false, modularWalletMode: 'EOA' }
-  uploadApiBaseUrl: 'http://localhost:3000', // your seed-protocol-server
+  uploadApiBaseUrl: 'http://localhost:3000', // your local upload API
   thirdwebClientId, // login stays hosted; allow the local origin
   useModularExecutor: true,
 })

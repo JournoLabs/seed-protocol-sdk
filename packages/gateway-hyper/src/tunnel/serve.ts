@@ -180,7 +180,7 @@ export async function serveTunnelConnection(
 }
 
 /**
- * Operator: accept Hyperswarm/DHT connections and proxy framed HTTP to upstream Traefik.
+ * Operator: accept Hyperswarm/DHT connections and proxy framed HTTP to the upstream.
  */
 export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTunnelResult> {
   const upstream = options.upstream.replace(/\/$/, '')

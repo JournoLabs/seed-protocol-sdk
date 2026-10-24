@@ -1,15 +1,13 @@
 # Gateway Hyper (P2P infrastructure tunnel)
 
-Tunnel a local **seed-protocol-server + ar.io gateway** stack to SDK users over **HyperDHT**, with optional localhost HTTP sidecar **or** an app-server HTTP proxy for browsers.
-
-Generation and bundler logic stay in `seed-protocol-server`. This repo adds transport only (`@seedprotocol/gateway-hyper` + SDK config).
+Tunnel an HTTP upstream that serves an Arweave gateway and the upload API to SDK users over **HyperDHT**, with optional localhost HTTP sidecar **or** an app-server HTTP proxy for browsers. `@seedprotocol/gateway-hyper` and the SDK config cover transport only; the upstream is whatever HTTP service the operator runs.
 
 ## Concepts
 
 | Concept | Role |
 |---------|------|
 | Operator key (z32) | Stable infrastructure identity (operator Ed25519 public key) |
-| `seed-gateway serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
+| `seed-gateway serve` | Operator: proxy Hyper connections → upstream HTTP |
 | `seed-gateway connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
 | `createGatewayProxy` | App server: dial operator key → Node HTTP handlers for a mount path (Path B) |
 | `DEFAULT_SEED_GATEWAY_HYPER_KEY` | Well-known official operator key (empty until ops publish one) |
@@ -183,20 +181,16 @@ initPublish({
 
 ## Operator runbook
 
-1. Run `seed-protocol-server` stack (Traefik + gateway + bundler). See server README.
+1. Run an HTTP upstream that serves the upload API and gateway routes.
 2. On the operator host:
 
    ```bash
    seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
 
-   If the tunnel runs in Docker on the stack's compose network, use the service that fronts the
-   gateway and seed API as the upstream, for example `--upstream http://traefik:80`.
-
    Upload API routes (`/api/upload/arweave/*`) and gateway reads (`/raw/{id}`, `/graphql`,
-   `/{txId}`) must go through the same upstream, and `ARWEAVE_GATEWAY_URL` on `seed_server` must
-   point at the gateway SDK users read through. Otherwise an item uploaded through the bundler isn't
-   readable right away.
+   `/{txId}`) must go through the same upstream, and the upload API must hand uploads to the
+   gateway SDK users read through. Otherwise an uploaded item isn't readable right away.
 
 3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional), in both `packages/arweave/src/constants.ts` and `packages/gateway-hyper/src/constants.ts`.
 4. Each SDK user (Path A) runs:
@@ -348,7 +342,7 @@ Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.g
 
 ## Manual validation
 
-1. Operator: docker stack + `seed-gateway serve`.
+1. Operator: upstream + `seed-gateway serve`.
 2. Path A: `seed-gateway connect <key>` then `curl http://127.0.0.1:1984/info`.
 3. Path B: mount `createGatewayProxy`, then `curl https://your-app/api/seed-gateway/info`.
 4. Publish via app; confirm `GET /raw/{txId}` through the chosen path serves new uploads immediately.

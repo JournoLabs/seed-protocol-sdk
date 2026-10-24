@@ -24,7 +24,7 @@ const DEFAULT_PORT = 1984
 const USAGE = `Usage:
   seed-gateway serve [--upstream http://127.0.0.1:80] [--key-file <path>] [--upstream-timeout-ms 30000]
                      [--allow-keys k1,k2] [--allow-ips 192.168.1.0/24,203.0.113.7]
-      Operator: accept Hyper connections and proxy them to a local upstream (Traefik).
+      Operator: accept Hyper connections and proxy them to a local HTTP upstream.
       Default --key-file: ./.seed/gateway-tunnel/operator.key.json (created on first run).
       Answers 504 when the upstream is idle for --upstream-timeout-ms (0 disables).
       With --allow-keys or --allow-ips, only clients whose public key or address is listed
