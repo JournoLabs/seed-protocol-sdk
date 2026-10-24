@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - A local database that looks older than 0.7.7 is copied to `seed.before-recreate-<ms>.db` beside `seed.db` (in OPFS in the browser) before it is recreated, and the warning names the copy. A 0.7.7 database can look older: 0.7.7 wrote its `storedDisplayUrlsCleared` marker from a background task after init, so a database closed right after its first 0.7.7 start, or whose task failed, has no marker, and 0.7.8 to 0.7.10 recreated it, dropping its unpublished drafts. If the copy fails, or the database is a remote libsql URL with nowhere to copy it, the database is opened as it is instead of recreated.
+- `@seedprotocol/sdk/node` exports `EntityUnloadedError`, `ItemCreateError` (and `ItemCreateErrorCode`), `PublishValidationFailedError`, `RelatedItemUnpublishedError`, `HtmlEmbeddedDataUriLimitError`, `HtmlSeedPropertyRefError`, and `exportArchive` with `ArchiveExportError`. A Node app importing from `./node` couldn't `instanceof` the error a write on an unloaded item throws. Both entries now export `OutboxOpFailedError` (`code: 'OUTBOX_OP_FAILED'`, the failing error's name in `errorName`), `RelationTargetError` and `StagedValueMissingError`; `save()` rejects with the first, and `ItemCreateError.cause` is usually one.
 
 ## 0.7.10 (2026-10-24)
 
