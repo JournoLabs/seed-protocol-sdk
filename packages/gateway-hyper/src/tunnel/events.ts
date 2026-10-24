@@ -67,6 +67,51 @@ export type TunnelEventName = TunnelEvent['name']
 /** Called synchronously; a throw is caught and dropped so tracing can't break the tunnel. */
 export type TunnelEventListener = (event: TunnelEvent) => void
 
+/** Bytes are counted from the HTTP client's side: up is toward the upstream. */
+type RawCloseFields = {
+  conn: string
+  bytesUp: number
+  bytesDown: number
+  durationMs: number
+  /** First error on either side, as `hyper:<code>`, `tcp:<code>` or `connect-timeout` */
+  error: string | null
+}
+
+/** Events from `serveRawTunnel`'s `onEvent`. Connections are `c<N>`. */
+export type RawTunnelEvent =
+  | {
+      name: 'conn.open'
+      conn: string
+      remoteKey: string
+      host: string | null
+      by: AllowedBy
+    }
+  | Extract<TunnelEvent, { name: 'stream.refused' }>
+  | ({ name: 'conn.close' } & RawCloseFields)
+
+export type RawTunnelEventListener = (event: RawTunnelEvent) => void
+
+/** Events from `connectRawTunnel`'s `onEvent`, one TCP connection each. */
+export type RawClientEvent =
+  | { name: 'conn.open'; conn: string; connectMs: number }
+  /** A TCP connection refused because `maxConnections` were already open */
+  | { name: 'conn.refused'; open: number; max: number }
+  | ({ name: 'conn.close' } & RawCloseFields)
+
+export type RawClientEventListener = (event: RawClientEvent) => void
+
+/** Wrap `onEvent` so a throw is dropped; undefined when there is no listener. */
+export function safeEmitter<E>(onEvent: ((event: E) => void) | undefined): ((event: E) => void) | undefined {
+  if (!onEvent) return undefined
+  return (event) => {
+    try {
+      onEvent(event)
+    } catch {
+      // Tracing must not break the tunnel.
+    }
+  }
+}
+
 export function errorFields(err: unknown): { error: string; code?: string } {
   const error = err instanceof Error ? err.message : String(err)
   const code = (err as { code?: unknown } | null)?.code

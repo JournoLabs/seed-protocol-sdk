@@ -7,6 +7,7 @@ import { createAllowlist } from './allowlist'
 import {
   createIdSource,
   errorFields,
+  safeEmitter,
   type TunnelEventListener,
   type UpstreamPhase,
 } from './events'
@@ -34,18 +35,6 @@ function errorResponse(
     status,
     headers: { 'content-type': 'text/plain; charset=utf-8' },
     body: Buffer.from(message, 'utf8'),
-  }
-}
-
-/** Call `onEvent`, dropping anything it throws. */
-function safeEmitter(onEvent: TunnelEventListener | undefined): TunnelEventListener | undefined {
-  if (!onEvent) return undefined
-  return (event) => {
-    try {
-      onEvent(event)
-    } catch {
-      // Tracing must not break the tunnel.
-    }
   }
 }
 
