@@ -1,11 +1,11 @@
 /**
- * Vitest setup file (browser): no network in tests. See networkGuard.ts. Wraps fetch,
+ * Vitest setup file (browser): no network in tests beyond allowedTestHosts.ts. See networkGuard.ts. Wraps fetch,
  * XMLHttpRequest, WebSocket, EventSource and sendBeacon on the page. Requests from workers and
  * DOM loads (<img src>) are blocked by Chromium's --host-resolver-rules in vite.config.js
  * instead, without a test failure naming them.
  */
 import { afterAll, afterEach } from 'vitest'
-import { assertNoBlockedRequests, blockRequest, emptyEasIndexerResponse, liveNetworkAllowed, remoteHostOf } from './networkGuard'
+import { assertNoBlockedRequests, blockRequest, liveNetworkAllowed, remoteHostOf } from './networkGuard'
 
 function installBrowserNetworkGuard(): void {
   if (liveNetworkAllowed() || typeof window === 'undefined') return
@@ -15,8 +15,6 @@ function installBrowserNetworkGuard(): void {
   const realFetch = window.fetch.bind(window)
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    const fake = emptyEasIndexerResponse(url, init)
-    if (fake) return Promise.resolve(fake)
     if (remote(url)) {
       return Promise.reject(blockRequest(`fetch ${(init?.method ?? 'GET').toUpperCase()} ${url}`))
     }

@@ -8,6 +8,7 @@ import { playwright } from '@vitest/browser-playwright'
 import Inspect from 'vite-plugin-inspect'
 import { configDefaults } from 'vitest/config'
 import { seedVitePlugin } from '@seedprotocol/vite'
+import { ALLOWED_TEST_HOSTS } from './packages/sdk/__tests__/test-utils/allowedTestHosts.ts'
 
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
@@ -80,16 +81,21 @@ const workspaceSourceAliases = (platform) => {
   ]
 }
 
-// No network in tests (packages/sdk/__tests__/test-utils/networkGuard.ts). The setup files patch
-// fetch and friends; in the browser this flag also fails DNS for every host but localhost, which
-// covers requests from workers and DOM loads the setup file can't see. IP literals such as the
-// vitest server's 127.0.0.1 don't go through the resolver.
+// No network in tests beyond allowedTestHosts.ts (packages/sdk/__tests__/test-utils/networkGuard.ts).
+// The setup files patch fetch and friends; in the browser this flag also fails DNS for every other
+// host, which covers requests from workers and DOM loads the setup file can't see. IP literals such
+// as the vitest server's 127.0.0.1 don't go through the resolver.
 const liveNetwork = process.env.SEED_LIVE_NETWORK_TESTS === '1'
+const resolvableHosts = ['localhost', ...Object.keys(ALLOWED_TEST_HOSTS)]
 const browserProvider = () =>
   playwright(
     liveNetwork
       ? {}
-      : { launchOptions: { args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost'] } },
+      : {
+          launchOptions: {
+            args: [`--host-resolver-rules=MAP * ~NOTFOUND, ${resolvableHosts.map((h) => `EXCLUDE ${h}`).join(', ')}`],
+          },
+        },
   )
 
 // Vite's object alias form as an array, so it can be combined with workspaceSourceAliases.

@@ -159,9 +159,9 @@ export async function ensureModelUidsForGetPublishPayloadTest(
  * Image, File and Html models (SEEDPROTOCOL_Seed_Protocol_v1.json).
  * getPublishPayload fails a property whose schema isn't registered (the publish package registers
  * them in ensureEasSchemasForItem, which these tests don't run). Covers both name forms a property
- * can attest under (schema key, Id-suffixed, List-of-relation storage name). The EAS indexer is
- * empty in tests (docs/TESTING.md), so nothing is looked up; the SDK models' schemas were found
- * on optimism-sepolia.easscan.org until tests lost the network.
+ * can attest under (schema key, Id-suffixed, List-of-relation storage name). Each UID is the one
+ * the schema registry derives for the definition (zero resolver, revocable), as registering it
+ * would give, so nothing waits on the EAS indexer or depends on what it holds.
  */
 export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: SchemaFileFormat): Promise<void> {
   const zeroAddress = '0x0000000000000000000000000000000000000000' as `0x${string}`
@@ -695,8 +695,8 @@ export async function markPublished(item: ItemClass<any>, related: ItemClass<any
   await db.update(versions).set({ uid: versionUid, seedUid }).where(eq(versions.seedLocalId, item.seedLocalId!))
   const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
   for (const row of rows) {
-    // A published row records its schema's uid. Saves only get one when the EAS indexer has the
-    // schema, and the indexer is empty in tests.
+    // A published row records its schema's uid. Saves only get one when the EAS indexer already
+    // has the schema, which these tests don't rely on.
     await db
       .update(metadata)
       .set({

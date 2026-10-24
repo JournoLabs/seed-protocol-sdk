@@ -45,8 +45,10 @@ once; if it fails again, it's a real failure. [docs/TESTING.md](docs/TESTING.md)
 - Tests assert behaviour, not how it's implemented.
 - Test defaults match production. A global override of a runtime default needs a comment saying
   why, and a test on the real default ([docs/TESTING.md](docs/TESTING.md#test-defaults-match-production)).
-- No network in tests. The test setups block every host but this machine; mock at the network
-  boundary or write a `*.live.test.ts` that runs only with `SEED_LIVE_NETWORK_TESTS=1`.
+- No network in tests beyond this machine and the hosts in
+  `packages/sdk/__tests__/test-utils/allowedTestHosts.ts`; the test setups block the rest. Mock at
+  the network boundary or write a `*.live.test.ts` that runs only with `SEED_LIVE_NETWORK_TESTS=1`.
+  Adding a host to the allowlist needs a reason in that file.
 - No deprecated aliases. Remove the old name and mark it **Breaking** in the package's
   `CHANGELOG.md` under `## Unreleased`. PermaPress is the only consumer and adapts.
 - Migrations: `bun run drizzle:update --name <what_it_does>` writes the next `NNNN_` file, its

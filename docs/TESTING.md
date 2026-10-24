@@ -48,14 +48,14 @@ The overrides, and the tests on the real default:
 | Unload grace period 0 (`test-utils/noUnloadGrace.ts`) | 60 s | `helpers/entityCacheGrace.test.ts` |
 | Browser `filesDir` `/app-files` (`createTestConfig`) | `.seed` | react `SeedProviderInit.test.tsx` (empty config) |
 | No retries when offline (`helpers/retryWhenOnline.ts`, `NODE_ENV=test`) | on | `events/item/easSyncManager.test.ts` |
-| Empty EAS indexer (`test-utils/networkGuard.ts`) | easscan | EAS read tests stub `fetch` with real-shaped answers |
 | Page without newer builtins (`test-utils/oldestBrowser.ts`) | the user's browser | every Node test, and the browser workers |
 
 ## No network in tests
 
-Tests reach only this machine: localhost, `*.localhost` and loopback addresses. A request to any
-other host fails, and so does the test that made it, even when the code under test caught the
-error. A test that read from arweave.net on every run flaked whenever the gateway was slow.
+Tests reach only this machine (localhost, `*.localhost` and loopback addresses) and the hosts in
+`packages/sdk/__tests__/test-utils/allowedTestHosts.ts`. A request to any other host fails, and so
+does the test that made it, even when the code under test caught the error. A test that read from
+arweave.net on every run flaked whenever the gateway was slow.
 
 - **Node:** `packages/sdk/__tests__/test-utils/noNetwork.node.ts`, a setup file of the NodeJS
   project and of every package's `vitest.config.ts`, blocks TCP connections
@@ -64,12 +64,12 @@ error. A test that read from arweave.net on every run flaked whenever the gatewa
   preloads `noNetwork.bun.ts`, the same guard for `bun test`.
 - **Browser:** `noNetwork.browser.ts`, imported by both `setup.browser.ts` files, wraps `fetch`,
   `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon`. Chromium's
-  `--host-resolver-rules` (set in `vite.config.js`) fails DNS for every other host, which covers
-  workers and `<img>` loads; those fail without a message naming them.
-- **The EAS indexer is empty.** The guards answer easscan GraphQL queries with no attestations and
-  no schemas, as a chain with nothing on it would. Without that, most SDK tests sent schema
-  lookups to optimism-sepolia.easscan.org on every save. A test of EAS reads stubs `fetch` or the
-  EAS client itself, which replaces the empty answer.
+  `--host-resolver-rules` (set in `vite.config.js`) fails DNS for every host but localhost and the
+  allowed ones, which covers workers and `<img>` loads; those fail without a message naming them.
+
+`allowedTestHosts.ts` maps each allowed host to the reason tests need the real service. It holds
+`optimism-sepolia.easscan.org`, the SDK's default EAS indexer: item saves and model init look up
+schemas there, in most SDK tests. Adding a host needs a reason in that file.
 
 To fix a blocked request, mock it at the network boundary: stub `fetch`, configure a mock client
 (`MockArweaveClient`), or start a local server.

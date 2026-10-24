@@ -5,7 +5,7 @@
  * because bun implements both natively. Unix sockets and named pipes are allowed.
  */
 import net from 'node:net'
-import { blockRequest, emptyEasIndexerResponse, isLocalHost, liveNetworkAllowed, remoteHostOf } from './networkGuard'
+import { blockRequest, isAllowedHost, liveNetworkAllowed, remoteHostOf } from './networkGuard'
 
 const INSTALLED = Symbol.for('seed.test.networkGuard')
 
@@ -24,7 +24,7 @@ export function installNodeNetworkGuard(): void {
     const [options] = normalizeArgs ? normalizeArgs(args) : [args[0] as NormalizedConnect[0]]
     const host = typeof options === 'object' && options ? options.host : undefined
     const isPipe = typeof options === 'object' && options && typeof options.path === 'string'
-    if (!isPipe && !isLocalHost(host)) {
+    if (!isPipe && !isAllowedHost(host)) {
       const error = blockRequest(`TCP connection to ${host}:${options?.port ?? ''}`)
       process.nextTick(() => this.destroy(error))
       return this
@@ -36,8 +36,6 @@ export function installNodeNetworkGuard(): void {
   if (typeof realFetch === 'function') {
     globalThis.fetch = function guardedFetch(input: RequestInfo | URL, init?: RequestInit) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      const fake = emptyEasIndexerResponse(url, init)
-      if (fake) return Promise.resolve(fake)
       if (remoteHostOf(url)) {
         return Promise.reject(blockRequest(`fetch ${(init?.method ?? 'GET').toUpperCase()} ${url}`))
       }
