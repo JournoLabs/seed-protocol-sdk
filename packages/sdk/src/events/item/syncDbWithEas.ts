@@ -942,12 +942,9 @@ const insertSyncedProperties = async ({
     let refSchemaUid
     const schemaUid = property.schemaId
 
-    setSchemaUidForSchemaDefinition({
-      text: propertyNameSnake,
-      schemaUid,
-    })
-
     const easDataType = propertyMetadata.type
+    // A one-field attestation's schema is exactly `<type> <name>`.
+    if (easDataType) setSchemaUidForSchemaDefinition({ text: `${easDataType} ${propertyNameSnake}`, schemaUid })
     const versionUid = property.refUID
     const versionLocalId = versionUidToLocalId.get(versionUid)
     const attestationCreatedAt = property.timeCreated * 1000

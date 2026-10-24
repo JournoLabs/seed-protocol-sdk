@@ -2,7 +2,7 @@ import { ModelValues } from '@/types'
 // Dynamic import to break circular dependency: Model -> BaseItem -> createNewItem -> Model
 // import { Model } from '@/Model/Model'
 import { resolveNewSeedFields } from './createSeed'
-import { resolveMetadataSchemaUid } from './createMetadata'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { generateId } from '@/helpers/generateId'
@@ -73,7 +73,7 @@ export const createNewItem = async ({
         if (!propertyRecordSchema || propertyRecordSchema.storageType === 'ItemStorage') return
         schemaUids.set(
           propertyName,
-          await resolveMetadataSchemaUid(
+          await lookupPropertySchemaUid(
             listRelationEasPropertyName(propertyName, propertyRecordSchema) ?? propertyName,
             propertyRecordSchema,
           ),

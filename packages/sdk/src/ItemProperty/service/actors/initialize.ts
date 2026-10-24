@@ -1,10 +1,9 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { getEasSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
-import { easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 
 
 export const initialize = fromCallback<
@@ -30,20 +29,10 @@ export const initialize = fromCallback<
         propertyRecordSchema.storageType !== 'ItemStorage'
       )
     ) {
-      try {
-        // A name alone matches schemas of any type (`bytes32 storage_transaction_id` beside
-        // `string storage_transaction_id`), so look up the exact definition when the type is known.
-        const schemaText = easSchemaDefinitionForProperty(propertyName, propertyRecordSchema) ?? propertyName
-        schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText })
-        if (schemaUid) {
-          sendBack({ type: 'updateContext', schemaUid })
-        }
-      } catch (error) {
-        // If schema fetch fails, continue without schemaUid - it's not required for local metadata
-        // Log error in development but don't throw
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
-        }
+      // Undefined when the lookup fails: local metadata doesn't need it.
+      schemaUid = await lookupPropertySchemaUid(propertyName, propertyRecordSchema)
+      if (schemaUid) {
+        sendBack({ type: 'updateContext', schemaUid })
       }
     }
   
