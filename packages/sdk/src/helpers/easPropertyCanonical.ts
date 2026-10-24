@@ -1,5 +1,1 @@
-export {
-  pickLatestPropertyAttestationsByRefAndSchema,
-  type AttestationLikeForCanonical,
-  type PickLatestPropertyAttestationsOptions,
-} from '@seedprotocol/eas'
+export { pickLatestPropertyAttestationsByRefAndSchema } from '@seedprotocol/eas'

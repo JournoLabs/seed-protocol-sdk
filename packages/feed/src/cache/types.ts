@@ -1,4 +1,4 @@
-import type { FeedItem, ImageMetadata } from '../types';
+import type { ImageMetadata } from '../types';
 
 /**
  * Cached image metadata for an Arweave transaction ID
@@ -70,5 +70,3 @@ export function buildContentKey(
   }
   return `${schemaName}:${format}`;
 }
-
-export type { FeedItem };

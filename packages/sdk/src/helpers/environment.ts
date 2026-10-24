@@ -10,10 +10,6 @@ export const isBrowser = (): boolean => {
   return !isElectron() && typeof document !== 'undefined' && typeof window !== 'undefined'
 }
 
-export const isReactNative = (): boolean => {
-  return typeof navigator !== 'undefined' && navigator.product === 'ReactNative'
-}
-
 export const isElectron = (): boolean => {
   return typeof process !== 'undefined' && process.versions != null && process.versions.electron != null;
 }
@@ -50,63 +46,9 @@ export const isElectronRenderer = (): boolean => {
 }
 
 /**
- * Detects if code is running in an Electron main process.
- * 
- * @returns true if running in Electron main process, false otherwise
- */
-export const isElectronMain = (): boolean => {
-  if (!isElectron()) {
-    return false
-  }
-
-  // Check process.type (official Electron API)
-  if (
-    typeof process !== 'undefined' &&
-    (process as any).type === 'browser'
-  ) {
-    return true
-  }
-
-  // Fallback: Electron without window/document (main process)
-  // Main process has neither window nor document
-  if (
-    isElectron() &&
-    typeof window === 'undefined' &&
-    typeof document === 'undefined'
-  ) {
-    return true
-  }
-
-  return false
-}
-
-/**
  * True where OPFS-backed Arweave file downloads should run: normal browsers and
  * Electron renderer. {@link isBrowser} is false for every Electron build (including renderer).
  */
 export const supportsOpfsFileDownloads = (): boolean => {
   return isBrowser() || isElectronRenderer()
 }
-
-export const getEnvironment = (): string => {
-  if (isBrowser()) {
-    return 'browser'
-  }
-
-  if (isElectron()) {
-    return 'electron'
-  }
-
-  if (isReactNative()) {
-    return 'react-native'
-  }
-
-  return 'node'
-}
-
-/**
- * NODE_ENV is 'test' or IS_SEED_DEV is set. Bundlers compile `process.env.NODE_ENV` in, but
- * not IS_SEED_DEV, so that is only read where a `process` global exists: browsers have none.
- */
-export const isTestOrSeedDev = (): boolean =>
-  process.env.NODE_ENV === 'test' || (typeof process !== 'undefined' && !!process.env?.IS_SEED_DEV)

@@ -55,7 +55,6 @@
     "@noble/hashes": "^1.8.0",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
-    "graphql-request": "^7.3.5",
     "pluralize": "^8.0.0"
   },
   "devDependencies": {

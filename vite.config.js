@@ -8,6 +8,7 @@ import { playwright } from '@vitest/browser-playwright'
 import Inspect from 'vite-plugin-inspect'
 import { configDefaults } from 'vitest/config'
 import { seedVitePlugin } from '@seedprotocol/vite'
+import { ALLOWED_TEST_HOSTS } from './packages/sdk/__tests__/test-utils/allowedTestHosts.ts'
 
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
@@ -80,6 +81,23 @@ const workspaceSourceAliases = (platform) => {
   ]
 }
 
+// No network in tests beyond allowedTestHosts.ts (packages/sdk/__tests__/test-utils/networkGuard.ts).
+// The setup files patch fetch and friends; in the browser this flag also fails DNS for every other
+// host, which covers requests from workers and DOM loads the setup file can't see. IP literals such
+// as the vitest server's 127.0.0.1 don't go through the resolver.
+const liveNetwork = process.env.SEED_LIVE_NETWORK_TESTS === '1'
+const resolvableHosts = ['localhost', ...Object.keys(ALLOWED_TEST_HOSTS)]
+const browserProvider = () =>
+  playwright(
+    liveNetwork
+      ? {}
+      : {
+          launchOptions: {
+            args: [`--host-resolver-rules=MAP * ~NOTFOUND, ${resolvableHosts.map((h) => `EXCLUDE ${h}`).join(', ')}`],
+          },
+        },
+  )
+
 // Vite's object alias form as an array, so it can be combined with workspaceSourceAliases.
 const aliasEntries = (aliases) =>
   Object.entries(aliases).map(([find, replacement]) => ({ find, replacement }))
@@ -146,6 +164,7 @@ export default defineConfig({
             SEED_BENCH: process.env.SEED_BENCH ?? '',
             SEED_BENCH_ITEMS: process.env.SEED_BENCH_ITEMS ?? '',
             SEED_BENCH_EAS_MS: process.env.SEED_BENCH_EAS_MS ?? '',
+            SEED_LIVE_NETWORK_TESTS: process.env.SEED_LIVE_NETWORK_TESTS ?? '',
           },
           setupFiles: [
             './packages/sdk/__tests__/setup.browser.ts',
@@ -181,7 +200,7 @@ export default defineConfig({
           sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: browserProvider(),
             headless: true,
             instances: [
               {browser: 'chromium'}
@@ -233,6 +252,7 @@ export default defineConfig({
           dir: './packages/react/__tests__',
           env: {
             DEBUG: debugNamespaces,
+            SEED_LIVE_NETWORK_TESTS: process.env.SEED_LIVE_NETWORK_TESTS ?? '',
           },
           setupFiles: [
             './packages/react/__tests__/setup.browser.ts',
@@ -251,7 +271,7 @@ export default defineConfig({
           sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: browserProvider(),
             headless: true,
             instances: [
               { browser: 'chromium' },
@@ -289,7 +309,10 @@ export default defineConfig({
           env: {
             DEBUG: debugNamespaces,
           },
-          setupFiles: ['./packages/sdk/__tests__/test-utils/noUnloadGrace.ts'],
+          setupFiles: [
+            './packages/sdk/__tests__/test-utils/noNetwork.node.ts',
+            './packages/sdk/__tests__/test-utils/noUnloadGrace.ts',
+          ],
           include: [
             'packages/sdk/__tests__/**/*.test.ts',
             'packages/feed/__tests__/**/*.test.ts',

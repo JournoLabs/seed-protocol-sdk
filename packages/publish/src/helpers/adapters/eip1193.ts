@@ -10,8 +10,6 @@ import {
   brandSigner,
   brandTxSender,
   type PublishWallet,
-  type SeedSigner,
-  type SeedTxSender,
 } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
 
@@ -85,12 +83,4 @@ export async function fromWindowEthereum(
     throw new Error('@seedprotocol/publish: window.ethereum is not available')
   }
   return fromEip1193Provider(eth, options)
-}
-
-/** Expose branded helpers for composing custom EIP-1193 senders. */
-export function brandEip1193Parts(signer: SeedSigner, txSender: SeedTxSender): PublishWallet {
-  return {
-    signer: brandSigner(signer),
-    txSender: brandTxSender(txSender),
-  }
 }

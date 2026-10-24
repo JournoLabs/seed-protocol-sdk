@@ -2,6 +2,7 @@ import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import type {
   DownloadAllFilesParams,
+  DownloadAllFilesResult,
   IFileManager,
   ResizeAllImagesParams,
   ResizeImageParams,
@@ -684,9 +685,6 @@ class CancelableInterval {
         }
     }
 }
-
-/** @deprecated Prefer BrowserFileManager */
-export const FileManager = BrowserFileManager
 
 BaseFileManager.configure(new BrowserFileManager())
 

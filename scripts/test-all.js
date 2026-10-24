@@ -29,12 +29,14 @@ export const PACKAGE_TESTS = [
 
 const STEPS = [
   'node scripts/check-node-env.js',
+  'node scripts/check-migrations.js',
   'tsc -p packages/sdk/tsconfig.typetests.json',
   'vitest run --reporter=default',
   ...PACKAGE_TESTS.map((name) => `bun run --filter ${name} test`),
   'node scripts/check-tests-wired.js',
   'node scripts/check-tier1-package-boundary.js',
   'node scripts/check-internal-deps.js',
+  'node scripts/check-knip.js',
   'node scripts/check-browser-entry-graph.js --fail',
   'node scripts/check-eas-sdk-node-import.js',
   'bun run test:scripts',

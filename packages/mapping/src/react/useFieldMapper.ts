@@ -11,7 +11,6 @@ import type {
   FieldMapping,
   LookupEntry,
   ResolveJob,
-  TargetProperty,
 } from '../types'
 import {
   applyAssembleBlocksToMappings,
@@ -611,4 +610,3 @@ export function useFieldMapper({
 
 /** Re-export filter helper for row renderers. */
 export { filterPropertyNames }
-export type { TargetProperty }

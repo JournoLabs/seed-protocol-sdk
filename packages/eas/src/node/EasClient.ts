@@ -31,7 +31,4 @@ export class NodeEasClient extends DefaultEasClient {
   }
 }
 
-/** @deprecated Prefer NodeEasClient */
-export const EasClient = NodeEasClient
-
 BaseEasClient.configure(new NodeEasClient())

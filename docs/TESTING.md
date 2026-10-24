@@ -33,10 +33,51 @@ with `bun run test`; see `vite.config.js` for the three projects (NodeJS, browse
   a root `devDependencies` entry (as `js-yaml` and `parse5` have). Vite logs "Failed to resolve
   dependency: …, present in client 'optimizeDeps.include'" for entries it can't resolve.
 
-## Live network tests
+## Test defaults match production
+
+A global override of a runtime default (in a setup file, a shared test config, or a branch on
+`NODE_ENV`) needs a comment saying why and what production does, and at least one test that runs
+on the real default. Otherwise the suite tests a configuration no user runs: a setup that set the
+unload grace period to 0 hid a regression on main, and init errors that only test runs swallowed
+let a broken init pass.
+
+The overrides, and the tests on the real default:
+
+| Override | Production | Test on the default |
+| --- | --- | --- |
+| Unload grace period 0 (`test-utils/noUnloadGrace.ts`) | 60 s | `helpers/entityCacheGrace.test.ts` |
+| Browser `filesDir` `/app-files` (`createTestConfig`) | `.seed` | react `SeedProviderInit.test.tsx` (empty config) |
+| No retries when offline (`helpers/retryWhenOnline.ts`, `NODE_ENV=test`) | on | `events/item/easSyncManager.test.ts` |
+| Page without newer builtins (`test-utils/oldestBrowser.ts`) | the user's browser | every Node test, and the browser workers |
+
+## No network in tests
+
+Tests reach only this machine (localhost, `*.localhost` and loopback addresses) and the hosts in
+`packages/sdk/__tests__/test-utils/allowedTestHosts.ts`. A request to any other host fails, and so
+does the test that made it, even when the code under test caught the error. A test that read from
+arweave.net on every run flaked whenever the gateway was slow.
+
+- **Node:** `packages/sdk/__tests__/test-utils/noNetwork.node.ts`, a setup file of the NodeJS
+  project and of every package's `vitest.config.ts`, blocks TCP connections
+  (`net.Socket.prototype.connect`, which http, https, undici, `fetch` and `WebSocket` use) and
+  wraps `fetch` and `WebSocket` for a message naming the URL. `packages/publish/bunfig.toml`
+  preloads `noNetwork.bun.ts`, the same guard for `bun test`.
+- **Browser:** `noNetwork.browser.ts`, imported by both `setup.browser.ts` files, wraps `fetch`,
+  `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon`. Chromium's
+  `--host-resolver-rules` (set in `vite.config.js`) fails DNS for every host but localhost and the
+  allowed ones, which covers workers and `<img>` loads; those fail without a message naming them.
+
+`allowedTestHosts.ts` maps each allowed host to the reason tests need the real service. It holds
+`optimism-sepolia.easscan.org`, the SDK's default EAS indexer: item saves and model init look up
+schemas there, in most SDK tests. Adding a host needs a reason in that file.
+
+To fix a blocked request, mock it at the network boundary: stub `fetch`, configure a mock client
+(`MockArweaveClient`), or start a local server.
+
+### Live network tests
 
 Files named `*.live.test.ts` call real services and are skipped unless `SEED_LIVE_NETWORK_TESTS=1`,
-so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
+which also turns the guards off, so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
 arweave.net, asking the Hyper gateway first when `SEED_GATEWAY_HYPER_KEY` is set:
 
 ```bash
@@ -133,8 +174,9 @@ every push to main. Three local checks cover its failures before a merge, from c
 faithful.
 
 **Pre-push hook.** `.githooks/pre-push` runs `bun install --frozen-lockfile --dry-run`, which fails
-when a `package.json` change isn't in `bun.lock`, then `bun run lint --quiet`. It isn't installed by
-default. Turn it on per clone with:
+when a `package.json` change isn't in `bun.lock`, then `bun run lint --quiet`, then
+`scripts/check-migrations.js`, which fails when two migrations share a number or `drizzleFiles.ts`
+is stale. It isn't installed by default. Turn it on per clone with:
 
 ```bash
 git config core.hooksPath .githooks

@@ -2,7 +2,6 @@ import {
   PUBLISHED_BY_SCHEMA_DEF,
   PUBLISHED_BY_SCHEMA_NAME,
   hashPublishedByBatch,
-  type PublishedByDecoded,
 } from '@seedprotocol/eas'
 import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
@@ -261,6 +260,4 @@ export async function revokePublishedBy(params: {
   }
 }
 
-export type { PublishedByDecoded }
-
-export { collectPublishedBatch, uidsFromAttestationPairs } from './collectBatchUids'
+export { collectPublishedBatch } from './collectBatchUids'

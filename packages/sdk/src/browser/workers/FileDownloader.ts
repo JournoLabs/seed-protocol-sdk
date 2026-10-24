@@ -4,6 +4,7 @@ import filesDownload from './filesDownload'
 import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
 import { contentSha256TagMatches } from '@/helpers/arweaveContentTags'
 import debug from 'debug'
+import type { DownloadAllFilesParams, DownloadAllFilesResult } from '@/helpers/FileManager/IFileManager'
 
 const logger = debug('seedSdk:browser:workers:FileDownloader')
 

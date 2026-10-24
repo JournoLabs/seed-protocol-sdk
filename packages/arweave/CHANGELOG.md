@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** the deprecated `ArweaveClient` alias is removed from `@seedprotocol/arweave/node`. Use `NodeArweaveClient`.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits

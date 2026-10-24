@@ -8,7 +8,6 @@ export {
 export {
   createRemoteQueryDataSource,
   getRemoteQueryDataSource,
-  resetRemoteQueryDataSource,
 } from './remote.js'
 export {
   resolveQuerySource,

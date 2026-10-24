@@ -353,9 +353,6 @@ export function initPublish(c: PublishConfig): void {
   })
 }
 
-/** Alias for initPublish. Use initPublish for the primary API. */
-export const configurePublish = initPublish
-
 export interface ResolvedPublishConfig extends PublishConfig {
   /**
    * ManagedAccount factory on the publish chain, or undefined when none is known for this chain.

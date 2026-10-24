@@ -175,9 +175,6 @@ export class NodeFileManager implements IFileManager {
   }
 }
 
-/** @deprecated Prefer NodeFileManager */
-export const FileManager = NodeFileManager
-
 BaseFileManager.configure(new NodeFileManager())
 
 const _check: IFileManager = new NodeFileManager()

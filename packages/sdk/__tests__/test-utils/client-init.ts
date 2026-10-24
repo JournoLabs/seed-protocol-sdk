@@ -30,7 +30,6 @@
  */
 
 import { BaseDb } from '@/db/Db/BaseDb'
-import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
 import { and } from 'drizzle-orm'
@@ -399,20 +398,14 @@ export async function getTestProjectPath(): Promise<string> {
 export function createTestConfig(overrides: Partial<SeedConstructorOptions> = {}): SeedConstructorOptions {
   const isNodeEnv = typeof window === 'undefined'
   
-  // Use environment-appropriate default for filesDir
-  // Browser: Use OPFS path /app-files
-  // Node.js: Use relative path .seed (will be resolved relative to process.cwd())
+  // Everything else (endpoints, arweaveDomain) takes client.init's defaults. filesDir is the
+  // production default, `.seed`, in Node (under the test's temp project dir). Browser tests use
+  // `/app-files`, which fixtures and cleanup helpers name; production's default there is `.seed`.
   const defaultFilesDir = isNodeEnv ? '.seed' : '/app-files'
-  
+
   const defaultConfig: SeedConstructorOptions = {
     config: {
       models: {},
-      endpoints: {
-        filePaths: '/api/seed/migrations',
-        files: defaultFilesDir,
-      },
-      arweaveDomain: DEFAULT_ARWEAVE_HOST,
-      // Explicitly set filesDir in config to ensure it's used
       filesDir: defaultFilesDir,
     },
   }

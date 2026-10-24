@@ -1,6 +1,6 @@
 export { preparingHtmlEmbedded } from './preparingHtmlEmbedded'
 export { rewritingHtmlEmbedded } from './rewritingHtmlEmbedded'
-export { createArweaveDataItems, type CreateArweaveDataItemsResult } from './createArweaveDataItems'
+export { createArweaveDataItems } from './createArweaveDataItems'
 export { createArweaveDataItemsPhase2 } from './createArweaveDataItemsPhase2'
 export { uploadViaBundler } from './uploadViaBundler'
 export { createAttestations } from './createAttestations'

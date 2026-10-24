@@ -7,20 +7,7 @@ export * from './publishConfig'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'
 export * from './mediaRef'
-export {
-  ensureImageLocal,
-  closestImageSize,
-  normalizeArweaveTxIdForEnsure,
-  resetEnsureImageLocalInFlightForTests,
-} from './ensureImageLocal'
-export type {
-  EnsureImageLocalParams,
-  EnsureImageLocalResult,
-} from './ensureImageLocal'
 export { generateId } from './generateId'
-
-export { easName } from '@seedprotocol/eas'
-
 
 export const getCorrectId: GetCorrectId = (localIdOrUid: string) => {
   const id: GetCorrectIdReturn = {
@@ -38,8 +25,6 @@ export const getCorrectId: GetCorrectId = (localIdOrUid: string) => {
   }
   return id
 }
-
-export { getMimeType, getDataTypeFromString } from './dataUrl'
 
 export { convertTxIdToImage } from './localImageBlobUrl'
 

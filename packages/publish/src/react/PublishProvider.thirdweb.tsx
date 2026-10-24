@@ -6,7 +6,6 @@ import { PublishConfigContext, usePublishConfig } from "./PublishConfigContext"
 import type { PublishProviderProps } from "./PublishProvider"
 
 export { usePublishConfig }
-export type { PublishProviderProps }
 
 /**
  * Thirdweb-backed PublishProvider (includes ThirdwebProvider).
