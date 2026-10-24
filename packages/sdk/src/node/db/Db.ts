@@ -11,7 +11,7 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
 import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
-import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
+import { recreateBackupPath, recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 
 const logger = debug('seedSdk:node:db:Db')
 
@@ -175,7 +175,9 @@ export class NodeDb implements IDb {
     if (localDbFilePath(dbUrl)) await client.execute('PRAGMA journal_mode = WAL')
     const db = drizzle(client, { schema })
 
-    await recreateIfOlderThanMinimumUpgradeVersion(db)
+    await recreateIfOlderThanMinimumUpgradeVersion(db, {
+      backupPath: dbFilePath ? recreateBackupPath(dbFilePath) : undefined,
+    })
     logger('[Db.prepareDb] running migrations from %s', outDir)
     await migrate(db, { migrationsFolder: outDir })
     if (generation !== this.openGeneration) {

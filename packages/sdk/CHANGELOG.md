@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A local database that looks older than 0.7.7 is copied to `seed.before-recreate-<ms>.db` beside `seed.db` (in OPFS in the browser) before it is recreated, and the warning names the copy. A 0.7.7 database can look older: 0.7.7 wrote its `storedDisplayUrlsCleared` marker from a background task after init, so a database closed right after its first 0.7.7 start, or whose task failed, has no marker, and 0.7.8 to 0.7.10 recreated it, dropping its unpublished drafts. If the copy fails, or the database is a remote libsql URL with nowhere to copy it, the database is opened as it is instead of recreated.
+
 ## 0.7.10 (2026-10-24)
 
 - New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.

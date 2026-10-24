@@ -9,7 +9,8 @@ import { BaseFileManager } from '@/helpers'
 
 /**
  * Decision D1 (SDK audit 2026-10) in the browser: an OPFS database written by an SDK older than
- * 0.7.7 is recreated by prepareDb, so its unpublished rows are gone; a 0.7.7 database is kept.
+ * 0.7.7 is recreated by prepareDb, so its unpublished rows are gone; a 0.7.7 database is kept. The
+ * old database is copied next to seed.db first.
  */
 
 /** Migrations 0000-0019: what SDKs 0.7.2 to 0.7.7 all ship. */
@@ -75,6 +76,21 @@ describe('minimum upgrade-from version (0.7.7) in the browser', () => {
     expect(applied).toBe(getEmbeddedMigrations().length)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('older than 0.7.7'))
     warn.mockRestore()
+
+    const root = await navigator.storage.getDirectory()
+    const dbDir = await (await root.getDirectoryHandle(filesDir.slice(1))).getDirectoryHandle('db')
+    const backups: string[] = []
+    for await (const name of (dbDir as any).keys() as AsyncIterable<string>) {
+      if (/^seed\.before-recreate-\d+\.db$/.test(name)) backups.push(name)
+    }
+    expect(backups).toHaveLength(1)
+    const copy = new SQLocalDrizzle({ databasePath: `${filesDir}/db/${backups[0]}` })
+    try {
+      const rows = await drizzle(copy.driver, copy.batchDriver).values<[string]>(sql`SELECT local_id FROM seeds`)
+      expect(rows.map(([localId]) => localId)).toEqual(['draftSeed01'])
+    } finally {
+      await copy.destroy()
+    }
   })
 
   it('keeps a database 0.7.7 wrote (same migrations, with its init marker)', async () => {

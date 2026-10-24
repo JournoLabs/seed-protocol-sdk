@@ -15,7 +15,7 @@ import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
 import { startChangeFeed, stopChangeFeed } from './changeFeed'
-import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
+import { recreateBackupPath, recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 import { Observable, ReplaySubject, distinctUntilChanged, finalize, share, throwError } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -151,7 +151,9 @@ export class BrowserDb implements IDb {
       logger('[Db.prepareDb] database prepared')
 
       await raceSqlocalStartup((async () => {
-        await recreateIfOlderThanMinimumUpgradeVersion(db)
+        await recreateIfOlderThanMinimumUpgradeVersion(db, {
+          backupPath: recreateBackupPath(`${filesDir}/db/seed.db`),
+        })
         await this.runMigrations(db)
         await closedMeanwhile()
 

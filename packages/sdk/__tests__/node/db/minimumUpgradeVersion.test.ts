@@ -1,7 +1,9 @@
 // @vitest-environment node
 /**
  * Decision D1 (SDK audit 2026-10): a database written by an SDK older than 0.7.7 is recreated when
- * opened, so its unpublished rows are gone; a 0.7.7 or newer database is opened as it is.
+ * opened, so its unpublished rows are gone; a 0.7.7 or newer database is opened as it is. A 0.7.7
+ * database can look older (its marker is written by a background task), so the old database is
+ * copied next to it first, and kept as it is when the copy fails.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
@@ -11,7 +13,10 @@ import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import { NodeDb, resolveSdkDrizzleMigrationsDir } from '@/node/db/Db'
-import { MIN_VERSION_APP_STATE_KEY } from '@/db/minimumUpgradeVersion'
+import {
+  MIN_VERSION_APP_STATE_KEY,
+  recreateIfOlderThanMinimumUpgradeVersion,
+} from '@/db/minimumUpgradeVersion'
 
 /** Migrations 0000-0019: what SDKs 0.7.2 to 0.7.7 all ship. */
 const MIGRATIONS_UP_TO_0_7_7 = 20
@@ -62,6 +67,16 @@ const openWithSdk = async (dbFile: string) => {
   return { seedRows, applied }
 }
 
+/** Local ids of the seeds in a database file, opened without the SDK. */
+const seedIdsIn = async (dbFile: string): Promise<string[]> => {
+  const client = createClient({ url: `file:${dbFile}` })
+  try {
+    return (await client.execute('SELECT local_id FROM seeds')).rows.map((row: any) => row.local_id)
+  } finally {
+    client.close()
+  }
+}
+
 const totalMigrations = () =>
   JSON.parse(fs.readFileSync(path.join(resolveSdkDrizzleMigrationsDir(), 'meta', '_journal.json'), 'utf-8'))
     .entries.length as number
@@ -81,6 +96,52 @@ describe('minimum upgrade-from version (0.7.7)', () => {
     expect(seedRows).toEqual([])
     expect(applied).toBe(totalMigrations())
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('older than 0.7.7'))
+  })
+
+  it('copies the old database next to it before recreating it, drafts included', async () => {
+    const dir = tempDir()
+    const dbFile = path.join(dir, 'seed.db')
+    await writeOldDatabase(dbFile, { migrations: MIGRATIONS_UP_TO_0_7_7 })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await openWithSdk(dbFile)
+
+    const backups = fs.readdirSync(dir).filter((name) => /^seed\.before-recreate-\d+\.db$/.test(name))
+    expect(backups).toHaveLength(1)
+    expect(await seedIdsIn(path.join(dir, backups[0]!))).toEqual(['draftSeed01'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(backups[0]!))
+  })
+
+  it('keeps an old database as it is when the copy fails', async () => {
+    const dbFile = path.join(tempDir(), 'seed.db')
+    await writeOldDatabase(dbFile, { migrations: MIGRATIONS_UP_TO_0_7_7 })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = createClient({ url: `file:${dbFile}` })
+    try {
+      const recreated = await recreateIfOlderThanMinimumUpgradeVersion(drizzle(client), {
+        backupPath: path.join(tempDir(), 'missing-folder', 'copy.db'),
+      })
+      expect(recreated).toBe(false)
+    } finally {
+      client.close()
+    }
+
+    expect(await seedIdsIn(dbFile)).toEqual(['draftSeed01'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('opened as it is'), expect.anything())
+  })
+
+  it('keeps an old database as it is when there is nowhere to copy it', async () => {
+    const dbFile = path.join(tempDir(), 'seed.db')
+    await writeOldDatabase(dbFile, { migrations: MIGRATIONS_UP_TO_0_7_7 })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = createClient({ url: `file:${dbFile}` })
+    try {
+      expect(await recreateIfOlderThanMinimumUpgradeVersion(drizzle(client))).toBe(false)
+    } finally {
+      client.close()
+    }
+
+    expect(await seedIdsIn(dbFile)).toEqual(['draftSeed01'])
   })
 
   it('recreates a database older than 0.7.2 too', async () => {
