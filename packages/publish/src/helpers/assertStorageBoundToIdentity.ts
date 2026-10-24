@@ -85,6 +85,7 @@ export async function assertStorageBoundToIdentity(
           const assess = assessPublishAuthorization({
             decoded,
             expirationTime,
+            revoked: row.revoked,
             now: nowMs,
           })
           if (assess.status === 'valid') {

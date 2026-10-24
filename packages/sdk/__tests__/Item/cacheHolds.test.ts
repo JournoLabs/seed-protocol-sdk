@@ -5,6 +5,9 @@ import { EntityUnloadedError, evictEntities } from '@/helpers/entity/entityLifec
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
+import { and, eq } from 'drizzle-orm'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { pendingWrites } from '@/seedSchema'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
@@ -189,6 +192,15 @@ testDescribe('Item cache holds', () => {
     await expect(created.publish()).rejects.toThrow(EntityUnloadedError)
     expect(() => title.setValue('after unload')).toThrow(EntityUnloadedError)
     await expect(title.save()).rejects.toThrow(id)
+    // clear() refuses before it appends an op
+    const titleOps = () =>
+      BaseDb.getAppDb()
+        .select({ opId: pendingWrites.opId })
+        .from(pendingWrites)
+        .where(and(eq(pendingWrites.seedLocalId, id), eq(pendingWrites.propertyName, 'title')))
+    const opsBefore = (await titleOps()).length
+    await expect(title.clear()).rejects.toThrow(EntityUnloadedError)
+    expect((await titleOps()).length).toBe(opsBefore)
     // Reads keep the last values
     expect((created as any).title).toBe('gone')
   }, 30000)

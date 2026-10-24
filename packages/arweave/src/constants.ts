@@ -28,8 +28,6 @@ export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/grap
 export const DEFAULT_ARWEAVE_GATEWAYS = [
   'ar.seedprotocol.io',
   'arweave.net',
-  'arweave.dev',
-  'g8way.io',
   'permagate.io',
   'zigza.xyz',
 ] as const

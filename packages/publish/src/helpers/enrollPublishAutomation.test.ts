@@ -150,6 +150,39 @@ describe('enrollPublishAutomation', () => {
   })
 })
 
+function firstArg(fn: { mock: { calls: unknown[] } }): { expiresAt?: number } {
+  return (fn.mock.calls[0] as [{ expiresAt?: number }])[0]
+}
+
+describe('enrollPublishAutomation expiry', () => {
+  test('defaults to 365 days and gives the session key and the grant the same end', async () => {
+    const { PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS } = await import('@seedprotocol/eas')
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    const before = Math.floor(Date.now() / 1000)
+    await enrollPublishAutomation({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession' })
+    const after = Math.floor(Date.now() / 1000)
+
+    const keyArgs = firstArg(ensureAutomationSessionKeyMock)
+    const grantArgs = firstArg(attestPublishAuthorizationMock)
+    expect(keyArgs.expiresAt).toBe(grantArgs.expiresAt)
+    expect(keyArgs.expiresAt).toBeGreaterThanOrEqual(before + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS)
+    expect(keyArgs.expiresAt).toBeLessThanOrEqual(after + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS)
+  })
+
+  test('passes a given expiresAt to both', async () => {
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    await enrollPublishAutomation({
+      managedAddress: '0xmanaged',
+      sessionKeyAddress: '0xsession',
+      expiresAt: 2_000_000_000,
+    })
+    const keyArgs = firstArg(ensureAutomationSessionKeyMock)
+    const grantArgs = firstArg(attestPublishAuthorizationMock)
+    expect(keyArgs.expiresAt).toBe(2_000_000_000)
+    expect(grantArgs.expiresAt).toBe(2_000_000_000)
+  })
+})
+
 describe('revokePublishAutomation', () => {
   test('removes session key and revokes sidecar', async () => {
     const { revokePublishAutomation } = await import('./enrollPublishAutomation')

@@ -233,7 +233,10 @@ sections. To bring it in, a maintainer with publish rights and 2FA:
 
 **Warning:** when a published package depends on the new one, do this before the next release.
 0.7.10 shipped `@seedprotocol/sdk` before its dependency `@seedprotocol/archive` was on npm, and
-the SDK couldn't be installed until `archive` was published by hand.
+the SDK couldn't be installed until `archive` was published by hand. `scripts/check-internal-deps.js`
+(part of `bun run test`, so it runs before CI publishes) now fails when a package in
+`PUBLISH_ORDER` has a dependency or peer dependency on an internal package that isn't in
+`PUBLISH_ORDER`, or that comes after it there.
 
 ## Troubleshooting
 
