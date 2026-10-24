@@ -5,7 +5,6 @@
 
 import {
   BaseDb,
-  DEFAULT_ARWEAVE_HOST,
   schemas,
   SEED_PROTOCOL_SCHEMA_NAME,
   models as modelsTable,
@@ -202,15 +201,11 @@ export function createTestConfig(
   overrides: Partial<SeedConstructorOptions> = {}
 ): SeedConstructorOptions {
   const isNodeEnv = typeof window === 'undefined'
+  // Everything else takes client.init's defaults; see createTestConfig in the SDK's test utils.
   const defaultFilesDir = isNodeEnv ? '.seed' : '/app-files'
   const defaultConfig: SeedConstructorOptions = {
     config: {
       models: {},
-      endpoints: {
-        filePaths: '/api/seed/migrations',
-        files: defaultFilesDir,
-      },
-      arweaveDomain: DEFAULT_ARWEAVE_HOST,
       filesDir: defaultFilesDir,
     },
   }
@@ -221,7 +216,7 @@ export function createTestConfig(
   if (overrides.config?.endpoints?.files) {
     mergedConfig.filesDir = overrides.config.endpoints.files
   } else if (!mergedConfig.filesDir) {
-    mergedConfig.filesDir = mergedConfig.endpoints.files
+    mergedConfig.filesDir = mergedConfig.endpoints?.files
   }
   return {
     config: mergedConfig,

@@ -52,10 +52,3 @@ export const isElectronRenderer = (): boolean => {
 export const supportsOpfsFileDownloads = (): boolean => {
   return isBrowser() || isElectronRenderer()
 }
-
-/**
- * NODE_ENV is 'test' or IS_SEED_DEV is set. Bundlers compile `process.env.NODE_ENV` in, but
- * not IS_SEED_DEV, so that is only read where a `process` global exists: browsers have none.
- */
-export const isTestOrSeedDev = (): boolean =>
-  process.env.NODE_ENV === 'test' || (typeof process !== 'undefined' && !!process.env?.IS_SEED_DEV)

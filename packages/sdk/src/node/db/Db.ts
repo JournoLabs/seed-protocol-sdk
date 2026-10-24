@@ -208,37 +208,13 @@ export class NodeDb implements IDb {
   }
 
   async migrate(pathToDbDir: string, _dbName: string, _dbId: string) {
-    try {
-      if (!this.db) {
-        throw new Error('Database not initialized. Call prepareDb first.')
-      }
-
-      await migrate(this.db, { migrationsFolder: pathToDbDir })
-      const queryResult = await this.db.select().from(appState)
-      logger('queryResult', queryResult)
-    } catch (error: any) {
-      const errorMessage = error.message || String(error) || ''
-      const errorString = String(error)
-      const isMigrationError =
-        errorMessage.includes("Can't find meta/_journal.json") ||
-        errorMessage.includes('_journal.json') ||
-        errorMessage.includes("Cannot read properties of undefined") ||
-        errorMessage.includes("reading 'dialect'") ||
-        errorMessage.includes('undefined is not an object') ||
-        errorString.includes('dialect') ||
-        errorString.includes('undefined is not an object')
-
-      if (isMigrationError) {
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
-          logger(
-            'Warning: Migration failed, but continuing in test environment:',
-            errorMessage || errorString,
-          )
-          return this.db
-        }
-      }
-      throw error
+    if (!this.db) {
+      throw new Error('Database not initialized. Call prepareDb first.')
     }
+
+    await migrate(this.db, { migrationsFolder: pathToDbDir })
+    const queryResult = await this.db.select().from(appState)
+    logger('queryResult', queryResult)
 
     return this.db
   }

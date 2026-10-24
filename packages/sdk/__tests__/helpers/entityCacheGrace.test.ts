@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { EntityCache, setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
+import {
+  DEFAULT_UNLOAD_GRACE_MS,
+  EntityCache,
+  entityUnloadGraceMs,
+  setDefaultEntityUnloadGraceMs,
+  setEntityUnloadGraceMs,
+} from '@/helpers/entity/entityCache'
 import { evictEntities, isEntityTornDown, releaseEntity } from '@/helpers/entity/entityLifecycle'
 
 /** Stands in for an entity: the cache only needs its actor. */
@@ -13,6 +19,27 @@ describe('EntityCache grace period', () => {
   afterEach(() => {
     vi.useRealTimers()
     setEntityUnloadGraceMs(undefined)
+  })
+
+  // The test setups set the default to 0 (test-utils/noUnloadGrace.ts); this runs on the real one.
+  it('waits 60 s by default, when no grace period is configured', () => {
+    vi.useFakeTimers()
+    setDefaultEntityUnloadGraceMs(DEFAULT_UNLOAD_GRACE_MS)
+    try {
+      setEntityUnloadGraceMs(undefined) // what client.init does without entityCache.unloadGraceMs
+      expect(entityUnloadGraceMs()).toBe(60_000)
+      const cache = new EntityCache<Entity>()
+      const entity = makeEntity()
+      cache.add(entity, ['a'], { hold: true })
+
+      releaseEntity(entity, cache)
+      vi.advanceTimersByTime(59_999)
+      expect(entity.actor.stopped).toBe(false)
+      vi.advanceTimersByTime(1)
+      expect(entity.actor.stopped).toBe(true)
+    } finally {
+      setDefaultEntityUnloadGraceMs(0)
+    }
   })
 
   it('tears an instance down only after the grace period, unless a hold is taken first', () => {
