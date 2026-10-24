@@ -25,9 +25,21 @@ Requires Node 20+ and Holepunch native addons. Prefer Node over Bun. Installs th
 # Operator
 seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
 
+# Operator accepting only listed clients
+seed-gateway serve --upstream http://127.0.0.1:80 --allow-keys <client-z32> --allow-ips 192.168.1.0/24
+
 # Client sidecar (Path A)
 seed-gateway connect <z32-key> --host 127.0.0.1 --port 1984
+
+# Client with a fixed key the operator can list
+seed-gateway connect --print-key --key-file ./client.key.json
+seed-gateway connect <z32-key> --key-file ./client.key.json
 ```
+
+A client on the operator's LAN connects over the LAN and shows its LAN address, so list the
+LAN range rather than the public IP. A connection relayed through another HyperDHT node shows
+the relay's address and is refused unless its key is listed. See
+[Restricting who can connect](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/GATEWAY_HYPER.md#restricting-who-can-connect).
 
 ## Library
 
@@ -67,8 +79,9 @@ Keep `SEED_GATEWAY_HYPER_KEY` on the server only. Authenticate / rate-limit the 
 
 ## Tests
 
-- Unit tests always run.
-- DHT integration: `GATEWAY_HYPER_TESTS=1 bun run test` (from a checkout of the monorepo)
+- All tests run with `bun run test` (from a checkout of the monorepo). DHT tests use a local
+  `hyperdht/testnet`.
+- Public-DHT smoke test: `GATEWAY_HYPER_TESTS=1 bun run test`
 
 ## License
 
