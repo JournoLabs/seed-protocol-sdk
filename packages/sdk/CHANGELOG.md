@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A property saved after a publish registered its EAS schema stores that schema's uid on its metadata row, and `property.schemaUid` returns it. The row had none until it was published: publish recorded the uids it registered where `getEasSchemaUidForExactDefinition` didn't look, so the lookup asked the EAS indexer, which hadn't indexed the new schema yet. Saving a draft row again also fills in a uid it was stored without.
+- `getEasSchemaUidForExactDefinition`, `getEasSchemaUidForSchemaDefinition` and `getSchemaUidForSchemaDefinitionFromCache` read one store, which `setSchemaUidForSchemaDefinition` writes, so a uid recorded there answers all three without a request. Its keys are exact definitions on the current EAS endpoint (`string title`); they were snake-cased and shared across endpoints. EAS sync and `@seedprotocol/query` record `<type> <name>` for each property attestation they read instead of the bare name.
+
 ## 0.7.10 (2026-10-24)
 
 - New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
