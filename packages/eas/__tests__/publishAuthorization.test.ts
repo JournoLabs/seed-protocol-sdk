@@ -62,4 +62,13 @@ describe('publishAuthorization helpers', () => {
       }).status,
     ).toBe('scope_mismatch')
   })
+
+  it('assessPublishAuthorization reports a revoked grant as revoked', () => {
+    expect(assessPublishAuthorization({ decoded: sampleDecoded(), revoked: true }).status).toBe(
+      'revoked',
+    )
+    expect(
+      assessPublishAuthorization({ decoded: sampleDecoded(), revoked: false }).status,
+    ).toBe('valid')
+  })
 })

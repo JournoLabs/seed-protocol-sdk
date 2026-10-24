@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `getPublishAuthorizationFromEas` reads through the new `GET_PUBLISH_AUTHORIZATIONS` query, which selects `expirationTime` and `revoked`. `GET_SEEDS` selects neither, so grants it returned had no EAS expiry and never assessed as `'expired'` from it.
+- `assessPublishAuthorization` takes `revoked` and returns the new status `'revoked'` for a revoked grant. Code that switches exhaustively on `PublishAuthorizationAssessStatus` needs the extra case.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits

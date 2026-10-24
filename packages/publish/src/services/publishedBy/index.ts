@@ -164,10 +164,6 @@ export async function attestPublishedBy(
   params: AttestPublishedByParams,
 ): Promise<AttestPublishedByResult> {
   const sender = resolveTxSender(params.wallet)
-  const schemaUid =
-    params.ensureSchema === false
-      ? getPublishedBySchemaUid()
-      : await ensurePublishedBySchema(params.wallet)
 
   let attestationUids: `0x${string}`[] = []
   let batchHash: `0x${string}`
@@ -195,6 +191,12 @@ export async function attestPublishedBy(
   }
 
   const versionUid = normalizeBytes32Hex(params.versionUid ?? ZERO_BYTES32) as `0x${string}`
+  // Register the schema only once the inputs are known good, so a bad call spends no gas.
+  const schemaUid =
+    params.ensureSchema === false
+      ? getPublishedBySchemaUid()
+      : await ensurePublishedBySchema(params.wallet)
+
   const data = encodePublishedByAttestationData({
     seedUid,
     versionUid,
