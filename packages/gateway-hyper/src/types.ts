@@ -41,6 +41,14 @@ export type ServeTunnelResult = {
 export type ConnectTunnelOptions = {
   /** Operator public key (z32 or hex) */
   key: string
+  /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /** Local HTTP bind host */
   host?: string
   /** Local HTTP bind port */
@@ -69,6 +77,8 @@ export type ConnectTunnelOptions = {
 
 export type ConnectTunnelResult = {
   key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
   host: string
   port: number
   baseUrl: string
@@ -87,6 +97,14 @@ export type CreateGatewayProxyOptions = {
    * Defaults to `process.env.SEED_GATEWAY_HYPER_KEY`.
    */
   key?: string
+  /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /**
    * URL path prefix the app mounts the proxy on (stripped before tunneling).
    * Default `/api/seed-gateway`.
