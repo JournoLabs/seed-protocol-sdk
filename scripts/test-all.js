@@ -35,6 +35,7 @@ const STEPS = [
   'node scripts/check-tests-wired.js',
   'node scripts/check-tier1-package-boundary.js',
   'node scripts/check-internal-deps.js',
+  'node scripts/check-knip.js',
   'node scripts/check-browser-entry-graph.js --fail',
   'node scripts/check-eas-sdk-node-import.js',
   'bun run test:scripts',
