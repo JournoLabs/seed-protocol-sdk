@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - **Breaking:** the deprecated `ArweaveClient` alias is removed from `@seedprotocol/arweave/node`. Use `NodeArweaveClient`.
+- `fetchTransactionStatusAcrossGateways` no longer starts another gateway attempt when the budget left is shorter than that attempt's timeout or `MIN_TRANSACTION_STATUS_ATTEMPT_MS` (1 s, newly exported), whichever is shorter. Before, a timer firing just ahead of the deadline could start a ~1 ms attempt that always timed out and counted against the gateway's circuit. The first gateway is always asked. The deadline is measured with `performance.now()`, so wall-clock adjustments no longer stretch or cut the budget.
 
 ## 0.7.10 (2026-10-24)
 
