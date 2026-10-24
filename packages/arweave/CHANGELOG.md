@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - **Breaking:** the deprecated `ArweaveClient` alias is removed from `@seedprotocol/arweave/node`. Use `NodeArweaveClient`.
 - `DEFAULT_ARWEAVE_GATEWAYS` no longer lists `arweave.dev` and `g8way.io`. Neither domain resolves on public DNS (checked 2026-10-22 and 2026-10-24), so a read that fell back to them failed at DNS before trying the next gateway. The list is now `ar.seedprotocol.io`, `arweave.net`, `permagate.io`, `zigza.xyz`. Set `ARWEAVE_READ_GATEWAYS` to use others.
+- `fetchTransactionStatusAcrossGateways` no longer starts another gateway attempt when the budget left is shorter than that attempt's timeout or `MIN_TRANSACTION_STATUS_ATTEMPT_MS` (1 s, newly exported), whichever is shorter. Before, a timer firing just ahead of the deadline could start a ~1 ms attempt that always timed out and counted against the gateway's circuit. The first gateway is always asked. The deadline is measured with `performance.now()`, so wall-clock adjustments no longer stretch or cut the budget.
 
 ## 0.7.10 (2026-10-24)
 
