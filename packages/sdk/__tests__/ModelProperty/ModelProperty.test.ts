@@ -9,7 +9,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
@@ -78,8 +77,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     if (db) {
       // First, nullify refModelId in properties to break self-referential foreign keys
       await db.update(propertiesTable).set({ refModelId: null })
-      // Delete in order: propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
-      await db.delete(propertyUids)
+      // Delete in order: modelUids -> properties -> model_schemas -> models -> schemas
       await db.delete(modelUids)
       await db.delete(propertiesTable)
       await db.delete(modelSchemas)

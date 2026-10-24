@@ -8,7 +8,6 @@ import { importJsonSchema } from '@/imports/json'
 import { updateModelProperties } from '@/helpers/updateSchema'
 import { models as modelsTable, properties, modelSchemas } from '@/seedSchema'
 import { schemas } from '@/seedSchema/SchemaSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -43,7 +42,6 @@ testDescribe('Property row changes reach cached ModelProperty instances', () => 
     const db = BaseDb.getAppDb()
     if (db) {
       await db.update(properties).set({ refModelId: null })
-      await db.delete(propertyUids)
       await db.delete(modelUids)
       await db.delete(properties)
       await db.delete(modelSchemas)
