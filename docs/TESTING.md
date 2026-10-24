@@ -33,6 +33,24 @@ with `bun run test`; see `vite.config.js` for the three projects (NodeJS, browse
   a root `devDependencies` entry (as `js-yaml` and `parse5` have). Vite logs "Failed to resolve
   dependency: …, present in client 'optimizeDeps.include'" for entries it can't resolve.
 
+## Test defaults match production
+
+A global override of a runtime default (in a setup file, a shared test config, or a branch on
+`NODE_ENV`) needs a comment saying why and what production does, and at least one test that runs
+on the real default. Otherwise the suite tests a configuration no user runs: a setup that set the
+unload grace period to 0 hid a regression on main, and init errors that only test runs swallowed
+let a broken init pass.
+
+The overrides, and the tests on the real default:
+
+| Override | Production | Test on the default |
+| --- | --- | --- |
+| Unload grace period 0 (`test-utils/noUnloadGrace.ts`) | 60 s | `helpers/entityCacheGrace.test.ts` |
+| Browser `filesDir` `/app-files` (`createTestConfig`) | `.seed` | react `SeedProviderInit.test.tsx` (empty config) |
+| No retries when offline (`helpers/retryWhenOnline.ts`, `NODE_ENV=test`) | on | `events/item/easSyncManager.test.ts` |
+| Empty EAS indexer (`test-utils/networkGuard.ts`) | easscan | EAS read tests stub `fetch` with real-shaped answers |
+| Page without newer builtins (`test-utils/oldestBrowser.ts`) | the user's browser | every Node test, and the browser workers |
+
 ## No network in tests
 
 Tests reach only this machine: localhost, `*.localhost` and loopback addresses. A request to any
