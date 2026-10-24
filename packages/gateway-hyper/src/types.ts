@@ -1,3 +1,5 @@
+import type { AllowlistOptions } from './tunnel/allowlist'
+
 export type TunnelMeta = {
   method: string
   path: string
@@ -9,6 +11,9 @@ export type TunnelResponseMeta = {
   headers: Record<string, string>
 }
 
+/** A HyperDHT bootstrap node. */
+export type DhtBootstrapNode = { host: string; port: number }
+
 export type ServeTunnelOptions = {
   /** Upstream HTTP origin (e.g. http://127.0.0.1:80) */
   upstream: string
@@ -17,10 +22,21 @@ export type ServeTunnelOptions = {
   /** Directory for DHT state (optional, in-memory if unset) */
   storePath?: string
   /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
+  /**
    * Answer 504 once the upstream socket has been idle this long, waiting for headers or
    * body. Default 30 000; 0 disables.
    */
   upstreamTimeoutMs?: number
+  /**
+   * Clients that may connect, by public key (z32 or hex) or by IP or CIDR range. A client
+   * listed in either is let in; with both empty or unset, every client is. Invalid entries
+   * throw. See `createAllowlist` for which address is checked.
+   */
+  allowlist?: AllowlistOptions
 }
 
 export type ServeTunnelResult = {
@@ -33,12 +49,25 @@ export type ServeTunnelResult = {
 export type ConnectTunnelOptions = {
   /** Operator public key (z32 or hex) */
   key: string
+  /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /** Local HTTP bind host */
   host?: string
   /** Local HTTP bind port */
   port?: number
   /** Optional store path for DHT client state */
   storePath?: string
+  /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the tunnel stream has sent and received nothing for this long,
    * answer 504, and reconnect for the next request. Keep it above the operator's
@@ -56,6 +85,8 @@ export type ConnectTunnelOptions = {
 
 export type ConnectTunnelResult = {
   key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
   host: string
   port: number
   baseUrl: string
@@ -75,12 +106,25 @@ export type CreateGatewayProxyOptions = {
    */
   key?: string
   /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /**
    * URL path prefix the app mounts the proxy on (stripped before tunneling).
    * Default `/api/seed-gateway`.
    */
   mountPath?: string
   /** Optional DHT client state directory */
   storePath?: string
+  /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
   /** Start the Hyper session immediately (default: lazy on first request) */
   eager?: boolean
   /**

@@ -38,6 +38,7 @@ function pairFactory() {
 function sessionFrom(runOnTunnel: TunnelSession['runOnTunnel']): TunnelSession {
   return {
     key: 'test',
+    clientKey: 'test-client',
     runOnTunnel,
     forwardHttp: (meta, body, opts) =>
       runOnTunnel(async (socket) => {

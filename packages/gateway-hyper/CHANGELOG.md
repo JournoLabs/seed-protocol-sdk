@@ -2,6 +2,19 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `serveTunnel` takes `allowlist: { keys, ips }` and `seed-gateway serve` takes
+  `--allow-keys` and `--allow-ips`. A client whose public key or address (IP or CIDR) is
+  listed is let in; with neither list set, every client is, as before. Invalid entries throw
+  at startup. See "Restricting who can connect" in docs/GATEWAY_HYPER.md for which address
+  is checked and why LAN clients show their LAN address.
+- `connectTunnel`, `createTunnelSession` and `createGatewayProxy` take `keyFile` or
+  `keyPair` for the key the client presents, so it can go on a key allowlist. The default is
+  still a new key per run. `TunnelSession` and `connectTunnel`'s result expose `clientKey`.
+  `seed-gateway connect` takes `--key-file` and `--print-key`.
+- Every DHT entry point takes `bootstrap` nodes, for a private or local HyperDHT network.
+
 ## 0.7.6 (2026-10-17)
 
 A request the operator's upstream never answers no longer blocks the tunnel for good.

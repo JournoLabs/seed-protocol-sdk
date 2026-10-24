@@ -3,6 +3,7 @@ import HyperDHT from 'hyperdht'
 import { readTunnelRequest, writeTunnelResponse } from './protocol'
 import { UpstreamTimeoutError } from './errors'
 import { proxyTunnelRequest } from './proxy'
+import { createAllowlist } from './allowlist'
 import { loadOrCreateOperatorKeypair } from '../keys'
 import type { ServeTunnelOptions, ServeTunnelResult } from '../types'
 
@@ -75,14 +76,24 @@ export async function serveTunnelConnection(
 export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTunnelResult> {
   const upstream = options.upstream.replace(/\/$/, '')
   const keyFile = options.keyFile ?? '.seed/gateway-tunnel/operator.key.json'
+  const allowlist = createAllowlist(options.allowlist)
   const keypair = loadOrCreateOperatorKeypair(keyFile)
 
-  const dht = new HyperDHT()
-  const server = dht.createServer((socket) => {
-    void serveTunnelConnection(socket as Duplex, upstream, {
-      upstreamTimeoutMs: options.upstreamTimeoutMs,
-    })
-  })
+  const dht = new HyperDHT(options.bootstrap ? { bootstrap: options.bootstrap } : {})
+  const server = dht.createServer(
+    { firewall: (remotePublicKey) => allowlist.firewall(remotePublicKey) },
+    (socket) => {
+      // Refuse before serveTunnelConnection attaches a reader, so nothing is read.
+      if (!allowlist.check(socket).ok) {
+        socket.on('error', () => {})
+        socket.destroy()
+        return
+      }
+      void serveTunnelConnection(socket, upstream, {
+        upstreamTimeoutMs: options.upstreamTimeoutMs,
+      })
+    },
+  )
 
   await server.listen(keypair)
 

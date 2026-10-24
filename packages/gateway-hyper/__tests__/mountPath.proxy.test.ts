@@ -39,6 +39,7 @@ describe('forwardFetchRequest path stripping', () => {
 
     const session: TunnelSession = {
       key: 'test',
+      clientKey: 'test-client',
       runOnTunnel: async (fn) => fn(client),
       forwardHttp: async (meta, body) => {
         await writeTunnelRequest(client, meta, body)

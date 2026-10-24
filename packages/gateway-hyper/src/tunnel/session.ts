@@ -1,7 +1,7 @@
 import type { Duplex } from 'node:stream'
 import HyperDHT from 'hyperdht'
-import { createEphemeralClientKeypair, decodePublicKey } from '../keys'
-import type { TunnelMeta, TunnelResponseMeta } from '../types'
+import { decodePublicKey, resolveClientKeypair } from '../keys'
+import type { DhtBootstrapNode, TunnelMeta, TunnelResponseMeta } from '../types'
 import { TunnelConnectTimeoutError, TunnelTimeoutError } from './errors'
 import { readTunnelResponse, writeTunnelRequest } from './protocol'
 
@@ -22,8 +22,17 @@ export const DEFAULT_MAX_STREAMS = 4
 export type TunnelSessionOptions = {
   /** Operator public key (z32 or hex) */
   key: string
+  /**
+   * Keypair file (created on first run if missing) for the key this client presents to the
+   * operator. Without `keyFile` or `keyPair`, each session uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /** Optional store path for DHT client state */
   storePath?: string
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the stream has sent and received nothing for this long, then
    * reconnect for the next request. Counts from when the request gets a stream.
@@ -48,6 +57,8 @@ export type TunnelRequestOptions = {
 
 export type TunnelSession = {
   key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
   runOnTunnel: <T>(
     fn: (socket: Duplex) => Promise<T>,
     options?: TunnelRequestOptions,
@@ -295,10 +306,10 @@ export function createTunnelPool(
  */
 export async function createTunnelSession(options: TunnelSessionOptions): Promise<TunnelSession> {
   const remotePublicKey = decodePublicKey(options.key)
-  const clientKey = createEphemeralClientKeypair()
+  const clientKey = resolveClientKeypair(options)
   const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
 
-  const dht = new HyperDHT()
+  const dht = new HyperDHT(options.bootstrap ? { bootstrap: options.bootstrap } : {})
 
   // Without a `pool` option, each connect is its own handshake and encrypted stream.
   const openStream = () =>
@@ -351,6 +362,7 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
 
   return {
     key: options.key,
+    clientKey: clientKey.z32,
     runOnTunnel,
     forwardHttp,
     close: async () => {

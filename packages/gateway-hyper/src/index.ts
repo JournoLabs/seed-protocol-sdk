@@ -1,6 +1,14 @@
 export { encodePublicKeyZ32, decodePublicKey, loadOrCreateOperatorKeypair } from './keys'
 
 export { serveTunnel } from './tunnel/serve'
+export { createAllowlist } from './tunnel/allowlist'
+export type {
+  Allowlist,
+  AllowlistOptions,
+  AllowlistStream,
+  AllowlistVerdict,
+  AllowedBy,
+} from './tunnel/allowlist'
 export { connectTunnel, localGatewayUrl } from './tunnel/connect'
 export { createGatewayProxy } from './tunnel/proxyApp'
 export { stripMountPath } from './tunnel/mountPath'
@@ -31,6 +39,7 @@ export {
 } from './tunnel/protocol'
 
 export type {
+  DhtBootstrapNode,
   TunnelMeta,
   TunnelResponseMeta,
   ServeTunnelOptions,

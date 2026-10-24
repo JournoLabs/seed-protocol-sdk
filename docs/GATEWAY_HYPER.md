@@ -208,6 +208,45 @@ initPublish({
    Or each app server (Path B) mounts `createGatewayProxy` with that key.
 5. App uses `transport: 'hyper'` or `'hybrid'` (and `proxyBaseUrl` when using Path B).
 
+## Restricting who can connect
+
+Anyone with the operator key can use the tunnel unless the operator lists the clients it
+accepts:
+
+```bash
+seed-gateway serve --upstream http://127.0.0.1:80 \
+  --allow-keys <client-z32>,<client-z32> \
+  --allow-ips 192.168.1.0/24,203.0.113.7
+```
+
+or `serveTunnel({ upstream, allowlist: { keys: [...], ips: [...] } })`. A client is let in
+when its public key or its address is listed. With neither list set, every client is. Keys
+are z32 or hex; addresses are IPv4 or IPv6, single or CIDR, and `::ffff:`-prefixed IPv4
+addresses match IPv4 entries. An invalid entry stops `serve` at startup.
+
+List keys where you can. A client keeps the same key across runs only when it has a key file:
+
+```bash
+seed-gateway connect --print-key --key-file ./.seed/gateway-tunnel/client.key.json
+seed-gateway connect <operator-z32> --key-file ./.seed/gateway-tunnel/client.key.json
+```
+
+The first command creates the file if needed and prints the public key to send to the
+operator. `connectTunnel` and `createGatewayProxy` take the same `keyFile`, or a `keyPair`
+(`{ publicKey, secretKey }` buffers) for app servers that can't keep a file. Without either,
+each run uses a new key, which no key list can match.
+
+When only keys are listed, an unlisted client is refused during the handshake and never gets
+a stream. When addresses are listed too, the operator can't refuse on the key at that point,
+because the handshake arrives through a DHT node and its address isn't the client's. It
+accepts the connection, checks the UDP address the connection uses, and destroys the stream
+before reading from it if neither the key nor the address is listed. Two consequences:
+
+- A client on the operator's LAN, or on the operator's own machine, connects over the LAN and
+  shows its LAN address (`192.168.x.x`), not its public IP. List the LAN range.
+- A connection relayed through another HyperDHT node shows the relay's address, so it is
+  refused unless its key is listed.
+
 ## Timeouts
 
 A tunnel session opens up to `maxStreams` HyperDHT streams to the operator (default 4, on
@@ -247,8 +286,10 @@ Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.g
 
 ## CI / tests
 
-- `@seedprotocol/gateway-hyper` unit tests always run.
-- DHT loopback integration: `GATEWAY_HYPER_TESTS=1 bun run test` in `packages/gateway-hyper`.
+- `@seedprotocol/gateway-hyper` tests always run, including the DHT tests, which use a
+  `hyperdht/testnet` on 127.0.0.1 through the `bootstrap` option.
+- One smoke test over the public DHT: `GATEWAY_HYPER_TESTS=1 bun run test` in
+  `packages/gateway-hyper`.
 - SDK resolver tests use a mock HTTP sidecar / proxy (no natives required).
 
 ## Manual validation
