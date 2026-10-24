@@ -200,7 +200,7 @@ Done by a maintainer with publish rights and 2FA.
    Node line use `npm install -g npm@11`:
 
    ```bash
-   for p in eas arweave vite next query sdk feed feed-hyper gateway-hyper react publish mapping; do
+   for p in archive eas arweave vite next query sdk feed feed-hyper gateway-hyper react publish mapping; do
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env release --allow-publish -y
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env preview --allow-publish -y
      npm trust github "@seedprotocol/$p" --file cleanup-dist-tags.yml --repo JournoLabs/seed-protocol-sdk --env cleanup --allow-stage-publish -y
@@ -232,8 +232,8 @@ sections. To bring it in, a maintainer with publish rights and 2FA:
 3. Moves it from `AWAITING_FIRST_PUBLISH` into `PUBLISH_ORDER` and adds it to the loop above.
 
 **Warning:** when a published package depends on the new one, do this before the next release.
-`@seedprotocol/sdk` depends on `@seedprotocol/archive` (in `AWAITING_FIRST_PUBLISH` since
-2026-10-22), so an SDK release published before `archive` is on npm can't be installed.
+0.7.10 shipped `@seedprotocol/sdk` before its dependency `@seedprotocol/archive` was on npm, and
+the SDK couldn't be installed until `archive` was published by hand.
 
 ## Troubleshooting
 
