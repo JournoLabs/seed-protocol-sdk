@@ -2,6 +2,23 @@ export { encodePublicKeyZ32, decodePublicKey, loadOrCreateOperatorKeypair } from
 
 export { serveTunnel } from './tunnel/serve'
 export { createAllowlist } from './tunnel/allowlist'
+export { serveRawTunnel, DEFAULT_RAW_OPERATOR_KEY_FILE } from './tunnel/rawServe'
+export {
+  connectRawTunnel,
+  DEFAULT_MAX_RAW_CONNECTIONS,
+  DEFAULT_RAW_PORT,
+} from './tunnel/rawConnect'
+export { RAW_CLOSE_GRACE_MS } from './tunnel/rawPipe'
+export type {
+  RawClientEvent,
+  RawClientEventListener,
+  RawTunnelEvent,
+  RawTunnelEventListener,
+  TunnelEvent,
+  TunnelEventListener,
+  TunnelEventName,
+  UpstreamPhase,
+} from './tunnel/events'
 export type {
   Allowlist,
   AllowlistOptions,
@@ -19,7 +36,7 @@ export {
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './tunnel/session'
 export type { TunnelRequestOptions, TunnelSession, TunnelSessionOptions } from './tunnel/session'
-export { DEFAULT_UPSTREAM_TIMEOUT_MS } from './tunnel/proxy'
+export { DEFAULT_UPSTREAM_TIMEOUT_MS, upstreamRequestHeaders } from './tunnel/proxy'
 export {
   TunnelConnectTimeoutError,
   TunnelTimeoutError,
@@ -46,6 +63,10 @@ export type {
   ServeTunnelResult,
   ConnectTunnelOptions,
   ConnectTunnelResult,
+  ServeRawTunnelOptions,
+  ServeRawTunnelResult,
+  ConnectRawTunnelOptions,
+  ConnectRawTunnelResult,
   OperatorKeyPair,
   CreateGatewayProxyOptions,
   GatewayProxy,

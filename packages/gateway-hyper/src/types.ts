@@ -1,4 +1,9 @@
 import type { AllowlistOptions } from './tunnel/allowlist'
+import type {
+  RawClientEventListener,
+  RawTunnelEventListener,
+  TunnelEventListener,
+} from './tunnel/events'
 
 export type TunnelMeta = {
   method: string
@@ -37,6 +42,17 @@ export type ServeTunnelOptions = {
    * throw. See `createAllowlist` for which address is checked.
    */
   allowlist?: AllowlistOptions
+  /**
+   * Receives an event at each step of each stream and request (see `TunnelEvent`), for
+   * logging or tracing. Called synchronously; a throw is dropped. Unset, no tracing state is
+   * kept.
+   */
+  onEvent?: TunnelEventListener
+  /**
+   * Send each request's id upstream under this header (e.g. `x-seed-tunnel-request-id`), so
+   * upstream logs can be matched to `onEvent` events. Replaces any value the client sent.
+   */
+  requestIdHeader?: string
 }
 
 export type ServeTunnelResult = {
@@ -90,6 +106,66 @@ export type ConnectTunnelResult = {
   host: string
   port: number
   baseUrl: string
+  close: () => Promise<void>
+}
+
+export type ServeRawTunnelOptions = {
+  /** Upstream TCP address: `http://host:port`, `https://host` (port 443) or `host:port` */
+  upstream: string
+  /**
+   * Operator keypair file (JSON), created on first run if missing. Default
+   * `.seed/gateway-tunnel/raw-operator.key.json`, apart from the framed tunnel's key.
+   */
+  keyFile?: string
+  /** The operator keypair itself. Takes precedence over `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /** Clients that may connect; same rules as `serveTunnel`'s `allowlist`. */
+  allowlist?: AllowlistOptions
+  /** Receives connection events; see `RawTunnelEvent`. */
+  onEvent?: RawTunnelEventListener
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
+  /** How long a side may stay open after the other closed cleanly. Default 30 000. */
+  closeGraceMs?: number
+}
+
+export type ServeRawTunnelResult = {
+  /** Operator public key (z32) */
+  key: string
+  /** Upstream as `host:port` */
+  upstream: string
+  close: () => Promise<void>
+}
+
+export type ConnectRawTunnelOptions = {
+  /** Raw operator public key (z32 or hex) */
+  key: string
+  /** Local TCP bind host. Default 127.0.0.1. */
+  host?: string
+  /** Local TCP bind port. Default 1985; 0 picks a free port. */
+  port?: number
+  /** Client keypair file, as on `connectTunnel`. Without it or `keyPair`, each run gets a new key. */
+  keyFile?: string
+  /** The client keypair itself. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /** Most TCP connections open at once; further ones are closed at once. Default 64. */
+  maxConnections?: number
+  /** Destroy a connection whose HyperDHT stream hasn't opened after this long. Default 30 000; 0 disables. */
+  connectTimeoutMs?: number
+  /** Receives connection events; see `RawClientEvent`. */
+  onEvent?: RawClientEventListener
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
+  /** How long a side may stay open after the other closed cleanly. Default 30 000. */
+  closeGraceMs?: number
+}
+
+export type ConnectRawTunnelResult = {
+  key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
+  host: string
+  port: number
   close: () => Promise<void>
 }
 
