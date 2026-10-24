@@ -9,7 +9,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { properties, models } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { eq, desc } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
@@ -86,7 +85,6 @@ testDescribe('Schema Integration Tests', () => {
     const db = BaseDb.getAppDb()
     if (db) {
       try {
-        await db.delete(propertyUids)
       } catch {
         // ignore
       }
@@ -123,9 +121,8 @@ testDescribe('Schema Integration Tests', () => {
     // Delete in correct order to respect foreign key constraints
     const db = BaseDb.getAppDb()
     if (db) {
-      // Delete in order: property_uids -> model_uids -> properties -> model_schemas -> models -> schemas
+      // Delete in order: model_uids -> properties -> model_schemas -> models -> schemas
       try {
-        await db.delete(propertyUids)
       } catch {
         // Ignore errors if table doesn't exist or is empty
       }

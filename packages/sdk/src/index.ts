@@ -45,7 +45,6 @@ export {
   seeds,
   metadata,
   versions,
-  propertyUids,
   modelUids,
   appState,
   schemas,

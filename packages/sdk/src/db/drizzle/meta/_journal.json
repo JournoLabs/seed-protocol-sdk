@@ -211,6 +211,13 @@
       "when": 1792596480144,
       "tag": "0029_dedupe_chain_uids_add_unique_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1792866514704,
+      "tag": "0030_drop_property_uids",
+      "breakpoints": true
     }
   ]
 }

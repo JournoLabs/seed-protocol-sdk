@@ -5,7 +5,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { setupFixtureFiles, cleanupFixtureFiles, getFixturePath } from '../test-utils/setupFixtureFiles'
 import { loadSchemaFromFile, importJsonSchema } from '@/imports/json'
-import { models, properties, schemas, modelSchemas, modelUids, propertyUids, PropertyType } from '@/seedSchema'
+import { models, properties, schemas, modelSchemas, modelUids, PropertyType } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
 
 
@@ -62,7 +62,6 @@ testDescribe('Schema ID Generation Integration Tests', () => {
     const db = BaseDb.getAppDb()
     if (db) {
       await db.delete(modelSchemas)
-      await db.delete(propertyUids)
       await db.delete(modelUids)
       await db.delete(properties)
       await db.delete(models)
