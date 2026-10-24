@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `DEFAULT_ARWEAVE_GATEWAYS` no longer lists `arweave.dev` and `g8way.io`. Neither domain resolves on public DNS (checked 2026-10-22 and 2026-10-24), so a read that fell back to them failed at DNS before trying the next gateway. The list is now `ar.seedprotocol.io`, `arweave.net`, `permagate.io`, `zigza.xyz`. Set `ARWEAVE_READ_GATEWAYS` to use others.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits
