@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@seedprotocol/gateway-hyper.svg)](https://www.npmjs.com/package/@seedprotocol/gateway-hyper)
 
-Expose a local **seed-protocol-server + ar.io gateway** stack (via Traefik or direct upstream) to SDK users over **HyperDHT**.
+Expose an HTTP upstream that serves an Arweave gateway and the upload API to SDK users over **HyperDHT**.
 
 Two client shapes:
 

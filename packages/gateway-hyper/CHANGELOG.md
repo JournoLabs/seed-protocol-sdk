@@ -67,8 +67,8 @@ A request the operator's upstream never answers no longer blocks the tunnel for 
 - Responses larger than 16 MiB (up to the 64 MiB frame limit) are sent in 1 MiB writes.
   Before, secret-stream rejected them and the stream was torn down.
 - The operator no longer forwards hop-by-hop request headers or the client's `Host`. The
-  upstream sees its own host, with the original in `X-Forwarded-Host`. Check any Traefik
-  rule that matched on the forwarded `Host`.
+  upstream sees its own host, with the original in `X-Forwarded-Host`. Check any upstream
+  routing rule that matched on the forwarded `Host`.
 
 ### Commits
 

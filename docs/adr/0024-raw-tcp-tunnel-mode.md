@@ -12,12 +12,10 @@ at a time. A frame is capped at 64 MiB, each HyperDHT stream carries one request
 (up to `maxStreams`, 4 by default), and `upgrade` is dropped, so WebSockets can't pass. That
 fits the SDK sidecar, whose requests are gateway reads and upload API calls.
 
-seed-protocol-server runs a public HTTP proxy for ar.seedprotocol.io: nginx on a VPS, a
-HyperDHT tunnel, and Traefik on the operator's machine. Its traffic includes large uploads and
-downloads, `Range` reads and many concurrent connections, which the framed tunnel can't carry.
-The server repo built its own raw tunnel for it (`scripts/gateway-edge-serve.mjs`,
-`edge/tunnel-client.mjs`) and asked for it to move into the package, beside the allowlist and
-client keys it depends on.
+An operator can put an HTTP reverse proxy in front of the tunnel to serve a public gateway
+hostname. That traffic includes large uploads and downloads, `Range` reads and many concurrent
+connections, which the framed tunnel can't carry. A raw TCP tunnel carries it, and it belongs in
+the package, beside the allowlist and client keys it depends on.
 
 `hypertele` (bitfinexcom, a TCP proxy over HyperDHT) does the piping, but only allowlists by
 key, has no events, no library API, and its own seed-based key format.
@@ -50,12 +48,12 @@ operator speaks, so it is a separate decision.
 
 - Operators who front the tunnel with an HTTP proxy get keep-alive, streaming, `Range` and
   WebSockets with no size cap.
-- Each raw connection costs a DHT lookup and handshake (100–400 ms measured by the server
-  repo), so the client in front must keep connections alive, e.g. nginx `keepalive`.
+- Each raw connection costs a DHT lookup and handshake, so the client in front must keep
+  connections alive, e.g. nginx `keepalive`.
 - An operator serving both protocols runs two HyperDHT servers and publishes two keys.
 - Two protocols to maintain. The raw one is small (a byte pipe), but its close and half-close
-  handling is where bugs live: the server repo's original client lacked `allowHalfOpen`, so a
-  client that half-closed after its request lost the response.
+  handling is where bugs live: without `allowHalfOpen`, a client that half-closes after its
+  request loses the response.
 - The operator sees bytes, not requests, so raw-mode events are per connection (`conn.open`,
   `conn.close` with byte counts), not per request.
 
@@ -67,5 +65,5 @@ operator speaks, so it is a separate decision.
   most of HTTP/2 rebuilt, and still wouldn't carry WebSockets without more work.
 - **One key for both protocols, telling them apart by a first-byte marker.** Raw mode would no
   longer be a transparent byte pipe, and a framed client of an old operator would still fail.
-- **Keep raw mode in seed-protocol-server.** It would drift from the package's allowlist and
-  key handling, which is what the server repo asked to stop.
+- **Leave raw mode to each operator.** Every copy would drift from the package's allowlist
+  and key handling.

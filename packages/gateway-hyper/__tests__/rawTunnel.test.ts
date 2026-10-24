@@ -18,7 +18,7 @@ const CHUNK = Buffer.alloc(1024 * 1024, 7)
 describe('parseTcpUpstream', () => {
   it.each([
     ['http://127.0.0.1:1980', { host: '127.0.0.1', port: 1980 }],
-    ['http://traefik', { host: 'traefik', port: 80 }],
+    ['http://gateway', { host: 'gateway', port: 80 }],
     ['https://example.com', { host: 'example.com', port: 443 }],
     ['10.0.0.2:8080', { host: '10.0.0.2', port: 8080 }],
     ['http://[::1]:81', { host: '::1', port: 81 }],
