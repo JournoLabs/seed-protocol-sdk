@@ -1,7 +1,7 @@
 import type { Duplex } from 'node:stream'
 import HyperDHT from 'hyperdht'
 import { createEphemeralClientKeypair, decodePublicKey } from '../keys'
-import type { TunnelMeta, TunnelResponseMeta } from '../types'
+import type { DhtBootstrapNode, TunnelMeta, TunnelResponseMeta } from '../types'
 import { TunnelConnectTimeoutError, TunnelTimeoutError } from './errors'
 import { readTunnelResponse, writeTunnelRequest } from './protocol'
 
@@ -24,6 +24,8 @@ export type TunnelSessionOptions = {
   key: string
   /** Optional store path for DHT client state */
   storePath?: string
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the stream has sent and received nothing for this long, then
    * reconnect for the next request. Counts from when the request gets a stream.
@@ -298,7 +300,7 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
   const clientKey = createEphemeralClientKeypair()
   const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
 
-  const dht = new HyperDHT()
+  const dht = new HyperDHT(options.bootstrap ? { bootstrap: options.bootstrap } : {})
 
   // Without a `pool` option, each connect is its own handshake and encrypted stream.
   const openStream = () =>

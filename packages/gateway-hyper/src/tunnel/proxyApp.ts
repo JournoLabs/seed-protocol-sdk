@@ -37,6 +37,7 @@ export function createGatewayProxy(options: CreateGatewayProxyOptions = {}): Gat
     starting = createTunnelSession({
       key,
       storePath: options.storePath,
+      bootstrap: options.bootstrap,
       requestTimeoutMs: options.requestTimeoutMs,
       connectTimeoutMs: options.connectTimeoutMs,
       maxStreams: options.maxStreams,

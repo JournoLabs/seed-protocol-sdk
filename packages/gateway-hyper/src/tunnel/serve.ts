@@ -77,7 +77,7 @@ export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTun
   const keyFile = options.keyFile ?? '.seed/gateway-tunnel/operator.key.json'
   const keypair = loadOrCreateOperatorKeypair(keyFile)
 
-  const dht = new HyperDHT()
+  const dht = new HyperDHT(options.bootstrap ? { bootstrap: options.bootstrap } : {})
   const server = dht.createServer((socket) => {
     void serveTunnelConnection(socket as Duplex, upstream, {
       upstreamTimeoutMs: options.upstreamTimeoutMs,

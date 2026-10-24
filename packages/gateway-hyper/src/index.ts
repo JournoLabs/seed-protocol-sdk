@@ -31,6 +31,7 @@ export {
 } from './tunnel/protocol'
 
 export type {
+  DhtBootstrapNode,
   TunnelMeta,
   TunnelResponseMeta,
   ServeTunnelOptions,
