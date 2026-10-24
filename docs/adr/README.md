@@ -34,6 +34,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0022](0022-properties-may-reference-the-seed.md) | Readers can accept property attestations that reference the Seed | Proposed |
 | [0023](0023-sealed-versions.md) | An owner can seal a Version; revoking a sealed value still removes it | Proposed |
 | [0024](0024-raw-tcp-tunnel-mode.md) | gateway-hyper carries raw TCP as a second protocol, on its own key | Accepted |
+| [0025](0025-gateway-neutral-html-links.md) | Published Html names one gateway; every Seed reader re-hosts its links | Proposed |
 
 ## Writing one
 
