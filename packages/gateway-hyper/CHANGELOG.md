@@ -14,6 +14,16 @@ All notable changes to this package are documented in this file.
   still a new key per run. `TunnelSession` and `connectTunnel`'s result expose `clientKey`.
   `seed-gateway connect` takes `--key-file` and `--print-key`.
 - Every DHT entry point takes `bootstrap` nodes, for a private or local HyperDHT network.
+- `serveTunnel` takes `onEvent`, called with a `TunnelEvent` for each stream and each step of a
+  request, and `requestIdHeader`, which sends each request's id upstream (replacing any value
+  the client sent). `seed-gateway serve` takes `--trace` and `--request-id-header`.
+  `upstreamRequestHeaders` is exported.
+- Raw TCP mode: `serveRawTunnel` and `connectRawTunnel`, and `seed-gateway serve --raw` and
+  `connect --raw`. Each TCP connection gets its own HyperDHT stream, piped byte for byte to the
+  upstream, so HTTP runs end to end with no size limit. A raw server needs its own key. See
+  ADR 0024 and "Raw TCP mode" in docs/GATEWAY_HYPER.md.
+- `seed-gateway connect` takes `--connect-timeout-ms`, and `--port 0` picks a free port instead
+  of falling back to 1984.
 
 ## 0.7.6 (2026-10-17)
 

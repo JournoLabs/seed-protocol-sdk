@@ -31,6 +31,13 @@ seed-gateway serve --upstream http://127.0.0.1:80 --allow-keys <client-z32> --al
 # Client sidecar (Path A)
 seed-gateway connect <z32-key> --host 127.0.0.1 --port 1984
 
+# Operator logging every stream and request, with a request id header upstream
+seed-gateway serve --upstream http://127.0.0.1:80 --trace --request-id-header x-seed-tunnel-request-id
+
+# Raw TCP mode, for an HTTP proxy in front (no size limit, streaming, WebSockets)
+seed-gateway serve --raw --upstream http://127.0.0.1:80
+seed-gateway connect --raw <raw-z32-key> --port 1985
+
 # Client with a fixed key the operator can list
 seed-gateway connect --print-key --key-file ./client.key.json
 seed-gateway connect <z32-key> --key-file ./client.key.json
@@ -48,6 +55,8 @@ import {
   serveTunnel,
   connectTunnel,
   createGatewayProxy,
+  serveRawTunnel,
+  connectRawTunnel,
 } from '@seedprotocol/gateway-hyper'
 
 const operator = await serveTunnel({ upstream: 'http://127.0.0.1:80' })

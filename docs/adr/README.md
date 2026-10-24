@@ -33,6 +33,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0021](0021-clearing-a-property.md) | A property is cleared by attesting an empty value or by revoking its attestations | Accepted (being implemented) |
 | [0022](0022-properties-may-reference-the-seed.md) | Readers can accept property attestations that reference the Seed | Proposed |
 | [0023](0023-sealed-versions.md) | An owner can seal a Version; revoking a sealed value still removes it | Proposed |
+| [0024](0024-raw-tcp-tunnel-mode.md) | gateway-hyper carries raw TCP as a second protocol, on its own key | Accepted |
 
 ## Writing one
 

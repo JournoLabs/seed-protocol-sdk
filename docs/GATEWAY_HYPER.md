@@ -247,6 +247,25 @@ before reading from it if neither the key nor the address is listed. Two consequ
 - A connection relayed through another HyperDHT node shows the relay's address, so it is
   refused unless its key is listed.
 
+## Tracing
+
+`seed-gateway serve --trace` logs a line per stream and request event:
+
+```
+2026-10-23T18:00:00.000Z tunnel-trace req.recv request=mk2x-r7 stream=s3 method=GET path=/raw/abc bodyBytes=0 receiveMs=0
+```
+
+In code, `serveTunnel({ onEvent })` receives each event as a `TunnelEvent` object:
+`stream.open`, `stream.refused` (with `stage: 'handshake'` or `'connection'`), `stream.error`,
+`stream.close` (requests, bytes in, the request in flight if any), `req.recv`, `up.response`,
+`up.done`, `up.error` and `up.timeout` (with the phase it failed in: `send`, `wait` or `body`),
+and `res.sent`. The callback runs synchronously and a throw from it is dropped. Without
+`onEvent`, the operator keeps no tracing state and adds no listeners.
+
+`--request-id-header x-seed-tunnel-request-id` (or `requestIdHeader`) sends each request's id
+upstream under that header, so upstream logs can be matched to `tunnel-trace` lines. It replaces
+any value the client sent.
+
 ## Timeouts
 
 A tunnel session opens up to `maxStreams` HyperDHT streams to the operator (default 4, on
@@ -279,6 +298,41 @@ the operator's 504 and the stream is kept. The operator buffers the whole upstre
 before sending it, so the client sees no bytes until the upstream finishes; a response that
 takes longer than `requestTimeoutMs` to arrive at the operator is abandoned even if the
 upstream is still sending.
+
+## Raw TCP mode
+
+The framed tunnel above buffers each request and response whole, caps them at 64 MiB, carries
+one request per stream, and can't carry WebSockets. For an HTTP proxy in front of the tunnel,
+such as nginx serving a public gateway hostname, raw mode carries TCP instead:
+
+```bash
+# Operator
+seed-gateway serve --raw --upstream http://127.0.0.1:80 --allow-keys <client-z32>
+
+# Client, e.g. on the proxy host
+seed-gateway connect --raw <raw-operator-z32> --port 1985 --key-file ./client.key.json
+```
+
+or `serveRawTunnel({ upstream, allowlist })` and `connectRawTunnel({ key, port, keyFile })`.
+Each TCP connection to the client's port gets its own HyperDHT stream, and the operator pipes
+it to a new TCP connection to the upstream. HTTP/1.1 runs end to end, so keep-alive, streamed
+bodies of any size, `Range` and WebSockets work. See
+[ADR 0024](adr/0024-raw-tcp-tunnel-mode.md).
+
+- A raw server needs its own key; it defaults to
+  `.seed/gateway-tunnel/raw-operator.key.json`. Framed clients can't use it, and raw clients
+  can't use a framed server.
+- Each new connection costs a DHT lookup and handshake, so put a client that keeps connections
+  alive in front: nginx with `keepalive` on its upstream block.
+- The client closes a connection whose stream hasn't opened within `--connect-timeout-ms`
+  (default 30 s) and refuses connections beyond `--max-connections` (default 64).
+- For a few seconds after the operator restarts, clients get `PEER_NOT_FOUND` until its new
+  announcement has spread.
+- `--trace` (or `onEvent`) logs `conn.open` and `conn.close` per connection, with bytes each
+  way, duration and the first error; the operator sees bytes, not requests. The operator also
+  logs `stream.refused`, and the client logs `conn.refused` past `maxConnections`.
+
+The SDK sidecar and `createGatewayProxy` still speak the framed protocol.
 
 ## Developer key swap
 
