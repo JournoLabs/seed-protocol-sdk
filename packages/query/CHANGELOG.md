@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.11 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- eas, sdk: one store for property schema uids, read by every resolver (0ea6562b)
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits

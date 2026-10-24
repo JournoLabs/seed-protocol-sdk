@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.11 (2026-10-24)
 
 - **Breaking:** migration 0030 drops the `property_uids` table, and `propertyUids` is no longer exported. Nothing wrote to it; property EAS schema uids live in the schema uid store and on each metadata row's `schema_uid`.
 - **Breaking:** `@seedprotocol/sdk/node` exports `NodeDb` and `NodeFileManager` in place of the deprecated `Db` and `FileManager` aliases, which are removed. Rename the imports; the classes are the same.
@@ -11,6 +11,26 @@ All notable changes to this package are documented in this file.
 - A local database that looks older than 0.7.7 is copied to `seed.before-recreate-<ms>.db` beside `seed.db` (in OPFS in the browser) before it is recreated, and the warning names the copy. A 0.7.7 database can look older: 0.7.7 wrote its `storedDisplayUrlsCleared` marker from a background task after init, so a database closed right after its first 0.7.7 start, or whose task failed, has no marker, and 0.7.8 to 0.7.10 recreated it, dropping its unpublished drafts. If the copy fails, or the database is a remote libsql URL with nowhere to copy it, the database is opened as it is instead of recreated.
 - `@seedprotocol/sdk/node` exports `EntityUnloadedError`, `ItemCreateError` (and `ItemCreateErrorCode`), `PublishValidationFailedError`, `RelatedItemUnpublishedError`, `HtmlEmbeddedDataUriLimitError`, `HtmlSeedPropertyRefError`, and `exportArchive` with `ArchiveExportError`. A Node app importing from `./node` couldn't `instanceof` the error a write on an unloaded item throws. Both entries now export `OutboxOpFailedError` (`code: 'OUTBOX_OP_FAILED'`, the failing error's name in `errorName`), `RelationTargetError` and `StagedValueMissingError`; `save()` rejects with the first, and `ItemCreateError.cause` is usually one.
 - `clear()` on an unloaded ItemProperty rejects with `EntityUnloadedError` before it writes. It appended the clear op first and then rejected from `save()`, so the caller got an error and the property was cleared anyway.
+
+### Commits
+
+#### Breaking
+
+- drop the unused property_uids table (88635bf0)
+- eas, arweave, publish: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- eas: one store for property schema uids, read by every resolver (0ea6562b)
+- fail init the same way in tests as in production (f9343543)
+- clear() on an unloaded property throws before it writes (652b7846)
+- export the outbox, unload, archive and publish errors from ./node (bd62f748)
+- back up a database before recreating it as older than 0.7.7 (55dd1a54)
+
+#### Other
+
+- fold resolveMetadataSchemaUid into lookupPropertySchemaUid (1725d65b)
+- testing: a test default that differs from production needs a reason and a test on the real one (14ea224e)
 
 ## 0.7.10 (2026-10-24)
 

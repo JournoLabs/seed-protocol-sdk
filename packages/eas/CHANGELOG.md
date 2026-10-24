@@ -2,11 +2,22 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.11 (2026-10-24)
 
 - **Breaking:** the deprecated `EasClient` and `QueryClient` aliases are removed from `@seedprotocol/eas/node`. Use `NodeEasClient` and `NodeQueryClient`.
 - `getPublishAuthorizationFromEas` reads through the new `GET_PUBLISH_AUTHORIZATIONS` query, which selects `expirationTime` and `revoked`. `GET_SEEDS` selects neither, so grants it returned had no EAS expiry and never assessed as `'expired'` from it.
 - `assessPublishAuthorization` takes `revoked` and returns the new status `'revoked'` for a revoked grant. Code that switches exhaustively on `PublishAuthorizationAssessStatus` needs the extra case.
+
+### Commits
+
+#### Breaking
+
+- sdk, arweave, publish: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- sdk: one store for property schema uids, read by every resolver (0ea6562b)
+- publish: enforce publish authorization revocation and expiry; validate attest inputs first (ce535cbe)
 
 ## 0.7.10 (2026-10-24)
 

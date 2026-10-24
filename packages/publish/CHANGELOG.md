@@ -2,13 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.11 (2026-10-24)
 
 - **Breaking:** `configurePublish` (an alias of `initPublish`) and `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` (the deprecated name of `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA`) are removed.
 - `assessPublishAuthorizationLive` reports a revoked grant as `'revoked'`; it returned `'valid'`. It and `assertStorageBoundToIdentity` now see the grant's EAS `expirationTime`, so a grant past it is `'expired'` and no longer binds a data item owner.
 - `enrollPublishAutomation` defaults `expiresAt` to 365 days from now and gives the session key and the PublishAuthorization the same value. Before, a call without `expiresAt` added a session key with no expiry.
 - `attestPublishAuthorization` throws when `wallet` isn't the `identity` account.
 - `attestPublishAuthorization`, `attestPublishedBy` and `attestDomainOwnership` check their inputs before registering or naming a schema, so a bad call sends no transactions.
+
+### Commits
+
+#### Breaking
+
+- sdk, eas, arweave: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- eas, sdk: one store for property schema uids, read by every resolver (0ea6562b)
+- eas: enforce publish authorization revocation and expiry; validate attest inputs first (ce535cbe)
+
+#### Other
+
+- describe the gateway tunnel upstream generically (8ea5874e)
 
 ## 0.7.10 (2026-10-24)
 

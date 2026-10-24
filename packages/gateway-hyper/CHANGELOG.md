@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.11 (2026-10-24)
+
+### Commits
+
+#### Other
+
+- describe the gateway tunnel upstream generically (8ea5874e)
+
 ## 0.7.10 (2026-10-24)
 
 - `serveTunnel` takes `allowlist: { keys, ips }` and `seed-gateway serve` takes

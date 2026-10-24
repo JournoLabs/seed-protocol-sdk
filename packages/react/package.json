@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/react",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "description": "React hooks and components for Seed Protocol: live schemas, models, items and properties from @seedprotocol/sdk, backed by TanStack Query",
   "keywords": [
     "seed-protocol",

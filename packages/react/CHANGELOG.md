@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.11 (2026-10-24)
+
+### Commits
+
+#### Breaking
+
+- sdk: drop the unused property_uids table (88635bf0)
+
+#### Fixes
+
+- sdk: fail init the same way in tests as in production (f9343543)
+
 ## 0.7.10 (2026-10-24)
 
 - **Breaking:** `useItem` holds the Item it shows once per mounted hook and releases it when the hook unmounts or shows another item, so an item no hook or caller holds is unloaded. Before, each lookup that missed the instance cache took a hold that was never released, and no item `useItem` loaded was ever unloaded. Code that keeps an Item from `useItem` after the component unmounts must hold it itself (`Item.find({ hold: true })` or `Item.retain`, then `unload()` when done).

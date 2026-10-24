@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "description": "Vite plugin for browser apps using @seedprotocol/sdk: cross-origin isolation headers, ES module workers, linked-install support, and opt-in Node polyfills",
   "keywords": [
     "seed-protocol",
