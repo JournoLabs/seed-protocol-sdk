@@ -224,9 +224,6 @@ export function createTestConfig(
   }
 }
 
-let originalCwd: string | undefined
-let testProjectPathForCleanup: string | undefined
-
 export async function setupTestEnvironment(options: {
   configOverrides?: Partial<SeedConstructorOptions>
   projectPath?: string
@@ -238,7 +235,6 @@ export async function setupTestEnvironment(options: {
   let testProjectPath: string | undefined
 
   if (isNodeEnv) {
-    originalCwd = process.cwd()
     testProjectPath = options.projectPath || (await getTestProjectPath())
     const fs = await import('fs')
     if (!fs.existsSync(testProjectPath)) {
@@ -264,37 +260,5 @@ export async function setupTestEnvironment(options: {
 
   await initializeTestClient({ config, timeout: options.timeout })
 
-  if (isNodeEnv && testProjectPath && !options.projectPath) {
-    const os = await import('os')
-    const tmpDir = os.tmpdir()
-    if (testProjectPath.startsWith(tmpDir)) {
-      testProjectPathForCleanup = testProjectPath
-    }
-  }
-
   return testProjectPath
-}
-
-export async function teardownTestEnvironment(): Promise<void> {
-  if (typeof window === 'undefined') {
-    if (originalCwd) {
-      process.chdir(originalCwd)
-      originalCwd = undefined
-    }
-    if (testProjectPathForCleanup) {
-      const fs = await import('fs')
-      const os = await import('os')
-      const tmpDir = os.tmpdir()
-      if (testProjectPathForCleanup.startsWith(tmpDir)) {
-        try {
-          if (fs.existsSync(testProjectPathForCleanup)) {
-            fs.rmSync(testProjectPathForCleanup, { recursive: true, force: true })
-          }
-        } catch {
-          // ignore
-        }
-      }
-      testProjectPathForCleanup = undefined
-    }
-  }
 }
