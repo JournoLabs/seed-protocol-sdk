@@ -1,3 +1,5 @@
+import type { AllowlistOptions } from './tunnel/allowlist'
+
 export type TunnelMeta = {
   method: string
   path: string
@@ -29,6 +31,12 @@ export type ServeTunnelOptions = {
    * body. Default 30 000; 0 disables.
    */
   upstreamTimeoutMs?: number
+  /**
+   * Clients that may connect, by public key (z32 or hex) or by IP or CIDR range. A client
+   * listed in either is let in; with both empty or unset, every client is. Invalid entries
+   * throw. See `createAllowlist` for which address is checked.
+   */
+  allowlist?: AllowlistOptions
 }
 
 export type ServeTunnelResult = {

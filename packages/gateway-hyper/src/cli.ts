@@ -4,15 +4,18 @@
 import path from 'node:path'
 import process from 'node:process'
 import { parseArgs } from 'node:util'
-import { connectTunnel, loadOrCreateOperatorKeypair, serveTunnel } from './index'
+import { connectTunnel, createAllowlist, loadOrCreateOperatorKeypair, serveTunnel } from './index'
 
 const DEFAULT_OPERATOR_KEY_FILE = path.join('.seed', 'gateway-tunnel', 'operator.key.json')
 
 const USAGE = `Usage:
   seed-gateway serve [--upstream http://127.0.0.1:80] [--key-file <path>] [--upstream-timeout-ms 30000]
+                     [--allow-keys k1,k2] [--allow-ips 192.168.1.0/24,203.0.113.7]
       Operator: accept Hyper connections and proxy them to a local upstream (Traefik).
       Default --key-file: ./.seed/gateway-tunnel/operator.key.json (created on first run).
       Answers 504 when the upstream is idle for --upstream-timeout-ms (0 disables).
+      With --allow-keys or --allow-ips, only clients whose public key or address is listed
+      can connect. A client on the operator's LAN shows its LAN address.
 
   seed-gateway connect <key> [--host 127.0.0.1] [--port 1984] [--request-timeout-ms 60000]
                        [--key-file <path>]
@@ -43,6 +46,13 @@ function parseCount(value: string | undefined, flag: string): number | undefined
   const count = Number(value)
   if (!Number.isInteger(count) || count < 1) fail(`${flag} must be a whole number of at least 1`)
   return count
+}
+
+function splitList(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
 }
 
 function waitForSignal(): Promise<void> {
@@ -77,6 +87,8 @@ export async function main(argv: string[]): Promise<void> {
       'upstream-timeout-ms': { type: 'string' },
       'request-timeout-ms': { type: 'string' },
       'max-streams': { type: 'string' },
+      'allow-keys': { type: 'string' },
+      'allow-ips': { type: 'string' },
     },
   })
 
@@ -85,10 +97,13 @@ export async function main(argv: string[]): Promise<void> {
     const keyFile = path.resolve(values['key-file'] ?? DEFAULT_OPERATOR_KEY_FILE)
     console.log(`[Seed Protocol] Gateway tunnel upstream: ${upstream}`)
     console.log(`[Seed Protocol] Operator key file: ${keyFile}`)
+    const allowlist = { keys: splitList(values['allow-keys']), ips: splitList(values['allow-ips']) }
+    console.log(`[Seed Protocol] Allowlist: ${createAllowlist(allowlist).summary}`)
 
     const session = await serveTunnel({
       upstream,
       keyFile,
+      allowlist,
       upstreamTimeoutMs: parseMs(values['upstream-timeout-ms'], '--upstream-timeout-ms'),
     })
     console.log(`[Seed Protocol] Operator key (z32): ${session.key}`)
