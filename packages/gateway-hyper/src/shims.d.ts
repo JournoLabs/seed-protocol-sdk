@@ -64,12 +64,3 @@ declare module 'hypercore-id-encoding' {
   }
   export default ID
 }
-
-declare module 'b4a' {
-  const b4a: {
-    from(input: string | Buffer | Uint8Array, encoding?: string): Buffer
-    toString(buf: Buffer | Uint8Array, encoding?: string): string
-    isBuffer(value: unknown): value is Buffer
-  }
-  export default b4a
-}

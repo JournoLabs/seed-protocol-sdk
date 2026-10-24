@@ -64,8 +64,15 @@
       "project": ["src/**/*.{ts,tsx}", "__tests__/**/*.{ts,tsx}"]
     },
     "packages/next": {
-      "entry": ["src/index.ts", "__tests__/**/*.test.ts"],
-      "project": ["src/**/*.ts", "__tests__/**/*.ts"]
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.test.ts",
+        // The app integration/nextApp.test.ts builds with next.
+        "__tests__/fixtures/next-app/next.config.mjs",
+        "__tests__/fixtures/next-app/app/**/*.jsx"
+      ],
+      "project": ["src/**/*.ts", "__tests__/**/*.ts", "__tests__/fixtures/next-app/**/*.{mjs,jsx}"],
+      "ignore": ["__tests__/fixtures/next-app/.next*/**"]
     },
     "packages/publish": {
       "entry": ["src/index.ts", "src/thirdweb.ts", "src/**/*.test.{ts,tsx}"],

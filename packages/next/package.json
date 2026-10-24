@@ -45,8 +45,6 @@
     "@seedprotocol/react": "workspace:*",
     "@seedprotocol/sdk": "workspace:*",
     "@types/node": "^24.10.1",
-    "@zenfs/core": "2.7.7",
-    "@zenfs/dom": "1.2.14",
     "next": "16.4.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

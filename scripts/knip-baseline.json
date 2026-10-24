@@ -1,7 +1,4 @@
 {
-  "dependencies": 8,
-  "devDependencies": 13,
   "exports": 1,
-  "unlisted": 7,
-  "unresolved": 1
+  "unlisted": 7
 }

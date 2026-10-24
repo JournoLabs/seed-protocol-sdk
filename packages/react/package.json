@@ -46,10 +46,8 @@
     "@tanstack/react-query": "^5"
   },
   "dependencies": {
-    "@xstate/react": "^6.1.0",
     "debug": "^4.4.1",
     "drizzle-orm": "^0.44.3",
-    "immer": "^11.0.1",
     "lodash-es": "^4.17.22",
     "pluralize": "^8.0.0",
     "rxjs": "^7.8.1",
