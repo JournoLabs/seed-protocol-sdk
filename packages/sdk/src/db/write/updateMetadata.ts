@@ -2,7 +2,7 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { PropertyType } from '@/types'
-import { resolveMetadataSchemaUid } from './createMetadata'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { normalizePublisher } from '@/helpers/addresses'
 
 type UpdateMetadata = (
@@ -11,7 +11,7 @@ type UpdateMetadata = (
   options?: {
     /**
      * The database or transaction to write and read; the app database by default. With one, the
-     * EAS schema uid isn't looked up: set `schemaUid` (resolveMetadataSchemaUid) beforehand.
+     * EAS schema uid isn't looked up: set `schemaUid` (lookupPropertySchemaUid) beforehand.
      */
     db?: ReturnType<typeof BaseDb.getAppDb>
   },
@@ -56,7 +56,7 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
     metadataValues.propertyName &&
     (!metadataValues.schemaUid || metadataValues.schemaUid === 'undefined')
   ) {
-    const schemaUid = await resolveMetadataSchemaUid(metadataValues.propertyName, propertyRecordSchema)
+    const schemaUid = await lookupPropertySchemaUid(metadataValues.propertyName, propertyRecordSchema)
     if (schemaUid) {
       metadataValues.schemaUid = schemaUid
       rest.schemaUid = schemaUid
