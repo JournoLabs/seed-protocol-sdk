@@ -133,8 +133,9 @@ every push to main. Three local checks cover its failures before a merge, from c
 faithful.
 
 **Pre-push hook.** `.githooks/pre-push` runs `bun install --frozen-lockfile --dry-run`, which fails
-when a `package.json` change isn't in `bun.lock`, then `bun run lint --quiet`. It isn't installed by
-default. Turn it on per clone with:
+when a `package.json` change isn't in `bun.lock`, then `bun run lint --quiet`, then
+`scripts/check-migrations.js`, which fails when two migrations share a number or `drizzleFiles.ts`
+is stale. It isn't installed by default. Turn it on per clone with:
 
 ```bash
 git config core.hooksPath .githooks

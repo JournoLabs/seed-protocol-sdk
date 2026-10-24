@@ -1,5 +1,5 @@
 #!/bin/sh
-# Opt-in pre-push hook: the two cheap, deterministic checks from the Release workflow's
+# Opt-in pre-push hook: the cheap, deterministic checks from the Release workflow's
 # "Lint and test" job. Install with `git config core.hooksPath .githooks`; skip once with
 # `git push --no-verify`. The full job is `bun run ci:local`.
 set -e
@@ -13,3 +13,6 @@ fi
 
 echo "pre-push: bun run lint"
 bun run lint --quiet
+
+echo "pre-push: node scripts/check-migrations.js"
+node scripts/check-migrations.js

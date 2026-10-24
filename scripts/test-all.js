@@ -29,6 +29,7 @@ export const PACKAGE_TESTS = [
 
 const STEPS = [
   'node scripts/check-node-env.js',
+  'node scripts/check-migrations.js',
   'tsc -p packages/sdk/tsconfig.typetests.json',
   'vitest run --reporter=default',
   ...PACKAGE_TESTS.map((name) => `bun run --filter ${name} test`),
