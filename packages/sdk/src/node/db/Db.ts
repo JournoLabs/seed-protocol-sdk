@@ -97,7 +97,6 @@ function copyDirRecursive(sourceDir: string, targetDir: string) {
   }
 }
 
-
 /** The file a local libsql `file:` URL opens; undefined for `:memory:` and remote URLs. */
 const localDbFilePath = (dbUrl: string): string | undefined => {
   if (!dbUrl.startsWith('file:')) return undefined
@@ -111,7 +110,6 @@ export class NodeDb implements IDb {
   private client: ReturnType<typeof createClient> | undefined
   /** Bumped by close(), so a prepareDb that was running closes what it opened instead of keeping it. */
   private openGeneration = 0
-
 
   getAppDb() {
     return this.db
@@ -280,9 +278,6 @@ export class NodeDb implements IDb {
     )
   }
 }
-
-/** @deprecated Prefer NodeDb */
-export const Db = NodeDb
 
 BaseDb.configure(new NodeDb())
 

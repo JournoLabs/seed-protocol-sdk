@@ -1,6 +1,5 @@
 export {
   MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA,
-  SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA,
   MANAGED_ACCOUNT_FACTORY_ADDRESSES,
 } from './helpers/constants'
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
@@ -14,7 +13,6 @@ export {
 } from '@seedprotocol/eas'
 export {
   initPublish,
-  configurePublish,
   getPublishConfig,
   resolvePublishEasChain,
   requireManagedAccountFactoryAddress,

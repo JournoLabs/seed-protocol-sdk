@@ -15,8 +15,8 @@ export { ConflictError, type ConflictResult } from '../Schema/errors'
 export { OwnershipError, assertItemOwned, isItemOwned } from '../helpers/ownership'
 
 // Node.js specific exports
-export { FileManager } from './helpers/FileManager'
-export { Db, resolveSdkDrizzleMigrationsDir } from './db/Db'
+export { NodeFileManager } from './helpers/FileManager'
+export { NodeDb, resolveSdkDrizzleMigrationsDir } from './db/Db'
 
 // Schema exports
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'

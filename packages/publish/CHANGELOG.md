@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **Breaking:** `configurePublish` (an alias of `initPublish`) and `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` (the deprecated name of `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA`) are removed.
+
 ## 0.7.10 (2026-10-24)
 
 - `publishItem` (the executor behind `item.publish()`) holds the item until the publish settles, so an item the caller looked up without a hold doesn't unload mid-publish after the SDK's grace period. The publish steps that look an item up themselves take an explicit hold (`Item.find({ hold: true })`), since `find` no longer holds by default.

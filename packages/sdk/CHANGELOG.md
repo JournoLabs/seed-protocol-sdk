@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `@seedprotocol/sdk/node` exports `NodeDb` and `NodeFileManager` in place of the deprecated `Db` and `FileManager` aliases, which are removed. Rename the imports; the classes are the same.
+
 ## 0.7.10 (2026-10-24)
 
 - New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.

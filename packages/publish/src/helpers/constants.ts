@@ -29,13 +29,6 @@ export const EAS_CONTRACT_ADDRESS =
 export const MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA =
   '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const
 
-/**
- * @deprecated Misleading name: this is the ABI reference deployment, not a shared on-chain router.
- *   Use {@link MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA}.
- */
-export const SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA =
-  MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA
-
 export const PublishMachineStates = {
   SUCCESS: 'success',
   FAILURE: 'failure',
