@@ -89,6 +89,8 @@ export interface PublishMachineContext {
    * Per-property `htmlEmbeddedDataUriPolicy` on the schema overrides this. Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy
+  /** How Arweave links are written into Html (ADR 0025). Default: `gateway`. */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
   /** Set during publish after embedded-image prep: Html seeds uploaded in a second pass. */
   htmlEmbeddedDeferredHtmlSeedLocalIds?: string[]
   htmlEmbeddedPhase1PublishUploads?: PublishUpload[]

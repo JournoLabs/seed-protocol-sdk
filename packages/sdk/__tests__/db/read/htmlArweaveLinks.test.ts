@@ -93,4 +93,14 @@ testDescribe('Arweave links in Html (ADR 0025)', () => {
       post.unload()
     }
   })
+
+  it("publish writes ar:// links with htmlArweaveRefs: 'ar'", async () => {
+    const post = await createPost(`<img src="https://ar.seedprotocol.io/raw/${TX}">`)
+    try {
+      await prepareHtmlEmbeddedImagesForPublish(post as any, 'materialize', { htmlArweaveRefs: 'ar' })
+      expect(await storedHtml(post)).toBe(`<img src="ar://${TX}">`)
+    } finally {
+      post.unload()
+    }
+  })
 })

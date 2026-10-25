@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- New `htmlArweaveRefs` option (`initPublish` config and `createPublish`/`item.publish()` options, ADR 0025): `'gateway'` (default) writes `https://<public gateway>/raw/<id>` into published Html, as before; `'ar'` writes `ar://<id>`, which needs no gateway but loads only in a Seed reader (`SeedHtml`, the SDK's Html value, query hydration).
+
 ## 0.7.11 (2026-10-24)
 
 - **Breaking:** `configurePublish` (an alias of `initPublish`) and `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` (the deprecated name of `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA`) are removed.

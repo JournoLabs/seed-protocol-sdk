@@ -207,6 +207,12 @@ export interface PublishConfig {
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
   /**
+   * How publish writes Arweave links into Html (ADR 0025). `gateway` (default): `https://<public
+   * gateway>/raw/<id>`, which loads anywhere and which Seed readers move onto their own gateways.
+   * `ar`: `ar://<id>`, host-free, but only a Seed reader can load it.
+   */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
+  /**
    * Optional fallback: Signer for DataItem creation. Prefer passing at createPublish time.
    */
   dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
@@ -258,6 +264,8 @@ export interface CreatePublishOptions {
    * Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
+  /** Overrides {@link PublishConfig.htmlArweaveRefs} for this publish. */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
   /**
    * Called when this publish run succeeds with the resolved Seed/Version/property UID batch.
    * Overrides {@link PublishConfig.onPublished} when both are set.

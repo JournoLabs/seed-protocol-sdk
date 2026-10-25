@@ -95,6 +95,7 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
           options?.htmlEmbeddedDataUriPolicy ??
           publishCfg.htmlEmbeddedDataUriPolicy ??
           'materialize',
+        htmlArweaveRefs: options?.htmlArweaveRefs ?? publishCfg.htmlArweaveRefs ?? 'gateway',
         onPublished: options?.onPublished ?? publishCfg.onPublished,
         authorizePublish: options?.authorizePublish ?? publishCfg.authorizePublish,
       },

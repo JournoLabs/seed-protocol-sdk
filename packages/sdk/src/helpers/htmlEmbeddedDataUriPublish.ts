@@ -12,6 +12,7 @@ import {
   publishedArweaveLinksInHtml,
   resolveSeedIdsFromRefString,
   rewriteHtmlAttributes,
+  type HtmlArweaveRefs,
 } from '@seedprotocol/arweave'
 import { getContentHash } from '@/helpers/crypto'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
@@ -336,6 +337,7 @@ const htmlValuesOf = (node: PublishGraphNode) =>
 export async function prepareHtmlEmbeddedImagesForPublish(
   item: { seedLocalId: string; modelName?: string },
   publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
+  options?: HtmlArweaveRefsOptions,
 ): Promise<PrepareHtmlEmbeddedImagesResult> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) {
@@ -346,7 +348,7 @@ export async function prepareHtmlEmbeddedImagesForPublish(
   // images materialized and co-published (rows keyed by the item owning the Html property).
   const graph = await getPublishGraph(item)
   for (const node of publishGraphItemNodes(graph)) {
-    await prepareHtmlEmbeddedImagesOfNode(appDb, node, publishPolicy, deferred)
+    await prepareHtmlEmbeddedImagesOfNode(appDb, node, publishPolicy, deferred, options?.htmlArweaveRefs)
   }
 
   return { deferredHtmlSeedLocalIds: [...deferred] }
@@ -354,14 +356,22 @@ export async function prepareHtmlEmbeddedImagesForPublish(
 
 /**
  * Writes an Html file that this publish uploads with its Arweave links in the published form
- * (ADR 0025): on the public gateway, so a link a reader re-hosted onto a local sidecar, a proxy or
- * another gateway (and an editor saved back) is public again. Html already published is left as it
- * is, so the file keeps matching its upload. Returns the text the rest of the publish reads.
+ * (ADR 0025): on the public gateway, or `ar://<id>` with `htmlArweaveRefs: 'ar'`. So a link a
+ * reader re-hosted onto a local sidecar, a proxy or another gateway (and an editor saved back) is
+ * public again. Html already published is left as it is, so the file keeps matching its upload.
+ * Returns the text the rest of the publish reads.
  */
-async function publishArweaveLinksOnDisk(property: PublishGraphProperty, filePath: string): Promise<string> {
+async function publishArweaveLinksOnDisk(
+  property: PublishGraphProperty,
+  filePath: string,
+  htmlArweaveRefs: HtmlArweaveRefs | undefined,
+): Promise<string> {
   const html = await BaseFileManager.readFileAsString(filePath)
   if (!property.refs[0]?.node?.newSeed) return html
-  const published = publishedArweaveLinksInHtml(html, { publicBaseUrl: getPublicArweaveBaseUrl() })
+  const published = publishedArweaveLinksInHtml(html, {
+    to: htmlArweaveRefs,
+    publicBaseUrl: getPublicArweaveBaseUrl(),
+  })
   if (published === html) return html
   await saveHtmlFile(filePath, published)
   return published
@@ -392,6 +402,7 @@ async function prepareHtmlEmbeddedImagesOfNode(
   node: PublishGraphNode,
   publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
   deferred: Set<string>,
+  htmlArweaveRefs: HtmlArweaveRefs | undefined,
 ): Promise<void> {
   // An earlier attempt's rows: their images are reused for the same Html and data URI
   const earlier = node.embeddedImages
@@ -399,7 +410,7 @@ async function prepareHtmlEmbeddedImagesOfNode(
 
   for (const { property, htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
     if (!(await BaseFileManager.pathExists(filePath))) continue
-    const html = await publishArweaveLinksOnDisk(property, filePath)
+    const html = await publishArweaveLinksOnDisk(property, filePath, htmlArweaveRefs)
 
     // seed:property/ placeholders are filled in after phase 1 whatever the data URI policy. A
     // placeholder naming no usable property fails here, before anything is uploaded.
@@ -442,6 +453,9 @@ async function prepareHtmlEmbeddedImagesOfNode(
   }
 }
 
+/** How publish writes Arweave links into Html (ADR 0025); see `PublishConfig.htmlArweaveRefs`. */
+export type HtmlArweaveRefsOptions = { htmlArweaveRefs?: HtmlArweaveRefs }
+
 export type UploadedTx = { txId: string; seedLocalId?: string; versionLocalId?: string }
 
 /**
@@ -456,6 +470,7 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   parentSeedLocalId: string,
   uploadedTransactions: UploadedTx[],
   deferredHtmlSeedLocalIds?: string[],
+  options?: HtmlArweaveRefsOptions,
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
@@ -473,7 +488,7 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   // The parent's Html and that of the draft items published with it (see prepareHtmlEmbeddedImagesForPublish).
   const graph = await getPublishGraph({ seedLocalId: parentSeedLocalId })
   for (const node of publishGraphItemNodes(graph)) {
-    await rewriteHtmlEmbeddedImagesOfNode(node, txBySeedLocalId, deferred)
+    await rewriteHtmlEmbeddedImagesOfNode(node, txBySeedLocalId, deferred, options?.htmlArweaveRefs)
   }
 }
 
@@ -481,7 +496,9 @@ async function rewriteHtmlEmbeddedImagesOfNode(
   node: PublishGraphNode,
   txBySeedLocalId: Map<string, string>,
   deferred: Set<string> | undefined,
+  htmlArweaveRefs: HtmlArweaveRefs | undefined,
 ): Promise<void> {
+  const linkFor = (txId: string) => (htmlArweaveRefs === 'ar' ? `ar://${txId}` : getPublicArweaveRawUrl(txId))
   for (const { htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
     if (deferred && !deferred.has(htmlSeedLocalId)) continue
     if (!(await BaseFileManager.pathExists(filePath))) continue
@@ -494,13 +511,13 @@ async function rewriteHtmlEmbeddedImagesOfNode(
       if (r.htmlSeedLocalId.trim() !== htmlSeedLocalId) continue
       const txId = txBySeedLocalId.get(r.imageSeedLocalId.trim())
       const dataUri = entries.find((e) => e.stableKey === r.stableKey)?.dataUri
-      if (txId && dataUri) replacements.set(dataUri, getPublicArweaveRawUrl(txId))
+      if (txId && dataUri) replacements.set(dataUri, linkFor(txId))
     }
 
     const urlByPropertyName = new Map<string, string>()
     for (const name of findSeedPropertyRefsInHtml(html)) {
       const txId = await resolveSeedPropertyRefTxId(node, name, txBySeedLocalId)
-      urlByPropertyName.set(name, getPublicArweaveRawUrl(txId))
+      urlByPropertyName.set(name, linkFor(txId))
     }
 
     const newHtml = replaceSeedPropertyRefsInHtml(replaceDataUrisInParsedHtml(html, replacements), urlByPropertyName)
