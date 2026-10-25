@@ -123,6 +123,11 @@ const getModel = (): typeof import('@/Model/Model').Model => {
   }
   return ModelClass!
 }
+// Start loading Model with this module. Item.create builds an item's ItemProperty instances from
+// its Model synchronously; before this import resolved, the first items had none, and a property
+// assigned on one (`item.title = x` after create with waitForReady: false) became a plain field
+// and was lost when the properties loaded (decision D16).
+getModel()
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context

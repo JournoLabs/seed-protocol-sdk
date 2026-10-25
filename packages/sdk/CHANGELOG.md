@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- A property assigned right after `Item.create(…, { waitForReady: false })` is kept and saved. In a process's first items, `Item` hadn't finished its deferred import of `Model`, so `create` built no ItemProperty instances; the assignment became a plain field on the item and was lost once the properties loaded (decision D16). `Item` now starts that import when it loads.
 - `prepareHtmlEmbeddedImagesForPublish` and `rewriteHtmlEmbeddedImagesOnDisk` take `{ htmlArweaveRefs }`; with `'ar'` they write `ar://<id>` links into Html instead of gateway URLs.
 - **Breaking:** `getArweaveUrlForTransaction` is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}` (ADR 0025). The SDK's deprecated copy, which returned `BaseArweaveClient.getRawUrl(id)`, is removed.
 - The SDK re-exports `rehostArweaveLinksInHtml`, `nextArweaveGatewayUrl`, `mapUrlAttribute`, `parseArweaveTransactionLink` and the `ArweaveTransactionLink` and `HtmlArweaveRefs` types from `@seedprotocol/arweave`.
