@@ -796,17 +796,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Get Item instance by ID from cache
-   * The ID can be either seedUid or seedLocalId
-   * @param id - seedUid or seedLocalId
-   * @returns Cached Item instance or null if not found
+   * The cached Item for a seedUid or seedLocalId, or null. Takes no cache hold unless called with
+   * `hold: true`, like `Item.find` and the definitions' `getById`; without one, the instance stays
+   * cached for the grace period after this lookup. A caller that takes a hold releases it with
+   * `unload()`.
    */
-  static getById(id: string): Item<any> | null {
+  static getById(id: string, options?: { hold?: boolean }): Item<any> | null {
     if (!id) {
       return null
     }
-    
-    return this.cache.hold(id) ?? null
+    if (options?.hold) return this.cache.hold(id) ?? null
+    const item = this.peek(id)
+    if (item) this.cache.keepUnheld(item)
+    return item ?? null
   }
 
   /**
@@ -841,8 +843,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    // Check cache first
-    const cached = this.getById(id)
+    // Check cache first; createById holds what it returns
+    const cached = this.getById(id, { hold: true })
     if (cached) {
       return cached
     }
@@ -902,7 +904,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
         async () => {
-          const fromCache = hold ? (Item.getById(id) ?? undefined) : Item.peek(id)
+          const fromCache = hold ? (Item.getById(id, { hold: true }) ?? undefined) : Item.peek(id)
           if (fromCache && !hold) Item.cache.keepUnheld(fromCache)
           cached = fromCache !== undefined
           let item = fromCache

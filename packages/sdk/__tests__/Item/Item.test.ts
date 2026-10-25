@@ -817,7 +817,7 @@ testDescribe('Item Integration Tests', () => {
       const holdsBefore = holds()
 
       expect(Item.peekReady(seedLocalId)).toBe(Item.getById(seedLocalId))
-      expect(holds()).toBe(holdsBefore + 1) // getById's hold, not peekReady's
+      expect(holds()).toBe(holdsBefore) // neither takes a hold
       expect(Item.peekReady(undefined)).toBeUndefined()
       expect(Item.peekReady('not-a-cached-id')).toBeUndefined()
 
