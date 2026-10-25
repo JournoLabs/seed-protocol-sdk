@@ -1,10 +1,11 @@
 # 0025. Published Html names one gateway; every Seed reader re-hosts its links
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-24
 - **Scope:** `@seedprotocol/arweave` (default host, gateway list, link resolver),
-  `@seedprotocol/sdk` (Html publish, Html value), `@seedprotocol/react` (`SeedHtml`),
-  `@seedprotocol/query` (body hydration), `@seedprotocol/feed` (documents and media links)
+  `@seedprotocol/sdk` (Html publish, Html value), `@seedprotocol/publish` (`htmlArweaveRefs`),
+  `@seedprotocol/react` (`SeedHtml`), `@seedprotocol/query` (body hydration),
+  `@seedprotocol/feed` (documents and media links)
 
 ## Context
 
@@ -44,11 +45,16 @@ Publish keeps writing `https://<host>/raw/<id>`. The default host becomes `arwea
 (`DEFAULT_ARWEAVE_HOST`); `ar.seedprotocol.io` stays in the read fallback list. `arweaveDomain`
 still overrides it.
 
-The host comes only from the resolved public gateway. Publish refuses to write links before
-endpoints resolve, and an empty or invalid `arweaveDomain` falls back to the default host instead of
-producing `https:///…`.
+The host is the resolved public gateway (`getPublicArweaveBaseUrl`). Before endpoints resolve it is
+the read host unless that is a loopback (sidecar) address, then the env host or the default; it is
+never a sidecar URL. An empty `arweaveDomain` means the default host instead of producing
+`https:///…`.
 
-A new publish option, `htmlArweaveRefs: 'ar'`, writes `ar://<id>` instead. It is for apps whose
+Publish also rewrites every Arweave link already in an Html value it uploads into the published
+form: a link a reader re-hosted onto a sidecar, a proxy or another gateway, and an editor saved
+back, goes up on the public gateway. Html already published is left as it is.
+
+A publish option, `htmlArweaveRefs: 'ar'`, writes `ar://<id>` instead. It is for apps whose
 Html is only ever shown by a Seed reader; anywhere else those links don't load. The default is
 `'gateway'`.
 
@@ -71,14 +77,17 @@ reader's gateway list:
   the sidecar or proxy, which serves this reader and nobody else, so it is never written back to
   the stored Html.
 
-The reader's read list always ends with the public gateways, and `arweave.net` is last unless the
-app removes it explicitly (`getReadGatewayHostsForConfig` returns only the active host today in
-Hyper and proxy modes).
+The reader's read list continues with the public gateway and the default list (`arweave.net`,
+`permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`) after any sidecar or proxy, unless the app
+replaces the list (`ARWEAVE_READ_GATEWAYS`). Transaction status checks still ask only the sidecar or
+proxy while one is active: a data item it just accepted isn't on the public gateways yet, and their
+404 would read as missing.
 
 Readers apply it as follows:
 
-- **SDK Html value** (`storageValue/resolve.ts`, `readHtmlBodyForStorageSeed.ts`): rewrites on read.
-  The stored file keeps the links as published.
+- **SDK Html value** (`resolveStorageDisplay`): rewrites on read, so editors that show the value
+  get working images too. The stored file keeps the links as written; `exportArchive` reads with
+  `rehostLinks: false`, so a bag keeps each Html as published.
 - **Query** (`hydrateArweaveRichText.ts`): rewrites hydrated bodies, and fetches the body itself
   across the gateway list instead of one URL.
 - **`SeedHtml`**: rewrites before calling the app's `sanitize`, so a sanitizer that drops unknown
@@ -86,14 +95,17 @@ Readers apply it as follows:
   for `error` events from `img`, `video`, `audio` and `source`, and moves that element to the next
   host in the list. This needs no script inside the Html. With the `render` prop the app owns the
   container, so `SeedHtml` exports the same listener as a helper the app attaches.
-- **Feed**: documents and media links use the feed's public host (`arweaveDomain`, default
-  `arweave.net`), never `getBaseUrl()`, since RSS clients outside Seed read them.
+- **Feed**: media links, link fields and Html fields use the feed's public host (`arweaveDomain`,
+  default `arweave.net`), never the read host, since RSS clients outside Seed read them. Query hands
+  feed this reader's URLs, so feed rewrites them back.
 
 String readers can only pick one host per link; failover after a load error happens only in
 `SeedHtml` (or an app using its helper).
 
-There is one exported `getArweaveUrlForTransaction`, in `@seedprotocol/arweave`, returning
-`<public host>/raw/<id>`. The SDK's and query's copies are removed (no aliases).
+Two functions name the two audiences. `getArweaveUrlForTransaction(id)` is the URL this reader loads
+from, `{first read gateway}/raw/{id}`; it is the only one, in `@seedprotocol/arweave`, and the SDK's
+and query's copies are removed. `getPublicArweaveRawUrl(id)` is the URL for anything that leaves
+this reader: published Html and feeds.
 
 ## Consequences
 
@@ -104,7 +116,8 @@ There is one exported `getArweaveUrlForTransaction`, in `@seedprotocol/arweave`,
   Seed reader.
 - **Breaking:** new publishes and default reads move from `ar.seedprotocol.io` to `arweave.net`. An
   app that wants Seed's gateway sets `arweaveDomain`. The three `getArweaveUrlForTransaction`
-  exports become one.
+  exports become one, returning `/raw/<id>` on the reader's first gateway (query's returned
+  `/<id>`).
 - The resolver runs on every Html read. It parses attributes, not the whole document; its cost
   should be checked against PermaPress's listing timings.
 - A link to a different Arweave app's `/raw/<id>` on some other host is re-hosted too. The content
