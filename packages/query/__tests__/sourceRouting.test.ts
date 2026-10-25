@@ -82,12 +82,9 @@ function makeLocalFixture(opts: {
     async getSeedByUid(uid) {
       return seedsByUid.get(uid) ?? null
     },
-    async listSeedsBySchemaName(name, { limit, skip }) {
+    async listSeedsBySchemaName(name, { limit, skip, uidPrefix }) {
       if (name !== schemaName) return []
-      return [seed].slice(skip, skip + limit)
-    },
-    async listSeedsByUidPrefix(name, uidPrefix, { limit, skip }) {
-      if (name !== schemaName || !opts.seedUid.startsWith(uidPrefix)) return []
+      if (uidPrefix && !opts.seedUid.startsWith(uidPrefix)) return []
       return [seed].slice(skip, skip + limit)
     },
     async listSeedsBySchemaNameForMonth(name) {

@@ -67,7 +67,6 @@ function makeSource(calls: string[]): QueryDataSource {
     kind: 'local',
     getSeedByUid: (uid) => call('seed', seeds.get(uid) ?? null),
     listSeedsBySchemaName: () => call('list', [seeds.get(POST)!]),
-    listSeedsByUidPrefix: () => call('list', [seeds.get(POST)!]),
     listSeedsBySchemaNameForMonth: () => call('list', [seeds.get(POST)!]),
     getVersionsForSeed: (uid) => call('versions', versions.filter((v) => v.refUID === uid)),
     getVersionsForSeeds: (uids) =>

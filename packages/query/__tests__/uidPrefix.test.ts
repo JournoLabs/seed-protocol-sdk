@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeUidPrefix } from '../src/api'
+import { normalizeAttesters, normalizeUidPrefix } from '../src/api'
 
 describe('normalizeUidPrefix', () => {
   it('lowercases and adds 0x', () => {
@@ -20,5 +20,22 @@ describe('normalizeUidPrefix', () => {
     expect(normalizeUidPrefix('fd8g50ca')).toBeNull()
     expect(normalizeUidPrefix('fd8c%')).toBeNull()
     expect(normalizeUidPrefix('fd8c_50')).toBeNull()
+  })
+})
+
+describe('normalizeAttesters', () => {
+  const OWNER = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+
+  it('lowercases, adds 0x and drops duplicates', () => {
+    expect(normalizeAttesters([OWNER, ` ${OWNER.slice(2).toUpperCase()} `])).toEqual([OWNER.toLowerCase()])
+  })
+
+  it('drops entries that are not 20-byte hex addresses', () => {
+    expect(normalizeAttesters(['nope', OWNER, '0x1234', OWNER + 'aa'])).toEqual([OWNER.toLowerCase()])
+  })
+
+  it('is null when no entry is an address', () => {
+    expect(normalizeAttesters([])).toBeNull()
+    expect(normalizeAttesters(['', '0x', 'zz'.repeat(20)])).toBeNull()
   })
 })

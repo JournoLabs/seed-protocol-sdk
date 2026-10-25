@@ -717,6 +717,52 @@ describe('queryBySchema / getSeed caching', () => {
     })
   })
 
+  describe('attesters', () => {
+    const SEED = '0x' + 'ab'.repeat(32)
+    const OWNER = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+
+    it('lists by normalized attesters, skips the collection cache, writes items through', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Owned', 100)
+      const result = await queryBySchema('post', {
+        ...uncachedOpts,
+        attesters: [OWNER, OWNER.toUpperCase().replace('0X', '0x'), 'nope'],
+        limit: 16,
+        skip: 32,
+      })
+
+      expect(result.items.map((r) => r.data.title)).toEqual(['Owned'])
+      expect(result.etag).toBeUndefined()
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 16, 32, {
+        attesters: [OWNER.toLowerCase()],
+      })
+      expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
+      expect((await getQueryCacheManager().getItem(SEED, optionsKey))?.record.data.title).toBe('Owned')
+    })
+
+    it('does not touch an existing collection', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Listed', 100)
+      const listed = await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', { ...uncachedOpts, attesters: [OWNER] })
+      expect((await getQueryCacheManager().getCollection('post', optionsKey))?.etag).toBe(listed.etag)
+    })
+
+    it('returns no items, without a request, when no attester is an address', async () => {
+      for (const attesters of [[], [''], ['0x1234', 'not-an-address']]) {
+        expect((await queryBySchema('post', { ...uncachedOpts, attesters })).items).toEqual([])
+      }
+      expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+    })
+
+    it('combines with uidPrefix', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Both', 100)
+      await queryBySchema('post', { ...uncachedOpts, attesters: [OWNER], uidPrefix: 'ABAB' })
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 10, 0, {
+        uidPrefix: '0xabab',
+        attesters: [OWNER.toLowerCase()],
+      })
+    })
+  })
+
   it('data+changelog does not share cache with data-only', async () => {
     const seedUid = '0xseedSep'
     const v1 = '0xvsep1'

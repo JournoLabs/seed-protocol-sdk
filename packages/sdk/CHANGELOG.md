@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The local query source (`createLocalQueryDataSource`) filters `listSeedsBySchemaName` by `attesters`, matching the seed's attester from `attestation_raw`, else `publisher`, in any case, so `queryBySchema(…, { attesters, source: 'local' })` returns what the remote source does. Its `listSeedsByUidPrefix` is removed with the `QueryDataSource` method (**Breaking** in `@seedprotocol/query`).
 - `prepareHtmlEmbeddedImagesForPublish` and `rewriteHtmlEmbeddedImagesOnDisk` take `{ htmlArweaveRefs }`; with `'ar'` they write `ar://<id>` links into Html instead of gateway URLs.
 - **Breaking:** `getArweaveUrlForTransaction` is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}` (ADR 0025). The SDK's deprecated copy, which returned `BaseArweaveClient.getRawUrl(id)`, is removed.
 - The SDK re-exports `rehostArweaveLinksInHtml`, `nextArweaveGatewayUrl`, `mapUrlAttribute`, `parseArweaveTransactionLink` and the `ArweaveTransactionLink` and `HtmlArweaveRefs` types from `@seedprotocol/arweave`.

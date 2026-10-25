@@ -16,3 +16,17 @@ export function checksumAddress(address: string): string {
   }
   return result
 }
+
+/**
+ * `addresses` as easscan stores them (EIP-55 checksummed), for an `attester` or `recipient`
+ * `in` filter: easscan compares addresses case-sensitively. Values that aren't 20-byte hex
+ * addresses are dropped, since they can't match.
+ */
+export function checksumAddresses(addresses: readonly string[]): string[] {
+  const out = new Set<string>()
+  for (const address of addresses) {
+    const trimmed = address.trim()
+    if (/^(0x)?[0-9a-fA-F]{40}$/.test(trimmed)) out.add(checksumAddress(trimmed))
+  }
+  return [...out]
+}

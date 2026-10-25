@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm
 import type {
   AttestationLike,
   QueryDataSource,
+  SeedListFilter,
 } from '@seedprotocol/query'
 import { easName, isValidEasAttestationUid } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -216,7 +217,7 @@ function monthBoundsUnix(year: number, month: number): {
 
 async function listPublishedSeedRows(
   schemaName: string,
-  opts?: { startTs?: number; endTs?: number; uidPrefix?: string },
+  opts?: { startTs?: number; endTs?: number } & SeedListFilter,
 ): Promise<AttestationLike[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return []
@@ -258,9 +259,14 @@ async function listPublishedSeedRows(
     )
     .orderBy(desc(seeds.attestationCreatedAt))
 
+  // The attester is in `attestation_raw` (or `publisher`), so it's matched here, not in SQL.
+  const attesters = opts?.attesters ? new Set(opts.attesters) : undefined
   const out: AttestationLike[] = []
   for (const row of rows) {
     if (!row.uid || !isValidEasAttestationUid(row.uid)) continue
+    const att = seedRowToAttestation(row)
+    if (!att) continue
+    if (attesters && !attesters.has(att.attester?.toLowerCase() ?? '')) continue
     // Must have at least one published version that is not revoked: the SDK's latest published
     // version skips revoked ones, so a seed whose versions were all revoked has none.
     const versionRows = await appDb
@@ -278,8 +284,6 @@ async function listPublishedSeedRows(
     )
     if (!hasPublished) continue
 
-    const att = seedRowToAttestation(row)
-    if (!att) continue
     // Force requested schema name so assembleSeeds filters correctly
     att.schema = { schemaNames: [{ name: schemaName }] }
 
@@ -331,18 +335,12 @@ export function createLocalQueryDataSource(): QueryDataSource {
 
     async listSeedsBySchemaName(
       schemaName: string,
-      opts: { limit: number; skip: number },
+      opts: { limit: number; skip: number } & SeedListFilter,
     ): Promise<AttestationLike[]> {
-      const all = await listPublishedSeedRows(schemaName)
-      return all.slice(opts.skip, opts.skip + opts.limit)
-    },
-
-    async listSeedsByUidPrefix(
-      schemaName: string,
-      uidPrefix: string,
-      opts: { limit: number; skip: number },
-    ): Promise<AttestationLike[]> {
-      const matching = await listPublishedSeedRows(schemaName, { uidPrefix })
+      const matching = await listPublishedSeedRows(schemaName, {
+        uidPrefix: opts.uidPrefix,
+        attesters: opts.attesters,
+      })
       return matching.slice(opts.skip, opts.skip + opts.limit)
     },
 
