@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Body hydration (`hydrateStorage`) fetches each body from the read gateways in order (`getArweaveReadBaseUrls`, skipping gateways whose circuit is open) instead of the one URL in the field, so a body is still found while that gateway is down.
+- Hydrated bodies have their Arweave links moved onto this reader's first read gateway (ADR 0025), so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down.
+
 ## 0.7.11 (2026-10-24)
 
 ### Commits
