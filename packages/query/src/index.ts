@@ -74,7 +74,7 @@ export type {
   QueryCacheStats,
 } from './cache/index.js'
 
-export { getArweaveUrlForTransaction } from './arweaveUrl.js'
+export { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 
 export {
   publicListRelationPropertyKey,

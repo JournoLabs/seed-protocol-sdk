@@ -30,7 +30,7 @@ describe('enrichImageSeedClone', () => {
     }
     enrichImageSeedClone(clone)
     expect(clone.arweaveUrl).toBe(
-      'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk',
+      'https://arweave.net/raw/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk',
     )
   })
 
@@ -40,7 +40,7 @@ describe('enrichImageSeedClone', () => {
     }
     enrichImageSeedClone(clone)
     expect(clone.arweaveUrl).toBe(
-      'https://arweave.net/05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
+      'https://arweave.net/raw/05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
     )
   })
 

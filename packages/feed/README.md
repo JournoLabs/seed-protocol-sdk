@@ -68,7 +68,7 @@ When unset, the default primary gateway is `arweave.net`.
 
 A custom primary gateway goes first, followed by the default gateways (`arweave.net`, `permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`) unless one of the env lists above replaces them.
 
-**Note:** Items already stored with full `https://ar.seedprotocol.io/...` URLs are passed through unchanged. Only newly resolved transaction IDs use the configured gateway.
+Arweave links in items, whether a field holds one or Html contains them, are written on the configured public gateway, so items published with `https://ar.seedprotocol.io/...` links come out on it too.
 
 ### Feed Item URLs (EASScan attestation links)
 

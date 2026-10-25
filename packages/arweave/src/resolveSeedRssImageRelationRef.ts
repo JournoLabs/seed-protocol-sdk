@@ -1,4 +1,4 @@
-import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
+import { getPublicArweaveRawUrl } from './gateway/publicUrl.js'
 import { isEasAttestationExplorerUrl } from './easAttestationUrl.js'
 import { classifyMediaRef } from './mediaRef.js'
 
@@ -48,11 +48,12 @@ function readObjectStringField(obj: Record<string, unknown>, ...keys: string[]):
   return ''
 }
 
+/** RSS readers are outside Seed, so the public gateway's URL, never a local read host (ADR 0025). */
 function tryGatewayUrlForTxId(txId: string): string | undefined {
   const trimmed = txId.trim()
   if (!trimmed || trimmed.startsWith('0x')) return undefined
   try {
-    return `${BaseArweaveClient.getBaseUrl()}/${trimmed}`
+    return getPublicArweaveRawUrl(trimmed)
   } catch {
     return undefined
   }

@@ -1,9 +1,15 @@
 import {
   queryBySchema,
   queryBySchemaForMonth,
-  getArweaveUrlForTransaction,
   type SeedRecord,
 } from '@seedprotocol/query'
+import {
+  buildArweaveTransactionLink,
+  getPublicArweaveBaseUrl,
+  getPublicArweaveRawUrl,
+  parseArweaveTransactionLink,
+  publishedArweaveLinksInHtml,
+} from '@seedprotocol/arweave'
 import { initializeFeedPlatform } from './bootstrap'
 import { loadFeedConfig } from './config'
 
@@ -73,7 +79,7 @@ export const setFeedItemDefaults = (
   let defaultLink = attestationLink
   if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
     try {
-      defaultLink = getArweaveUrlForTransaction(storageTransactionId)
+      defaultLink = getPublicArweaveRawUrl(storageTransactionId)
     } catch (error) {
       console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)
     }
@@ -206,7 +212,7 @@ const setImageRelationCloneForFeed = (
 
   if (storageTransactionId && storageTransactionId.length > 0) {
     try {
-      const mediaLink = getArweaveUrlForTransaction(storageTransactionId)
+      const mediaLink = getPublicArweaveRawUrl(storageTransactionId)
       clone.link = mediaLink
       clone.Link = mediaLink
     } catch {
@@ -282,9 +288,35 @@ function seedRecordsToFeedItems(
     itemUrlPath: feedConfig.itemUrlPath,
   }
 
-  return records.map((record) =>
-    applyFeedDefaultsDeep(record.data, schemaName, defaultsOptions),
+  const publicBaseUrl = getPublicArweaveBaseUrl()
+  return records.map(
+    (record) =>
+      withPublicArweaveLinks(applyFeedDefaultsDeep(record.data, schemaName, defaultsOptions), publicBaseUrl) as Record<
+        string,
+        unknown
+      >,
   )
+}
+
+/**
+ * `value` with every Arweave link on the public gateway: a field that is a link, and the links in
+ * Html fields (ADR 0025). Query gives this reader's URLs (hydrated bodies and image URLs on its
+ * first read gateway, which on a Hyper feed server is the local sidecar); RSS readers are outside
+ * Seed and need public ones. Returns new arrays and objects; query's records stay as they are.
+ */
+function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown {
+  if (typeof value === 'string') {
+    if (value.includes('<')) return publishedArweaveLinksInHtml(value, { publicBaseUrl })
+    const link = parseArweaveTransactionLink(value)
+    return link ? buildArweaveTransactionLink(link, publicBaseUrl) : value
+  }
+  if (Array.isArray(value)) return value.map((v) => withPublicArweaveLinks(v, publicBaseUrl))
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, v]) => [key, withPublicArweaveLinks(v, publicBaseUrl)]),
+    )
+  }
+  return value
 }
 
 /**

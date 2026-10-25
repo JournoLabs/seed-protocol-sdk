@@ -204,3 +204,26 @@ export function rehostArweaveLinksInHtml(html: string, options?: ArweaveLinkOpti
   }
   return rewriteHtmlAttributes(html, (_el, attrName, value) => mapUrlAttribute(attrName, value, rehost))
 }
+
+/** How publish writes Arweave links into Html (ADR 0025). */
+export type HtmlArweaveRefs = 'gateway' | 'ar'
+
+/**
+ * The Arweave links in `html` as publish uploads them: on `publicBaseUrl` (form kept), or as
+ * `ar://<id>` with `to: 'ar'`. Links re-hosted for a reader (a sidecar, a proxy, another gateway)
+ * become public again before upload. Other bytes are kept.
+ */
+export function publishedArweaveLinksInHtml(
+  html: string,
+  { to = 'gateway', publicBaseUrl, baseUrls }: { to?: HtmlArweaveRefs; publicBaseUrl: string } & ArweaveLinkOptions,
+): string {
+  const known = [publicBaseUrl, ...(baseUrls ?? getArweaveReadBaseUrls())]
+  if (!html || !mayHoldArweaveLinks(html, known)) return html
+  const publish = (url: string): string | undefined => {
+    const link = parseArweaveTransactionLink(url, { baseUrls: known })
+    if (!link) return undefined
+    const next = to === 'ar' ? `ar://${link.transactionId}${link.rest}` : buildArweaveTransactionLink(link, publicBaseUrl)
+    return next === url ? undefined : next
+  }
+  return rewriteHtmlAttributes(html, (_el, attrName, value) => mapUrlAttribute(attrName, value, publish))
+}

@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `getArweaveUrlForTransaction`, used for image `arweaveUrl` fields and storage URLs in assembled seeds, is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}`. It was `https://{read host}/{id}`. `isArweaveTransactionGatewayUrl` accepts `/raw/{id}` on any host and `/{id}` on a known or configured gateway.
 - Body hydration (`hydrateStorage`) fetches each body from the read gateways in order (`getArweaveReadBaseUrls`, skipping gateways whose circuit is open) instead of the one URL in the field, so a body is still found while that gateway is down.
 - Hydrated bodies have their Arweave links moved onto this reader's first read gateway (ADR 0025), so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down.
 

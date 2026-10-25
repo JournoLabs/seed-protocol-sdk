@@ -1,8 +1,7 @@
 import {
-  BaseArweaveClient,
   getArweaveReadBaseUrls,
   isGatewayHostCircuitOpen,
-  isKnownArweaveGatewayHostname,
+  parseArweaveTransactionLink,
   readArweaveContentResponse,
   recordGatewayHostFailure,
   recordGatewayHostSuccess,
@@ -30,23 +29,13 @@ export type HydrateStorageOptions = {
 }
 
 /**
- * True for a single-path gateway URL whose path looks like an Arweave transaction id.
+ * True for a gateway URL of an Arweave transaction: `/raw/<id>` or a gateway's `/<id>`, with nothing
+ * after the id (see `parseArweaveTransactionLink`).
  */
 export function isArweaveTransactionGatewayUrl(raw: string): boolean {
   const s = raw.trim()
   if (!s.startsWith('http://') && !s.startsWith('https://')) return false
-  try {
-    const u = new URL(s)
-    const host = u.hostname.toLowerCase()
-    const expected = BaseArweaveClient.getHost().toLowerCase()
-    if (host !== expected && !isKnownArweaveGatewayHostname(host)) return false
-    const segments = u.pathname.replace(/^\//, '').split('/').filter(Boolean)
-    if (segments.length !== 1) return false
-    const id = segments[0]!
-    return /^[A-Za-z0-9_-]{43}$/.test(id)
-  } catch {
-    return false
-  }
+  return parseArweaveTransactionLink(s)?.rest === ''
 }
 
 /**
@@ -124,7 +113,7 @@ function cacheBody(txId: string, text: string): void {
  * concurrent requests shared.
  */
 async function fetchTransactionBody(url: string): Promise<string | null> {
-  const txId = new URL(url.trim()).pathname.replace(/^\//, '')
+  const txId = parseArweaveTransactionLink(url)!.transactionId
   const cached = bodyCache.get(txId)
   if (cached !== undefined) {
     // Most recently used goes last.

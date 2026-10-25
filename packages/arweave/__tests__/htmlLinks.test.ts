@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   nextArweaveGatewayUrl,
   parseArweaveTransactionLink,
+  publishedArweaveLinksInHtml,
   rehostArweaveLinksInHtml,
 } from '../src/htmlLinks.js'
 
@@ -89,6 +90,28 @@ describe('nextArweaveGatewayUrl', () => {
   it('starts at the first base URL for a link on a host outside the list', () => {
     expect(nextArweaveGatewayUrl(`https://ar.seedprotocol.io/raw/${TX}`, { baseUrls })).toBe(
       `https://reader.example/raw/${TX}`,
+    )
+  })
+})
+
+describe('publishedArweaveLinksInHtml', () => {
+  const html =
+    `<img src="http://127.0.0.1:1984/raw/${TX}">` +
+    `<a href="https://ar.seedprotocol.io/${TX2}">doc</a>` +
+    `<img src="ar://${TX2}">`
+  const local = ['http://127.0.0.1:1984', 'https://arweave.net']
+
+  it('puts every link a reader re-hosted back on the public gateway before upload', () => {
+    expect(publishedArweaveLinksInHtml(html, { publicBaseUrl: 'https://arweave.net', baseUrls: local })).toBe(
+      `<img src="https://arweave.net/raw/${TX}">` +
+        `<a href="https://arweave.net/${TX2}">doc</a>` +
+        `<img src="https://arweave.net/raw/${TX2}">`,
+    )
+  })
+
+  it('writes ar:// links when asked', () => {
+    expect(publishedArweaveLinksInHtml(html, { to: 'ar', publicBaseUrl: 'https://arweave.net', baseUrls: local })).toBe(
+      `<img src="ar://${TX}">` + `<a href="ar://${TX2}">doc</a>` + `<img src="ar://${TX2}">`,
     )
   })
 })

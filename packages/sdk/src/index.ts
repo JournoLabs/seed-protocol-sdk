@@ -249,7 +249,7 @@ export {
   normalizeAddressConfig,
 } from './helpers/addresses'
 
-export { getArweaveUrlForTransaction } from './helpers'
+export { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 export {
   BaseArweaveClient,
   normalizeUploadApiBaseUrl,

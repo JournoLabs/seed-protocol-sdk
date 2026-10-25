@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `getArweaveUrlForTransaction(id)` returns `{first read gateway}/raw/{id}`, the URL this reader loads from (ADR 0025); it returned `{read host}/{id}`. It is now the only `getArweaveUrlForTransaction`: `@seedprotocol/sdk` and `@seedprotocol/query` re-export it. For URLs that leave this reader (published Html, feeds), use `getPublicArweaveRawUrl`. `resolveSeedRssImageRelationRef` builds media URLs with `getPublicArweaveRawUrl`, so a feed server on a Hyper sidecar no longer emits sidecar URLs.
+- `getPublicArweaveBaseUrl` before endpoints resolve uses the read host when it isn't a loopback address (a query or feed server's `arweaveDomain`).
 - **Breaking:** `DEFAULT_ARWEAVE_HOST` is `arweave.net` (ADR 0025): the default read host, and the host publish writes into Html links unless `arweaveDomain` names another. `DEFAULT_ARWEAVE_GATEWAYS` is `arweave.net`, `permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`. An app that wants Seed's gateway sets `arweaveDomain: 'ar.seedprotocol.io'`.
 - `getArweaveReadGatewayHostsForPrimary` keeps every default gateway after a custom primary. It dropped `ar.seedprotocol.io` then.
 - With a Hyper sidecar or app proxy active, `getReadGatewayHostsForConfig` and `getArweaveReadBaseUrls` list the public gateway and the default list after it (as `https://` URLs), so `/raw` reads fall back to them when the sidecar or proxy is down. They listed the sidecar or proxy alone. `fetchTransactionStatusAcrossGateways` still asks only the sidecar or proxy (and preferred gateways) then, since a data item it just accepted isn't on the public gateways yet.

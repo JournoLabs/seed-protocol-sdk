@@ -11,7 +11,6 @@ describe('getPublicArweaveBaseUrl', () => {
   afterEach(() => {
     setResolvedSeedGatewayEndpoints(null)
     BaseArweaveClient.setHost(originalBaseUrl)
-    delete process.env.ARWEAVE_HOST
   })
 
   it('never writes the read host before endpoints resolve, even when it is a local sidecar', () => {
@@ -19,8 +18,8 @@ describe('getPublicArweaveBaseUrl', () => {
     expect(getPublicArweaveRawUrl(TX)).toBe(`https://arweave.net/raw/${TX}`)
   })
 
-  it('uses the env host before endpoints resolve', () => {
-    process.env.ARWEAVE_HOST = 'https://gateway.example'
+  it('uses a public read host set before endpoints resolve (a query or feed server)', () => {
+    BaseArweaveClient.setHost('gateway.example')
     expect(getPublicArweaveBaseUrl()).toBe('https://gateway.example')
   })
 
