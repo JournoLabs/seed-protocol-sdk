@@ -63,6 +63,23 @@ testDescribe('Item cache holds', () => {
     expect(Item.peekReady(item.seedLocalId)).toBeUndefined()
   }, 30000)
 
+  it('getById takes no hold unless asked (D29)', async () => {
+    const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'getById' } as never)
+    const id = created.seedLocalId
+    try {
+      const refCount = Item.cache.entryOf(created as Item<any>)?.refCount
+      expect(Item.getById(id)).toBe(created)
+      expect(Item.cache.entryOf(created as Item<any>)?.refCount).toBe(refCount)
+
+      expect(Item.getById(id, { hold: true })).toBe(created)
+      expect(Item.cache.entryOf(created as Item<any>)?.refCount).toBe(refCount! + 1)
+      created.unload()
+      expect(Item.cache.entryOf(created as Item<any>)?.refCount).toBe(refCount)
+    } finally {
+      created.unload()
+    }
+  }, 30000)
+
   it('find loads the item without holding it', async () => {
     const created = await Item.create({ modelName: 'HoldPost', schemaName: SCHEMA_NAME, title: 'no hold' } as never)
     const id = created.seedLocalId

@@ -28,6 +28,7 @@ import {
   getMetadataPropertyNamesForQuery,
   listRelationEasPropertyName,
   metadataRowPropertyKey,
+  metadataStorageName,
   metadataStoredNameForms,
 } from '@/helpers/metadataPropertyNames'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
@@ -1401,9 +1402,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return name
   }
 
-  /** DB / EAS / metadata column name (e.g. authorIdentityIds). Use for storage; prefer `propertyName` for public API. */
+  /**
+   * The name new metadata rows of this property are stored under (`metadataStorageName`): `authorId`
+   * for a single Relation `author`, `authorIdentityIds` for a List of Relation `authors`, the key
+   * otherwise. Use it for storage; `propertyName` is the public name.
+   */
   get storagePropertyName(): string {
-    return this._getSnapshotContext().propertyName || ''
+    const name = this.propertyName
+    return name ? metadataStorageName(name, this._getSnapshotContext().propertyRecordSchema) : ''
   }
 
   get modelName() {
@@ -1450,7 +1456,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return waitForEntityReady(this, options)
   }
 
-  /** Validation errors from last failed save (enum, pattern, minLength, maxLength). Cleared when the next save starts. */
+  /** Validation errors from the last refused write (enum, pattern, minLength, maxLength). Cleared by the next assignment. */
   get saveValidationErrors(): import('@/Schema/validation').ValidationError[] {
     return this._getSnapshotContext()._saveValidationErrors ?? []
   }
@@ -1829,10 +1835,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
-  /**
-   * Every cache key holding this instance: its item's local id and seed uid, and the name it had
-   * before a rename (List of relation). They share one entry.
-   */
   /** Throws EntityUnloadedError, naming the property and its item, when this instance was unloaded. */
   private _assertLoaded(action: string): void {
     if (!isEntityTornDown(this)) return
@@ -1843,7 +1845,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
   }
 
-  /** Releases this caller's hold; the last one stops the property and drops it from the cache. */
+  /**
+   * Releases this caller's hold. Once no one holds the property (its item holds it while the item
+   * is loaded), it unloads after `SeedConfig.entityCache.unloadGraceMs` unless a hold is taken first.
+   */
   unload() {
     releaseEntity(this, ItemProperty.cache)
   }

@@ -3,6 +3,7 @@ import type { DeleteOp, DeleteResult } from '@/outbox'
 import { timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import {
+  CLIENT_NOT_INITIALIZED,
   INTERNAL_PROPERTY_NAMES,
   PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
 } from '@/helpers/constants'
@@ -123,6 +124,11 @@ const getModel = (): typeof import('@/Model/Model').Model => {
   }
   return ModelClass!
 }
+// Start loading Model with this module. Item.create builds an item's ItemProperty instances from
+// its Model synchronously; before this import resolved, the first items had none, and a property
+// assigned on one (`item.title = x` after create with waitForReady: false) became a plain field
+// and was lost when the properties loaded (decision D16).
+getModel()
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
@@ -791,17 +797,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Get Item instance by ID from cache
-   * The ID can be either seedUid or seedLocalId
-   * @param id - seedUid or seedLocalId
-   * @returns Cached Item instance or null if not found
+   * The cached Item for a seedUid or seedLocalId, or null. Takes no cache hold unless called with
+   * `hold: true`, like `Item.find` and the definitions' `getById`; without one, the instance stays
+   * cached for the grace period after this lookup. A caller that takes a hold releases it with
+   * `unload()`.
    */
-  static getById(id: string): Item<any> | null {
+  static getById(id: string, options?: { hold?: boolean }): Item<any> | null {
     if (!id) {
       return null
     }
-    
-    return this.cache.hold(id) ?? null
+    if (options?.hold) return this.cache.hold(id) ?? null
+    const item = this.peek(id)
+    if (item) this.cache.keepUnheld(item)
+    return item ?? null
   }
 
   /**
@@ -836,8 +844,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    // Check cache first
-    const cached = this.getById(id)
+    // Check cache first; createById holds what it returns
+    const cached = this.getById(id, { hold: true })
     if (cached) {
       return cached
     }
@@ -868,6 +876,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * the item longer passes `hold: true` and releases it with `unload()`, or holds it with
    * `Item.retain` (React hooks do). Returns undefined, keeping no hold, when there is no such item
    * or it isn't ready in `readyTimeout`.
+   *
+   * Called while `client.init` runs, it waits for the database to open. It throws
+   * `CLIENT_NOT_INITIALIZED` when the database isn't open within `readyTimeout` (no init, a
+   * failed or stopped client): an undefined result would read as "no such item".
    */
   static async find({
     modelName,
@@ -891,13 +903,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
+    if (!(await whenDbReady(readyTimeout))) throw new Error(CLIENT_NOT_INITIALIZED)
+
     let cached = false
     let held: Item<any> | undefined
     try {
       return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
         async () => {
-          const fromCache = hold ? (Item.getById(id) ?? undefined) : Item.peek(id)
+          const fromCache = hold ? (Item.getById(id, { hold: true }) ?? undefined) : Item.peek(id)
           if (fromCache && !hold) Item.cache.keepUnheld(fromCache)
           cached = fromCache !== undefined
           let item = fromCache
@@ -2034,8 +2048,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Releases this holder's reference. Item.create, Item.find and createById return the same cached
-   * instance to every caller, so the instance is stopped only when the last holder unloads it.
+   * Releases this caller's hold (from `Item.create`, `find({ hold: true })`, `getById(id, { hold:
+   * true })` or `Item.retain`). Every caller gets the same cached instance; once no one holds it,
+   * it unloads after `SeedConfig.entityCache.unloadGraceMs` unless a hold is taken first. On an
+   * instance no one holds it does nothing.
    */
   unload(): void {
     releaseEntity(this, Item.cache)
