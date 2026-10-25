@@ -23,7 +23,7 @@ The root entry only holds the facade; it needs a platform implementation before 
 import { registerNodeArweavePlatform } from '@seedprotocol/arweave/node'
 import { ArweaveClient } from '@seedprotocol/arweave'
 
-// Optional: set the preferred read gateway (default: ar.seedprotocol.io)
+// Optional: set the preferred read gateway (default: arweave.net)
 registerNodeArweavePlatform({ arweaveDomain: 'arweave.net' })
 
 const text = await ArweaveClient.getTransactionData(txId, { string: true })

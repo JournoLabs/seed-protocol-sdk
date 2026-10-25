@@ -4,6 +4,7 @@ import {
   recordGatewayHostFailure,
   recordGatewayHostSuccess,
 } from './gatewayCircuitBreaker.js'
+import { getPreferredArweaveReadBaseUrls, getResolvedSeedGatewayEndpoints } from './gatewayState.js'
 import { getArweaveReadBaseUrls } from './readBaseUrls.js'
 
 /** Per-gateway timeout for a status check. A gateway can take minutes on an id it doesn't have. */
@@ -18,7 +19,7 @@ export const MIN_TRANSACTION_STATUS_ATTEMPT_MS = 1_000
 export type TransactionStatusFetchOptions = {
   timeoutMs?: number
   totalTimeoutMs?: number
-  /** Base URLs to try in order. Defaults to {@link getArweaveReadBaseUrls}. */
+  /** Base URLs to try in order. Defaults to {@link getArweaveReadBaseUrls}, without public gateways while a sidecar or proxy is active. */
   baseUrls?: readonly string[]
 }
 
@@ -58,13 +59,26 @@ async function fetchStatusFromBaseUrl(baseUrl: string, transactionId: string, ti
  * gateway after the first is only asked while the budget left covers its timeout or
  * {@link MIN_TRANSACTION_STATUS_ATTEMPT_MS}, whichever is shorter.
  */
+/**
+ * Read gateways for a status check. While a sidecar or proxy is the active path, only it and the
+ * preferred gateways are asked: a data item it just accepted isn't on the public gateways yet, and
+ * their 404 would read as missing.
+ */
+function transactionStatusBaseUrls(): string[] {
+  const urls = getArweaveReadBaseUrls()
+  const resolved = getResolvedSeedGatewayEndpoints()
+  if (resolved?.activePath !== 'hyper-sidecar' && resolved?.activePath !== 'http-proxy') return urls
+  const local = new Set([...getPreferredArweaveReadBaseUrls(), resolved.arweaveBaseUrl.replace(/\/$/, '')])
+  return urls.filter((url) => local.has(url))
+}
+
 export async function fetchTransactionStatusAcrossGateways(
   transactionId: string,
   options: TransactionStatusFetchOptions = {},
 ): Promise<TransactionStatus> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TRANSACTION_STATUS_TIMEOUT_MS
   const deadline = performance.now() + (options.totalTimeoutMs ?? DEFAULT_TRANSACTION_STATUS_TOTAL_TIMEOUT_MS)
-  const baseUrls = options.baseUrls ?? getArweaveReadBaseUrls()
+  const baseUrls = options.baseUrls ?? transactionStatusBaseUrls()
   const open = baseUrls.filter((url) => !isGatewayHostCircuitOpen(url))
   // Every circuit open: try them anyway rather than answer without asking.
   const candidates = open.length > 0 ? open : baseUrls

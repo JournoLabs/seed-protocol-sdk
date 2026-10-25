@@ -1,5 +1,8 @@
-/** Default Arweave gateway host used across all packages (first in {@link DEFAULT_ARWEAVE_GATEWAYS}) */
-export const DEFAULT_ARWEAVE_HOST = 'ar.seedprotocol.io'
+/**
+ * Default Arweave gateway host used across all packages (first in {@link DEFAULT_ARWEAVE_GATEWAYS}),
+ * and the host publish writes into Html links unless `arweaveDomain` names another (ADR 0025).
+ */
+export const DEFAULT_ARWEAVE_HOST = 'arweave.net'
 
 /**
  * Official Seed Protocol public feed Hyperdrive key (z32).
@@ -26,10 +29,10 @@ export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/grap
  * Override order with `ARWEAVE_READ_GATEWAYS` or `NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS` (comma-separated hosts).
  */
 export const DEFAULT_ARWEAVE_GATEWAYS = [
-  'ar.seedprotocol.io',
   'arweave.net',
   'permagate.io',
   'zigza.xyz',
+  'ar.seedprotocol.io',
 ] as const
 
 const READ_GATEWAYS_ENV_KEYS = ['ARWEAVE_READ_GATEWAYS', 'NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS'] as const
@@ -61,21 +64,9 @@ export function resolveArweaveHostFromEnv(): string | undefined {
   return undefined
 }
 
-function filterDefaultsForPrimary(primary: string, defaults: readonly string[]): string[] {
-  const primaryNorm = primary.trim().toLowerCase().replace(/\/$/, '')
-  const seedNorm = DEFAULT_ARWEAVE_HOST.toLowerCase()
-  if (primaryNorm === seedNorm) return [...defaults]
-  return defaults.filter((g) => g.toLowerCase() !== seedNorm)
-}
-
-/**
- * Ordered read gateways: `primary` first, then fallbacks.
- * When `primary` is not {@link DEFAULT_ARWEAVE_HOST}, `ar.seedprotocol.io` is omitted from fallbacks
- * unless it appears in an explicit `ARWEAVE_READ_GATEWAYS` env list.
- */
+/** Ordered read gateways: `primary` first, then the defaults (or the env list) not already in it. */
 export function getArweaveReadGatewayHostsForPrimary(primary: string): string[] {
-  const defaults = getDefaultArweaveReadGatewayHostsOrdered()
-  return mergePrimaryHostWithDefaults(primary, filterDefaultsForPrimary(primary, defaults))
+  return mergePrimaryHostWithDefaults(primary, getDefaultArweaveReadGatewayHostsOrdered())
 }
 
 /** Ordered gateway hostnames for reads: env list if set, otherwise {@link DEFAULT_ARWEAVE_GATEWAYS}. */
