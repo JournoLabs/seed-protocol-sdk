@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- On Node, live queries complete when the database closes (`client.stop()`, `BaseDb.close()`). Their poll kept running on the closed libsql client, so subscribers got a `Failed query: select …` error at shutdown.
+- On Node, `entity_changes` is pruned like in the browser: rows older than 10 minutes, when the database opens and every minute after (on a timer that doesn't keep the process running). Node wrote the trigger rows and never deleted them, so the table grew without bound.
 - Sync records no conflict for an Image, File or Html draft, as ADR 0019 says for storage values; the draft still stays the value. Only edits still in the outbox were exempt, so a saved storage draft got a conflict when sync brought a newer attestation.
 - **Breaking:** `Item.create` checks its initial Relation and List-of-Relation values like an assignment does: a local seed id with no seed rejects the create (`Relation target not found: <id>`, the op's `errorName` is `RelationTargetError`), and a target whose own create is still pending makes it wait. It stored the dangling id. Attestation uids and a relation to the item itself pass.
 - `ItemProperty.save({ timeoutMs })` rejects with the new `OutboxSaveTimeoutError` (`code: 'OUTBOX_SAVE_TIMEOUT'`, the queued op's `opId`) after that long (decision D30). Nothing is cancelled: the op stays queued and applies once a leader tab drains the outbox. Without `timeoutMs` a save still waits with no limit, and outside production one still waiting after 10 s logs a warning naming the property. Exported from both entries.

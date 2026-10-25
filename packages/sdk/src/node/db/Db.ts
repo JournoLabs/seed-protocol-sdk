@@ -10,7 +10,8 @@ import { createSingleConnectionTransactions } from './singleConnectionTransactio
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
-import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
+import { Observable, Subject, interval, switchMap, distinctUntilChanged, startWith, takeUntil } from 'rxjs'
+import { ENTITY_CHANGES_PRUNE_EVERY_MS, pruneEntityChanges } from '@/db/entityChangesPrune'
 import { recreateBackupPath, recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 
 const logger = debug('seedSdk:node:db:Db')
@@ -110,6 +111,10 @@ export class NodeDb implements IDb {
   private client: ReturnType<typeof createClient> | undefined
   /** Bumped by close(), so a prepareDb that was running closes what it opened instead of keeping it. */
   private openGeneration = 0
+  /** Emits when the database closes: open live queries complete instead of polling a closed client. */
+  private closed$ = new Subject<void>()
+  /** Prunes entity_changes while the database is open; Node runs no change feed to do it (ADR 0020). */
+  private pruneTimer: ReturnType<typeof setInterval> | undefined
 
   getAppDb() {
     return this.db
@@ -185,8 +190,19 @@ export class NodeDb implements IDb {
     }
 
     this.db = db
+    this.startPruningEntityChanges(db)
 
     return this.db
+  }
+
+  /** Prunes entity_changes now and every ENTITY_CHANGES_PRUNE_EVERY_MS until close. Never throws. */
+  private startPruningEntityChanges(db: any): void {
+    const prune = () =>
+      pruneEntityChanges(db).catch((error: unknown) => logger('[Db] pruning entity_changes failed', error))
+    void prune()
+    this.pruneTimer = setInterval(() => void prune(), ENTITY_CHANGES_PRUNE_EVERY_MS)
+    // Doesn't keep the process running
+    this.pruneTimer.unref?.()
   }
 
   async close(): Promise<void> {
@@ -194,9 +210,12 @@ export class NodeDb implements IDb {
     this.closeOpenDb()
   }
 
-  /** Closes the libsql client and forgets the database. */
+  /** Closes the libsql client and forgets the database; open live queries complete. */
   private closeOpenDb(): void {
     const client = this.client
+    if (this.pruneTimer) clearInterval(this.pruneTimer)
+    this.pruneTimer = undefined
+    this.closed$.next()
     this.db = undefined
     this.transactions = undefined
     this.client = undefined
@@ -222,7 +241,8 @@ export class NodeDb implements IDb {
   }
 
   /**
-   * Polling-based liveQuery stub for Node. Prefer browser reactive queries in UI apps.
+   * Polling-based liveQuery stub for Node. Prefer browser reactive queries in UI apps. Completes
+   * when the database closes (`close()`, `client.stop()`).
    */
   liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
     if (!this.db) {
@@ -253,6 +273,7 @@ export class NodeDb implements IDb {
       distinctUntilChanged((prev, curr) => {
         return JSON.stringify(prev) === JSON.stringify(curr)
       }),
+      takeUntil(this.closed$),
     )
   }
 }
