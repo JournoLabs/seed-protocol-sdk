@@ -1,4 +1,4 @@
-import { checksumAddress } from './utils.js'
+import { checksumAddresses } from './utils.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
@@ -59,25 +59,13 @@ export async function getPublishAuthorizationFromEas(
 
   if (identities?.length) {
     where.attester = {
-      in: identities.map((a) => {
-        try {
-          return checksumAddress(a)
-        } catch {
-          return a
-        }
-      }),
+      in: checksumAddresses(identities),
     }
   }
 
   if (sessionKeys?.length) {
     where.recipient = {
-      in: sessionKeys.map((a) => {
-        try {
-          return checksumAddress(a)
-        } catch {
-          return a
-        }
-      }),
+      in: checksumAddresses(sessionKeys),
     }
   }
 

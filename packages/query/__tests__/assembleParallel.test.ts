@@ -72,7 +72,6 @@ function makeSource(log: string[]): QueryDataSource {
     kind: 'local',
     getSeedByUid: (uid) => call('seed', seeds.get(uid) ?? null),
     listSeedsBySchemaName: async () => [],
-    listSeedsByUidPrefix: async () => [],
     listSeedsBySchemaNameForMonth: async () => [],
     getVersionsForSeed: async (uid) => versions.filter((v) => v.refUID === uid),
     getVersionsForSeeds: (uids) =>

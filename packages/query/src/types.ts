@@ -122,10 +122,17 @@ export type QueryBySchemaOptions = AssembleOptions & {
    */
   uidPrefix?: string
   /**
+   * Only seeds whose Seed attestation was made by one of these addresses (`SeedRecord.attester`),
+   * in any case. Applied before `limit` and `skip`: in the EAS request on the remote source.
+   * Entries that aren't 20-byte hex addresses are ignored; if none is left, or the list is empty,
+   * no items. Combines with `uidPrefix`. Like `uidPrefix`, reads don't use the collection cache.
+   */
+  attesters?: readonly string[]
+  /**
    * Seconds after this collection was last checked against the indexer during which it is
    * returned from the collection cache with no request at all. New, changed and revoked seeds
    * show up to this many seconds late. Applies only where the collection cache does (remote,
-   * `skip` 0, no `uidPrefix`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
+   * `skip` 0, no `uidPrefix` or `attesters`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
    */
   maxAge?: number
 }

@@ -268,7 +268,7 @@ describe.sequential('local and remote query sources: seeds with revoked versions
 
   it('lists by uid prefix the same way in both sources, leaving out all-revoked seeds', async () => {
     const byPrefix = async (ds: QueryDataSource, prefix: string) =>
-      summarize(ds, await ds.listSeedsByUidPrefix(SCHEMA, prefix, { limit: 16, skip: 0 }))
+      summarize(ds, await ds.listSeedsBySchemaName(SCHEMA, { limit: 16, skip: 0, uidPrefix: prefix }))
     for (const ds of [local, remote]) {
       expect(await byPrefix(ds, '0xd5d5')).toEqual([expectedPublished[0]])
       expect(await byPrefix(ds, '0xdada')).toEqual([expectedPublished[1]])

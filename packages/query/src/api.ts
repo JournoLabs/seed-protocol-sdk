@@ -23,7 +23,7 @@ import {
   resolveQuerySource,
   getRemoteQueryDataSource,
 } from './source/index.js'
-import type { QueryDataSource } from './source/types.js'
+import type { QueryDataSource, SeedListFilter } from './source/types.js'
 import type {
   AssembleOptions,
   GetSeedOptions,
@@ -64,13 +64,11 @@ async function fetchAndAssemble(
   schemaName: string,
   limit: number,
   skip: number,
+  filter: SeedListFilter,
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
 ): Promise<Assembled> {
-  const seeds = await dataSource.listSeedsBySchemaName(schemaName, {
-    limit,
-    skip,
-  })
+  const seeds = await dataSource.listSeedsBySchemaName(schemaName, { limit, skip, ...filter })
   return assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
 }
 
@@ -229,6 +227,19 @@ export function normalizeUidPrefix(prefix: string): string | null {
   return `0x${hex}`
 }
 
+/**
+ * Lowercase `0x` + 40 hex for each entry that is an address (with or without `0x`, any case),
+ * without duplicates. Null when none is.
+ */
+export function normalizeAttesters(attesters: readonly string[]): string[] | null {
+  const out = new Set<string>()
+  for (const attester of attesters) {
+    const hex = attester.trim().toLowerCase().replace(/^0x/, '')
+    if (/^[0-9a-f]{40}$/.test(hex)) out.add(`0x${hex}`)
+  }
+  return out.size > 0 ? [...out] : null
+}
+
 export async function queryBySchema(
   schemaName: string,
   options?: QueryBySchemaOptions,
@@ -240,21 +251,25 @@ export async function queryBySchema(
   const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
 
-  let uidPrefix: string | null = null
+  const filter: SeedListFilter = {}
   if (options?.uidPrefix !== undefined) {
-    uidPrefix = normalizeUidPrefix(options.uidPrefix)
+    const uidPrefix = normalizeUidPrefix(options.uidPrefix)
     if (!uidPrefix) return { items: [], limit, skip }
+    filter.uidPrefix = uidPrefix
   }
-
-  const runAssemble = async (ds: QueryDataSource): Promise<Assembled> => {
-    if (!uidPrefix) return fetchAndAssemble(schemaName, limit, skip, options, ds)
-    const seeds = await ds.listSeedsByUidPrefix(schemaName, uidPrefix, { limit, skip })
-    return assembleSeedsWithDependencies(schemaName, seeds, options, ds)
+  if (options?.attesters !== undefined) {
+    const attesters = normalizeAttesters(options.attesters)
+    if (!attesters) return { items: [], limit, skip }
+    filter.attesters = attesters
   }
+  const filtered = filter.uidPrefix !== undefined || filter.attesters !== undefined
 
-  // Collection cache only for remote + skip=0 working set (a uid-prefix match isn't one)
+  const runAssemble = (ds: QueryDataSource): Promise<Assembled> =>
+    fetchAndAssemble(schemaName, limit, skip, filter, options, ds)
+
+  // Collection cache only for the remote, skip=0 working set (a filtered listing isn't one)
   if (
-    !uidPrefix &&
+    !filtered &&
     shouldUseCache(options, resolved.useQueryCache) &&
     skip === 0 &&
     resolved.dataSource.kind === 'remote'

@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `getSeedsBySchemaName(schemaName, limit, skip, { attesters })` adds an `attester: { in: [...] }` condition with each address checksummed. With no address in the list, it returns `[]` without a request.
+- `checksumAddresses(addresses)` checksums a list for an `attester` or `recipient` filter and drops values that aren't 20-byte hex addresses. `getSeedsFromSchemaUids`, `getPublishedByFromEas`, `getDomainOwnershipFromEas` and `getPublishAuthorizationFromEas` use it, so a non-address in their address lists is left out of the request instead of sent.
+
 ## 0.7.11 (2026-10-24)
 
 - **Breaking:** the deprecated `EasClient` and `QueryClient` aliases are removed from `@seedprotocol/eas/node`. Use `NodeEasClient` and `NodeQueryClient`.

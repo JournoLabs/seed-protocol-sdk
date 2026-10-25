@@ -57,9 +57,17 @@ const { items, limit, skip, etag } = await queryBySchema('post', {
 
 // Seeds whose UID starts with a prefix (e.g. the 8-hex-digit trunc in a URL), newest first
 const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', limit: 16 })
+
+// Seeds attested by one of these addresses, newest first
+const { items: owned } = await queryBySchema('publication', {
+  attesters: ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', walletAddress],
+  limit: 100,
+})
 ```
 
 `uidPrefix` takes at least 4 hex digits, with or without `0x`, in any case (it is lowercased: EAS matches UIDs case-sensitively); anything else returns no items. It filters like a schema listing (schema name, not revoked, seeds whose versions were all revoked left out) in one EAS request, or a `LIKE` on the local source. It never reads or writes the collection cache; matched items are written through to the item cache. `normalizeUidPrefix` is exported for callers that want the same validation.
+
+`attesters` keeps seeds whose Seed attestation (`SeedRecord.attester`) was made by one of the addresses, in any case, with or without `0x`. It applies before `limit` and `skip`, so a page holds that many of those attesters' seeds: on the remote source it is an `attester: { in: [...] }` condition in the EAS request, with each address checksummed (EAS compares attesters case-sensitively in checksummed form). Entries that aren't 20-byte hex addresses are ignored; an empty list, or one with no address in it, returns no items without a request. It combines with `uidPrefix`, and like it never reads or writes the collection cache; matched items are written through to the item cache. `normalizeAttesters` is exported.
 
 `SeedRecord` shape:
 

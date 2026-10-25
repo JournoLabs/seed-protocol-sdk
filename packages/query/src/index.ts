@@ -12,6 +12,7 @@ export {
   getSeed,
   getSeeds,
   normalizeUidPrefix,
+  normalizeAttesters,
   queryBySchema,
   queryBySchemaForMonth,
 } from './api.js'
@@ -26,7 +27,7 @@ export {
   resolveQuerySource,
   normalizeSourceMode,
 } from './source/index.js'
-export type { QueryDataSource, ResolvedQuerySource } from './source/index.js'
+export type { QueryDataSource, ResolvedQuerySource, SeedListFilter } from './source/index.js'
 
 export {
   buildFlatSnapshotFromProperties,
