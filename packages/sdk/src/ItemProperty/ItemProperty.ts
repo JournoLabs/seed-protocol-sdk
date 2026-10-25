@@ -214,7 +214,21 @@ const STORAGE_SEED_TYPES = new Set(['Image', 'File', 'Html'])
 const FILE_SYSTEM_WAIT_MS = 10_000
 
 /** One assignment's write; `done` resolves once its op settled and the context shows the outcome. */
-type PropertyWrite = { done: Promise<void> }
+/** One assignment: settles when its op applies or fails. `opId` is set once the op is appended. */
+type PropertyWrite = { done: Promise<void>; opId?: string }
+
+/** A `save()` still waiting after this long logs a warning outside production (decision D30). */
+const SLOW_SAVE_WARNING_MS = 10_000
+
+const isProduction = (): boolean =>
+  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production'
+
+/** A timer that doesn't keep a Node process running. */
+function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const timer = setTimeout(fn, ms)
+  ;(timer as { unref?: () => void }).unref?.()
+  return timer
+}
 
 type ItemPropertyFindProps = {
   propertyName: string
@@ -1675,6 +1689,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const { getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
       startItemOutbox()
       const opId = await appended
+      write.opId = opId
       await waitForOutboxOp(opId)
       const [op] = await getOutboxOps([opId])
       // A newer op of the property, from another tab, replaced it
@@ -1801,8 +1816,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * Resolves once the latest assignment's op is applied (ADR 0019). Rejects with its error when it
    * failed (OwnershipError when the item isn't the client's), and with
    * ItemPropertySaveValidationError when the value broke a rule and was not written.
+   *
+   * It waits until a leader tab applies the op, with no limit by default; outside production a save
+   * still waiting after 10 s logs a warning. With `timeoutMs` it rejects with OutboxSaveTimeoutError
+   * after that long. The op stays queued and applies later; the error doesn't mean it was dropped.
    */
-  async save(): Promise<void> {
+  async save(options?: { timeoutMs?: number }): Promise<void> {
     this._assertLoaded('save')
     const ctx = this._getSnapshotContext()
     const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
@@ -1815,10 +1834,47 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
     await timed(`${label} until applied`, async () => {
       // Each await may see a newer assignment start: wait for the latest
-      for (let write = this._latestWrite; write; ) {
-        await write.done
-        if (this._latestWrite === write) break
-        write = this._latestWrite
+      const untilApplied = (async () => {
+        for (let write = this._latestWrite; write; ) {
+          await write.done
+          if (this._latestWrite === write) break
+          write = this._latestWrite
+        }
+      })()
+      const name = `${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
+      const warning = isProduction()
+        ? undefined
+        : unrefTimer(() => {
+            console.warn(
+              `[seed] Saving ${name} has waited ${SLOW_SAVE_WARNING_MS / 1000} s: its write is still queued. ` +
+                'No leader tab may be draining the outbox (a frozen or closed tab). ' +
+                'Pass save({ timeoutMs }) to stop waiting; the write stays queued either way.',
+            )
+          }, SLOW_SAVE_WARNING_MS)
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        const timeoutMs = options?.timeoutMs
+        if (timeoutMs === undefined) {
+          await untilApplied
+          return
+        }
+        const { OutboxSaveTimeoutError } = await import('@/outbox/outbox')
+        await Promise.race([
+          untilApplied,
+          new Promise<never>((_, reject) => {
+            timeout = unrefTimer(() => {
+              reject(
+                new OutboxSaveTimeoutError(
+                  this._latestWrite?.opId,
+                  `Saving ${name} timed out after ${timeoutMs} ms. The write is still queued and applies once a leader tab drains the outbox.`,
+                ),
+              )
+            }, timeoutMs)
+          }),
+        ])
+      } finally {
+        if (warning) clearTimeout(warning)
+        if (timeout) clearTimeout(timeout)
       }
     })
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
