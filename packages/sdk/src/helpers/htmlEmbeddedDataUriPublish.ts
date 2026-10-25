@@ -6,8 +6,10 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import {
+  getPublicArweaveBaseUrl,
   getPublicArweaveRawUrl,
   normalizeRelationPropertyValue,
+  publishedArweaveLinksInHtml,
   resolveSeedIdsFromRefString,
   rewriteHtmlAttributes,
 } from '@seedprotocol/arweave'
@@ -23,6 +25,7 @@ import {
   publishGraphItemNodes,
   type EmbeddedImageRow,
   type PublishGraphNode,
+  type PublishGraphProperty,
 } from '@/db/read/publishGraph'
 import { getExtensionForMimeType } from '@/helpers/mimeTypes'
 
@@ -350,6 +353,30 @@ export async function prepareHtmlEmbeddedImagesForPublish(
 }
 
 /**
+ * Writes an Html file that this publish uploads with its Arweave links in the published form
+ * (ADR 0025): on the public gateway, so a link a reader re-hosted onto a local sidecar, a proxy or
+ * another gateway (and an editor saved back) is public again. Html already published is left as it
+ * is, so the file keeps matching its upload. Returns the text the rest of the publish reads.
+ */
+async function publishArweaveLinksOnDisk(property: PublishGraphProperty, filePath: string): Promise<string> {
+  const html = await BaseFileManager.readFileAsString(filePath)
+  if (!property.refs[0]?.node?.newSeed) return html
+  const published = publishedArweaveLinksInHtml(html, { publicBaseUrl: getPublicArweaveBaseUrl() })
+  if (published === html) return html
+  await saveHtmlFile(filePath, published)
+  return published
+}
+
+async function saveHtmlFile(filePath: string, html: string): Promise<void> {
+  try {
+    await BaseFileManager.saveFile(filePath, html)
+  } catch {
+    const fs = await BaseFileManager.getFs()
+    fs.writeFileSync(filePath, html)
+  }
+}
+
+/**
  * An embedded image an earlier attempt materialized for this data URI that can be used again: its
  * Image seed is still a local draft and its file is there.
  */
@@ -372,7 +399,7 @@ async function prepareHtmlEmbeddedImagesOfNode(
 
   for (const { property, htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
     if (!(await BaseFileManager.pathExists(filePath))) continue
-    const html = await BaseFileManager.readFileAsString(filePath)
+    const html = await publishArweaveLinksOnDisk(property, filePath)
 
     // seed:property/ placeholders are filled in after phase 1 whatever the data URI policy. A
     // placeholder naming no usable property fails here, before anything is uploaded.
@@ -479,12 +506,7 @@ async function rewriteHtmlEmbeddedImagesOfNode(
     const newHtml = replaceSeedPropertyRefsInHtml(replaceDataUrisInParsedHtml(html, replacements), urlByPropertyName)
     if (newHtml === html) continue
 
-    try {
-      await BaseFileManager.saveFile(filePath, newHtml)
-    } catch {
-      const fs = await BaseFileManager.getFs()
-      fs.writeFileSync(filePath, newHtml)
-    }
+    await saveHtmlFile(filePath, newHtml)
   }
 }
 

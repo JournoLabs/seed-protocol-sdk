@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- An Html property's value shows its Arweave links (`ar://<id>`, `/raw/<id>` on any host, `/<id>` on a known gateway) on this reader's first read gateway, so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down (ADR 0025). The stored file keeps the links as written. `resolveStorageDisplay` takes `rehostLinks: false` to skip it; `exportArchive` does, so a bag keeps each Html exactly as published.
+- Publish writes an Html value it uploads with every Arweave link on the public gateway (`arweaveDomain`, default `arweave.net`), in its path form. A link a reader re-hosted onto a Hyper sidecar or app proxy, and an editor saved back, was uploaded as that local URL.
+
 ## 0.7.11 (2026-10-24)
 
 - **Breaking:** migration 0030 drops the `property_uids` table, and `propertyUids` is no longer exported. Nothing wrote to it; property EAS schema uids live in the schema uid store and on each metadata row's `schema_uid`.
