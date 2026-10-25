@@ -2048,8 +2048,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Releases this holder's reference. Item.create, Item.find and createById return the same cached
-   * instance to every caller, so the instance is stopped only when the last holder unloads it.
+   * Releases this caller's hold (from `Item.create`, `find({ hold: true })`, `getById(id, { hold:
+   * true })` or `Item.retain`). Every caller gets the same cached instance; once no one holds it,
+   * it unloads after `SeedConfig.entityCache.unloadGraceMs` unless a hold is taken first. On an
+   * instance no one holds it does nothing.
    */
   unload(): void {
     releaseEntity(this, Item.cache)

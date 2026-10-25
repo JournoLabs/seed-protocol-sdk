@@ -424,8 +424,8 @@ export class Schema {
   /**
    * Find a schema by schemaFileId or by name. Read-only: a name with no schema row gives undefined
    * and creates nothing (`Schema.create` creates a draft for an unknown name). By name, the cached
-   * instance is used, else the stored schema is loaded. Waits for the schema to be fully loaded
-   * (idle state) by default. Takes no hold unless `hold: true`.
+   * instance is used, else the stored schema is loaded. Waits until the schema is ready (`status`
+   * `'ready'`) unless `waitForReady: false`. Takes no hold unless `hold: true`.
    * @returns Schema instance if found, undefined otherwise
    */
   static async find({

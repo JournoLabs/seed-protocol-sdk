@@ -86,11 +86,15 @@ export interface SeedConfig {
   schema?: string | import('./import').SchemaFileInput
   entityCache?: {
     /**
-     * How long a loaded Schema, Model, Item or property no one holds stays cached before it is
-     * unloaded, in ms. A hold taken meanwhile (`Item.retain`, `find({ hold: true })`, a hook
-     * mounting) keeps the same instance. Default 60000. 0 unloads an instance as soon as its last
-     * hold is released. `destroy()`, cache clears, schema eviction, other tabs' removals and local
-     * purges unload at once whatever this is.
+     * How long a loaded Item or ItemProperty no one holds stays cached before it is unloaded, in ms.
+     * A hold taken meanwhile (`Item.retain`, `find({ hold: true })`, a hook mounting) keeps the same
+     * instance. Default 60000. Schemas, Models and ModelProperties never unload for having no holds.
+     *
+     * 0 unloads an instance as soon as its last hold is released. An instance that never had a hold
+     * (looked up with `find` or created with `hold: false`) is then kept until it is destroyed or
+     * evicted, since unloading it at once would hand the caller an unloaded instance.
+     * `destroy()`, cache clears, schema eviction, other tabs' removals and local purges unload at
+     * once whatever this is.
      */
     unloadGraceMs?: number
   }

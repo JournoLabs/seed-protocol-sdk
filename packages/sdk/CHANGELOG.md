@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `ItemProperty.storagePropertyName` is the name new metadata rows are stored under: `authorId` for a single Relation `author` (it returned `author`), `authorIdentityIds` for a List of Relation. JSDoc corrected for `SeedConfig.entityCache.unloadGraceMs` (Schemas, Models and ModelProperties never unload for lack of holds; with 0, an instance that never had a hold is kept), `Item.unload`, `ItemProperty.unload`, `ItemProperty.saveValidationErrors` (cleared by the next assignment) and `Schema.find`.
 - **Breaking:** `Item.find` called before `client.init` (or after `client.stop()`) rejects with `CLIENT_NOT_INITIALIZED` once `readyTimeout` passes; it returned `undefined`, which read as "no such item". Called while init runs, it waits for the database to open.
 - **Breaking:** `Item.getById(id)` no longer takes a cache hold unless called with `{ hold: true }`, like `Item.find` and the definitions' `getById` (decision D29). Code that called `unload()` after a plain `getById` must drop that call; code that keeps the item across long work passes `{ hold: true }` and unloads it.
 - A property assigned right after `Item.create(…, { waitForReady: false })` is kept and saved. In a process's first items, `Item` hadn't finished its deferred import of `Model`, so `create` built no ItemProperty instances; the assignment became a plain field on the item and was lost once the properties loaded (decision D16). `Item` now starts that import when it loads.
