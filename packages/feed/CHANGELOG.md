@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits

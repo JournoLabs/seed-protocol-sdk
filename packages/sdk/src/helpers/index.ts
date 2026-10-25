@@ -1,6 +1,5 @@
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
-import { BaseArweaveClient } from '@seedprotocol/arweave'
 
 export * from './FileManager/BaseFileManager'
 export * from './publishConfig'
@@ -28,12 +27,3 @@ export const getCorrectId: GetCorrectId = (localIdOrUid: string) => {
 
 export { convertTxIdToImage } from './localImageBlobUrl'
 
-/**
- * Constructs an Arweave URL for a storage transaction ID
- * @param storageTransactionId - The Arweave transaction ID
- * @returns The full URL to access the transaction data on Arweave (e.g., https://arweave.net/raw/{transactionId})
- * @deprecated Use BaseArweaveClient.getRawUrl() instead for better consistency and testability
- */
-export const getArweaveUrlForTransaction = (storageTransactionId: string): string => {
-  return BaseArweaveClient.getRawUrl(storageTransactionId)
-}

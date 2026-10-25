@@ -23,7 +23,8 @@ export function invalidateSidecarProbeCache(): void {
 }
 
 function parseGatewayHost(input: string | undefined): { host: string; protocol: 'http' | 'https' } {
-  const raw = (input ?? DEFAULT_ARWEAVE_HOST).trim()
+  // An empty arweaveDomain means the default, not `https://`
+  const raw = input?.trim() || DEFAULT_ARWEAVE_HOST
   if (raw.startsWith('http://')) {
     return { protocol: 'http', host: raw.slice(7).replace(/\/$/, '') }
   }
@@ -265,13 +266,22 @@ export async function resolveSeedGatewayEndpoints(
   }
 }
 
-/** Build ordered gateway host list for read fallback (sidecar/proxy first when active). */
+/**
+ * Ordered read gateways. With a sidecar or proxy active it comes first, as its base URL, followed by
+ * the public gateway and the default list as `https://` URLs, so reads (and links re-hosted for
+ * this reader, ADR 0025) still have public fallbacks when it is down. Otherwise hosts without a
+ * scheme, the active one first.
+ */
 export function getReadGatewayHostsForConfig(
   resolved: ResolvedSeedGatewayEndpoints,
   _defaults?: readonly string[],
 ): string[] {
   if (resolved.activePath === 'hyper-sidecar' || resolved.activePath === 'http-proxy') {
-    return [resolved.arweaveHost]
+    const publicBase = new URL(resolved.publicArweaveBaseUrl)
+    const publicHosts = getArweaveReadGatewayHostsForPrimary(publicBase.host).map((host, index) =>
+      index === 0 ? `${publicBase.protocol}//${host}` : `https://${host}`,
+    )
+    return [resolved.arweaveBaseUrl, ...publicHosts]
   }
   return getArweaveReadGatewayHostsForPrimary(resolved.arweaveHost)
 }

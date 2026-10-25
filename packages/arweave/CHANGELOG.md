@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `getArweaveUrlForTransaction(id)` returns `{first read gateway}/raw/{id}`, the URL this reader loads from (ADR 0025); it returned `{read host}/{id}`. It is now the only `getArweaveUrlForTransaction`: `@seedprotocol/sdk` and `@seedprotocol/query` re-export it. For URLs that leave this reader (published Html, feeds), use `getPublicArweaveRawUrl`. `resolveSeedRssImageRelationRef` builds media URLs with `getPublicArweaveRawUrl`, so a feed server on a Hyper sidecar no longer emits sidecar URLs.
+- `getPublicArweaveBaseUrl` before endpoints resolve uses the read host when it isn't a loopback address (a query or feed server's `arweaveDomain`).
+- **Breaking:** `DEFAULT_ARWEAVE_HOST` is `arweave.net` (ADR 0025): the default read host, and the host publish writes into Html links unless `arweaveDomain` names another. `DEFAULT_ARWEAVE_GATEWAYS` is `arweave.net`, `permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`. An app that wants Seed's gateway sets `arweaveDomain: 'ar.seedprotocol.io'`.
+- `getArweaveReadGatewayHostsForPrimary` keeps every default gateway after a custom primary. It dropped `ar.seedprotocol.io` then.
+- With a Hyper sidecar or app proxy active, `getReadGatewayHostsForConfig` and `getArweaveReadBaseUrls` list the public gateway and the default list after it (as `https://` URLs), so `/raw` reads fall back to them when the sidecar or proxy is down. They listed the sidecar or proxy alone. `fetchTransactionStatusAcrossGateways` still asks only the sidecar or proxy (and preferred gateways) then, since a data item it just accepted isn't on the public gateways yet.
+- `getPublicArweaveBaseUrl` before client init resolves endpoints returns the env host or `https://arweave.net`. It returned the read host, which can be a local sidecar or proxy URL that a publish would write into Html. An empty `arweaveDomain` now means the default host; it produced `https:///raw/<id>`.
+- New `rehostArweaveLinksInHtml(html, { baseUrls })` (ADR 0025) moves the Arweave links in an Html string onto the first of the reader's read gateways (`getArweaveReadBaseUrls` by default): `ar://<id>`, `/raw/<id>` on any host and any path prefix, and `/<id>` on a known gateway, in `src`, `href`, `poster` and `srcset`. Each link keeps its path form and its path, query and hash after the id; every other byte of the Html is kept. Also new: `parseArweaveTransactionLink`, `buildArweaveTransactionLink`, `nextArweaveGatewayUrl` (the same link on the next gateway, for retrying a failed load), `rewriteHtmlAttributes` and `mapUrlAttribute`. `@seedprotocol/arweave` now depends on `parse5`.
+
 ## 0.7.11 (2026-10-24)
 
 - **Breaking:** the deprecated `ArweaveClient` alias is removed from `@seedprotocol/arweave/node`. Use `NodeArweaveClient`.

@@ -1,3 +1,4 @@
+import { rehostArweaveLinksInHtml } from '@seedprotocol/arweave'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { normalizeDataType } from '@/helpers/property'
 import { getItemStorageSubdir, getStorageSubdirForDataType } from '@/helpers/storageDir'
@@ -104,11 +105,17 @@ export type StorageDisplayOptions = {
   stagedPath?: string
   /** How long to wait for an Html file that isn't there yet (OPFS writes land late). Default 5000 ms. */
   htmlWaitMs?: number
+  /**
+   * Html only: move its Arweave links onto this reader's gateway list (ADR 0025). Default true;
+   * false returns the text as stored or published.
+   */
+  rehostLinks?: boolean
 }
 
 /**
  * What a storage value shows (`renderValue`): a session URL for an Image or File (blob: in
- * browsers, file:// in Node), the text for Html and ItemStorage. `filePath` is the file it came
+ * browsers, file:// in Node), the text for Html (its Arweave links on this reader's gateways) and
+ * ItemStorage. `filePath` is the file it came
  * from; `ref` the row's file reference with resolveStorageRef's gaps filled. `renderValue` is
  * undefined when no file was found.
  */
@@ -152,6 +159,7 @@ export async function resolveStorageDisplay(
       const { readHtmlBodyForStorageSeedPropertyValue } = await import('@/helpers/readHtmlBodyForStorageSeed')
       renderValue = await readHtmlBodyForStorageSeedPropertyValue(ref.propertyValue)
     }
+    if (renderValue && options.rehostLinks !== false) renderValue = rehostArweaveLinksInHtml(renderValue)
     return { ref, filePath, renderValue }
   }
 

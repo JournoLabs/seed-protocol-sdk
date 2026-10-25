@@ -1,7 +1,11 @@
 import {
-  BaseArweaveClient,
-  isKnownArweaveGatewayHostname,
+  getArweaveReadBaseUrls,
+  isGatewayHostCircuitOpen,
+  parseArweaveTransactionLink,
   readArweaveContentResponse,
+  recordGatewayHostFailure,
+  recordGatewayHostSuccess,
+  rehostArweaveLinksInHtml,
 } from '@seedprotocol/arweave'
 import {
   getFieldStorageModels,
@@ -25,43 +29,53 @@ export type HydrateStorageOptions = {
 }
 
 /**
- * True for a single-path gateway URL whose path looks like an Arweave transaction id.
+ * True for a gateway URL of an Arweave transaction: `/raw/<id>` or a gateway's `/<id>`, with nothing
+ * after the id (see `parseArweaveTransactionLink`).
  */
 export function isArweaveTransactionGatewayUrl(raw: string): boolean {
   const s = raw.trim()
   if (!s.startsWith('http://') && !s.startsWith('https://')) return false
-  try {
-    const u = new URL(s)
-    const host = u.hostname.toLowerCase()
-    const expected = BaseArweaveClient.getHost().toLowerCase()
-    if (host !== expected && !isKnownArweaveGatewayHostname(host)) return false
-    const segments = u.pathname.replace(/^\//, '').split('/').filter(Boolean)
-    if (segments.length !== 1) return false
-    const id = segments[0]!
-    return /^[A-Za-z0-9_-]{43}$/.test(id)
-  } catch {
-    return false
-  }
+  return parseArweaveTransactionLink(s)?.rest === ''
 }
 
-/** Body goes through `transformArweaveContent` (`@seedprotocol/arweave`, `content/arweaveContent.ts`). */
-async function fetchGatewayPayloadAsUtf8(url: string, transactionId: string): Promise<string | null> {
+/**
+ * `GET {baseUrl}/{id}` as UTF-8 text. `skip` when the gateway answered with media or a body that
+ * isn't text (no other gateway would answer differently); null on an error, to try the next one.
+ * The body goes through `transformArweaveContent` (`@seedprotocol/arweave`, `content/arweaveContent.ts`).
+ */
+async function fetchGatewayPayloadAsUtf8(baseUrl: string, transactionId: string): Promise<string | 'skip' | null> {
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/${transactionId}`, {
       headers: { Accept: 'text/html, text/plain, text/markdown, application/json, */*' },
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) return null
     const ct = res.headers.get('content-type') ?? ''
-    if (/^(image|video|audio)\//i.test(ct)) return null
+    if (/^(image|video|audio)\//i.test(ct)) return 'skip'
     const { bytes } = await readArweaveContentResponse(res, { transactionId })
-    if (bytes.byteLength > MAX_BODY_BYTES) return null
+    if (bytes.byteLength > MAX_BODY_BYTES) return 'skip'
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-    if (text.length === 0 || text.includes('\0')) return null
+    if (text.length === 0 || text.includes('\0')) return 'skip'
     return text
   } catch {
     return null
   }
+}
+
+/** The body from the first read gateway that has it, skipping gateways whose circuit is open. */
+async function fetchBodyAcrossGateways(transactionId: string): Promise<string | null> {
+  const baseUrls = getArweaveReadBaseUrls()
+  const open = baseUrls.filter((url) => !isGatewayHostCircuitOpen(url))
+  for (const baseUrl of open.length > 0 ? open : baseUrls) {
+    const result = await fetchGatewayPayloadAsUtf8(baseUrl, transactionId)
+    if (result === null) {
+      recordGatewayHostFailure(baseUrl)
+      continue
+    }
+    recordGatewayHostSuccess(baseUrl)
+    return result === 'skip' ? null : result
+  }
+  return null
 }
 
 /** Upper bound on cached body text, in UTF-16 code units (~2 bytes each). */
@@ -94,9 +108,12 @@ function cacheBody(txId: string, text: string): void {
   }
 }
 
-/** Gateway body for a transaction URL: cached by transaction id, concurrent requests shared. */
+/**
+ * Gateway body for a transaction URL, from whichever read gateway has it: cached by transaction id,
+ * concurrent requests shared.
+ */
 async function fetchTransactionBody(url: string): Promise<string | null> {
-  const txId = new URL(url.trim()).pathname.replace(/^\//, '')
+  const txId = parseArweaveTransactionLink(url)!.transactionId
   const cached = bodyCache.get(txId)
   if (cached !== undefined) {
     // Most recently used goes last.
@@ -107,7 +124,7 @@ async function fetchTransactionBody(url: string): Promise<string | null> {
   const inFlight = bodiesInFlight.get(txId)
   if (inFlight) return inFlight
 
-  const request = fetchGatewayPayloadAsUtf8(url, txId)
+  const request = fetchBodyAcrossGateways(txId)
     .then((text) => {
       if (text !== null && bodiesInFlight.get(txId) === request) cacheBody(txId, text)
       return text
@@ -154,7 +171,8 @@ async function runWithConcurrency(
 
 /**
  * After relation URL resolution, Html/File fields may be gateway URLs (or local paths).
- * Replace those with the UTF-8 body when `hydrateStorage` is enabled.
+ * Replace those with the UTF-8 body when `hydrateStorage` is enabled, its Arweave links moved onto
+ * this reader's gateways (ADR 0025).
  * Up to HYDRATE_CONCURRENCY bodies are resolved at a time, across all items.
  */
 export async function hydrateArweaveRichTextInItems(
@@ -177,7 +195,7 @@ export async function hydrateArweaveRichTextInItems(
       if (typeof v !== 'string' || v.trim() === '') continue
       tasks.push(async () => {
         const text = await resolveHydratedBody(key, v, readStorageBody)
-        if (text !== null) item[key] = text
+        if (text !== null) item[key] = rehostArweaveLinksInHtml(text)
       })
     }
 
@@ -193,7 +211,7 @@ export async function hydrateArweaveRichTextInItems(
           if (typeof el !== 'string') continue
           tasks.push(async () => {
             const text = await resolveHydratedBody(listKey, el, readStorageBody)
-            if (text !== null) arr[i] = text
+            if (text !== null) arr[i] = rehostArweaveLinksInHtml(text)
           })
         }
       }

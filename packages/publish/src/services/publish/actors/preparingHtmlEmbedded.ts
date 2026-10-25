@@ -11,7 +11,9 @@ type Input = { input: { context: PublishMachineContext } }
 export const preparingHtmlEmbedded = fromPromise(
   async ({ input: { context } }: Input): Promise<{ deferredHtmlSeedLocalIds: string[] }> => {
     const policy = context.htmlEmbeddedDataUriPolicy ?? 'materialize'
-    const r = await prepareHtmlEmbeddedImagesForPublish(context.item, policy)
+    const r = await prepareHtmlEmbeddedImagesForPublish(context.item, policy, {
+      htmlArweaveRefs: context.htmlArweaveRefs,
+    })
     return { deferredHtmlSeedLocalIds: r.deferredHtmlSeedLocalIds }
   },
 )

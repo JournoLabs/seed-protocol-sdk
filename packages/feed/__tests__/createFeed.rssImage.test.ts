@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createFeed } from '../src/index'
-import { getArweaveUrlForTransaction } from '@seedprotocol/query'
+import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
 
 describe('createFeed rss image tags', () => {
   it('emits enclosure, media:content, and media:thumbnail from _imageMetadata', async () => {
@@ -55,7 +55,7 @@ describe('createFeed rss image tags', () => {
 
   it('resolves tx id image string and emits RSS image tags', async () => {
     const txId = 'txid-from-image-field'
-    const expectedUrl = getArweaveUrlForTransaction(txId)
+    const expectedUrl = getPublicArweaveRawUrl(txId)
     const xml = await createFeed(
       [
         {
@@ -74,7 +74,7 @@ describe('createFeed rss image tags', () => {
   })
 
   it('uses first valid relation image from image array', async () => {
-    const expectedUrl = getArweaveUrlForTransaction('txid-array-image')
+    const expectedUrl = getPublicArweaveRawUrl('txid-array-image')
     const xml = await createFeed(
       [
         {

@@ -45,7 +45,7 @@ import {
   queryBySchema,
 } from '@seedprotocol/query'
 
-await initializeQueryPlatform({ arweaveDomain: 'ar.seedprotocol.io' })
+await initializeQueryPlatform({ arweaveDomain: 'arweave.net' })
 
 const one = await getSeed('0x...')
 console.log(JSON.stringify(one?.data, null, 2))

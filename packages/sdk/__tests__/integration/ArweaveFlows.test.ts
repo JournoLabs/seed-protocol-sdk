@@ -12,7 +12,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { BaseArweaveClient, invalidateReadGatewayCache } from '@seedprotocol/arweave'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { MockArweaveClient } from '../test-utils/MockArweaveClient'
-import { getArweaveUrlForTransaction } from '@/helpers'
 
 // Skip in browser environment
 const isNodeEnv = typeof window === 'undefined'
@@ -39,22 +38,12 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
       expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/abc123`)
     })
 
-    it('deprecated getArweaveUrlForTransaction() delegates to BaseArweaveClient', () => {
-      // The deprecated function should still work and produce the same result
-      const url = getArweaveUrlForTransaction('abc123')
-      const directUrl = BaseArweaveClient.getRawUrl('abc123')
-      expect(url).toBe(directUrl)
-    })
-
     it('respects custom host configuration', () => {
       BaseArweaveClient.setHost('custom-gateway.example.com')
       
       const url = BaseArweaveClient.getRawUrl('abc123')
       expect(url).toBe('https://custom-gateway.example.com/raw/abc123')
-      
-      // Also check the deprecated function
-      const deprecatedUrl = getArweaveUrlForTransaction('abc123')
-      expect(deprecatedUrl).toBe('https://custom-gateway.example.com/raw/abc123')
+
       
       // Reset
       BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)

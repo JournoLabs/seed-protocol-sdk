@@ -249,7 +249,7 @@ export {
   normalizeAddressConfig,
 } from './helpers/addresses'
 
-export { getArweaveUrlForTransaction } from './helpers'
+export { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 export {
   BaseArweaveClient,
   normalizeUploadApiBaseUrl,
@@ -286,6 +286,14 @@ export {
   hasArweaveContentReadTransform,
   transformArweaveContent,
   readArweaveContentResponse,
+  rehostArweaveLinksInHtml,
+  nextArweaveGatewayUrl,
+  mapUrlAttribute,
+  parseArweaveTransactionLink,
+} from '@seedprotocol/arweave'
+export type {
+  ArweaveTransactionLink,
+  HtmlArweaveRefs,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,

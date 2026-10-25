@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BaseArweaveClient, setArweaveContentReadTransform } from '@seedprotocol/arweave'
+import {
+  BaseArweaveClient,
+  resetGatewayCircuitBreakerForTests,
+  setArweaveContentReadTransform,
+} from '@seedprotocol/arweave'
 import { enrichImageSeedClone } from '../src/imageRelationEnrichment'
 import {
   hydrateArweaveRichTextInItems,
@@ -26,7 +30,7 @@ describe('enrichImageSeedClone', () => {
     }
     enrichImageSeedClone(clone)
     expect(clone.arweaveUrl).toBe(
-      'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk',
+      'https://arweave.net/raw/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk',
     )
   })
 
@@ -36,7 +40,7 @@ describe('enrichImageSeedClone', () => {
     }
     enrichImageSeedClone(clone)
     expect(clone.arweaveUrl).toBe(
-      'https://arweave.net/05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
+      'https://arweave.net/raw/05eY_BXxztbTacIqutY1S5FUXgzq4ock3x2pDHMQqmY',
     )
   })
 
@@ -52,6 +56,7 @@ describe('hydrateArweaveRichTextInItems', () => {
     BaseArweaveClient.setHost('arweave.net')
     vi.restoreAllMocks()
     resetArweaveBodyCache()
+    resetGatewayCircuitBreakerForTests()
   })
 
   it('isArweaveTransactionGatewayUrl accepts standard gateway tx URL', () => {
@@ -115,21 +120,47 @@ describe('hydrateArweaveRichTextInItems', () => {
     )
   })
 
-  it('does not cache a failed fetch', async () => {
+  it('does not cache a fetch every gateway failed', async () => {
     const url = `https://arweave.net/${txId(2)}`
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, headers: { get: () => '' } })
-      .mockResolvedValueOnce(htmlResponse('<p>later</p>'))
-    vi.stubGlobal('fetch', fetchMock)
+    let published = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => (published ? htmlResponse('<p>later</p>') : { ok: false, headers: { get: () => '' } })),
+    )
 
     const first = [{ html: url }] as Record<string, unknown>[]
     await hydrateArweaveRichTextInItems(first)
     expect(first[0]!.html).toBe(url)
 
+    published = true
+    resetGatewayCircuitBreakerForTests()
     const second = [{ html: url }] as Record<string, unknown>[]
     await hydrateArweaveRichTextInItems(second)
     expect(second[0]!.html).toBe('<p>later</p>')
+  })
+
+  it('fetches the body from the next read gateway when the first fails', async () => {
+    const url = `https://arweave.net/${txId(5)}`
+    const fetchMock = vi.fn(async (requested: string) =>
+      requested.startsWith('https://arweave.net/')
+        ? { ok: false, headers: { get: () => '' } }
+        : htmlResponse('<p>from a fallback</p>'),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const items = [{ html: url }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe('<p>from a fallback</p>')
+    expect(fetchMock.mock.calls[0]![0]).toBe(url)
+  })
+
+  it('moves the hydrated body\'s Arweave links onto the reader\'s first gateway', async () => {
+    const image = `${'img'.padEnd(43, 'z')}`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(htmlResponse(`<img src="https://ar.seedprotocol.io/raw/${image}">`)))
+
+    const items = [{ html: `https://arweave.net/${txId(6)}` }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe(`<img src="https://arweave.net/raw/${image}">`)
   })
 
   it('fetches bodies in parallel, at most 8 at a time, each into its own item', async () => {

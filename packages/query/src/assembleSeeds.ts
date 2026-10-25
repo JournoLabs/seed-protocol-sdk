@@ -6,7 +6,7 @@ import {
   pickLatestPropertyAttestationsByRefAndSchema,
   keepAttestationsFromRefAttester,
 } from '@seedprotocol/eas'
-import { getArweaveUrlForTransaction } from './arweaveUrl.js'
+import { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 import {
   publicListRelationPropertyKey,
   stripListRelationStorageAliasesForPublicKey,
