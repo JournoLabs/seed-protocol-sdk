@@ -18,6 +18,7 @@ import {
   createItemWithImageAndUploadedTx,
   createPublishedTestAuthor,
   createImageItemWithMissingStorageTxMetadata,
+  createItemWithDanglingRelation,
   waitForPropertyInstances,
   OPTIONAL_AUTHOR_POST_MODEL_NAME,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
@@ -134,20 +135,12 @@ testDescribe('getPublishPayload integration', () => {
 
   it('skips (no throw) when related item not found for optional relation', async () => {
     const { schemaName } = await createGetPublishPayloadTestSchemaOptionalAuthor()
-    const postItem = await Item.create({
-      modelName: OPTIONAL_AUTHOR_POST_MODEL_NAME,
+    // Missing author; optional, so publish skips it
+    const { postItem } = await createItemWithDanglingRelation({
+      postModelName: OPTIONAL_AUTHOR_POST_MODEL_NAME,
       schemaName,
       title: 'Post with optional author',
-      author: '0000000000', // Non-existent author - optional so should skip
     })
-    await waitForPropertyInstances(postItem)
-    const authorProp = postItem.properties.find(
-      (p) => p.propertyName === 'author' || p.propertyName === 'authorId' || p.alias === 'author'
-    )
-    if (authorProp) {
-      authorProp.value = '0000000000'
-      await authorProp.save()
-    }
     const result = await getPublishPayload(postItem, [])
     expect(result.length).toBeGreaterThanOrEqual(1)
   }, 30000)

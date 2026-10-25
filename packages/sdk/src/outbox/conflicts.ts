@@ -196,12 +196,19 @@ type SyncedRow = {
   revokedAt?: number | null
 }
 
+/** Seed types of storage values (Image, File, Html), which record no conflicts (ADR 0019). */
+const STORAGE_SEED_TYPES = new Set(['image', 'file', 'html'])
+
+const isStorageDraft = (row: { refSeedType?: string | null }): boolean =>
+  STORAGE_SEED_TYPES.has((row.refSeedType ?? '').toLowerCase())
+
 /**
  * The conflict rule for rows sync just inserted (`synced`) over a local draft already written: the
  * draft stays the property's value. When a synced row is newer than the draft, the draft's time is
  * moved just past it (readers take the newest row). A conflict is recorded, on an `applied` op row
  * of its own, when the synced value differs from both the draft's and the attested value the draft
- * replaced. Properties with a pending value op are left to the drainer, which applies the same rule.
+ * replaced, except for Image, File and Html drafts: storage values record no conflicts (ADR 0019).
+ * Properties with a pending value op are left to the drainer, which applies the same rule.
  */
 export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promise<void> {
   const db = BaseDb.getAppDb()
@@ -259,7 +266,7 @@ export async function keepLocalDraftsOverSyncedRows(synced: SyncedRow[]): Promis
     const baseValue = base?.propertyValue ?? null
     const remoteValue = remote.propertyValue ?? null
     const localValue = draft.propertyValue ?? null
-    if (remoteValue === localValue || remoteValue === baseValue) {
+    if (remoteValue === localValue || remoteValue === baseValue || isStorageDraft(draft)) {
       await keepDraftNewest(db, false)
       continue
     }

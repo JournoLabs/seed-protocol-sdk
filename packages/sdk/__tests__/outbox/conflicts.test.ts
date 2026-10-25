@@ -257,6 +257,22 @@ testDescribe('conflicts between a pending edit and sync', () => {
     expect(await shownTitle(item.seedLocalId)).toBe('remote')
   }, 30000)
 
+  it('records no conflict for a storage draft (Image, File, Html), which stays the value (ADR 0019)', async () => {
+    const { item, property, baseRow } = await publishedPost('base')
+    property.value = 'local'
+    await property.save()
+    // Make the property's rows an Image's: the rule reads the draft's seed type
+    await db()
+      .update(metadata)
+      .set({ refSeedType: 'image' })
+      .where(and(eq(metadata.seedLocalId, item.seedLocalId), eq(metadata.propertyName, 'title')))
+
+    await syncAfterDraft({ ...baseRow, refSeedType: 'image' }, 'remote', Date.now() + 5_000)
+
+    expect(await item.conflicts()).toEqual([])
+    expect(await shownTitle(item.seedLocalId)).toBe('local')
+  }, 30000)
+
   // The change feed (browser only) puts the conflict on the loaded property: no rehydrate, and
   // also when the synced attestation is older than the draft, so the draft row needs no new time.
   it.skipIf(typeof window === 'undefined').each([

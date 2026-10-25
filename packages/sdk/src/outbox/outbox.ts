@@ -108,6 +108,22 @@ export class OutboxOpRejectedError extends Error {
   }
 }
 
+/**
+ * `save({ timeoutMs })` stopped waiting. Nothing is cancelled: the op stays queued and applies once
+ * a leader tab drains the outbox (decision D30).
+ */
+export class OutboxSaveTimeoutError extends Error {
+  readonly code = 'OUTBOX_SAVE_TIMEOUT'
+  constructor(
+    /** The queued op, when it had been appended. */
+    readonly opId: string | undefined,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'OutboxSaveTimeoutError'
+  }
+}
+
 /** Rejects `waitForOutboxOp` for an op that failed, or that a failed op superseded. */
 export class OutboxOpFailedError extends Error {
   readonly code = 'OUTBOX_OP_FAILED'
@@ -575,20 +591,28 @@ export function waitForOutboxOp(opId: string): Promise<void> {
 
 /**
  * Resolves once every op pending when it was called has settled (applied, superseded or failed),
- * so a reader of `metadata` sees every edit made before. Publish waits on this before it reads.
+ * so a reader of `metadata` sees every edit made before. With `seedLocalIds`, only the ops on
+ * those seeds (publish waits for its own graph's, ADR 0019). Resolves true when there were any.
  */
-export async function waitForPendingOutboxOps(): Promise<void> {
+export async function waitForPendingOutboxOps(options?: { seedLocalIds?: readonly string[] }): Promise<boolean> {
   const db = BaseDb.getAppDb()
-  if (!db) return
+  if (!db) return false
+  const seedLocalIds = options?.seedLocalIds
+  if (seedLocalIds && seedLocalIds.length === 0) return false
   const pending: Array<{ opId: string }> = await db
     .select({ opId: pendingWrites.opId })
     .from(pendingWrites)
-    .where(eq(pendingWrites.status, 'pending'))
-  if (pending.length === 0) return
+    .where(
+      seedLocalIds
+        ? and(eq(pendingWrites.status, 'pending'), inArray(pendingWrites.seedLocalId, [...seedLocalIds]))
+        : eq(pendingWrites.status, 'pending'),
+    )
+  if (pending.length === 0) return false
   startOutbox()
   if (isLeaderTab()) scheduleDrain()
   else postTabMessage({ type: 'outbox-nudge' })
   await Promise.allSettled(pending.map(({ opId }) => waitForOutboxOp(opId)))
+  return true
 }
 
 /** The status of each op, by id; ops not found are left out. */

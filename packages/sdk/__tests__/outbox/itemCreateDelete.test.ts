@@ -9,10 +9,11 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { renamePendingWritesForProperty } from '@/helpers/db'
 import { hardDeleteLocalSeedsByLocalIds } from '@/db/write/removeLocalCopiesForAddresses'
 import { appendOutboxOp, getOutboxOps, startItemOutbox, waitForPendingOutboxOps } from '@/outbox'
-import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
+import { OutboxSaveTimeoutError, outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForIdle } from '../test-utils/waitForIdle'
+import { getPublishGraph } from '@/db/read/publishGraph'
 
 /**
  * Creating and deleting items through the outbox (ADR 0019), and the writers that must know about
@@ -190,4 +191,95 @@ testDescribe('item lifecycle through the outbox', () => {
     expect((await opsFor(post.seedLocalId)).at(-1)?.status).toBe('applied')
     post.unload()
   }, 30000)
+
+  it('waitForPendingOutboxOps({ seedLocalIds }) waits only for those seeds', async () => {
+    const mine = await createPost()
+    const other = await createPost()
+    pauseOutboxDrainForTests(true)
+    try {
+      other.title = 'stuck elsewhere'
+      await vi.waitFor(async () => expect((await opsFor(other.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      expect(await waitForPendingOutboxOps({ seedLocalIds: [mine.seedLocalId] })).toBe(false)
+    } finally {
+      pauseOutboxDrainForTests(false)
+    }
+    await waitForPendingOutboxOps()
+    mine.unload()
+    other.unload()
+  }, 30000)
+
+  it("getPublishGraph waits for its own item's edits, not another item's (ADR 0019)", async () => {
+    const mine = await createPost()
+    const other = await createPost()
+    pauseOutboxDrainForTests(true)
+    try {
+      other.title = 'stuck elsewhere'
+      await vi.waitFor(async () => expect((await opsFor(other.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      const graph = await Promise.race([
+        getPublishGraph(mine),
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+      ])
+      expect(graph).not.toBe('timeout')
+
+      mine.title = 'my edit'
+      await vi.waitFor(async () => expect((await opsFor(mine.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      let built = false
+      const waiting = getPublishGraph(mine).then((g) => {
+        built = true
+        return g
+      })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(built).toBe(false)
+      pauseOutboxDrainForTests(false)
+      const withEdit = await waiting
+      expect(withEdit.root.properties.find((p) => p.key === 'title')?.row?.propertyValue).toBe('my edit')
+    } finally {
+      pauseOutboxDrainForTests(false)
+    }
+    await waitForPendingOutboxOps()
+    mine.unload()
+    other.unload()
+  }, 30000)
+
+  describe('save() while no tab drains the outbox (D30)', () => {
+    const titleOf = (post: Post) => post.properties.find((p) => p.propertyName === 'title')!
+
+    it('save({ timeoutMs }) rejects with OutboxSaveTimeoutError and the op stays queued', async () => {
+      const post = await createPost()
+      pauseOutboxDrainForTests(true)
+      try {
+        post.title = 'queued'
+        const error = await titleOf(post).save({ timeoutMs: 200 }).catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(OutboxSaveTimeoutError)
+        const last = (await opsFor(post.seedLocalId)).at(-1)!
+        expect((error as OutboxSaveTimeoutError).opId).toBe(last.opId)
+        expect(last.status).toBe('pending')
+      } finally {
+        pauseOutboxDrainForTests(false)
+      }
+      await waitForPendingOutboxOps()
+      expect((await opsFor(post.seedLocalId)).at(-1)?.status).toBe('applied')
+      post.unload()
+    }, 30000)
+
+    it('warns when a save has waited 10 s', async () => {
+      const post = await createPost()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      pauseOutboxDrainForTests(true)
+      try {
+        post.title = 'slow'
+        const saving = titleOf(post).save()
+        await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('has waited 10 s')), {
+          timeout: 13000,
+          interval: 250,
+        })
+        pauseOutboxDrainForTests(false)
+        await saving
+      } finally {
+        pauseOutboxDrainForTests(false)
+        warn.mockRestore()
+      }
+      post.unload()
+    }, 30000)
+  })
 })

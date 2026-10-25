@@ -514,24 +514,43 @@ export class RelationTargetError extends Error {
 }
 
 /** The seed ids a Relation or List-of-Relation value names; none for other values. */
-function relationTargets(value: SetPropertyValueOp): string[] {
+function relationTargets(value: { dataType?: string; refValueType?: string; newValue: unknown }): string[] {
   const dataType = normalizeDataType(value.dataType)
   const refValueType = normalizeDataType(value.refValueType)
-  if (!value.newValue) return []
-  if (dataType === 'Relation' && refValueType !== 'Image') return [value.newValue]
-  if (dataType === 'List' && refValueType === 'Relation') return parseListPropertyValueFromStorage(value.newValue)
+  const { newValue } = value
+  if (!newValue) return []
+  if (dataType === 'Relation' && refValueType !== 'Image') return typeof newValue === 'string' ? [newValue] : []
+  if (dataType === 'List' && refValueType === 'Relation') {
+    if (Array.isArray(newValue)) return newValue.filter((id): id is string => typeof id === 'string')
+    return typeof newValue === 'string' ? parseListPropertyValueFromStorage(newValue) : []
+  }
   return []
 }
 
+/** The seed ids a create's initial Relation and List-of-Relation values name. */
+function createRelationTargets(value: CreateItemOp | undefined): string[] {
+  return (value?.rows ?? []).flatMap((row) =>
+    relationTargets({
+      dataType: row.propertyRecordSchema?.dataType,
+      refValueType: row.propertyRecordSchema?.refValueType,
+      newValue: row.propertyValue,
+    }),
+  )
+}
+
 /**
- * The relation-target rule, checked before a `set` applies: each seed a Relation value names by
- * local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
+ * The relation-target rule, checked before a `set` or `create` applies: each seed a Relation value
+ * names by local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
  * target whose create op is still pending defers the op (OutboxOpDeferredError) until it applies;
  * any other missing target fails it with RelationTargetError.
  */
 async function requireRelationTargets(op: OutboxOp): Promise<void> {
-  const value = outboxOpValue<SetPropertyValueOp>(op)
-  const localIds = [...new Set(value ? relationTargets(value) : [])].filter((id) => !isValidEasAttestationUid(id))
+  const targets =
+    op.kind === 'create'
+      ? createRelationTargets(outboxOpValue<CreateItemOp>(op))
+      : relationTargets(outboxOpValue<SetPropertyValueOp>(op) ?? { newValue: null })
+  // A create may relate the item to itself
+  const localIds = [...new Set(targets)].filter((id) => !isValidEasAttestationUid(id) && id !== op.seedLocalId)
   if (localIds.length === 0) return
   const db = BaseDb.getAppDb()
   const found = await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.localId, localIds))
@@ -655,6 +674,7 @@ export function startItemOutbox(): void {
       discard: discardStorageValue,
     })
     registerOutboxApplier('create', {
+      prepare: (op) => requireRelationTargets(op),
       apply: async (op, tx): Promise<CreateItemResult> =>
         applyCreateItem(op.seedLocalId, outboxOpValue<CreateItemOp>(op)!, tx),
       // Staged ItemStorage values of a create that never applied

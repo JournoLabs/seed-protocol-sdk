@@ -428,6 +428,30 @@ export async function createItemWithRelation(
   return { authorItem, postItem }
 }
 
+/**
+ * A Post whose author Relation names a local seed that no longer exists: the author is created and
+ * related, then its local copy is removed. Item.create refuses a missing relation target, so this is
+ * how a test gets one (a local purge or another tab's delete leaves the same state).
+ */
+export async function createItemWithDanglingRelation(options: {
+  postModelName?: string
+  schemaName?: string
+  title?: string
+} = {}): Promise<{ postItem: ItemClass<any>; missingAuthorLocalId: string }> {
+  const { postModelName = 'Post', schemaName = SCHEMA_NAME, title = 'Post with a missing author' } = options
+  const author = await Item.create({ modelName: 'Author', schemaName, name: 'Removed Author' })
+  await waitForItemIdle(author)
+  const postItem = await Item.create({ modelName: postModelName, schemaName, title, author: author.seedLocalId })
+  await waitForItemIdle(postItem)
+  await waitForPropertyInstances(postItem)
+  const missingAuthorLocalId = author.seedLocalId
+  author.unload()
+  const { hardDeleteLocalSeedsByLocalIds } = await import('@/db/write/removeLocalCopiesForAddresses')
+  await hardDeleteLocalSeedsByLocalIds([missingAuthorLocalId])
+  Item.dropCachedInstancesForSeedIds([missingAuthorLocalId])
+  return { postItem, missingAuthorLocalId }
+}
+
 export type CreateItemWithListOptions = {
   tagLabels?: string[]
   postTitle?: string

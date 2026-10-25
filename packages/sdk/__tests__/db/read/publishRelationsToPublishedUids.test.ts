@@ -7,6 +7,7 @@ import { Item } from '@/Item/Item'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
+  createItemWithDanglingRelation,
   waitForPropertyInstances,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 
@@ -85,12 +86,7 @@ testDescribe('publish with relations to published uids that have no local copy',
   }, 30000)
 
   it('still throws for a local id with no local item', async () => {
-    const postItem = await Item.create({
-      modelName: 'Post',
-      title: 'Uploads with broken local relation',
-      author: '0000000000',
-    })
-    await waitForPropertyInstances(postItem)
+    const { postItem } = await createItemWithDanglingRelation({ title: 'Uploads with broken local relation' })
     await expect(getPublishUploads(postItem)).rejects.toThrow('No relatedItem found for author')
     await expect(getPublishPayload(postItem, [])).rejects.toThrow(
       'No related item found for required relation',

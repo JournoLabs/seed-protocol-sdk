@@ -269,17 +269,48 @@ export function htmlPropertyForHtmlSeed(node: PublishGraphNode, htmlSeedLocalId:
   )
 }
 
+/** Rebuilds after waiting at most this many times; ops that keep arriving don't hold publish forever. */
+const MAX_GRAPH_OUTBOX_PASSES = 4
+
+/** Every local seed a graph names: its nodes, the unpublished items it refers to, and refs it couldn't follow. */
+function graphSeedLocalIds(graph: PublishGraph): string[] {
+  const ids = new Set<string>([graph.root.seedLocalId])
+  for (const node of graph.nodes) ids.add(node.seedLocalId)
+  for (const item of graph.unpublishedRelatedItems) ids.add(item.seedLocalId)
+  for (const broken of graph.brokenRefs) {
+    const { seedLocalId } = resolveSeedIdsFromRefString(broken.ref)
+    if (seedLocalId) ids.add(seedLocalId)
+  }
+  for (const missing of graph.missingEmbeddedImages) ids.add(missing.imageSeedLocalId)
+  return [...ids]
+}
+
 /**
- * The publish graph of the seed `root` (an Item, or any `{ seedLocalId }`). Waits for pending
- * outbox ops first, so every edit made before publishing is in its row (ADR 0019), then reads rows
- * only.
+ * The publish graph of the seed `root` (an Item, or any `{ seedLocalId }`). Waits for the pending
+ * outbox ops on the seeds in the graph first, so every edit made to them before publishing is in
+ * its row (ADR 0019); ops on other seeds don't hold the publish. Since those ops can change which
+ * seeds the graph reaches, it is read again after any were pending. Reads rows only.
  */
 export async function getPublishGraph(
   root: { seedLocalId: string; modelName?: string },
   options: GetPublishGraphOptions = {},
 ): Promise<PublishGraph> {
   const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
+  let seedLocalIds = [root.seedLocalId]
+  let graph: PublishGraph | undefined
+  for (let pass = 0; pass < MAX_GRAPH_OUTBOX_PASSES; pass++) {
+    const waited = await waitForPendingOutboxOps({ seedLocalIds })
+    if (graph && !waited) return graph
+    graph = await readPublishGraph(root, options)
+    seedLocalIds = graphSeedLocalIds(graph)
+  }
+  return graph!
+}
+
+async function readPublishGraph(
+  root: { seedLocalId: string; modelName?: string },
+  options: GetPublishGraphOptions,
+): Promise<PublishGraph> {
   const rootNode = await readNode(root.seedLocalId, 'root', root.modelName)
   if (!rootNode) throw new Error(`Cannot publish ${root.seedLocalId}: no local seed with a known model`)
   const republishRevokedSeed = !!rootNode.seedUid && rootNode.newSeed

@@ -82,7 +82,7 @@ export {
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'
 export { EntityUnloadedError } from './helpers/entity/entityLifecycle'
-export { OutboxOpFailedError } from './outbox/outbox'
+export { OutboxOpFailedError, OutboxSaveTimeoutError } from './outbox/outbox'
 export { RelationTargetError } from './outbox/itemAppliers'
 export { StagedValueMissingError } from './storageValue/stage'
 export type { ValidationError, ValidationResult } from './Schema/validation'
