@@ -286,6 +286,14 @@ export {
   hasArweaveContentReadTransform,
   transformArweaveContent,
   readArweaveContentResponse,
+  rehostArweaveLinksInHtml,
+  nextArweaveGatewayUrl,
+  mapUrlAttribute,
+  parseArweaveTransactionLink,
+} from '@seedprotocol/arweave'
+export type {
+  ArweaveTransactionLink,
+  HtmlArweaveRefs,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
