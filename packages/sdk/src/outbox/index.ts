@@ -11,7 +11,6 @@ export {
   waitForPendingOutboxOps,
   OutboxOpDeferredError,
   OutboxOpFailedError,
-  OutboxSaveTimeoutError,
   OutboxOpRejectedError,
   OUTBOX_PRUNE_AFTER_MS,
   OUTBOX_PRUNE_FAILED_AFTER_MS,
