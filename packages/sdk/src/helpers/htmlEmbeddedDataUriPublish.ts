@@ -5,7 +5,12 @@ import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { getPublicArweaveRawUrl, normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
+import {
+  getPublicArweaveRawUrl,
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+  rewriteHtmlAttributes,
+} from '@seedprotocol/arweave'
 import { getContentHash } from '@/helpers/crypto'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { Item } from '@/Item/Item'
@@ -138,56 +143,6 @@ export async function extractDataUriImagesFromHtml(html: string): Promise<HtmlEm
 
   for (const c of fragment.childNodes) await walk(c as DefaultTreeAdapterTypes.ChildNode)
   return found
-}
-
-function escapeAttributeValue(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-}
-
-/**
- * Rewrite attribute values of `html` by splicing each new value into the original string: every
- * byte other than the rewritten attributes stays as written. Re-serializing the parsed tree would
- * not round-trip (parse5 drops the newline the parser eats after `<pre>`/`<textarea>`/`<listing>`,
- * a fragment parse drops doctype/html/head/body, and quoting, case and line endings are normalized),
- * and sealed Html must not change with the serializer.
- *
- * `rewrite` gets each attribute's (entity-decoded) value and returns its new value, or undefined to
- * leave it. A rewritten attribute is written as `name="value"`.
- */
-function rewriteHtmlAttributes(
-  html: string,
-  rewrite: (element: DefaultTreeAdapterTypes.Element, attrName: string, value: string) => string | undefined,
-): string {
-  const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
-  const edits: { start: number; end: number; text: string }[] = []
-  const walk = (node: DefaultTreeAdapterTypes.ChildNode): void => {
-    if (node.nodeName === '#text' || node.nodeName === '#comment') return
-    const el = node as DefaultTreeAdapterTypes.Element
-    if (el.attrs?.length) {
-      for (const attr of el.attrs) {
-        if (attr.prefix) continue
-        const next = rewrite(el, attr.name, attr.value)
-        const location = el.sourceCodeLocation?.attrs?.[attr.name]
-        if (next === undefined || !location) continue
-        edits.push({
-          start: location.startOffset,
-          end: location.endOffset,
-          text: `${attr.name}="${escapeAttributeValue(next)}"`,
-        })
-      }
-    }
-    const parent = el as DefaultTreeAdapterTypes.ParentNode
-    if (parent.childNodes) {
-      for (const c of parent.childNodes) walk(c)
-    }
-  }
-  for (const c of fragment.childNodes) walk(c as DefaultTreeAdapterTypes.ChildNode)
-
-  let out = html
-  for (const edit of edits.sort((a, b) => b.start - a.start)) {
-    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
-  }
-  return out
 }
 
 /**
