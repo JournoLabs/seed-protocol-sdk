@@ -4,8 +4,8 @@ import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { entityChanges, metadata, seeds } from '@/seedSchema'
 import { createNewItem } from '@/db/write/createNewItem'
+import { ENTITY_CHANGES_RETENTION_MS } from '@/db/entityChangesPrune'
 import {
-  ENTITY_CHANGES_RETENTION_MS,
   resetChangeFeedForTests,
   watchEntityChanges,
   watchEntityRows,
