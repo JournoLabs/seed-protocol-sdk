@@ -32,6 +32,7 @@ import { resetAddressesPersistedAnnouncement } from '@/client/addressesPersisted
 import {
   findLocalOnchainCopiesForAddresses,
   hardDeleteLocalSeedsByLocalIds,
+  type RemoveLocalCopiesOptions,
 } from '@/db/write/removeLocalCopiesForAddresses'
 import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
@@ -311,13 +312,18 @@ const clientInstance = {
     return result
   },
   /**
-   * Hard-delete local on-chain seed copies for the given publisher addresses.
-   * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
+   * Hard-delete local on-chain seed copies for the given publisher addresses. Chain is untouched;
+   * reconnect can rehydrate via syncFromEas. Drafts (no uid / attestationRaw) are kept. A copy that
+   * holds unpublished edits or pending outbox ops, of an address still owned, is kept too and listed
+   * in `keptSeedLocalIds` (decision D24); `{ includeUnpublished: true }` removes it with the rest.
    */
-  removeLocalCopiesForAddresses: async (addresses: string[]) => {
+  removeLocalCopiesForAddresses: async (addresses: string[], options: RemoveLocalCopiesOptions = {}) => {
     ensureInitialized()
     const list = Array.isArray(addresses) ? addresses : []
-    const matched = await findLocalOnchainCopiesForAddresses(list)
+    const matched = await findLocalOnchainCopiesForAddresses(list, {
+      includeUnpublished: options.includeUnpublished,
+      ownedAddresses: options.includeUnpublished ? [] : await getOwnedAddressesFromDb(),
+    })
     const cacheIds = [
       ...matched.removedSeedLocalIds,
       ...matched.removedSeedUids,
