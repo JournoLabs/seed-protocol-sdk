@@ -168,6 +168,7 @@ export function useItemProperty(
     const initialContext = (property.getService().getSnapshot() as any)?.context
     let lastRenderValue: unknown = initialContext?.renderValue
     let lastPropertyValue: unknown = initialContext?.propertyValue
+    let lastConflict: unknown = initialContext?.conflict
     let wasIdle = false
     let lastVersionAt = 0
     let trailing: ReturnType<typeof setTimeout> | undefined
@@ -176,9 +177,15 @@ export function useItemProperty(
       const ctx = snapshot?.context ?? {}
       // A value change re-renders at once: a controlled input bound to property.value that
       // skipped a render was reset to the old value, and the next keystroke built on it.
-      if (!Object.is(ctx.renderValue, lastRenderValue) || !Object.is(ctx.propertyValue, lastPropertyValue)) {
+      // So does a conflict arriving or clearing (sync, another tab), which comes on an idle snapshot.
+      if (
+        !Object.is(ctx.renderValue, lastRenderValue) ||
+        !Object.is(ctx.propertyValue, lastPropertyValue) ||
+        !Object.is(ctx.conflict ?? null, lastConflict ?? null)
+      ) {
         lastRenderValue = ctx.renderValue
         lastPropertyValue = ctx.propertyValue
+        lastConflict = ctx.conflict
         wasIdle = snapshot.value === 'idle' && ctx._status === 'ready'
         lastVersionAt = Date.now()
         clearTimeout(trailing)
@@ -557,6 +564,9 @@ export function useItemProperties(
     // The instances are held only while a hook shows them: a list kept after unmount could hold
     // stopped ones.
     gcTime: 0,
+    // A refetch after another tab's save returns the same instances with new values; structural
+    // sharing would keep the old array, and the hook wouldn't re-render.
+    structuralSharing: false,
   })
   useHeldItemProperties(properties)
 

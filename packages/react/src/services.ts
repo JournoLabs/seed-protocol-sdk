@@ -217,12 +217,16 @@ export const useServices = () => {
   }
 }
 
+/**
+ * The client manager's state. `'stopped'` after `client.stop()` until the next init starts: a stopped
+ * actor keeps its last state (`'idle'`), which would read as ready.
+ */
 export const useGlobalServiceStatus = () => {
-  const status = useClientSelector((snapshot) => snapshot.value)
+  const status = useClientSelector((snapshot) => (snapshot.status === 'active' ? snapshot.value : 'stopped'))
 
   // 'ready' while the app database is open (see isDbReadyState), otherwise the client state.
   const internalStatus = useClientSelector((snapshot) =>
-    snapshot.status === 'active' && isDbReadyState(snapshot.value) ? 'ready' : snapshot.value,
+    snapshot.status !== 'active' ? 'stopped' : isDbReadyState(snapshot.value) ? 'ready' : snapshot.value,
   )
 
   return {

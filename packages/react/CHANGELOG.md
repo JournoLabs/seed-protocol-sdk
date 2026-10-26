@@ -4,6 +4,9 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `useGlobalServiceStatus()` reports `status` and `internalStatus` `'stopped'` after `client.stop()` until the next init starts. Both read `'idle'`, the stopped client's last state, so a stopped client looked ready.
+- `useItemProperty` re-renders when only the property's `conflict` changes (sync or another tab recording or resolving one). It dropped idle snapshots whose value hadn't changed.
+- `useItemProperties` re-renders after another tab's save. Its refetch returned the same instances, and React Query's structural sharing kept the old array.
 - `SeedHtml` moves the Html's Arweave links onto this reader's first read gateway before calling `sanitize` (ADR 0025), so `ar://` links reach the sanitizer as `https` and Html published with `ar.seedprotocol.io` links shows its images while that gateway is down. When an `img`, `video`, `audio` or `source` in it fails to load, it moves to the same transaction on the next read gateway. New `attachArweaveLoadFailover(container)` adds that failover to a container an app renders itself with the `render` prop.
 
 ## 0.7.11 (2026-10-24)
