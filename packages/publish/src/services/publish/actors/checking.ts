@@ -113,6 +113,27 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           return
         }
 
+        if (!address || typeof address !== 'string' || !address.trim()) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({
+            type: 'validationFailed',
+            errors: [{ message: 'No publisher address for publish. Connect a wallet and try again.' }],
+          })
+          return
+        }
+
+        // ADR 0021: retracted properties are revoked after attesting, from the attester. Fail now,
+        // before anything is attested and before EAS schemas are registered (which costs
+        // transactions), when this wallet can't revoke.
+        if (item.seedUid) {
+          const { getPendingRetractions } = await import('@seedprotocol/sdk')
+          const retractions = await getPendingRetractions({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          if (retractions.length > 0) {
+            const { assertCanRevokeSeedAttestations } = await import('../../revoke/revokeAttestations')
+            await assertCanRevokeSeedAttestations({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          }
+        }
+
         const publishWallet = wallet ?? account
         if (publishWallet) {
           await ensureEasSchemasForItem(
@@ -128,26 +149,6 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         if (!validation.isValid) {
           activePublishProcesses.delete(item.seedLocalId)
           sendBack({ type: 'validationFailed', errors: validation.errors })
-          return
-        }
-
-        // ADR 0021: retracted properties are revoked after attesting, from the attester. Fail now,
-        // before anything is attested, when this wallet can't revoke.
-        if (item.seedUid) {
-          const { getPendingRetractions } = await import('@seedprotocol/sdk')
-          const retractions = await getPendingRetractions({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
-          if (retractions.length > 0) {
-            const { assertCanRevokeSeedAttestations } = await import('../../revoke/revokeAttestations')
-            await assertCanRevokeSeedAttestations({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
-          }
-        }
-
-        if (!address || typeof address !== 'string' || !address.trim()) {
-          activePublishProcesses.delete(item.seedLocalId)
-          sendBack({
-            type: 'validationFailed',
-            errors: [{ message: 'No publisher address for publish. Connect a wallet and try again.' }],
-          })
           return
         }
 
