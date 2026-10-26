@@ -34,6 +34,12 @@ export type EasSyncMachineContext = {
   pendingMergedOptions: SyncFromEasOptions | undefined
   pendingCorrelationIds: string[]
   pendingPrimarySource: EasSyncRequestSource | null
+  /**
+   * The merged options of the automatic (non-`client_api`) requests in the running sync, retried
+   * when it fails whatever request started it; undefined when it has none.
+   */
+  runRetryableOptions: SyncFromEasOptions | undefined
+  pendingRetryableOptions: SyncFromEasOptions | undefined
   lastFinishedCorrelationIds: string[] | null
   lastFinishedStatus: 'success' | 'failed' | null
   lastFinishedError: string | null
@@ -104,9 +110,18 @@ const runEasSync = fromPromise(
   },
 )
 
+/** `options` merged into `into` when `source` is automatic; `into` as is for a `client_api` request. */
+const withRetryable = (
+  into: SyncFromEasOptions | undefined,
+  source: EasSyncRequestSource,
+  options: SyncFromEasOptions | undefined,
+): SyncFromEasOptions | undefined =>
+  source === 'client_api' ? into : mergeEasSyncRequestIntents([into, options ?? {}])
+
 /**
  * Automatic syncs that failed (probably offline), merged and run again once the device is back
- * online. A failed `client_api` sync isn't retried: its caller gets the error.
+ * online. A failed `client_api` sync isn't retried: its caller gets the error. Automatic requests
+ * merged into a run a `client_api` request started are retried.
  */
 let failedSyncOptions: SyncFromEasOptions[] = []
 const syncRetry = createRetryWhenOnline(() => {
@@ -131,6 +146,8 @@ const initialContext: EasSyncMachineContext = {
   pendingMergedOptions: undefined,
   pendingCorrelationIds: [],
   pendingPrimarySource: null,
+  runRetryableOptions: undefined,
+  pendingRetryableOptions: undefined,
   lastFinishedCorrelationIds: null,
   lastFinishedStatus: null,
   lastFinishedError: null,
@@ -160,6 +177,7 @@ export const easSyncMachine = setup({
                 : mergeEasSyncRequestIntents([event.options]),
             activeCorrelationIds: ({ event }) => [event.correlationId],
             activePrimarySource: ({ event }) => event.source,
+            runRetryableOptions: ({ event }) => withRetryable(undefined, event.source, event.options),
           }),
         },
       },
@@ -182,6 +200,13 @@ export const easSyncMachine = setup({
             ],
             pendingPrimarySource: ({ context, event }) =>
               context.pendingPrimarySource ?? event.source,
+            // The next run repeats this one's options too (pendingMergedOptions), so its retryable part as well
+            pendingRetryableOptions: ({ context, event }) =>
+              withRetryable(
+                context.pendingRetryableOptions ?? context.runRetryableOptions,
+                event.source,
+                event.options,
+              ),
           }),
         },
       },
@@ -219,8 +244,8 @@ export const easSyncMachine = setup({
           actions: [
             // Before the assign below clears runOptions.
             ({ context }) => {
-              if (context.activePrimarySource === 'client_api') return
-              failedSyncOptions.push(context.runOptions)
+              if (!context.runRetryableOptions) return
+              failedSyncOptions.push(context.runRetryableOptions)
               syncRetry.schedule()
             },
             assign({
@@ -261,6 +286,8 @@ export const easSyncMachine = setup({
             pendingMergedOptions: () => undefined,
             pendingCorrelationIds: () => [],
             pendingPrimarySource: () => null,
+            runRetryableOptions: ({ context }) => context.pendingRetryableOptions,
+            pendingRetryableOptions: () => undefined,
           }),
         },
         { target: 'idle' },

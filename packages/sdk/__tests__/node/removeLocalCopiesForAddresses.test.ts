@@ -242,11 +242,58 @@ describe.sequential('removeLocalCopiesForAddresses', () => {
   it('no-ops for empty addresses and emits empty removal payload', async () => {
     const { client } = await import('@/client')
     const result = await client.removeLocalCopiesForAddresses([])
-    expect(result).toEqual({ removedSeedLocalIds: [], removedSeedUids: [] })
+    expect(result).toEqual({ removedSeedLocalIds: [], removedSeedUids: [], keptSeedLocalIds: [] })
     expect(emitSpy).toHaveBeenCalledWith(LOCAL_COPIES_REMOVED_EVENT, {
       addresses: [],
       removedSeedLocalIds: [],
       removedSeedUids: [],
     })
+  })
+
+  it('keeps an owned copy holding an unpublished edit unless includeUnpublished (D24)', async () => {
+    const { client } = await import('@/client')
+    const db = BaseDb.getAppDb()
+    const t = Date.now()
+    const insertCopy = async (localId: string, uid: string, draftEdit: boolean) => {
+      await db.insert(seeds).values({
+        localId,
+        uid,
+        type: 'post',
+        publisher: ADDR_A,
+        attestationRaw: JSON.stringify({ attester: ADDR_A, id: uid }),
+        createdAt: t,
+      })
+      await db.insert(metadata).values({
+        localId: `${localId}-meta`,
+        seedLocalId: localId,
+        seedUid: uid,
+        uid: draftEdit ? null : `0x${'e'.repeat(64)}`,
+        propertyName: 'title',
+        propertyValue: draftEdit ? 'unpublished edit' : 'attested',
+        createdAt: t,
+      })
+    }
+    const editedLocalId = `edited-a-${t}`
+    const cleanLocalId = `clean-a-${t}`
+    await insertCopy(editedLocalId, `0x${'d'.repeat(63)}1`, true)
+    await insertCopy(cleanLocalId, `0x${'d'.repeat(63)}2`, false)
+
+    await client.setAddresses({ owned: [ADDR_A], watched: [] })
+    try {
+      const kept = await client.removeLocalCopiesForAddresses([ADDR_A])
+      expect(kept.keptSeedLocalIds).toEqual([editedLocalId])
+      expect(kept.removedSeedLocalIds).toContain(cleanLocalId)
+      expect(kept.removedSeedLocalIds).not.toContain(editedLocalId)
+      const left = (await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.localId, [editedLocalId, cleanLocalId])))
+        .map((row: { localId: string }) => row.localId)
+      expect(left).toEqual([editedLocalId])
+
+      const all = await client.removeLocalCopiesForAddresses([ADDR_A], { includeUnpublished: true })
+      expect(all.removedSeedLocalIds).toContain(editedLocalId)
+      expect(all.keptSeedLocalIds).toEqual([])
+      expect(await db.select().from(seeds).where(eq(seeds.localId, editedLocalId))).toEqual([])
+    } finally {
+      await client.setAddresses({ owned: [], watched: [] })
+    }
   })
 })

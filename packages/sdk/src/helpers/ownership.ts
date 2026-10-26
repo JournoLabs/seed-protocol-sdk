@@ -1,6 +1,7 @@
 import type { IItem } from '@/interfaces/IItem'
 import { seeds } from '@/seedSchema'
 import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
+import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
 import { isPlaceholderUid } from '@seedprotocol/eas'
 import { ZERO_BYTES32 } from '@/helpers/constants'
@@ -108,7 +109,7 @@ export function ownedPublisherSql(ownedAddresses: readonly string[]): SQL {
 }
 
 /** SQL form of {@link isPlaceholderUid}: null, `''`, `'NULL'`, or zero bytes32 (trimmed, any case). */
-export function placeholderUidSql(column: typeof seeds.uid): SQL {
+export function placeholderUidSql(column: AnySQLiteColumn): SQL {
   return or(
     isNull(column),
     eq(column, 'NULL'),
