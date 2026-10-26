@@ -1076,6 +1076,21 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       })
       expect(created!.getService().getSnapshot().context._schemaName).toBe('props-app-2')
     })
+
+    it("refuses a schema id no stored schema has, instead of cutting '-<n>' off it", async () => {
+      // "Test Schema Properties" is stored; "Test Schema Properties-3" is not, and isn't version 3 of it
+      const { result } = renderHook(() => useCreateModelProperty())
+      let thrown: unknown
+      await act(async () => {
+        await result.current
+          .create('Test Schema Properties-3', 'Post', { name: 'misplaced', dataType: 'Text' })
+          .catch((err: unknown) => {
+            thrown = err
+          })
+      })
+      expect(String((thrown as Error)?.message)).toContain('Test Schema Properties-3')
+      expect(result.current.error).toBe(thrown)
+    })
   })
 
   describe('useDestroyModelProperty', () => {
