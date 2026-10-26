@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `useCreateItem` hands a running create to a second call only when it is the same call (same model, same values, same options), as from a double click. A call with other values or another model returned the first call's item; it now creates its own. `isLoading` stays true until every create has finished.
+- `isClientReadySnapshot` is exported, as the 0.7.9 notes said (the SDK's, re-exported unchanged).
 - **Breaking:** `useModelProperty(schemaId, …)` and `useCreateModelProperty().create(schemaId, …)` no longer cut a trailing `-<n>` off a schema id that no stored schema has as its name or file id. `blog-2` resolved to `blog`, so a typo or a schema not stored yet added the property to another schema. `useModelProperty` now finds nothing for such an id, and `create` rejects naming it.
 - `useCreateModel`, `useCreateModelProperty` and `useCreateItemProperty` report the entity's own load error, as `useCreateSchema` did; they set a generic "Failed to create …" message.
 - `useGlobalServiceStatus()` reports `status` and `internalStatus` `'stopped'` after `client.stop()` until the next init starts. Both read `'idle'`, the stopped client's last state, so a stopped client looked ready.

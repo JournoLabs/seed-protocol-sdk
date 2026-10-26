@@ -531,11 +531,25 @@ export type UseCreateItemReturn = {
   resetError: () => void
 }
 
+/** Same keys, each value the same (Object.is): a repeated call, not a new item. */
+const shallowEqual = (a: Record<string, unknown> | undefined, b: Record<string, unknown> | undefined): boolean => {
+  const aKeys = Object.keys(a ?? {})
+  const bKeys = Object.keys(b ?? {})
+  return aKeys.length === bKeys.length && aKeys.every((key) => Object.is(a?.[key], b?.[key]))
+}
+
+type CreateCall = {
+  modelName: string
+  itemData?: Record<string, any>
+  options?: ItemCreateOptions
+  promise: Promise<Item<any> | undefined>
+}
+
 export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
-  // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
-  const inFlightRef = useRef<Promise<Item<any> | undefined> | null>(null)
+  // Refs, not the isLoading state: two calls before a re-render both saw isLoading false.
+  const inFlightRef = useRef<CreateCall[]>([])
 
   const resetError = useCallback(() => setError(null), [])
 
@@ -545,9 +559,16 @@ export const useCreateItem = (): UseCreateItemReturn => {
       itemData?: Record<string, any>,
       options?: ItemCreateOptions,
     ): Promise<Item<any> | undefined> => {
-      if (inFlightRef.current) {
-        logger('[useCreateItem] [createItem] already creating item, returning the in-flight create')
-        return inFlightRef.current
+      // The same call again while it runs (a double click) gets the same item; a different one runs
+      const repeated = inFlightRef.current.find(
+        (call) =>
+          call.modelName === modelName &&
+          shallowEqual(call.itemData, itemData) &&
+          shallowEqual(call.options as Record<string, unknown> | undefined, options as Record<string, unknown> | undefined),
+      )
+      if (repeated) {
+        logger('[useCreateItem] [createItem] the same create is running, returning it')
+        return repeated.promise
       }
 
       setError(null)
@@ -570,15 +591,16 @@ export const useCreateItem = (): UseCreateItemReturn => {
           setError(err instanceof Error ? err : new Error(String(err)))
           return undefined
         } finally {
-          inFlightRef.current = null
+          inFlightRef.current = inFlightRef.current.filter((c) => c !== call)
           // Defer clearing loading so React can commit the loading=true render first.
           // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
-          queueMicrotask(() => setIsLoading(false))
+          if (inFlightRef.current.length === 0) queueMicrotask(() => setIsLoading(false))
         }
       }
-      const promise = run()
-      inFlightRef.current = promise
-      return promise
+      const call: CreateCall = { modelName, itemData, options, promise: Promise.resolve(undefined) }
+      inFlightRef.current = [...inFlightRef.current, call]
+      call.promise = run()
+      return call.promise
     },
     [],
   )
