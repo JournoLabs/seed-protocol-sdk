@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `checking` refuses a wallet that can't revoke a pending retraction, and a publish with no publisher address, before it registers EAS schemas. A refused publish paid for the schema registrations first. Validation still runs after registration, since it builds the payload from the schema uids.
+- Every publish holds its item until the publish actor stops (success, failure, or stopped by the manager): `createPublish` takes the hold, so `ensureWalletThenPublish`, `PublishManager.createPublish` and direct callers get it, not only `item.publish()`. An item a caller found with `Item.find()` (no hold) unloaded after the SDK's grace period, mid-publish.
+- A publish whose revocation of retracted properties fails rejects with the new `PublishRetractionError` (`code: 'PUBLISH_RETRACTION_FAILED'`), saying the new attestations are in place and that `PublishManager.retryAttestations(seedLocalId)` sends the revocation again. It rejected with the attestation-failure message.
 - New `htmlArweaveRefs` option (`initPublish` config and `createPublish`/`item.publish()` options, ADR 0025): `'gateway'` (default) writes `https://<public gateway>/raw/<id>` into published Html, as before; `'ar'` writes `ar://<id>`, which needs no gateway but loads only in a Seed reader (`SeedHtml`, the SDK's Html value, query hydration).
 
 ## 0.7.11 (2026-10-24)

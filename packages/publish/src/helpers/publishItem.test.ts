@@ -76,6 +76,22 @@ describe('waitForPublishActor', () => {
     await expect(done).rejects.toThrow("nonce too low. Uploads are kept; retry with PublishManager.retryAttestations('seed-1')")
   })
 
+  test('rejects with PublishRetractionError when revoking retracted properties fails', async () => {
+    const machine = createMachine({
+      initial: 'running',
+      context: { error: new Error('revoke reverted') },
+      states: { running: { on: { finish: 'retractionFailureRecoverable' } }, retractionFailureRecoverable: {} },
+    })
+    const actor = createActor(machine)
+    actor.start()
+    const done = waitForPublishActor(actor, 'seed-1')
+    actor.send({ type: 'finish' })
+    const error = await done.catch((e: unknown) => e)
+    expect((error as Error).name).toBe('PublishRetractionError')
+    expect((error as Error).message).toContain('Revoking the retracted properties of seed-1 failed: revoke reverted')
+    actor.stop()
+  })
+
   test('rejects when the publish is stopped', async () => {
     const actor = fakePublishActor('stopping')
     const done = waitForPublishActor(actor, 'seed-1')

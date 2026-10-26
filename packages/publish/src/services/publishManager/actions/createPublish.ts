@@ -12,6 +12,7 @@ import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { settleCreatePublish } from '../createPublishResult'
+import { holdItemUntilStopped } from '../holdPublishItem'
 
 function coerceWallet(account: unknown): PublishWallet | undefined {
   if (!account) return undefined
@@ -102,6 +103,7 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     })
 
     publishProcesses.set(item.seedLocalId, publishProcess)
+    holdItemUntilStopped(item, publishProcess)
     const settledPublishes = new Map(context.settledPublishes)
     settledPublishes.delete(item.seedLocalId)
     settleCreatePublish(createToken, publishProcess)

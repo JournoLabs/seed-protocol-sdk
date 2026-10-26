@@ -135,7 +135,13 @@ describe('publish locks', () => {
     await PublishManager.ready()
     const address = '0x00000000000000000000000000000000000000aa'
     const item = (seedLocalId: string) =>
-      ({ seedLocalId, modelName: 'Post', schemaUid: '0xschema' }) as import('@seedprotocol/sdk').Item<any>
+      ({
+        seedLocalId,
+        modelName: 'Post',
+        schemaUid: '0xschema',
+        // An item no cache holds: createPublish takes no hold on it.
+        getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+      }) as unknown as import('@seedprotocol/sdk').Item<any>
 
     otherTab.hold(publishLockName('seed-busy'))
     expect(await PublishManager.createPublish(item('seed-busy'), address)).toBeUndefined()
