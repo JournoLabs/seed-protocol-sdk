@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- An automatic EAS sync (startup, address change) merged into a run that a `client.syncFromEas()` call started is retried when that run fails, like one that runs on its own. The retry was decided by the first request's source alone, so the automatic part was dropped.
 - On Node, live queries complete when the database closes (`client.stop()`, `BaseDb.close()`). Their poll kept running on the closed libsql client, so subscribers got a `Failed query: select …` error at shutdown.
 - On Node, `entity_changes` is pruned like in the browser: rows older than 10 minutes, when the database opens and every minute after (on a timer that doesn't keep the process running). Node wrote the trigger rows and never deleted them, so the table grew without bound.
 - Sync records no conflict for an Image, File or Html draft, as ADR 0019 says for storage values; the draft still stays the value. Only edits still in the outbox were exempt, so a saved storage draft got a conflict when sync brought a newer attestation.
