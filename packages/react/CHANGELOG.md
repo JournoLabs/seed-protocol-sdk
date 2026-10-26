@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `useModelProperty(schemaId, …)` and `useCreateModelProperty().create(schemaId, …)` no longer cut a trailing `-<n>` off a schema id that no stored schema has as its name or file id. `blog-2` resolved to `blog`, so a typo or a schema not stored yet added the property to another schema. `useModelProperty` now finds nothing for such an id, and `create` rejects naming it.
+- `useCreateModel`, `useCreateModelProperty` and `useCreateItemProperty` report the entity's own load error, as `useCreateSchema` did; they set a generic "Failed to create …" message.
 - `useGlobalServiceStatus()` reports `status` and `internalStatus` `'stopped'` after `client.stop()` until the next init starts. Both read `'idle'`, the stopped client's last state, so a stopped client looked ready.
 - `useItemProperty` re-renders when only the property's `conflict` changes (sync or another tab recording or resolving one). It dropped idle snapshots whose value hadn't changed.
 - `useItemProperties` re-renders after another tab's save. Its refetch returned the same instances, and React Query's structural sharing kept the old array.

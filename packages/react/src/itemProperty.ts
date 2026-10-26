@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Subscription } from 'xstate'
 import debug from 'debug'
-import { ItemProperty, ItemPropertySaveValidationError } from '@seedprotocol/sdk'
+import { ItemProperty, ItemPropertySaveValidationError, entityLoadError } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import type { ChangeWatch, IItemProperty } from '@seedprotocol/sdk'
 import { useEntityRowsState } from './entityRows'
@@ -756,7 +756,8 @@ export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
 
     const subscription = instance.getService().subscribe(() => {
       if (instance.status === 'error') {
-        setError(new Error('Failed to create item property'))
+        const loadError = entityLoadError(instance as never)
+        setError(loadError instanceof Error ? loadError : new Error('Failed to create item property'))
         setIsLoading(false)
       }
       if (instance.status === 'ready') {

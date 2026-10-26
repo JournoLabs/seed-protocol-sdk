@@ -81,7 +81,7 @@ export {
   type ItemCreateProblem,
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'
-export { EntityUnloadedError } from './helpers/entity/entityLifecycle'
+export { EntityUnloadedError, entityLoadError } from './helpers/entity/entityLifecycle'
 export { OutboxOpFailedError, OutboxSaveTimeoutError } from './outbox/outbox'
 export { RelationTargetError } from './outbox/itemAppliers'
 export { StagedValueMissingError } from './storageValue/stage'

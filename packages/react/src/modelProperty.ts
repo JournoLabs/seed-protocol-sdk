@@ -14,7 +14,6 @@ import { useQuery } from "@tanstack/react-query"
 import { useSeedQueryClient } from "./queryClient"
 import { useCreateState } from "./useCreateState"
 import { useHeldEntities } from "./useHeldEntities"
-import { getSchemaNameFromId } from '@seedprotocol/sdk'
 
 const NO_PROPERTIES: ModelProperty[] = []
 /** ModelProperty.retain, stable for useHeldEntities. */
@@ -40,20 +39,19 @@ type UseModelPropertiesResult = {
  * @returns Object with modelProperties array, isLoading, and error
  */
 /**
- * A schema name for a schemaId that may be a schema name, a schema file id, or "name-version".
- * An exact stored name or file id wins, so hyphenated names ("my-app") aren't cut.
+ * The stored schema a schemaId names, by schema name or schema file id; undefined when none does.
+ * A "name-version" id isn't cut down to a name: `blog-2` resolving to `blog` added properties to
+ * the wrong schema when `blog-2` was a typo or not stored yet.
  */
-async function resolveSchemaName(schemaId: string): Promise<string> {
+async function resolveSchemaName(schemaId: string): Promise<string | undefined> {
   const db = BaseDb.getAppDb()
-  if (db) {
-    const rows = await db
-      .select({ name: schemasTable.name })
-      .from(schemasTable)
-      .where(or(eq(schemasTable.name, schemaId), eq(schemasTable.schemaFileId, schemaId)))
-      .limit(1)
-    if (rows[0]?.name) return rows[0].name
-  }
-  return getSchemaNameFromId(schemaId) ?? schemaId
+  if (!db) return undefined
+  const rows = await db
+    .select({ name: schemasTable.name })
+    .from(schemasTable)
+    .where(or(eq(schemasTable.name, schemaId), eq(schemasTable.schemaFileId, schemaId)))
+    .limit(1)
+  return rows[0]?.name ?? undefined
 }
 
 export const useModelProperties = (
@@ -369,7 +367,9 @@ export function useModelProperty(...args: Array<string | null | undefined>) {
         // Use existing getPropertySchema for schemaId + modelName + propertyName
         // schemaId may be a schema file id or a schema name; scope the lookup to that schema
         const schemaName = await resolveSchemaName(lookupMode.schemaId)
-        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName, { schemaName })
+        propertyData = schemaName
+          ? await getPropertySchema(lookupMode.modelName, lookupMode.propertyName, { schemaName })
+          : undefined
         resolvedModelName = lookupMode.modelName
       }
 
@@ -504,6 +504,7 @@ export const useCreateModelProperty = (): UseCreateModelPropertyReturn => {
           throw new Error('modelName, property name and dataType are required')
         }
         const schemaName = await resolveSchemaName(schemaId)
+        if (!schemaName) throw new Error(`No stored schema has the name or schema file id "${schemaId}"`)
         return ModelProperty.create(
           { ...property, modelName } as Parameters<typeof ModelProperty.create>[0],
           { waitForReady: false, schemaName }
