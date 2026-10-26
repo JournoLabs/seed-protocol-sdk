@@ -155,3 +155,17 @@ export function isRouterNonModularCoreAccountError(cause: unknown): boolean {
   if (/Cannot decode zero data\s*\(\s*["']0x["']\s*\)/i.test(msg)) return true
   return false
 }
+
+/**
+ * A publish attested its properties, then failed to revoke the ones it retracts
+ * (`clear({ retract: true })`). The new attestations are in place; the actor waits in
+ * `retractionFailureRecoverable` for `PublishManager.retryAttestations(seedLocalId)`, which sends
+ * only the revocation again.
+ */
+export class PublishRetractionError extends Error {
+  readonly code = 'PUBLISH_RETRACTION_FAILED'
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'PublishRetractionError'
+  }
+}

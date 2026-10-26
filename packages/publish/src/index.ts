@@ -54,6 +54,7 @@ export {
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
   PublishTransactionRevertedError,
+  PublishRetractionError,
   Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
   type Eip7702ModularAccountPublishErrorCode,
