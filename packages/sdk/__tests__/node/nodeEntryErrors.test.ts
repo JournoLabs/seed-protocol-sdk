@@ -7,13 +7,11 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** Thrown only by the browser's OPFS, ZenFS mount and tab locks. */
-const BROWSER_ONLY = new Set([
-  'DatabaseNotPersistentError',
-  'FileSystemLockedError',
-  'TabLockTimeoutError',
-  'UnsupportedBrowserError',
-])
+/**
+ * Thrown only by the browser's OPFS and ZenFS mount. Tab locks are not here: on Node, `withTabLock`
+ * waits through Web Locks (24.5+) or the in-process fallback, and both throw TabLockTimeoutError.
+ */
+const BROWSER_ONLY = new Set(['DatabaseNotPersistentError', 'FileSystemLockedError', 'UnsupportedBrowserError'])
 
 /** Names ending in `Error` that the main entry exports as values (not `type` exports). */
 const mainEntryErrorNames = (): string[] => {

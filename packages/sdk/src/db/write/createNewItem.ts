@@ -113,7 +113,7 @@ export const createNewItem = async ({
       rows.push({ propertyName, propertyValue, propertyRecordSchema, schemaUid: schemaUids.get(propertyName) })
     }
 
-    const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+    const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
     startItemOutbox()
     const fields = await timed(`${label} seed fields`, () => resolveNewSeedFields(seedType))
     const applied = await timed(
@@ -127,7 +127,7 @@ export const createNewItem = async ({
             seed: { type: seedType, modelFileId, fields },
             rows,
           } satisfies CreateItemOp,
-        }),
+        }).catch(throwItemWriteError),
       () => `(${rows.length} rows)`,
     )
     if (applied.superseded || !applied.result) {

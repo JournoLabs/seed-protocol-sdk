@@ -34,7 +34,7 @@ import { findSetConflict, recordPropertyEdit } from './conflicts'
 import { storageValueRowOf } from './storageValueRow'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { afterStorageValueApplied, prepareStorageValue, type PreparedStorageValue } from '@/storageValue/save'
-import { requireStagedFile } from '@/storageValue/stage'
+import { requireStagedFile, StagedValueMissingError } from '@/storageValue/stage'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -511,6 +511,12 @@ export class RelationTargetError extends Error {
     super(`Relation target not found: ${targets.join(', ')}`)
     this.name = 'RelationTargetError'
   }
+
+  /** Rebuilds the error from its message, as an op row stores it; undefined for any other message. */
+  static fromMessage(message: string): RelationTargetError | undefined {
+    const match = /^Relation target not found: (.+)$/.exec(message)
+    return match ? new RelationTargetError(match[1]!.split(', ')) : undefined
+  }
 }
 
 /** The seed ids a Relation or List-of-Relation value names; none for other values. */
@@ -572,12 +578,20 @@ async function requireRelationTargets(op: OutboxOp): Promise<void> {
 
 /**
  * Rethrows a failed item op's error as its caller expects it: OwnershipError when the drainer
- * refused the op for ownership, else the OutboxOpFailedError as is.
+ * refused the op for ownership, else the OutboxOpFailedError. For a RelationTargetError or a
+ * StagedValueMissingError its `cause` is that error, rebuilt from the op row (decision D31): the op
+ * may have failed in another tab or before a reload, so the original instance isn't here.
  */
 export function throwItemWriteError(error: unknown): never {
-  if (error instanceof OutboxOpFailedError && error.errorName === 'OwnershipError') {
-    throw new OwnershipError(error.message)
-  }
+  if (!(error instanceof OutboxOpFailedError)) throw error
+  if (error.errorName === 'OwnershipError') throw new OwnershipError(error.message)
+  const cause =
+    error.errorName === 'RelationTargetError'
+      ? RelationTargetError.fromMessage(error.message)
+      : error.errorName === 'StagedValueMissingError'
+        ? StagedValueMissingError.fromMessage(error.message)
+        : undefined
+  if (cause && error.cause === undefined) error.cause = cause
   throw error
 }
 

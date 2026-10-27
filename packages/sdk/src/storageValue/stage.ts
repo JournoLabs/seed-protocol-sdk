@@ -32,6 +32,12 @@ export class StagedValueMissingError extends Error {
     super(`The staged value ${path} was never written`)
     this.name = 'StagedValueMissingError'
   }
+
+  /** Rebuilds the error from its message, as an op row stores it; undefined for any other message. */
+  static fromMessage(message: string): StagedValueMissingError | undefined {
+    const match = /^The staged value (.+) was never written$/.exec(message)
+    return match ? new StagedValueMissingError(match[1]!) : undefined
+  }
 }
 
 /**

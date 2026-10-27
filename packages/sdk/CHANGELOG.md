@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `TabLockTimeoutError` is exported from `@seedprotocol/sdk/node`. Node throws it when a storage-value or ItemStorage save waits longer than the lock timeout (60 s), through Web Locks on Node 24.5+ or the in-process fallback before that.
+- When `save()`, `Item.create` or a delete rejects with `OutboxOpFailedError` for a missing relation target or a staged file that was never written, its `cause` is a `RelationTargetError` (with `targets`) or a `StagedValueMissingError` (with `path`), rebuilt from the op (decision D31). The two classes were exported, but no caller ever received an instance. `errorName` is unchanged. `Item.create` now goes through the same rethrow as `save()`.
 - The local query source's `readStorageBody` finds the Html body on disk for the value query hydrates: a gateway URL or `ar://` link (the storage seed's `html/<local id>.html` by its `storageTransactionId`, else a download named after the transaction) or, with `relations: 'uids'`, the storage seed's uid. It looked for `html/<value>.html`, which never exists for those values, so every local read of an Html body went to a gateway.
 - `ItemPublishOptions.dataItemSigner` is typed: an object with an `address` and `signMessage`, such as an ethers `Wallet` or a @seedprotocol/publish `SeedSigner`. Any value type-checked through the index signature.
 - New `entityLoadError(instance)`: the error an entity's last load failed with, while its `status` is `'error'`.
