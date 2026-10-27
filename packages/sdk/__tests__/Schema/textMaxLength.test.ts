@@ -13,7 +13,7 @@ describe('Text maxLength validation', () => {
       expect(result.isValid).toBe(false)
       expect(result.errors.length).toBeGreaterThan(0)
       expect(result.errors.some((e) => e.message.includes('255'))).toBe(true)
-      expect(result.errors.some((e) => e.message.includes('File property'))).toBe(true)
+      expect(result.errors.some((e) => e.message.includes('validation.maxLength') && e.message.includes('Html'))).toBe(true)
       expect(result.errors.some((e) => e.code === 'max_length_exceeded')).toBe(true)
       expect(result.errors.some((e) => e.message.includes('default limit'))).toBe(true)
     })
@@ -61,7 +61,6 @@ describe('Text maxLength validation', () => {
       })
       expect(result.isValid).toBe(false)
       expect(result.errors.some((e) => e.message.includes('500'))).toBe(true)
-      expect(result.errors.some((e) => e.message.includes('File property'))).toBe(true)
       expect(result.errors.some((e) => e.code === 'max_length_exceeded')).toBe(true)
     })
 

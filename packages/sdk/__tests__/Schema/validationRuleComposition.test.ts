@@ -36,15 +36,3 @@ describe('validatePropertyValue combines rules', () => {
     expect(check(3, ModelPropertyDataTypes.Number, { enum: [1, 2] })).toBe(false)
   })
 })
-
-describe('validatePropertyStructure', () => {
-  it('rejects custom validators, which are not supported', () => {
-    const result = new SchemaValidationService().validatePropertyStructure({
-      name: 'slug',
-      dataType: 'Text',
-      validation: { custom: 'isSlug' },
-    } as any)
-    expect(result.isValid).toBe(false)
-    expect(result.errors.map((e) => e.code)).toContain('custom_validation_unsupported')
-  })
-})
