@@ -33,10 +33,10 @@
   ],
   "scripts": {
     "build": "bun run build:dev",
-    "build:types": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
+    "build:types": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js && node scripts/fix-dts-specifiers.js packages/sdk/dist\"",
     "build:watch": "tsc -w -p tsconfig.json",
-    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
-    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
+    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/fix-dts-specifiers.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
+    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/fix-dts-specifiers.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
     "test": "vitest run --reporter=default",
     "test:watch": "vitest",
     "test:browser": "vitest --project=browser"

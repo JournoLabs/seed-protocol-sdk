@@ -42,7 +42,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js --alias '~/'",
     "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
     "test": "vitest run --config vitest.config.ts"
   },

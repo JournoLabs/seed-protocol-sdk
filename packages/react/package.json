@@ -34,7 +34,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && vite build",
+    "build": "rimraf dist && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "cd ../.. && vitest run --reporter=default --config vite.config.js --project=browser-react",
     "test:watch": "cd ../.. && vitest --config vite.config.js --project=browser-react",
     "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser"
