@@ -1,5 +1,5 @@
 import { Static, Type } from '@sinclair/typebox'
-import { PropertyDataType, PropertyDefs, StorageType } from '@/types'
+import { PropertyDataType, StorageType } from '@/types'
 import { TValidationRules, type ValidationError } from '@/Schema/validation'
 
 /**
@@ -245,5 +245,4 @@ export const Property = {
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
   Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
   Html: htmlPropertyFactory,
-  /** `Html` opts are not representable in `TPropertyConstructor`; keep runtime shape via double assert. */
-} as unknown as PropertyDefs
+} satisfies Record<PropertyDataType, (...args: never[]) => Static<typeof TProperty>>
