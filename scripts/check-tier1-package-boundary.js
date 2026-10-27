@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
  * Fail if lean Tier-1 packages declare heavy SDK/runtime deps.
+ *
+ * An optional peer (marked in peerDependenciesMeta) passes: it installs nothing, and vite
+ * declares @zenfs/core and @zenfs/dom that way so it can dedupe the app's copies.
  */
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -31,6 +34,7 @@ function checkPackage(shortName) {
     const block = pkg[field]
     if (!block) continue
     for (const dep of Object.keys(block)) {
+      if (field === 'peerDependencies' && pkg.peerDependenciesMeta?.[dep]?.optional) continue
       if (FORBIDDEN.some((f) => dep === f || dep.startsWith(`${f}/`))) {
         violations.push(`${shortName}: ${field}.${dep}`)
       }
