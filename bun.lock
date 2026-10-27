@@ -377,8 +377,8 @@
         "vitest": "^4.1.11",
       },
       "peerDependencies": {
-        "@zenfs/core": "*",
-        "@zenfs/dom": "*",
+        "@zenfs/core": "^2.7.7",
+        "@zenfs/dom": "^1.2.14",
         "vite": ">=8.0.0",
       },
       "optionalPeers": [
