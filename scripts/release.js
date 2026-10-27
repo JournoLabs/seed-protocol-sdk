@@ -239,6 +239,15 @@ async function main() {
       .join(', ')
     console.log(`  changelogs  ${summary || 'no listable commits'}; Unreleased notes move into the new section`)
   }
+  if (!args.retry) {
+    // A feature or a breaking change needs prose for users, not only its commit line
+    for (const { path, notableLines, movesUnreleased } of changelogPlan) {
+      if (movesUnreleased || notableLines.length === 0) continue
+      warnings.push(
+        `${path.split('/')[1]} has ${notableLines.length} feat or breaking commit(s) and no Unreleased notes in ${path}: ${notableLines[0].slice(2)}`,
+      )
+    }
+  }
   for (const w of warnings) console.log(`  ⚠️  ${w}`)
 
   if (problems.length > 0) {

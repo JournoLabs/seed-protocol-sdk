@@ -104,17 +104,24 @@ push fails, it removes the local commit and tag again.
 
 ### Changelogs
 
-The release commit also adds a `## X.Y.Z (date)` section to the CHANGELOG.md of each package
-that changed ([`changelog.js`](../scripts/changelog.js)). The section starts with the
-package's `## Unreleased` notes, if any, and ends with the commits since the last release
-that touched the package, grouped into Breaking, Features, Fixes and Other from their
-conventional-commit subjects (`fix(publish): ...`). test, ci, chore and version-bump commits
-are left out, and so are changes to the CHANGELOG.md itself. The plan lists how many
-commits each changelog gets.
+The release commit also adds a `## X.Y.Z (date)` section to the CHANGELOG.md of every package
+([`changelog.js`](../scripts/changelog.js)). The section starts with the package's
+`## Unreleased` notes, if any, and ends with the commits since the last release that touched
+the package, grouped into Breaking, Features, Fixes and Other from their conventional-commit
+subjects (`fix(publish): ...`). test, ci, chore and version-bump commits are left out, and so
+are changes to the CHANGELOG.md itself. A package with neither notes nor commits gets the
+heading and "No user-facing changes", since it is published at the new version anyway.
+The plan lists how many commits each changelog gets.
+
+A commit is Breaking when its subject has `!` (`fix(sdk)!: ...`) or its body has a
+`BREAKING CHANGE:` footer. With a scope, it is Breaking only in the packages the scope names;
+in other packages it touches, it is listed under its type. Without a scope, it is Breaking in
+every package it touches.
 
 So write `## Unreleased` notes for changes a user needs explained (breaking changes, new
-options, migrations); the commit list covers the rest. Commit subjects end up in the
-changelog, so write them for a reader.
+options, migrations); the commit list covers the rest. The plan warns about each package with
+a feat or breaking commit and no Unreleased notes. Commit subjects end up in the changelog,
+so write them for a reader.
 
 Sections from 0.5.1 to 0.7.4 were backfilled from git history. Versions published without
 a committed version bump (0.5.2, 0.6.1–0.6.2, 0.6.4–0.6.6) are folded into the next section.
