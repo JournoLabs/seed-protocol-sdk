@@ -86,7 +86,7 @@ export interface SchemaAllOptions extends SchemaHoldOption {
   waitForReady?: boolean
   /**
    * Timeout in ms for waiting for each schema to be ready (when waitForReady is true).
-   * @default 5000
+   * @default 15000
    */
   readyTimeout?: number
 }

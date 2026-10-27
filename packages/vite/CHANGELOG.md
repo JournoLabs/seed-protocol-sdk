@@ -7,6 +7,10 @@
 - `includeNodePolyfills: true` also polyfills `timers` (`timers-browserify`), so `@seedprotocol/mapping`'s `rssXmlToSources` (through `rss-parser`) builds for the browser.
 - `debug: true` skips chunks made only of Seed packages' modules when it reports Node globals. `Buffer` in the SDK's drizzle chunk and `process.cwd` in its Node paths drowned the app's own hits. A chunk that mixes app and Seed code is still scanned.
 
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits
@@ -14,6 +18,14 @@
 #### Fixes
 
 - build: pin @types/bun to 1.4.3 (0dd3ed34)
+
+## 0.7.9 (2026-10-22)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.6 (2026-10-17)
 

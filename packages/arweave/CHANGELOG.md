@@ -45,6 +45,7 @@ All notable changes to this package are documented in this file.
 ## 0.7.9 (2026-10-22)
 
 - New `DefaultArweaveClient`, exported from the root entry: the fetch-based client for Node and browsers. `getTransactionData` reads `/raw` from the preferred read gateways (`setPreferredArweaveReadBaseUrls`) before the configured host, unless the caller asks for undecoded data. arweave-js is loaded on first use (the data fallback and `createTransaction`), so the root entry does not import it. `NodeArweaveClient` extends it, so Node reads try the preferred gateways too.
+- New `getPublicArweaveBaseUrl()` and `getPublicArweaveRawUrl(transactionId)`: the public gateway for links written into published content, and `{public gateway}/raw/{id}` on it. The read host can be a local Hyper sidecar or an app proxy that nobody else can reach. Before client init resolves endpoints, they use the read host.
 
 ### Commits
 
@@ -59,6 +60,10 @@ All notable changes to this package are documented in this file.
 #### Fixes
 
 - publish: write public gateway URLs into published Html (f83bffd9)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.6 (2026-10-17)
 

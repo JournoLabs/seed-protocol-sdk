@@ -91,7 +91,7 @@ function throwIfAutomationCannotRegister(blockSchemaRegistration: boolean, schem
 /**
  * Checks the Seed-wide schemas every publish depends on: "Name a Schema" (used to name every other
  * schema) and Version. Their UIDs are the same on every chain. The protocol registers them on each
- * supported chain (seed-protocol `seed:ensure-schemas`); the SDK does not, so a missing one is a
+ * supported chain (seed-protocol `npx hardhat seed:ensure-schemas`); the SDK does not, so a missing one is a
  * chain setup problem and fails before anything is sent.
  */
 async function assertBaseSchemas(): Promise<void> {
@@ -114,7 +114,7 @@ async function assertBaseSchemas(): Promise<void> {
   if (missing.length > 0) {
     throw new Error(
       `Seed base schema${missing.length > 1 ? 's' : ''} ${missing.join(' and ')} not registered on chain ${chainId}. ` +
-        'The protocol registers base schemas for each supported chain (seed-protocol: bun run seed:ensure-schemas).',
+        'The protocol registers base schemas for each supported chain (seed-protocol: npx hardhat seed:ensure-schemas).',
     )
   }
 
