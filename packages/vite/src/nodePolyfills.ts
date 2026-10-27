@@ -331,7 +331,8 @@ export function nodePolyfillPlugins(log: (...args: unknown[]) => void): Plugin[]
   const polyfills = nodePolyfills({
     exclude: ['readline'],
     // Not stream or crypto: those pull stream-browserify and break Vite SSR / React Router prerender.
-    include: ['path', 'buffer', 'events', 'string_decoder', 'util'],
+    // timers: rss-parser (@seedprotocol/mapping's rssXmlToSources) imports it.
+    include: ['path', 'buffer', 'events', 'string_decoder', 'util', 'timers'],
     globals: { Buffer: true, global: true, process: true },
     protocolImports: true,
   }) as unknown as Plugin | Plugin[]
