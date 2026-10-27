@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the `~/` imports kept from the source's path alias are relative. Eight declarations imported `~/…` paths, which no consumer resolves, so types such as `SeedSigner` in their signatures were errors.
 - A tab that opens while another tab is uploading no longer marks that publish `interrupted`. `restoreFromDb` takes the publish lock before deciding a row can't be resumed, and gives it back after marking an abandoned one. It marked the other tab's live publish, whose later progress saves were then skipped as stale.
 - `uploadApiBaseUrl` is optional in `PublishConfig`; it is still required unless `payment.storage` is `'user'`, which `initPublish` checks. The resolved config's is `''` when unset.
 - `MissingSignedDataItemsError` is exported, so a resumed publish's upload failure can be matched with `instanceof` as well as `code: 'SIGNED_DATA_ITEMS_MISSING'`.

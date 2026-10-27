@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
 - **Breaking:** Atom entry ids and JSON Feed item ids are the item's RSS `guid` (its `guid` field, else its link), so the three formats identify an item the same way (D26). They were the Seed UID. Feed readers show each item of an existing Atom or JSON feed once more as new after the upgrade.
 - The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed.

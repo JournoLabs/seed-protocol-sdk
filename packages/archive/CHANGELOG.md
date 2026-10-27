@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - `engines` declares Node 20.12 or later: `readBagDirectory` reads `Dirent.parentPath`.
 
 ## 0.7.10 (2026-10-24)
