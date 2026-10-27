@@ -25,6 +25,8 @@ export const EAS_CONTRACT_ADDRESS =
  * **Do not use as the transaction `to` for user publishes.** Runtime `multiPublish` targets the
  * publisher’s deployed ManagedAccount (non-modular), `managedAddress` (modular), or is not used
  * when attesting via direct EAS (EOA path).
+ *
+ * @internal Exported for the package's own tests and tooling; not part of the public API.
  */
 export const MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA =
   '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const

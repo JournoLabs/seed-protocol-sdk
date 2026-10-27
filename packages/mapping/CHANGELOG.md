@@ -80,7 +80,7 @@ _Derive and assemble. This file used to list them under `0.8.0`, a mapping versi
 - `resolvedSourceId` only suffixes `extract` / `file`.
 - Package `autoMap` is unchanged: it does not inject derive-only slug or default html to assemble.
 
-_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.2._
+_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.1._
 
 - Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.
 - `applyMapping` (sync) applies lookup entries and emits refs. Unmatched values are omitted. `applyMappingAsync` reports unmatched on `errors[]` and no longer calls the host `resolve` callback for lookup.
