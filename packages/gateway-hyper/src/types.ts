@@ -20,12 +20,15 @@ export type TunnelResponseMeta = {
 export type DhtBootstrapNode = { host: string; port: number }
 
 export type ServeTunnelOptions = {
-  /** Upstream HTTP origin (e.g. http://127.0.0.1:80) */
+  /**
+   * Upstream HTTP origin (e.g. http://127.0.0.1:80). `https://` is refused: the framed tunnel
+   * speaks plain HTTP to its upstream; use `serveRawTunnel` to carry TLS end to end.
+   */
   upstream: string
   /** Operator Ed25519 keypair file (JSON) — created on first run if missing */
   keyFile?: string
-  /** Directory for DHT state (optional, in-memory if unset) */
-  storePath?: string
+  /** The operator keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /**
    * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
    * local one (e.g. `hyperdht/testnet` in tests).
@@ -33,7 +36,7 @@ export type ServeTunnelOptions = {
   bootstrap?: DhtBootstrapNode[]
   /**
    * Answer 504 once the upstream socket has been idle this long, waiting for headers or
-   * body. Default 30 000; 0 disables.
+   * body. Default 130 000 (above publish's 120 s upload); 0 disables.
    */
   upstreamTimeoutMs?: number
   /**
@@ -77,8 +80,6 @@ export type ConnectTunnelOptions = {
   host?: string
   /** Local HTTP bind port */
   port?: number
-  /** Optional store path for DHT client state */
-  storePath?: string
   /**
    * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
    * local one (e.g. `hyperdht/testnet` in tests).
@@ -87,7 +88,7 @@ export type ConnectTunnelOptions = {
   /**
    * Abandon a request once the tunnel stream has sent and received nothing for this long,
    * answer 504, and reconnect for the next request. Keep it above the operator's
-   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
@@ -117,7 +118,7 @@ export type ServeRawTunnelOptions = {
    * `.seed/gateway-tunnel/raw-operator.key.json`, apart from the framed tunnel's key.
    */
   keyFile?: string
-  /** The operator keypair itself. Takes precedence over `keyFile`. */
+  /** The operator keypair itself. Exclusive with `keyFile`. */
   keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /** Clients that may connect; same rules as `serveTunnel`'s `allowlist`. */
   allowlist?: AllowlistOptions
@@ -194,8 +195,6 @@ export type CreateGatewayProxyOptions = {
    * Default `/api/seed-gateway`.
    */
   mountPath?: string
-  /** Optional DHT client state directory */
-  storePath?: string
   /**
    * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
    * local one (e.g. `hyperdht/testnet` in tests).
@@ -206,7 +205,7 @@ export type CreateGatewayProxyOptions = {
   /**
    * Abandon a request once the tunnel stream has sent and received nothing for this long,
    * answer 504, and reconnect for the next request. Keep it above the operator's
-   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */

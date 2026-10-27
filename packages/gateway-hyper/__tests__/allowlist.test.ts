@@ -166,12 +166,12 @@ describe('serveTunnel allowlist over HyperDHT', () => {
     expect(result).toMatchObject({ ok: true, status: 200, upstreamHit: true })
   }, 30_000)
 
-  it('refuses a client whose address is not listed, before reading from it', async () => {
+  it('refuses a client whose address is not listed, before reading from it, with a 403 it can read', async () => {
     const result = await tryRequest(
       { keys: [listed.publicKey.toString('hex')], ips: ['198.51.100.0/24'] },
       unlisted,
     )
-    expect(result).toMatchObject({ ok: false, upstreamHit: false })
+    expect(result).toMatchObject({ ok: true, status: 403, upstreamHit: false })
   }, 30_000)
 
   it('lets a listed key in when its address is not listed', async () => {

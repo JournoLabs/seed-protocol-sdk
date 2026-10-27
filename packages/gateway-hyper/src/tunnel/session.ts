@@ -6,7 +6,8 @@ import { TunnelConnectTimeoutError, TunnelTimeoutError } from './errors'
 import { readTunnelResponse, writeTunnelRequest } from './protocol'
 
 /** Default idle limit for one request on the tunnel stream. */
-export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+/** Above the operator's default upstream timeout (130 s), so the operator's own 504 arrives first. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 150_000
 
 /** Default limit for opening the HyperDHT connection. */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
@@ -29,14 +30,12 @@ export type TunnelSessionOptions = {
   keyFile?: string
   /** The client keypair itself. Exclusive with `keyFile`. */
   keyPair?: { publicKey: Buffer; secretKey: Buffer }
-  /** Optional store path for DHT client state */
-  storePath?: string
   /** HyperDHT bootstrap nodes. Defaults to the public network. */
   bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the stream has sent and received nothing for this long, then
    * reconnect for the next request. Counts from when the request gets a stream.
-   * Default 60 000; 0 disables.
+   * Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */

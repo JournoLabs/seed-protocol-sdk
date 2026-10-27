@@ -2,6 +2,20 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `storePath` is removed from `serveTunnel`, `connectTunnel`, `createGatewayProxy` and `createTunnelSession` options. Nothing read it.
+- **Breaking:** the default `upstreamTimeoutMs` is 130 000 (was 30 000) and the default `requestTimeoutMs` 150 000 (was 60 000). Both are idle limits; the old ones cut off an upload API that stays quiet while it stores a batch, which @seedprotocol/publish waits up to 120 s for.
+- **Breaking:** `serveTunnel` refuses an `https://` upstream. The framed tunnel speaks plain HTTP to its upstream; `serveRawTunnel` carries TLS end to end.
+- **Breaking:** `serveRawTunnel` throws when given both `keyFile` and `keyPair`, as the client functions do. `keyPair` won silently.
+- `serveTunnel` takes `keyPair`, the operator keypair itself, as `serveRawTunnel` does.
+- An operator that refuses a client by address (`allowlist.ips`) answers its request with a 403 saying so, instead of resetting the stream. A client refused by key is still refused in the handshake, where nothing can be sent.
+- A framed reader that gets plain HTTP (a framed client of a raw operator, or the reverse) says the other side runs in raw mode. It reported `Frame too large: 1213486160 bytes`.
+- `seed-gateway serve` and `connect` take `--bootstrap host:port,…` to join a private or local HyperDHT network.
+- `seed-gateway` warns about each flag the chosen mode ignores (`connect --trace` and `--max-connections` in framed mode, `connect --raw --request-timeout-ms` and `--max-streams`, `serve --raw --upstream-timeout-ms` and `--request-id-header`, and flags of the other command).
+- `seed-gateway serve --help` and `connect --help` print that command's usage.
+- `formatTunnelEvent`, the `--trace` line format, is exported from the package entry.
+
 ## 0.7.11 (2026-10-24)
 
 ### Commits

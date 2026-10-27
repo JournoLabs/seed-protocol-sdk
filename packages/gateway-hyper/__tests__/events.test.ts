@@ -6,7 +6,7 @@ import path from 'node:path'
 import { duplexPair } from 'node:stream'
 import HyperDHT from 'hyperdht'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { formatTunnelEvent } from '../src/cli'
+import { formatTunnelEvent } from '../src/index'
 import { encodePublicKeyZ32 } from '../src/keys'
 import type { TunnelEvent } from '../src/tunnel/events'
 import { serveTunnel, serveTunnelConnection } from '../src/tunnel/serve'
@@ -153,7 +153,8 @@ describe('serveTunnel events', () => {
     })
 
     const withIps = await startStack({ allowlist: { ips: ['198.51.100.0/24'] } }, client)
-    await expect(get(withIps.session, '/info')).rejects.toThrow()
+    // Refused by address: the operator answers the request with a 403 instead of resetting.
+    expect((await get(withIps.session, '/info')).meta.status).toBe(403)
     await withIps.close()
     const refused = withIps.events.find((e) => e.name === 'stream.refused')
     expect(refused).toMatchObject({ stage: 'connection', remoteKey: encodePublicKeyZ32(client.publicKey) })

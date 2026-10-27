@@ -14,7 +14,6 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
     key: options.key,
     keyFile: options.keyFile,
     keyPair: options.keyPair,
-    storePath: options.storePath,
     bootstrap: options.bootstrap,
     requestTimeoutMs: options.requestTimeoutMs,
     connectTimeoutMs: options.connectTimeoutMs,

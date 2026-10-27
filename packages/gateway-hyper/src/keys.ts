@@ -99,6 +99,21 @@ export function resolveClientKeypair(options: {
   return createEphemeralClientKeypair()
 }
 
+/**
+ * The operator's keypair: `keyPair` if given, else the one in `keyFile` (`defaultKeyFile` when
+ * unset), created on first use. Passing both throws, as for a client.
+ */
+export function resolveOperatorKeypair(
+  options: { keyFile?: string; keyPair?: { publicKey: Buffer; secretKey: Buffer } },
+  defaultKeyFile: string,
+): OperatorKeyPair {
+  if (options.keyFile && options.keyPair) {
+    throw new Error('Pass keyFile or keyPair, not both')
+  }
+  if (options.keyPair) return toOperatorKeypair(options.keyPair)
+  return loadOrCreateOperatorKeypair(options.keyFile ?? defaultKeyFile)
+}
+
 export function createEphemeralClientKeypair(): OperatorKeyPair {
   const kp = HyperDHT.keyPair()
   return {

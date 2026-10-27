@@ -9,6 +9,7 @@ export {
   DEFAULT_RAW_PORT,
 } from './tunnel/rawConnect'
 export { RAW_CLOSE_GRACE_MS } from './tunnel/rawPipe'
+export { formatTunnelEvent } from './tunnel/events'
 export type {
   RawClientEvent,
   RawClientEventListener,
