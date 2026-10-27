@@ -115,6 +115,7 @@ export {
 export {
   estimatePublishCost,
   combinePublishCostEstimate,
+  repricePublishCostEstimate,
   getCachedTokenPrices,
   getCachedMarketRates,
   resetMarketRateCache,

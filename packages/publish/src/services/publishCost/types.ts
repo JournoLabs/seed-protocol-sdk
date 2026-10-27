@@ -8,6 +8,11 @@ export type PublishWorkSummary = {
   newSeedCount: number
   newVersionCount: number
   attestationCount: number
+  /**
+   * Attestations the publish revokes for retracted properties (ADR 0021). Optional for a summary
+   * built by hand; the SDK's summarizePublishWork always sets it.
+   */
+  revocationCount?: number
   uploadCount: number
   uploadBytes: number
   /** Size of each upload. Without it, uploads are taken as equal parts of uploadBytes. */
@@ -34,11 +39,16 @@ export type PublishCostEstimate = {
     /** Bytes uploaded. */
     bytes: number
     /**
-     * Bytes paid for: the bundle is one transaction, charged for at least 256 KiB; with Turbo,
-     * uploads of 100 KiB or less are free.
+     * Bytes paid for, measured on the signed data items (each upload plus its ANS-104 header and
+     * tags): the bundle is one transaction, charged for at least 256 KiB; with Turbo, data items
+     * of `freeBytes` or less are free.
      */
     chargedBytes: number
     uploadCount: number
+    /** Where uploads go (`payment.storage`): the upload API, or Turbo for user-paid storage. */
+    uploadTo: 'upload-api' | 'turbo'
+    /** Largest data item Turbo stores for free, from Turbo's `/v1/info`; 0 for the upload API. */
+    freeBytes: number
     /** Always `'bundler'`: uploads are signed data items. */
     path: 'bundler'
     /**

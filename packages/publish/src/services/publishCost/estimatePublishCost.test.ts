@@ -1,19 +1,34 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { initPublish, setConfigRef } from '~/config'
+import { signedDataItemByteLength } from '~/helpers/arweave'
 import {
   ARWEAVE_MIN_CHARGED_BYTES,
   chargedUploadBytes,
   combinePublishCostEstimate,
   estimatePublishCost,
+  repricePublishCostEstimate,
+  resetTurboFreeBytesCache,
+  TURBO_FREE_BYTES,
 } from './estimatePublishCost'
 import { heuristicPublishGas, PUBLISH_GAS_HEURISTICS } from './gasHeuristics'
 import { resetMarketRateCache } from './marketRates'
 import type { PublishWorkSummary } from './types'
 
+const realFetch = globalThis.fetch
+
 afterEach(() => {
   setConfigRef(null)
   resetMarketRateCache()
+  resetTurboFreeBytesCache()
+  globalThis.fetch = realFetch
 })
+
+/** Signed size of an upload of `bytes` with the tags every upload carries and none configured. */
+const signed = (bytes: number) =>
+  signedDataItemByteLength(bytes, [
+    { name: 'Content-SHA-256', value: '0'.repeat(64) },
+    { name: 'Content-Type', value: 'application/octet-stream' },
+  ])
 
 const work: PublishWorkSummary = {
   publishMode: 'patch',
@@ -44,6 +59,12 @@ describe('heuristicPublishGas', () => {
         PUBLISH_GAS_HEURISTICS.NEW_SEED +
         PUBLISH_GAS_HEURISTICS.NEW_VERSION +
         PUBLISH_GAS_HEURISTICS.ATTESTATION * 3n,
+    )
+  })
+
+  test('counts the revocations of retracted properties', () => {
+    expect(heuristicPublishGas({ ...work, revocationCount: 2 }) - heuristicPublishGas(work)).toBe(
+      PUBLISH_GAS_HEURISTICS.REVOCATION * 2n,
     )
   })
 })
@@ -123,6 +144,8 @@ describe('estimatePublishCost', () => {
   })
 
   test("payment.storage 'user' reports storage as user-paid", async () => {
+    // Turbo's /v1/info, read for its free size.
+    globalThis.fetch = (async () => new Response('{}', { status: 200 })) as unknown as typeof fetch
     initPublish({
       uploadApiBaseUrl: 'https://example.test',
       payment: { storage: 'user' },
@@ -169,22 +192,94 @@ describe('Arweave charges per transaction', () => {
 
   test('one transaction for the whole bundle, charged for at least 256 KiB', () => {
     expect(chargedUploadBytes(small)).toBe(ARWEAVE_MIN_CHARGED_BYTES)
-    expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] })).toBe(1_000_000)
+    expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] })).toBe(signed(1_000_000))
     const estimate = combinePublishCostEstimate(small, rates)
     expect(estimate.arweave.bytes).toBe(3_000)
     expect(estimate.arweave.chargedBytes).toBe(ARWEAVE_MIN_CHARGED_BYTES)
     expect(Number(estimate.arweave.ar)).toBeCloseTo((ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
   })
 
-  test('Turbo: uploads of 100 KiB or less are free', () => {
+  test('Turbo: data items of 100 KiB or less are free', () => {
     const mixed = { ...work, uploadCount: 2, uploadBytes: 1_001_000, uploadSizes: [1_000, 1_000_000] }
-    expect(chargedUploadBytes(mixed, 'turbo')).toBe(1_000_000)
+    expect(chargedUploadBytes(mixed, 'turbo')).toBe(signed(1_000_000))
     expect(chargedUploadBytes(small, 'turbo')).toBe(0)
   })
 
+  test("sizes the signed data item: an upload just under Turbo's free size isn't free once signed", () => {
+    const nearLimit = TURBO_FREE_BYTES - 100
+    expect(signed(nearLimit)).toBeGreaterThan(TURBO_FREE_BYTES)
+    const upload = { ...work, uploadCount: 1, uploadBytes: nearLimit, uploadSizes: [nearLimit] }
+    expect(chargedUploadBytes(upload, 'turbo')).toBe(signed(nearLimit))
+    // Configured tags count too.
+    const tags = [{ name: 'App-Name', value: 'PermaPress' }]
+    expect(chargedUploadBytes(upload, 'turbo', { uploadTags: tags })).toBeGreaterThan(signed(nearLimit))
+  })
+
   test('without upload sizes, uploads are equal parts of the total', () => {
-    expect(chargedUploadBytes({ uploadCount: 2, uploadBytes: 400_000 }, 'turbo')).toBe(400_000)
+    expect(chargedUploadBytes({ uploadCount: 2, uploadBytes: 400_000 }, 'turbo')).toBe(2 * signed(200_000))
     expect(chargedUploadBytes({ uploadCount: 0, uploadBytes: 0 })).toBe(0)
+  })
+
+  test("user-paid storage uses Turbo's free size from /v1/info", async () => {
+    const requested: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      requested.push(String(url))
+      return new Response(JSON.stringify({ freeUploadLimitBytes: 107_520 }), { status: 200 })
+    }) as typeof fetch
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      payment: { storage: 'user', userStorage: { uploadUrl: 'https://turbo.example.test', paymentUrl: 'https://pay.example.test' } },
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    // Over the 102,400-byte fallback, under Turbo's live 107,520 once signed.
+    const upload = { ...work, uploadCount: 1, uploadBytes: 105_000, uploadSizes: [105_000] }
+    const estimate = await estimatePublishCost(dummyItem(), { work: upload, rates })
+    expect(requested).toEqual(['https://turbo.example.test/v1/info'])
+    expect(estimate.arweave.uploadTo).toBe('turbo')
+    expect(estimate.arweave.freeBytes).toBe(107_520)
+    expect(estimate.arweave.chargedBytes).toBe(0)
+    // Cached: a second estimate doesn't ask again.
+    await estimatePublishCost(dummyItem(), { work: upload, rates })
+    expect(requested).toHaveLength(1)
+  })
+
+  test("falls back to 100 KiB when Turbo's /v1/info doesn't answer", async () => {
+    globalThis.fetch = (async () => new Response('down', { status: 503 })) as unknown as typeof fetch
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      payment: { storage: 'user', userStorage: { uploadUrl: 'https://turbo.example.test', paymentUrl: 'https://pay.example.test' } },
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const upload = { ...work, uploadCount: 1, uploadBytes: 105_000, uploadSizes: [105_000] }
+    const estimate = await estimatePublishCost(dummyItem(), { work: upload, rates })
+    expect(estimate.arweave.freeBytes).toBe(TURBO_FREE_BYTES)
+    expect(estimate.arweave.chargedBytes).toBe(signed(105_000))
+  })
+})
+
+describe('repricePublishCostEstimate', () => {
+  test('keeps the payers, upload target, free size and testnet of the estimate it reprices', () => {
+    const upload = { ...work, uploadCount: 2, uploadBytes: 1_001_000, uploadSizes: [1_000, 1_000_000] }
+    const first = combinePublishCostEstimate(upload, rates, {
+      evmUserPays: false,
+      arweaveUserPays: true,
+      uploadTo: 'turbo',
+      freeBytes: 107_520,
+      testnet: true,
+    })
+    const pricier = { ...rates, arUsd: 20, gasPriceWei: 10_000_000_000n, winstonPerByte: 2000, fetchedAt: 2 }
+    const next = repricePublishCostEstimate(first, pricier)
+    expect(next.evm.userPays).toBe(false)
+    expect(next.arweave.userPays).toBe(true)
+    expect(next.arweave.uploadTo).toBe('turbo')
+    expect(next.arweave.freeBytes).toBe(107_520)
+    expect(next.evm.testnet).toBe(true)
+    expect(next.evm.usd).toBe(0)
+    expect(next.evm.gas).toBe(first.evm.gas)
+    // Turbo's free first upload stays free: only the 1 MB one is charged, at the new rate.
+    expect(next.arweave.chargedBytes).toBe(first.arweave.chargedBytes)
+    expect(next.arweave.ar).toBe(((first.arweave.chargedBytes * 2000) / 1e12).toPrecision(6))
+    expect(next.prices.fetchedAt).toBe(2)
   })
 })
 

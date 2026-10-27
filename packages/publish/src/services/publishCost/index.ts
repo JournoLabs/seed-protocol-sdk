@@ -1,6 +1,7 @@
 export {
   estimatePublishCost,
   combinePublishCostEstimate,
+  repricePublishCostEstimate,
 } from './estimatePublishCost'
 export { getCachedTokenPrices, resetTokenPriceCache, type TokenPrices } from './tokenPrices'
 export { getCachedMarketRates, resetMarketRateCache, type MarketRates } from './marketRates'
