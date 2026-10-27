@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DefaultArweaveClient } from '../../src/default/ArweaveClient.js'
+import { ARWEAVE_GRAPHQL_TIMEOUT_MS, DefaultArweaveClient } from '../../src/default/ArweaveClient.js'
 import { NodeArweaveClient } from '../../src/node/ArweaveClient.js'
 import { setPreferredArweaveReadBaseUrls } from '../../src/gateway/gatewayState.js'
 import { BaseArweaveClient } from '../../src/ArweaveClient/BaseArweaveClient.js'
@@ -55,5 +55,29 @@ describe('DefaultArweaveClient.getTransactionData', () => {
 
     await new DefaultArweaveClient().getTransactionData(TX, { decode: false, string: true })
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('sidecar'))).toBe(true)
+  })
+})
+
+describe('DefaultArweaveClient GraphQL requests', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('abort after ARWEAVE_GRAPHQL_TIMEOUT_MS when the gateway never answers', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
+          }),
+      ),
+    )
+    const pending = new DefaultArweaveClient().getArweaveClient().request('{ transactions { edges { node { id } } } }')
+    const settled = expect(pending).rejects.toThrow(/timed out after 30000 ms/)
+    await vi.advanceTimersByTimeAsync(ARWEAVE_GRAPHQL_TIMEOUT_MS)
+    await settled
   })
 })

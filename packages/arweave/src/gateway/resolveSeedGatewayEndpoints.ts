@@ -118,7 +118,8 @@ async function probeUrlHealthy(
 function buildHttpEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpoints {
   const { host, protocol } = parseGatewayHost(config.arweaveDomain)
   const baseUrl = `${protocol}://${host}`
-  const uploadApiBaseUrl = config.uploadApiBaseUrl?.trim() || baseUrl
+  // A public gateway doesn't serve the upload API: unset stays unset (''), not the gateway's URL.
+  const uploadApiBaseUrl = config.uploadApiBaseUrl?.trim() ?? ''
   return {
     mode: config.transport ?? 'http-gateway',
     arweaveHost: host,
@@ -171,6 +172,29 @@ function buildProxyEndpoints(
   }
 }
 
+function shouldProbeProxy(config: SeedGatewayConfig): boolean {
+  return (config.hyper?.probeProxy ?? config.hyper?.probeSidecar) !== false
+}
+
+const LOOPBACK_HOSTNAME = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$|\.localhost$/i
+
+/**
+ * Whether `hybrid` may try the local sidecar here: outside a browser, from a loopback page, or
+ * with `hyper.probeSidecarFromBrowser`.
+ */
+function sidecarReachableFromHere(config: SeedGatewayConfig, origin: string | undefined): boolean {
+  if (config.hyper?.probeSidecarFromBrowser) return true
+  const pageOrigin =
+    origin ??
+    (typeof window !== 'undefined' && typeof window.location?.origin === 'string' ? window.location.origin : undefined)
+  if (!pageOrigin || typeof window === 'undefined') return true
+  try {
+    return LOOPBACK_HOSTNAME.test(new URL(pageOrigin).hostname)
+  } catch {
+    return false
+  }
+}
+
 export type ResolveSeedGatewayEndpointsOptions = {
   signal?: AbortSignal
   /** Skip cache and probe sidecar / proxy again. */
@@ -190,8 +214,7 @@ async function tryProxyEndpoints(
   if (!raw) return null
 
   const absolute = resolveProxyBaseUrl(raw, { origin: options?.origin })
-  const shouldProbe = config.hyper?.probeSidecar !== false
-  if (shouldProbe) {
+  if (shouldProbeProxy(config)) {
     const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
     if (!ok) return null
   }
@@ -218,7 +241,7 @@ export async function resolveSeedGatewayEndpoints(
   if (mode === 'http-gateway') {
     if (config.proxyBaseUrl?.trim()) {
       const absolute = resolveProxyBaseUrl(config.proxyBaseUrl, { origin: options?.origin })
-      if (shouldProbe) {
+      if (shouldProbeProxy(config)) {
         const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
         if (!ok) {
           throw new Error(
@@ -249,12 +272,16 @@ export async function resolveSeedGatewayEndpoints(
     return hyperEndpoints
   }
 
-  // hybrid: proxy → sidecar → public HTTP
+  // hybrid: proxy → sidecar → public HTTP. The sidecar is skipped on a public web page.
   const proxy = await tryProxyEndpoints({ ...config, transport: mode }, options)
   if (proxy) return proxy
 
   const sidecar = sidecarOrigin(config)
-  if (shouldProbe && (await probeUrlHealthy(sidecar.baseUrl, 'sidecar', options?.signal))) {
+  if (
+    shouldProbe &&
+    sidecarReachableFromHere(config, options?.origin) &&
+    (await probeUrlHealthy(sidecar.baseUrl, 'sidecar', options?.signal))
+  ) {
     return buildHyperEndpoints({ ...config, transport: 'hyper' })
   }
 

@@ -17,6 +17,15 @@ export interface SeedGatewayHyperConfig {
   localSidecarPort?: number
   /** Probe sidecar / proxy before use. Default true */
   probeSidecar?: boolean
+  /** Probe `proxyBaseUrl`'s `/info` before adopting it. Default: `probeSidecar`, else true. */
+  probeProxy?: boolean
+  /**
+   * In a browser, `hybrid` mode tries the local sidecar only when the page's origin is loopback
+   * (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`), since a public page's request to it is a
+   * public-to-loopback request most visitors would see fail. Set true where the page is meant to
+   * reach the sidecar (Electron, desktop shells). Default false.
+   */
+  probeSidecarFromBrowser?: boolean
 }
 
 export interface SeedGatewayConfig {
