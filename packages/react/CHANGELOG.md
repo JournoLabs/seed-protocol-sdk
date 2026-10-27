@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, `useItems`, `useItem`, `useItemProperty` and `useCreateItem` were missing (TS2305) and named re-exports were typed `any`.
 - `useCreateItem` hands a running create to a second call only when it is the same call (same model, same values, same options), as from a double click. A call with other values or another model returned the first call's item; it now creates its own. `isLoading` stays true until every create has finished.
@@ -13,6 +13,21 @@ All notable changes to this package are documented in this file.
 - `useItemProperty` re-renders when only the property's `conflict` changes (sync or another tab recording or resolving one). It dropped idle snapshots whose value hadn't changed.
 - `useItemProperties` re-renders after another tab's save. Its refetch returned the same instances, and React Query's structural sharing kept the old array.
 - `SeedHtml` moves the Html's Arweave links onto this reader's first read gateway before calling `sanitize` (ADR 0025), so `ar://` links reach the sanitizer as `https` and Html published with `ar.seedprotocol.io` links shows its images while that gateway is down. When an `img`, `video`, `audio` or `source` in it fails to load, it moves to the same transaction on the next read gateway. New `attachArweaveLoadFailover(container)` adds that failover to a container an app renders itself with the `render` prop.
+
+### Commits
+
+#### Breaking
+
+- no '-<n>' schema-id fallback; create hooks report load errors (e1ad72b3)
+
+#### Features
+
+- SeedHtml re-hosts Arweave links and fails over media loads (bcb63c5f)
+
+#### Fixes
+
+- useCreateItem shares only a repeated call; export isClientReadySnapshot (eb970299)
+- stopped status, conflict re-renders, other-tab saves in useItemProperties (445d59ca)
 
 ## 0.7.11 (2026-10-24)
 

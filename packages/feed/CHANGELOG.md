@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
@@ -10,6 +10,21 @@ All notable changes to this package are documented in this file.
 - The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed.
 - A weak `If-None-Match` (`W/"…"`) for the current ETag gets a 304. Proxies that compress the response mark its ETag weak, so their clients never got one.
 - An archive request whose year or month isn't an integer (`NaN` from a non-numeric path segment) returns 400 instead of passing the range check and failing with 500.
+
+### Commits
+
+#### Breaking
+
+- Atom and JSON Feed ids use the RSS guid (5c31f134)
+- arweave, query, sdk: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- arweave: arweave.net is the default host; public fallbacks behind a sidecar or proxy (18eec823)
+
+#### Fixes
+
+- stale fallback matches the site, weak If-None-Match, 400 for NaN archive params (52a53cd2)
 
 ## 0.7.11 (2026-10-24)
 

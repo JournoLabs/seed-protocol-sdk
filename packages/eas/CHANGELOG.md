@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - **Breaking:** `normalizeBytes32Hex` returns `''` for a value that isn't 64 hex digits (with or without `0x`). It left-padded short values and turned non-hex characters into `0`, so `collectPublishedBatch({ seedUid: '0xabc' })` built a batch for a padded UID. Decoded BigNumber values (`{ hex }`) are padded by the new `bytes32FromNumberHex`.
 - **Breaking:** `toSnakeCase` is removed. It kept the old rule (`HTMLPage` → `htmlpage`); use `easName`.
@@ -11,6 +11,13 @@ All notable changes to this package are documented in this file.
 - `engines` declares Node 20.18.1 or later: `@seedprotocol/eas/node` uses `process.getBuiltinModule` (Node 20.16) and undici 7 (20.18.1).
 - `getSeedsBySchemaName(schemaName, limit, skip, { attesters })` adds an `attester: { in: [...] }` condition with each address checksummed. With no address in the list, it returns `[]` without a request.
 - `checksumAddresses(addresses)` checksums a list for an `attester` or `recipient` filter and drops values that aren't 20-byte hex addresses. `getSeedsFromSchemaUids`, `getPublishedByFromEas`, `getDomainOwnershipFromEas` and `getPublishAuthorizationFromEas` use it, so a non-address in their address lists is left out of the request instead of sent.
+
+### Commits
+
+#### Breaking
+
+- strict normalizeBytes32Hex, timeout without AbortSignal.any, remove toSnakeCase (058a4667)
+- query, sdk: queryBySchema attesters filter (e436bbcd)
 
 ## 0.7.11 (2026-10-24)
 

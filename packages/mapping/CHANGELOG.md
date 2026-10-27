@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - **Breaking:** the `--fm-*` and `--map-*` CSS custom properties are removed; theme with `--sfm-*` (`--sfm-color-*`, `--sfm-map-1` … `--sfm-map-8`). The default theme set each `--fm-*` from its `--sfm-*` token, so a host's own `--fm-*` value was overwritten, and the README's "aliases kept" didn't hold. Wire strokes default to `var(--sfm-map-N, currentColor)`.
@@ -9,6 +9,16 @@
 - `applyMapping` and `applyMappingAsync` copy a source's `value` only: an empty frontmatter field copies as `''` and an empty Markdown body as `''`. They fell back to the source's `label`, so the field's name (or "Full document") was copied.
 - `UseFieldMapperResult.conflicts`' doc comment says it holds every row that maps an already-mapped property, the first such row included, as `findConflicts` does.
 - The README says `rssXmlToSources` needs `seedVitePlugin({ includeNodePolyfills: true })` in a Vite browser build: `rss-parser` imports Node's `timers`.
+
+### Commits
+
+#### Breaking
+
+- --sfm-* tokens only, stable edge ids, Boolean case, no label fallback (d00c286e)
+
+#### Fixes
+
+- the hook reads row ids from the edge-id state (24e131e1)
 
 ## 0.7.11 (2026-10-24)
 

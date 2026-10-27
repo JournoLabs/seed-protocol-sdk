@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - `TabLockTimeoutError` is exported from `@seedprotocol/sdk/node`. Node throws it when a storage-value or ItemStorage save waits longer than the lock timeout (60 s), through Web Locks on Node 24.5+ or the in-process fallback before that.
 - When `save()`, `Item.create` or a delete rejects with `OutboxOpFailedError` for a missing relation target or a staged file that was never written, its `cause` is a `RelationTargetError` (with `targets`) or a `StagedValueMissingError` (with `path`), rebuilt from the op (decision D31). The two classes were exported, but no caller ever received an instance. `errorName` is unchanged. `Item.create` now goes through the same rethrow as `save()`.
@@ -37,6 +37,47 @@ All notable changes to this package are documented in this file.
 - The `Property` builders keep their own parameter types: `Property.Html({ htmlEmbeddedDataUriPolicy: 'preserve' })` type-checks, `Property.List()` needs its element type, and `Property.Relation`'s third argument is a boolean. `Property` was cast to `PropertyDefs`, which typed every builder as `(string?, string?, string | boolean?)`.
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports of `@seedprotocol/sdk` and `@seedprotocol/sdk/node` were typed `any` and `export *` names such as `importJsonSchema` were missing (TS2305). drizzle-orm 0.44's own declarations still fail without `skipLibCheck`, so keep it on.
 - `Item.create`'s parameter type takes property values beside the item fields, so `Item.create({ modelName: 'Post', title: 'Hello' })` type-checks as an object literal. The excess-property check rejected `title`.
+
+### Commits
+
+#### Breaking
+
+- named validation codes; reject string rules on other types (8e806453)
+- Item.create checks relation targets like an assignment (12ac3085)
+- query, eas: queryBySchema attesters filter (e436bbcd)
+- Item.find before init throws instead of returning undefined (ff563f08)
+- Item.getById takes no hold unless asked (D29) (d8bc4654)
+- arweave, query, feed: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- warn when a removed request event is emitted (4276a0d4)
+- save({ timeoutMs }) and a slow-save warning (D30) (e3134c6c)
+- publish: htmlArweaveRefs: 'ar' publishes ar://<id> links in Html (936db56e)
+- react: SeedHtml re-hosts Arweave links and fails over media loads (bcb63c5f)
+- Html values show Arweave links on the reader's gateways; publish uploads them public (94d0b72b)
+- arweave: rehostArweaveLinksInHtml moves Html's Arweave links onto the reader's gateways (2d64ac74)
+
+#### Fixes
+
+- export TabLockTimeoutError from ./node; OutboxOpFailedError carries RelationTargetError and StagedValueMissingError as cause (D31) (eda2cd64)
+- type the Property builders with satisfies, not a PropertyDefs cast (a21c1cb5)
+- Item.create's props type takes property values (d2399394)
+- query: getSeed lowercases its uid, a seed with no Versions is not found, local reads skip the duplicate-module checks (527973ac)
+- publish: createPublish defaults the data item signer; 'modular' wallet kind; useSeedWallet keeps kind (70fe3105)
+- react: no '-<n>' schema-id fallback; create hooks report load errors (e1ad72b3)
+- removeLocalCopiesForAddresses keeps owned copies with unpublished work (D24) (21b0d3ad)
+- retry automatic EAS syncs merged into a failed client_api run (4e7ceea8)
+- type pruneEntityChanges' db as drizzle's async SQLite database (babff420)
+- Node live queries complete on close; Node prunes entity_changes (e9ed2a5c)
+- sync records no conflicts for storage drafts (b8e23907)
+- publish waits only for its own graph's outbox ops (fe32bb4c)
+- storagePropertyName gives the stored name; stale entity JSDoc (0367b2c1)
+- keep a property assigned right after Item.create without waiting (D16) (c6d88d5b)
+
+#### Other
+
+- Phase H text fixes (1bb65ae8)
 
 ## 0.7.11 (2026-10-24)
 

@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the type import of arweave-js's `CreateTransactionInterface` names `arweave/web/common.js`, which nodenext finds (`arweave/web` was TS2307).
 - **Breaking:** in `http-gateway` mode with no `uploadApiBaseUrl`, `resolveSeedGatewayEndpoints` resolves `uploadApiBaseUrl` to `''`. It fell back to the gateway's base URL, which with the default host is `https://arweave.net`, where no upload API runs. Set `uploadApiBaseUrl` when your gateway also serves the upload API. Proxy and sidecar modes still upload through the proxy or sidecar.
@@ -16,6 +16,22 @@ All notable changes to this package are documented in this file.
 - With a Hyper sidecar or app proxy active, `getReadGatewayHostsForConfig` and `getArweaveReadBaseUrls` list the public gateway and the default list after it (as `https://` URLs), so `/raw` reads fall back to them when the sidecar or proxy is down. They listed the sidecar or proxy alone. `fetchTransactionStatusAcrossGateways` still asks only the sidecar or proxy (and preferred gateways) then, since a data item it just accepted isn't on the public gateways yet.
 - `getPublicArweaveBaseUrl` before client init resolves endpoints returns the env host or `https://arweave.net`. It returned the read host, which can be a local sidecar or proxy URL that a publish would write into Html. An empty `arweaveDomain` now means the default host; it produced `https:///raw/<id>`.
 - New `rehostArweaveLinksInHtml(html, { baseUrls })` (ADR 0025) moves the Arweave links in an Html string onto the first of the reader's read gateways (`getArweaveReadBaseUrls` by default): `ar://<id>`, `/raw/<id>` on any host and any path prefix, and `/<id>` on a known gateway, in `src`, `href`, `poster` and `srcset`. Each link keeps its path form and its path, query and hash after the id; every other byte of the Html is kept. Also new: `parseArweaveTransactionLink`, `buildArweaveTransactionLink`, `nextArweaveGatewayUrl` (the same link on the next gateway, for retrying a failed load), `rewriteHtmlAttributes` and `mapUrlAttribute`. `@seedprotocol/arweave` now depends on `parse5`.
+
+### Commits
+
+#### Breaking
+
+- no gateway fallback for uploadApiBaseUrl; browser hybrid skips the sidecar on public pages; GraphQL timeout (a597cbcc)
+- query, sdk, feed: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+- arweave.net is the default host; public fallbacks behind a sidecar or proxy (18eec823)
+
+#### Features
+
+- rehostArweaveLinksInHtml moves Html's Arweave links onto the reader's gateways (2d64ac74)
+
+#### Fixes
+
+- read the page origin through globalThis (no DOM lib) (97cca8a8)
 
 ## 0.7.11 (2026-10-24)
 

@@ -2,10 +2,16 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - `engines` declares Node 20.12 or later: `readBagDirectory` reads `Dirent.parentPath`.
+
+### Commits
+
+#### Fixes
+
+- publish: restoreFromDb locks before marking interrupted; optional uploadApiBaseUrl; export MissingSignedDataItemsError (e0966829)
 
 ## 0.7.11 (2026-10-24)
 

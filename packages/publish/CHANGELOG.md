@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - `PublishProvider` (both entries) takes `seedConfig`, `addresses` and `onInitError` and passes them to the `SeedProvider` it renders, which initializes the Seed client when `seedConfig` is set (decision D25). It passed only the QueryClient, so the client had to be started some other way (`client.init`, `SeedClientGate`).
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the `~/` imports kept from the source's path alias are relative. Eight declarations imported `~/…` paths, which no consumer resolves, so types such as `SeedSigner` in their signatures were errors.
@@ -23,6 +23,25 @@ All notable changes to this project will be documented in this file.
 - Every publish holds its item until the publish actor stops (success, failure, or stopped by the manager): `createPublish` takes the hold, so `ensureWalletThenPublish`, `PublishManager.createPublish` and direct callers get it, not only `item.publish()`. An item a caller found with `Item.find()` (no hold) unloaded after the SDK's grace period, mid-publish.
 - A publish whose revocation of retracted properties fails rejects with the new `PublishRetractionError` (`code: 'PUBLISH_RETRACTION_FAILED'`), saying the new attestations are in place and that `PublishManager.retryAttestations(seedLocalId)` sends the revocation again. It rejected with the attestation-failure message.
 - New `htmlArweaveRefs` option (`initPublish` config and `createPublish`/`item.publish()` options, ADR 0025): `'gateway'` (default) writes `https://<public gateway>/raw/<id>` into published Html, as before; `'ar'` writes `ar://<id>`, which needs no gateway but loads only in a Seed reader (`SeedHtml`, the SDK's Html value, query hydration).
+
+### Commits
+
+#### Features
+
+- PublishProvider passes seedConfig, addresses and onInitError to SeedProvider (D25) (df1fb08c)
+- sdk: htmlArweaveRefs: 'ar' publishes ar://<id> links in Html (936db56e)
+
+#### Fixes
+
+- restoreFromDb locks before marking interrupted; optional uploadApiBaseUrl; export MissingSignedDataItemsError (e0966829)
+- cost estimates size signed data items, read Turbo's free size, keep flags on reprice (e5ba0c07)
+- createPublish defaults the data item signer; 'modular' wallet kind; useSeedWallet keeps kind (70fe3105)
+- refuse unrevokable retractions and missing addresses before registering schemas (2e4fc2ed)
+- every publish holds its item; retraction failures get their own error (a2bccc22)
+
+#### Other
+
+- Phase H text fixes (1bb65ae8)
 
 ## 0.7.11 (2026-10-24)
 

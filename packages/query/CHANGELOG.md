@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - **Breaking:** `getSeed` returns `null` for a seed with no Versions from its attester, and `getSeeds` leaves it out. Both returned a record with `versionUid: ''` and no properties. With `source: 'auto'`, a local seed with no Versions is read from EAS, as a seed the local source doesn't have is.
 - `getSeed` reads the UID in lower case, like `getSeeds`, so `getSeed('0xAB…')` finds the seed. It returned `null`, because EAS matches UIDs case-sensitively. The record's `seedUid` is lower case.
@@ -12,6 +12,19 @@ All notable changes to this package are documented in this file.
 - **Breaking:** `getArweaveUrlForTransaction`, used for image `arweaveUrl` fields and storage URLs in assembled seeds, is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}`. It was `https://{read host}/{id}`. `isArweaveTransactionGatewayUrl` accepts `/raw/{id}` on any host and `/{id}` on a known or configured gateway.
 - Body hydration (`hydrateStorage`) fetches each body from the read gateways in order (`getArweaveReadBaseUrls`, skipping gateways whose circuit is open) instead of the one URL in the field, so a body is still found while that gateway is down.
 - Hydrated bodies have their Arweave links moved onto this reader's first read gateway (ADR 0025), so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down.
+
+### Commits
+
+#### Breaking
+
+- getSeed lowercases its uid, a seed with no Versions is not found, local reads skip the duplicate-module checks (527973ac)
+- eas, sdk: queryBySchema attesters filter (e436bbcd)
+- arweave, sdk, feed: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- hydrate bodies across read gateways and re-host their Arweave links (9d347131)
+- arweave: arweave.net is the default host; public fallbacks behind a sidecar or proxy (18eec823)
 
 ## 0.7.11 (2026-10-24)
 

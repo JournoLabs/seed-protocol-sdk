@@ -1,9 +1,15 @@
 # @seedprotocol/next
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - New `dir` option: the directory `withSeed` resolves the SDK and `next` from, and makes Turbopack alias paths relative to. Pass the config file's directory when Next.js runs from somewhere else (a monorepo root). It defaults to `process.cwd()`, which skipped the aliases in that case.
 - The package description and README no longer name ZenFS as a requirement: it is needed only with `fsModules`. The README says to remove `--turbopack` from both the `dev` and `build` scripts on Next.js 15.
+
+### Commits
+
+#### Fixes
+
+- dir option; README and description drop ZenFS as required; --turbopack in build (b64a6099)
 
 ## 0.7.11 (2026-10-24)
 

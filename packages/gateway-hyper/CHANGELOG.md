@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - **Breaking:** `storePath` is removed from `serveTunnel`, `connectTunnel`, `createGatewayProxy` and `createTunnelSession` options. Nothing read it.
@@ -16,6 +16,12 @@ All notable changes to this package are documented in this file.
 - `seed-gateway` warns about each flag the chosen mode ignores (`connect --trace` and `--max-connections` in framed mode, `connect --raw --request-timeout-ms` and `--max-streams`, `serve --raw --upstream-timeout-ms` and `--request-id-header`, and flags of the other command).
 - `seed-gateway serve --help` and `connect --help` print that command's usage.
 - `formatTunnelEvent`, the `--trace` line format, is exported from the package entry.
+
+### Commits
+
+#### Breaking
+
+- CLI --bootstrap, ignored-flag warnings and per-command help; refusal and raw-mode errors; serveTunnel keyPair; longer default timeouts; drop storePath (e971b3ed)
 
 ## 0.7.11 (2026-10-24)
 

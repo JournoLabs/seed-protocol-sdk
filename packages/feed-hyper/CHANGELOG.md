@@ -1,6 +1,6 @@
 # Changelog — @seedprotocol/feed-hyper
 
-## Unreleased
+## 0.7.12 (2026-10-27)
 
 - The published declarations include the module declarations for corestore, hyperdrive, hyperswarm, hypercore-id-encoding and serve-drive (`dist/shims.d.ts`), so they compile without `skipLibCheck` (TS7016 before), and relative imports carry `.js` for `moduleResolution: node16` and `nodenext`.
 

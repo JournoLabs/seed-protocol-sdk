@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "Publish Seed Protocol items to Arweave and EAS: publish state machine, React provider and hooks, wallet integration and optional thirdweb adapters",
   "keywords": [
     "seed-protocol",
