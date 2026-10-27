@@ -23,6 +23,8 @@ function makeEstimate(totalUsd: number): PublishCostEstimate {
       bytes: 0,
       chargedBytes: 0,
       uploadCount: 0,
+      uploadTo: 'upload-api',
+      freeBytes: 0,
       path: 'bundler',
       userPays: true,
     },
