@@ -2,7 +2,10 @@ export type ItemCreateProblem = {
   /** The key passed to Item.create. */
   property: string
   message: string
-  /** 'unknown_property', or the validation code (e.g. 'pattern', 'type'). */
+  /**
+   * 'unknown_property', or the validation code: 'type', 'pattern', 'min_length',
+   * 'max_length_exceeded', 'enum_violation', 'format', or another named code.
+   */
   code: string
 }
 

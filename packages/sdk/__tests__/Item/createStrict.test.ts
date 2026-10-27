@@ -70,8 +70,8 @@ testDescribe('Item.create is strict', () => {
     expect(error).toBeInstanceOf(ItemCreateValidationError)
     expect((error as ItemCreateValidationError).problems.map((p) => [p.property, p.code])).toEqual(
       expect.arrayContaining([
-        ['title', expect.any(String)],
-        ['rating', expect.any(String)],
+        ['title', 'max_length_exceeded'],
+        ['rating', 'type'],
         ['colour', 'unknown_property'],
       ]),
     )
