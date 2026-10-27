@@ -17,7 +17,7 @@ describe('useSeedWallet', () => {
     }
     renderToString(<Probe />)
 
-    const wallet = fromEthersWallet(ethers.Wallet.createRandom())
+    const wallet = fromEthersWallet(new ethers.Wallet(ethers.Wallet.createRandom().privateKey))
     expect(wallet.kind).toBe('eoa')
     // setPublishWallet registers the session at once, then waits for the Seed client, which this
     // test doesn't start: read the session instead of awaiting connect.
