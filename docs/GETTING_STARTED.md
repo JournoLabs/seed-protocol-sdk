@@ -15,6 +15,8 @@ yarn add @seedprotocol/sdk
 bun add @seedprotocol/sdk
 ```
 
+All `@seedprotocol/*` packages are released together, at one version, and depend on each other at that exact version. Install and upgrade them together (`npm install @seedprotocol/sdk@<version> @seedprotocol/react@<version>`); a mismatched pair installs a second copy of the package they share, which splits its module state.
+
 ## Prerequisites
 
 - Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (`filesDir`, optional `endpoints`, optional `dbConfig`, optional `schemaFile`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details. On Node, `filesDir` alone is enough: `endpoints.filePaths` and `endpoints.files` default to it. Browser init still requires `endpoints`.

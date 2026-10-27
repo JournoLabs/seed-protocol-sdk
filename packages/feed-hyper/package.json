@@ -38,7 +38,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js && node ../../scripts/ship-ambient-dts.js src/shims.d.ts",
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },

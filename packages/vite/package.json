@@ -31,7 +31,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default && node ../../scripts/check-browser-entry-graph.js --fail",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
@@ -40,6 +40,8 @@
     "vite-plugin-node-polyfills": "^0.27.0"
   },
   "peerDependencies": {
+    "@zenfs/core": "^2.7.7",
+    "@zenfs/dom": "^1.2.14",
     "vite": ">=8.0.0"
   },
   "peerDependenciesMeta": {

@@ -1,4 +1,4 @@
-import type { CreateTransactionInterface } from 'arweave/web'
+import type { CreateTransactionInterface } from 'arweave/web/common.js'
 
 /**
  * Transaction presence / status as returned by {@link BaseArweaveClient.getTransactionStatus}.

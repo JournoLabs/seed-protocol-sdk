@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - **Breaking:** `storePath` is removed from `serveTunnel`, `connectTunnel`, `createGatewayProxy` and `createTunnelSession` options. Nothing read it.
 - **Breaking:** the default `upstreamTimeoutMs` is 130 000 (was 30 000) and the default `requestTimeoutMs` 150 000 (was 60 000). Both are idle limits; the old ones cut off an upload API that stays quiet while it stores a batch, which @seedprotocol/publish waits up to 120 s for.
 - **Breaking:** `serveTunnel` refuses an `https://` upstream. The framed tunnel speaks plain HTTP to its upstream; `serveRawTunnel` carries TLS end to end.

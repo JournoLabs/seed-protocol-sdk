@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the type import of arweave-js's `CreateTransactionInterface` names `arweave/web/common.js`, which nodenext finds (`arweave/web` was TS2307).
 - **Breaking:** in `http-gateway` mode with no `uploadApiBaseUrl`, `resolveSeedGatewayEndpoints` resolves `uploadApiBaseUrl` to `''`. It fell back to the gateway's base URL, which with the default host is `https://arweave.net`, where no upload API runs. Set `uploadApiBaseUrl` when your gateway also serves the upload API. Proxy and sidecar modes still upload through the proxy or sidecar.
 - In a browser, `hybrid` mode tries the local sidecar only from a loopback page (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`) or with the new `hyper.probeSidecarFromBrowser: true`. From a public page the probe was a public-to-loopback request: a failed request and console error on most visitors' cold start, and, for a visitor running the sidecar, uploads routed through it instead of the app's proxy. `transport: 'hyper'` still uses the sidecar.
 - New `hyper.probeProxy` turns the `proxyBaseUrl` health check on or off by itself; it defaults to `probeSidecar`, which turned both off together.

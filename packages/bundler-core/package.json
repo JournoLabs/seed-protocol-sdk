@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default"
   },
   "devDependencies": {
