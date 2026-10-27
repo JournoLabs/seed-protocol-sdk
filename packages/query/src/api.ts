@@ -1,3 +1,4 @@
+import { keepAttestationsFromRefAttester } from '@seedprotocol/eas'
 import { initializeQueryPlatform } from './bootstrap.js'
 import {
   assembleSeedRecords,
@@ -244,7 +245,7 @@ export async function queryBySchema(
   schemaName: string,
   options?: QueryBySchemaOptions,
 ): Promise<QueryBySchemaResult> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
   const mode = normalizeSourceMode(options?.source)
@@ -359,6 +360,16 @@ async function getUnchangedCachedItem(
   return hits.get(seedUid) ?? null
 }
 
+/**
+ * UIDs (lowercase) of `seeds` that have a Version from the seed's attester, revoked ones included.
+ * A seed without one has never been published: getSeed and getSeeds treat it as not found.
+ */
+function seedUidsWithVersions(seeds: AttestationLike[], versions: AttestationLike[]): Set<string> {
+  return new Set(
+    keepAttestationsFromRefAttester(versions, seeds).map((version) => version.refUID.toLowerCase()),
+  )
+}
+
 /** The pin in `options`, if it names a version or a time. */
 function pinOf(options: VersionPin | undefined): VersionPin | undefined {
   if (options?.versionUid === undefined && options?.asOf === undefined) return undefined
@@ -369,12 +380,13 @@ export async function getSeed(
   seedUid: string,
   options?: GetSeedOptions,
 ): Promise<GetSeedResult | null> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   if (!seedUid || typeof seedUid !== 'string' || seedUid.trim() === '') {
     return null
   }
 
-  const trimmed = seedUid.trim()
+  // Read lowercase, like getSeeds (EAS indexes UIDs lowercase and matches them case-sensitively).
+  const trimmed = seedUid.trim().toLowerCase()
   const include = options?.include ?? 'data'
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
@@ -396,10 +408,17 @@ export async function getSeed(
       ds.getVersionsForSeeds([trimmed], { includeRevoked: true }),
     ])
 
-  const startedAt = nowSeconds()
-  let [seed, versions] = await fetchSeedAndVersions(dataSource)
+  /** The seed, or null when the source doesn't have it or it has no Versions. */
+  const fetchPublishedSeed = async (ds: QueryDataSource) => {
+    const [found, foundVersions] = await fetchSeedAndVersions(ds)
+    const published = found && seedUidsWithVersions([found], foundVersions).has(trimmed)
+    return [published ? found : null, foundVersions] as const
+  }
 
-  // auto: local miss → remote
+  const startedAt = nowSeconds()
+  let [seed, versions] = await fetchPublishedSeed(dataSource)
+
+  // auto: local miss (or a local seed with no Versions) → remote
   if (!seed && mode === 'auto' && dataSource.kind === 'local') {
     dataSource = getRemoteQueryDataSource()
     allowCache = true
@@ -407,7 +426,7 @@ export async function getSeed(
       const cached = await getUnchangedCachedItem(trimmed, optionsKey, dataSource)
       if (cached) return cached
     }
-    ;[seed, versions] = await fetchSeedAndVersions(dataSource)
+    ;[seed, versions] = await fetchPublishedSeed(dataSource)
   }
 
   if (!seed) return null
@@ -493,7 +512,7 @@ export async function getSeeds(
   seedUids: readonly string[],
   options?: GetSeedsOptions,
 ): Promise<Map<string, SeedRecord>> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
 
   // Read lowercase (EAS indexes UIDs lowercase and matches them case-sensitively); keyed as given.
   const givenByUid = new Map<string, string>()
@@ -540,7 +559,11 @@ export async function getSeeds(
       dataSource.getSeedsByUids(toFetch),
       dataSource.getVersionsForSeeds(toFetch, { includeRevoked: true }),
     ])
-    const seedByUid = new Map(seeds.map((seed) => [seed.id.toLowerCase(), seed]))
+    // Like getSeed: a seed with no Versions counts as missing.
+    const published = seedUidsWithVersions(seeds, versions)
+    const seedByUid = new Map(
+      seeds.filter((seed) => published.has(seed.id.toLowerCase())).map((seed) => [seed.id.toLowerCase(), seed]),
+    )
     const missing = toFetch.filter((uid) => !seedByUid.has(uid))
     // Like getSeed: a seed without a schema name isn't assembled.
     const toAssemble = toFetch
@@ -597,7 +620,7 @@ export async function queryBySchemaForMonth(
   month: number,
   options?: AssembleOptions,
 ): Promise<SeedRecord[]> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
 

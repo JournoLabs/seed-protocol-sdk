@@ -4,10 +4,14 @@ import type {
   QueryDataSource,
   SeedListFilter,
 } from '@seedprotocol/query'
+import { parseArweaveTransactionLink } from '@seedprotocol/arweave'
 import { easName, isValidEasAttestationUid } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getMetadata } from '@/db/read/getMetadata'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { resolveHtmlStorageSeedLocalId } from '@/helpers/readHtmlBodyForStorageSeed'
 import { seeds, versions, metadata } from '@/seedSchema'
+import { findFileInDir } from '@/storageValue/findFile'
 
 function msToUnixSeconds(ms: number | null | undefined): number {
   if (ms == null || !Number.isFinite(ms)) return 0
@@ -32,6 +36,26 @@ function parsePropertyValue(raw: string | null | undefined): unknown {
     }
   }
   return raw
+}
+
+/**
+ * The local file holding an Html body that query names by its Arweave transaction (a gateway URL
+ * or `ar://` after relation resolution) or by its storage seed's uid (`relations: 'uids'`):
+ * `html/<storage seed local id>.html` as saveHtml writes it, else a download named after the
+ * transaction.
+ */
+async function findLocalHtmlBody(value: string): Promise<string | undefined> {
+  const txId = parseArweaveTransactionLink(value)?.transactionId
+  if (txId) {
+    const row = await getMetadata({ storageTransactionId: txId })
+    const localId = row?.seedLocalId ?? (row?.seedUid ? await resolveHtmlStorageSeedLocalId(row.seedUid) : undefined)
+    return findFileInDir('html', [localId && `${localId}.html`, txId])
+  }
+  if (isValidEasAttestationUid(value)) {
+    const localId = await resolveHtmlStorageSeedLocalId(value)
+    return localId ? findFileInDir('html', [`${localId}.html`]) : undefined
+  }
+  return undefined
 }
 
 /**
@@ -460,6 +484,11 @@ export function createLocalQueryDataSource(): QueryDataSource {
         // Common layout: html/{name}.html under filesDir
         if (typeof ref.value === 'string') {
           const v = ref.value.trim()
+          const stored = await findLocalHtmlBody(v)
+          if (stored) {
+            const text = await BaseFileManager.readFileAsString(stored)
+            if (text) return text
+          }
           // Absolute or relative file path already on disk
           if (v.includes('/') && !v.startsWith('http')) {
             try {

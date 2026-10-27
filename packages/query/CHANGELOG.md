@@ -4,6 +4,9 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `getSeed` returns `null` for a seed with no Versions from its attester, and `getSeeds` leaves it out. Both returned a record with `versionUid: ''` and no properties. With `source: 'auto'`, a local seed with no Versions is read from EAS, as a seed the local source doesn't have is.
+- `getSeed` reads the UID in lower case, like `getSeeds`, so `getSeed('0xAB…')` finds the seed. It returned `null`, because EAS matches UIDs case-sensitively. The record's `seedUid` is lower case.
+- `getSeed`, `getSeeds`, `queryBySchema` and `queryBySchemaForMonth` with `source: 'local'` no longer throw `DuplicateEasModuleError` or `DuplicateArweaveModuleError`: a local read uses neither client. `initializeQueryPlatform({ source: 'local' })` skips the checks.
 - `queryBySchema(schemaName, { attesters })` keeps seeds attested by one of the addresses, in any case. On the remote source it is part of the EAS request, before `limit` and `skip`, so the read costs those attesters' seeds rather than the schema's. Entries that aren't addresses are ignored; with none left, no items. Like `uidPrefix`, it skips the collection cache. `normalizeAttesters` is exported.
 - **Breaking:** `QueryDataSource.listSeedsByUidPrefix` is removed. `listSeedsBySchemaName(schemaName, opts)` takes the filters in `opts` (`uidPrefix`, `attesters`; the `SeedListFilter` type) and applies them before `limit` and `skip`. A custom local source implements the one method.
 - **Breaking:** `getArweaveUrlForTransaction`, used for image `arweaveUrl` fields and storage URLs in assembled seeds, is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}`. It was `https://{read host}/{id}`. `isArweaveTransactionGatewayUrl` accepts `/raw/{id}` on any host and `/{id}` on a known or configured gateway.
