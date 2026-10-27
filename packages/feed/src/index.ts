@@ -577,11 +577,12 @@ export const createFeed = (
         entries: transformedItems.map((item) => {
           // Atom entries require: id, title, updated, links
           const entry: any = {
-            id: item.id || item.link,
+            ...item, // Preserve all dynamic properties
+            // The same identifier as RSS's guid (D26)
+            id: item.guid || item.id || item.link,
             title: item.title || 'Untitled',
             updated: item.date || item.pubDate || now,
             links: item.link ? [{ href: item.link }] : [],
-            ...item, // Preserve all dynamic properties
           }
           if (item.content) entry.content = item.content
           if (item.description) entry.summary = item.description
@@ -629,8 +630,9 @@ export const createFeed = (
         items: transformedItems.map((item) => {
           // JSON items require: id
           const jsonItem: any = {
-            id: item.id || item.link,
             ...item, // Preserve all dynamic properties
+            // The same identifier as RSS's guid (D26)
+            id: item.guid || item.id || item.link,
           }
           if (item.title) jsonItem.title = item.title
           if (item.link) jsonItem.url = item.link
@@ -797,6 +799,11 @@ function capitalize(str: string): string {
 }
 
 /** Hash of what a feed body is built from besides its items' content (see CachedFeedContent). */
+/** The site config a body was built for; sites sharing a cache directory differ here. */
+function siteFingerprint(siteConfig: FeedConfig): string {
+  return generateETag(JSON.stringify(siteConfig))
+}
+
 function feedFingerprint(inputs: {
   sourceEtag?: string
   siteConfig: FeedConfig
@@ -881,7 +888,7 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
     })
 
     if (cacheEnabled) {
-      const cached = await cache.getFeedContent(schemaName, format, contentKeyOptions, fingerprint)
+      const cached = await cache.getFeedContent(schemaName, format, contentKeyOptions, { fingerprint })
       if (cached) return cachedFeedResponse(request, cached, 'HIT')
     }
 
@@ -896,7 +903,13 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
       ? await cache.setFeedContent(
           schemaName,
           format,
-          { content, contentType, etag, fingerprint },
+          {
+            content,
+            contentType,
+            etag,
+            fingerprint,
+            siteFingerprint: siteFingerprint(request.siteConfig),
+          },
           contentKeyOptions,
         )
       : null
@@ -909,7 +922,9 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
   } catch (error) {
     console.error(`Feed generation error for ${schemaName}:${format}:`, error)
     if (cacheEnabled) {
-      const stale = await cache.getFeedContent(schemaName, format, contentKeyOptions)
+      const stale = await cache.getFeedContent(schemaName, format, contentKeyOptions, {
+        siteFingerprint: siteFingerprint(request.siteConfig),
+      })
       if (stale) {
         return cachedFeedResponse(request, stale, 'STALE', { Warning: '110 - "Response is stale"' })
       }
@@ -1026,13 +1041,13 @@ export async function handleArchiveFeedRequest(
   cacheBust?: string,
   siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<Response> {
-  if (year < 1970 || year > 2100) {
+  if (!Number.isInteger(year) || year < 1970 || year > 2100) {
     return new Response(
       JSON.stringify({ error: `Invalid year: ${year}` }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
-  if (month < 1 || month > 12) {
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
     return new Response(
       JSON.stringify({ error: `Invalid month: ${month}` }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }

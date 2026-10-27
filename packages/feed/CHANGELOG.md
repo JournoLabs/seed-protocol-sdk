@@ -5,6 +5,10 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
+- **Breaking:** Atom entry ids and JSON Feed item ids are the item's RSS `guid` (its `guid` field, else its link), so the three formats identify an item the same way (D26). They were the Seed UID. Feed readers show each item of an existing Atom or JSON feed once more as new after the upgrade.
+- The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed.
+- A weak `If-None-Match` (`W/"…"`) for the current ETag gets a 304. Proxies that compress the response mark its ETag weak, so their clients never got one.
+- An archive request whose year or month isn't an integer (`NaN` from a non-numeric path segment) returns 400 instead of passing the range check and failing with 500.
 
 ## 0.7.10 (2026-10-24)
 
