@@ -69,7 +69,7 @@ describe('usePublishCostEstimate', () => {
       estimate: () => new Promise<PublishCostEstimate>((resolve) => (resolveFirst = resolve)),
     }
     const seen: Array<{ total: number | null; isStale: boolean }> = []
-    const Probe = ({ item }: { item: IItem<any> }) => {
+    const Probe = ({ item }: { item: ReturnType<typeof mockItem> }) => {
       const { estimate, isStale } = usePublishCostEstimate(item, options)
       seen.push({ total: estimate?.totalUsd ?? null, isStale })
       return null
