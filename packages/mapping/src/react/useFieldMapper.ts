@@ -205,7 +205,7 @@ export function useFieldMapper({
       }
 
       // source mode
-      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.ids.indexOf(rowId)
       if (edgeIndex >= 0) {
         if (!sourceId) {
           const prev = current[edgeIndex]
@@ -316,7 +316,7 @@ export function useFieldMapper({
       }
 
       const current = mappingsRef.current
-      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.ids.indexOf(rowId)
       if (edgeIndex >= 0) {
         const prev = current[edgeIndex]!
         const target = targets.find((t) => t.name === propertyName)
@@ -420,7 +420,7 @@ export function useFieldMapper({
         mappingsRef.current,
         rowKey,
         rowId,
-        edgeIdsRef.current,
+        edgeIdsRef.current.ids,
         entries,
       )
       if (!next) return
@@ -429,7 +429,7 @@ export function useFieldMapper({
       const edge =
         rowKey === 'property'
           ? next.find((m) => m.propertyName === rowId)
-          : next[edgeIdsRef.current.indexOf(rowId)]
+          : next[edgeIdsRef.current.ids.indexOf(rowId)]
       if (!edge) return
       const table = Object.fromEntries(
         (edge.lookup?.entries ?? []).map((e) => [e.value, e.ref]),
@@ -451,7 +451,7 @@ export function useFieldMapper({
         mappingsRef.current,
         rowKey,
         rowId,
-        edgeIdsRef.current,
+        edgeIdsRef.current.ids,
         blocks,
       )
       if (next) commitMappings(next)
@@ -465,7 +465,7 @@ export function useFieldMapper({
         mappingsRef.current,
         rowKey,
         rowId,
-        edgeIdsRef.current,
+        edgeIdsRef.current.ids,
         spec,
       )
       if (next) commitMappings(next)
@@ -496,7 +496,7 @@ export function useFieldMapper({
         return
       }
 
-      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.ids.indexOf(rowId)
       if (edgeIndex >= 0) {
         const prev = current[edgeIndex]!
         const next = [...current]
@@ -578,7 +578,7 @@ export function useFieldMapper({
         return
       }
 
-      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.ids.indexOf(rowId)
       if (edgeIndex >= 0) {
         const prev = current[edgeIndex]
         commitMappings(current.filter((_, i) => i !== edgeIndex))
