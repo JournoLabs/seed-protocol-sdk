@@ -18,6 +18,34 @@ import debug from 'debug'
 
 const logger = debug('seedArweave:ArweaveClient')
 
+/**
+ * How long one Arweave GraphQL request may take before it is aborted, so a stalled gateway doesn't
+ * hold every caller that awaits it.
+ */
+export const ARWEAVE_GRAPHQL_TIMEOUT_MS = 30_000
+
+type FetchInit = Parameters<typeof fetch>[1]
+
+/** `fetch` that aborts after `timeoutMs`, or when the caller's signal does. */
+function fetchWithTimeout(timeoutMs: number) {
+  return (input: Parameters<typeof fetch>[0], init?: FetchInit): Promise<Response> => {
+    if (typeof AbortController === 'undefined') return fetch(input, init)
+    const controller = new AbortController()
+    const callerSignal = init?.signal ?? undefined
+    const timer = setTimeout(
+      () => controller.abort(new Error(`Arweave GraphQL request timed out after ${timeoutMs} ms`)),
+      timeoutMs,
+    )
+    const onCallerAbort = () => controller.abort(callerSignal?.reason)
+    if (callerSignal?.aborted) onCallerAbort()
+    else callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
+    return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+      clearTimeout(timer)
+      callerSignal?.removeEventListener('abort', onCallerAbort)
+    })
+  }
+}
+
 // Cached Arweave instance (keyed by gateway so setHost / protocol changes apply)
 let _arweaveInstance: Arweave | null = null
 let _arweaveGatewayKey: string | null = null
@@ -51,7 +79,9 @@ const getArweaveInstance = async (): Promise<Arweave> => {
  */
 export class DefaultArweaveClient implements IArweaveClient {
   getArweaveClient(): GraphQLClient {
-    return new GraphQLClient(BaseArweaveClient.getEndpoint())
+    return new GraphQLClient(BaseArweaveClient.getEndpoint(), {
+      fetch: fetchWithTimeout(ARWEAVE_GRAPHQL_TIMEOUT_MS),
+    })
   }
 
   async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
