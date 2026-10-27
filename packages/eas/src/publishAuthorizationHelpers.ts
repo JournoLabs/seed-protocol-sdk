@@ -1,5 +1,5 @@
 import { keccak256Hex } from './keccak.js'
-import { normalizeBytes32Hex } from './easUid.js'
+import { bytes32FromNumberHex, normalizeBytes32Hex } from './easUid.js'
 import { checksumAddress } from './utils.js'
 
 /** EAS schema definition for ManagedAccount publish-automation grants (revocable). */
@@ -55,7 +55,7 @@ function normalizeAddress(addr: string): string {
 function asBytes32(value: unknown): `0x${string}` {
   if (typeof value === 'string') return normalizeBytes32Hex(value) as `0x${string}`
   if (value && typeof value === 'object' && 'hex' in (value as object)) {
-    return normalizeBytes32Hex(String((value as { hex: string }).hex)) as `0x${string}`
+    return bytes32FromNumberHex(String((value as { hex: string }).hex)) as `0x${string}`
   }
   return normalizeBytes32Hex(String(value ?? '')) as `0x${string}`
 }
