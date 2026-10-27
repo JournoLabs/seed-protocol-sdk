@@ -529,8 +529,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return entityStatus(instance) === 'ready' ? instance : undefined
   }
 
-  static async create<_T extends ModelValues<ModelSchema>>(
-    props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
+  /** Property values go beside the item fields: `Item.create({ modelName: 'Post', title: 'Hello' })`. */
+  static async create<T extends Record<string, unknown> = Record<string, unknown>>(
+    props: Partial<ItemData> & Partial<T> & { modelInstance?: import('@/Model/Model').Model },
     options?: ItemCreateOptions,
   ): Promise<Item<any>> {
     const waitForReady = options?.waitForReady !== false
