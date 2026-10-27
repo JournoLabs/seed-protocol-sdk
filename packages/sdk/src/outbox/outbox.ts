@@ -125,6 +125,11 @@ export class OutboxSaveTimeoutError extends Error {
 }
 
 /** Rejects `waitForOutboxOp` for an op that failed, or that a failed op superseded. */
+/**
+ * A failed outbox op, as `save()`, `Item.create` and deletes reject with it. `errorName` names the
+ * error that failed the op; match on it. For `RelationTargetError` and `StagedValueMissingError`,
+ * `cause` is that error, rebuilt from the op row (its `targets` or `path`).
+ */
 export class OutboxOpFailedError extends Error {
   readonly code = 'OUTBOX_OP_FAILED'
   constructor(

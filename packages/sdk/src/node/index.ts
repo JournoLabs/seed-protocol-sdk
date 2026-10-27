@@ -21,6 +21,7 @@ export {
 export { ConflictError, type ConflictResult } from '../Schema/errors'
 export { OwnershipError, assertItemOwned, isItemOwned } from '../helpers/ownership'
 export { EntityUnloadedError } from '../helpers/entity/entityLifecycle'
+export { TabLockTimeoutError } from '../helpers/tabLocks'
 export { OutboxOpFailedError, OutboxSaveTimeoutError } from '../outbox/outbox'
 export { RelationTargetError } from '../outbox/itemAppliers'
 export { StagedValueMissingError } from '../storageValue/stage'
