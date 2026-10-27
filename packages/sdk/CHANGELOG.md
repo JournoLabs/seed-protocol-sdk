@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The local query source's `readStorageBody` finds the Html body on disk for the value query hydrates: a gateway URL or `ar://` link (the storage seed's `html/<local id>.html` by its `storageTransactionId`, else a download named after the transaction) or, with `relations: 'uids'`, the storage seed's uid. It looked for `html/<value>.html`, which never exists for those values, so every local read of an Html body went to a gateway.
 - `ItemPublishOptions.dataItemSigner` is typed: an object with an `address` and `signMessage`, such as an ethers `Wallet` or a @seedprotocol/publish `SeedSigner`. Any value type-checked through the index signature.
 - New `entityLoadError(instance)`: the error an entity's last load failed with, while its `status` is `'error'`.
 - Emitting `syncDbWithEas` or `fs.downloadAll.request` on `eventEmitter` warns once outside production that nothing handles it any more, and what to call instead (`client.syncFromEas()`). Both did nothing silently since the SDK stopped listening for them.

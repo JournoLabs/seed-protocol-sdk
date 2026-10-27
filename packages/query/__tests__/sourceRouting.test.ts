@@ -30,6 +30,7 @@ vi.mock('../src/bootstrap.js', () => ({
 import {
   queryBySchema,
   getSeed,
+  getSeeds,
   clearLocalQuerySource,
   registerLocalQuerySource,
   resetQueryCacheManager,
@@ -47,6 +48,8 @@ function makeLocalFixture(opts: {
   title: string
   timeCreated: number
   schemaName?: string
+  /** The seed is stored without any Version (never published). */
+  noVersions?: boolean
 }): QueryDataSource {
   const schemaName = opts.schemaName ?? 'post'
   const seed: AttestationLike = {
@@ -74,7 +77,7 @@ function makeLocalFixture(opts: {
   }
 
   const seedsByUid = new Map([[opts.seedUid, seed]])
-  const versionsBySeed = new Map([[opts.seedUid, [version]]])
+  const versionsBySeed = new Map([[opts.seedUid, opts.noVersions ? [] : [version]]])
   const propsByVersion = new Map([[opts.versionUid, [prop]]])
 
   return {
@@ -279,6 +282,61 @@ describe('query source local / remote / auto', () => {
 
     const one = await getSeed('0xremotemiss', { source: 'auto' })
     expect(one?.data.title).toBe('Remote Fallback')
+  })
+
+  it('getSeed finds a seed given its UID in upper case', async () => {
+    const seedUid = '0x' + 'ab'.repeat(32)
+    registerLocalQuerySource(
+      makeLocalFixture({ seedUid, versionUid: '0xv', title: 'Mixed Case', timeCreated: 1 }),
+    )
+
+    const one = await getSeed('0x' + 'AB'.repeat(32), { source: 'local' })
+    expect(one?.seedUid).toBe(seedUid)
+    expect(one?.data.title).toBe('Mixed Case')
+  })
+
+  it('a seed with no Versions is not found', async () => {
+    registerLocalQuerySource(
+      makeLocalFixture({ seedUid: '0xunpublished', versionUid: '0xv', title: 'Draft', timeCreated: 1, noVersions: true }),
+    )
+
+    expect(await getSeed('0xunpublished', { source: 'local' })).toBeNull()
+    expect(await getSeed('0xunpublished', { source: 'local', include: 'changelog' })).toBeNull()
+    expect(await getSeeds(['0xunpublished'], { source: 'local' })).toEqual(new Map())
+  })
+
+  it('source auto reads remote when the local seed has no Versions', async () => {
+    registerLocalQuerySource(
+      makeLocalFixture({ seedUid: '0xlocalnover', versionUid: '0xv', title: 'Draft', timeCreated: 1, noVersions: true }),
+    )
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        {
+          id: '0xlocalnover',
+          decodedDataJson: '',
+          refUID: '0x0',
+          schemaId: '0xschema',
+          timeCreated: 300,
+          attester: '0xr',
+          schema: { schemaNames: [{ name: 'post' }] },
+        },
+      ],
+    })
+    mockGetItemVersionsFromEas.mockResolvedValue([
+      { id: '0xvremote3', decodedDataJson: '', refUID: '0xlocalnover', schemaId: '0xversion', timeCreated: 310 },
+    ])
+    mockGetItemPropertiesFromEas.mockResolvedValue([
+      {
+        id: '0xpr3',
+        decodedDataJson: propDecoded('title', 'Published'),
+        refUID: '0xvremote3',
+        schemaId: '0xtitleSchema',
+        timeCreated: 320,
+      },
+    ])
+
+    expect((await getSeed('0xlocalnover', { source: 'auto' }))?.data.title).toBe('Published')
+    expect((await getSeeds(['0xlocalnover'], { source: 'auto' })).get('0xlocalnover')?.data.title).toBe('Published')
   })
 
   it('local bypasses query cache even when CACHE_ENABLED', async () => {
