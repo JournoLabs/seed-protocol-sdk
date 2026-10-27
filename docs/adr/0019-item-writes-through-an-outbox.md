@@ -1,7 +1,7 @@
 # 0019. Item edits go through a durable outbox that the leader tab drains
 
-- **Status:** Accepted (being implemented); amended 2026-10-22 (the setter appends at once; see
-  Assignment, Assignment order and Storage values)
+- **Status:** Accepted; amended 2026-10-22 (the setter appends at once; see Assignment, Assignment
+  order and Storage values) and 2026-10-27 (the setter never throws; see Assignment)
 - **Date:** 2026-10-18
 - **Scope:** `@seedprotocol/sdk` (Item, ItemProperty, `db/write`, `BaseDb`, EAS sync, migrations),
   `@seedprotocol/react` (property hooks), `@seedprotocol/publish` (payload, uid stamping)
@@ -34,16 +34,18 @@ property waits behind its oldest pending op, including one waiting for a retry, 
 of value ops waits for its newest op only (the older ones are superseded with it). An op on the seed
 itself (no property: create, delete) is ordered against all of its seed's ops.
 
-**Assignment.** The setter checks the value's type and shape synchronously and throws a
-`TypeError` on a mismatch, before anything changes; documented coercions (a numeric string for
-Number, an ISO string for Date, a JSON array string for List) don't throw. A value of the right
-type that breaks a rule (length, range, enum, pattern, required) is kept in memory with its errors
-on `property.validation` and is not appended; `save()` rejects with
-`ItemPropertySaveValidationError`, and the value is lost on reload. A valid value updates memory
-and appends one op before the setter returns. Ownership is checked in the applier's `prepare`
-step (the op may come from another tab or from before a reload, and the client may have lost the
-item's wallet since), so a refused assignment appends an op that fails. `save()` still checks
-ownership before it waits.
+**Assignment.** The setter never throws (amended 2026-10-27; it was to throw a `TypeError` on a
+type mismatch). It shows the value at once and checks it against the property's definition: a
+value of the wrong type and one that breaks a rule (length, range, enum, pattern, required) are
+handled alike. Such a value stays shown with its errors in `saveValidationErrors` and is not
+appended; `save()` rejects with `ItemPropertySaveValidationError`, and the value is lost on reload.
+A non-empty string assigned to a List is stored as a one-element list. An empty Image, File or Html
+value clears the property (ADR 0021). A valid value appends one op before the setter
+returns. If planning the op fails for another reason (no definition found for the property, no
+local seed), the stored value is shown again and `save()` rejects with that error. Ownership is
+checked in the applier's `prepare` step (the op may come from another tab or from before a reload,
+and the client may have lost the item's wallet since), so a refused assignment appends an op that
+fails. `save()` still checks ownership before it waits.
 Creates and discards are not checked. A `set` op's Relation value is checked there too: each seed it
 names by local id must exist (an attestation uid passes, since a related seed may have no local
 copy). A target whose create op is still pending defers the op; any other missing target fails it
