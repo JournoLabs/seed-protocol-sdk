@@ -350,7 +350,7 @@ describe('seedVitePlugin includeNodePolyfills', () => {
 })
 
 describe('seedVitePlugin debug: bare-globals scan', () => {
-  function scan(code: string, debug = true): string[] {
+  function scan(code: string, debug = true, moduleIds?: string[]): string[] {
     const hook = hookFn(configPlugin({ debug }), 'generateBundle')
     const lines: string[] = []
     const warn = console.warn
@@ -360,7 +360,7 @@ describe('seedVitePlugin debug: bare-globals scan', () => {
     }
     console.log = () => {}
     try {
-      hook.call({}, {}, { 'chunk.js': { type: 'chunk', code } })
+      hook.call({}, {}, { 'chunk.js': { type: 'chunk', code, moduleIds } })
     } finally {
       console.warn = warn
       console.log = log
@@ -393,6 +393,13 @@ describe('seedVitePlugin debug: bare-globals scan', () => {
     expect(scan('export const buf = Buffer.from("x")', false)).toEqual([])
   })
 
+  it("skips a chunk made only of Seed packages' modules, not one with app code in it", () => {
+    const sdk = '/app/node_modules/@seedprotocol/sdk/dist/index.js'
+    const drizzle = '/app/node_modules/@seedprotocol/sdk/dist/drizzle.js'
+    expect(scan('export const buf = Buffer.from("x")', true, [sdk, drizzle])).toEqual([])
+    expect(scan('export const buf = Buffer.from("x")', true, [sdk, '/app/src/main.ts'])).toEqual(['Buffer@1'])
+  })
+
   it.each([
     ['ternary typeof guard', 'export const a = typeof process === "object" ? process.env : {}'],
     [
@@ -418,5 +425,18 @@ describe('seedVitePlugin debug: bare-globals scan', () => {
 
   it('reports nothing for a chunk it cannot parse', () => {
     expect(scan('process.env.X = (')).toEqual([])
+  })
+})
+
+describe('seedVitePlugin options', () => {
+  it('rejects autoInit, which was removed, and other unknown options', () => {
+    expect(() => seedVitePlugin({ autoInit: true } as SeedVitePluginOptions)).toThrow(/autoInit was removed/)
+    expect(() => seedVitePlugin({ fsModule: ['fs'] } as SeedVitePluginOptions)).toThrow(/unknown option "fsModule"/)
+  })
+
+  it("polyfills timers with includeNodePolyfills (rss-parser imports it)", async () => {
+    const { config } = await resolveWith('build', { includeNodePolyfills: true })
+    const timers = config.resolve.alias.find((entry) => String(entry.find).replace(/[/^$]/g, '') === 'timers')
+    expect(String(timers?.replacement)).toContain('timers-browserify')
   })
 })

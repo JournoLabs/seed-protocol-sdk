@@ -374,3 +374,18 @@ describe('applyMappingAsync', () => {
     expect(bag.authors).toBeUndefined()
   })
 })
+
+describe('Boolean and empty values', () => {
+  it('reads true, 1 and yes in any case', () => {
+    for (const raw of ['true', 'TRUE', 'True', ' yes ', 'YES', '1']) expect(coerceValue(raw, 'Boolean')).toBe(true)
+    for (const raw of ['false', 'no', '0', '']) expect(coerceValue(raw, 'Boolean')).toBe(false)
+  })
+
+  it("copies an empty field as empty, not as its label", async () => {
+    const empty = [{ id: 'fm-subtitle', label: 'subtitle', kind: 'frontmatter' as const, value: '' }]
+    const targetsEmpty = [{ name: 'subtitle', dataType: 'Text' }]
+    const mappingsEmpty = [{ sourceId: 'fm-subtitle', propertyName: 'subtitle' }]
+    expect(applyMapping(empty, mappingsEmpty, targetsEmpty)).toEqual({ subtitle: '' })
+    expect((await applyMappingAsync(empty, mappingsEmpty, targetsEmpty)).properties).toEqual({ subtitle: '' })
+  })
+})

@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { parseAst } from 'vite'
 import { attachScopes, type AttachedScope } from '@rollup/pluginutils'
 
@@ -176,13 +177,25 @@ export function findDangerousGlobals(code: string): GlobalHit[] {
   return hits
 }
 
-/** Warn about free references to Node-only globals in the bundle's chunks (`debug: true`). */
+const SEED_PACKAGE_PATH = /[\\/]node_modules[\\/]@seedprotocol[\\/]/
+
+/**
+ * Warn about free references to Node-only globals in the bundle's chunks (`debug: true`). A chunk
+ * made only of Seed packages' modules (under `seedPackageDirs`, or `node_modules/@seedprotocol/`)
+ * is skipped: their guarded uses (`Buffer` in drizzle, `process.cwd` on Node paths) aren't the
+ * app's to fix.
+ */
 export function warnAboutNodeGlobals(
-  bundle: Record<string, { type: string; code?: string }>,
+  bundle: Record<string, { type: string; code?: string; moduleIds?: readonly string[] }>,
+  seedPackageDirs: readonly string[] = [],
 ): void {
+  const isSeedModule = (id: string) =>
+    SEED_PACKAGE_PATH.test(id) || seedPackageDirs.some((dir) => id.startsWith(dir + path.sep) || id.startsWith(dir + '/'))
   const allHits: Array<{ chunk: string } & GlobalHit> = []
   for (const [chunkName, asset] of Object.entries(bundle)) {
     if (asset.type !== 'chunk' || asset.code === undefined) continue
+    const ids = asset.moduleIds ?? []
+    if (ids.length > 0 && ids.every((id) => isSeedModule(id.replace(/^\0/, '')))) continue
     for (const hit of findDangerousGlobals(asset.code)) allHits.push({ chunk: chunkName, ...hit })
   }
   if (allHits.length === 0) return

@@ -137,6 +137,18 @@ describe('withSeed SDK platform alias', () => {
   it('adds no platform alias when the SDK is not installed', () => {
     expect(withSeed({}).turbopack?.resolveAlias).not.toHaveProperty('#seed-node-platform')
   })
+
+  it('resolves the SDK from dir, for a Next.js run started outside the app (a monorepo root)', () => {
+    // cwd is a root without the SDK; the app directory has it.
+    const app = tempApp({ '@seedprotocol/sdk': '0.7.4', '@seedprotocol/query': '0.7.4' })
+    const config = withSeed({}, { dir: app })
+    expect(config.turbopack?.resolveAlias).toMatchObject({
+      '#seed-node-platform': './node_modules/@seedprotocol/sdk/dist/platform.browser.js',
+    })
+    expect(runWebpack(config, false).resolve.alias['#seed-node-platform']).toBe(
+      path.join(fs.realpathSync(app), 'node_modules', '@seedprotocol', 'sdk', 'dist', 'platform.browser.js'),
+    )
+  })
 })
 
 describe('withSeed headers', () => {

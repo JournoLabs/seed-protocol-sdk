@@ -1,4 +1,4 @@
-/** Number of cycling pair / map-color slots (`--fm-map-1` … `--fm-map-8`). */
+/** Number of cycling pair / map-color slots (`--sfm-map-1` … `--sfm-map-8`). */
 export const FIELD_MAPPER_PAIR_SLOTS = 8
 
 /**
@@ -24,7 +24,7 @@ export function connectionStrokeForIndex(
     return connectionColors[index % connectionColors.length]!
   }
   const n = pairSlot(index) + 1
-  return `var(--fm-map-${n}, var(--map-${n}, currentColor))`
+  return `var(--sfm-map-${n}, currentColor)`
 }
 
 export { pairSlot }
@@ -56,24 +56,6 @@ const PAINT_TOKENS = `
   --sfm-map-6: #06b6d4;
   --sfm-map-7: #f97316;
   --sfm-map-8: #14b8a6;
-  --fm-ground: var(--sfm-color-ground);
-  --fm-ink: var(--sfm-color-ink);
-  --fm-well: var(--sfm-color-well);
-  --fm-line: var(--sfm-color-line);
-  --fm-muted: var(--sfm-color-muted);
-  --fm-faint: var(--sfm-color-faint);
-  --fm-selection: var(--sfm-color-selection);
-  --fm-highlight: var(--sfm-color-highlight);
-  --fm-danger: var(--sfm-color-danger);
-  --fm-warning: var(--sfm-color-warning);
-  --fm-map-1: var(--sfm-map-1);
-  --fm-map-2: var(--sfm-map-2);
-  --fm-map-3: var(--sfm-map-3);
-  --fm-map-4: var(--sfm-map-4);
-  --fm-map-5: var(--sfm-map-5);
-  --fm-map-6: var(--sfm-map-6);
-  --fm-map-7: var(--sfm-map-7);
-  --fm-map-8: var(--sfm-map-8);
 `
 
 const STRUCTURAL_TOKENS = `

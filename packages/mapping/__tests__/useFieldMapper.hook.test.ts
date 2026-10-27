@@ -124,3 +124,25 @@ describe('useFieldMapper write-through mappingsRef', () => {
     unmount()
   })
 })
+
+describe('useFieldMapper source mode row ids', () => {
+  it("keeps the other rows' ids when one is removed, and edits by id still reach the right row", () => {
+    const onChange = vi.fn()
+    const { result, rerender, unmount } = renderHook(
+      ({ mappings }: { mappings: FieldMapping[] }) =>
+        useFieldMapper({ sources, targets, mappings, onChange, rowKey: 'source' }),
+      { initialProps: { mappings: initialMappings } },
+    )
+    const [titleRow, htmlRow, urlRow] = result.current.rows.map((row) => row.id)
+
+    result.current.removeRow(titleRow!)
+    const afterRemove = onChange.mock.calls.at(-1)?.[0] as FieldMapping[]
+    expect(namesOf(afterRemove)).toEqual(['html', 'importUrl'])
+    rerender({ mappings: afterRemove })
+    expect(result.current.rows.map((row) => row.id)).toEqual([htmlRow, urlRow])
+
+    result.current.setProperty(urlRow!, 'slug')
+    expect(namesOf(onChange.mock.calls.at(-1)?.[0] as FieldMapping[])).toEqual(['html', 'slug'])
+    unmount()
+  })
+})

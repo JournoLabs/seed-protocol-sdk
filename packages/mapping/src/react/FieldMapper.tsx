@@ -103,8 +103,8 @@ export type FieldMapperProps = {
   theme?: FieldMapperTheme
   /**
    * Optional connector stroke colors (wires layout). When omitted, strokes use
-   * `var(--fm-map-N, var(--map-N, currentColor))` for N = 1…8.
-   * @deprecated Prefer CSS `--sfm-map-*` / `--fm-map-*` / `--map-*` tokens.
+   * `var(--sfm-map-N, currentColor)` for N = 1…8.
+   * @deprecated Prefer the CSS `--sfm-map-*` tokens.
    */
   connectionColors?: string[]
   /**

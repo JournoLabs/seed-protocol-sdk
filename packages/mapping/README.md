@@ -66,7 +66,7 @@ const doc: MappingDocument = {
 }
 ```
 
-RSS with resolve jobs:
+RSS with resolve jobs. `rssXmlToSources` parses with `rss-parser`, which imports Node's `timers`; in a Vite browser build, use `seedVitePlugin({ includeNodePolyfills: true })` from `@seedprotocol/vite`, which polyfills it.
 
 ```ts
 const { items } = await rssXmlToSources(xml)
@@ -264,7 +264,7 @@ default html to assemble.
 
 | Prop | Behavior |
 |------|----------|
-| `theme="default"` (default) | Injects structural + paint CSS once into `document.head` (`@layer seed-field-mapper`) with `--sfm-*` tokens (`--fm-*` aliases kept for one minor) |
+| `theme="default"` (default) | Injects structural + paint CSS once into `document.head` (`@layer seed-field-mapper`) with `--sfm-*` tokens |
 | `theme="structural"` | Layout / spacing only — no color paint; inherits host colors |
 | `theme="none"` | No injection — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …); keeps `seed-field-mapper--unstyled` |
 | `theme="unstyled"` | **Deprecated** shim for `none` |
@@ -276,7 +276,7 @@ default html to assemble.
 | `renderRowExpansion` | Optional `(row: FieldMapperRow) => ReactNode` under the row (e.g. host assemble stack) in `.fm-row-expansion`. |
 | `transformOptions` | Optional `(row, defaults) => options` to add or relabel transforms (e.g. **from title** on slug). Defaults: copy / extract / file / lookup, plus assemble on `Html` targets. |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
-| `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
+| `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` |
 | `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
 
 `SourceNode` may include optional `subtitle` (display-only). Prefer `subtitle` over stuffing a secondary fact into `label` (e.g. origin field name on a resolved well).

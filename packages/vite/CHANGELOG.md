@@ -1,5 +1,11 @@
 # @seedprotocol/vite
 
+## Unreleased
+
+- **Breaking:** `seedVitePlugin` throws on an option it doesn't take. `autoInit`, which was removed, says so; a misspelt option names the ones it takes. Both were ignored silently.
+- `includeNodePolyfills: true` also polyfills `timers` (`timers-browserify`), so `@seedprotocol/mapping`'s `rssXmlToSources` (through `rss-parser`) builds for the browser.
+- `debug: true` skips chunks made only of Seed packages' modules when it reports Node globals. `Buffer` in the SDK's drizzle chunk and `process.cwd` in its Node paths drowned the app's own hits. A chunk that mixes app and Seed code is still scanned.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits

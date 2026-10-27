@@ -328,7 +328,7 @@ describe('filterPropertyNames', () => {
 })
 
 describe('findConflicts / syncEdgeIds', () => {
-  it('findConflicts marks later duplicates', () => {
+  it('findConflicts marks every row of a duplicate, the first included', () => {
     const set = findConflicts([
       { id: 'a', propertyName: 'title' },
       { id: 'b', propertyName: 'html' },
@@ -337,10 +337,24 @@ describe('findConflicts / syncEdgeIds', () => {
     expect([...set].sort()).toEqual(['a', 'c'])
   })
 
-  it('syncEdgeIds grows and shrinks', () => {
-    const grown = syncEdgeIds(['e0'], 3)
-    expect(grown).toHaveLength(3)
-    expect(grown[0]).toBe('e0')
-    expect(syncEdgeIds(grown, 1)).toEqual(['e0'])
+  it('syncEdgeIds keeps each row its id when another is added, removed or edited', () => {
+    const a = { sourceId: 's1', propertyName: 'title' }
+    const b = { sourceId: 's2', propertyName: 'html' }
+    const c = { sourceId: 's3', propertyName: 'slug' }
+    const ids = syncEdgeIds({ mappings: [], ids: [] }, [a, b, c])
+    expect(new Set(ids).size).toBe(3)
+
+    // Removing the first row keeps the others' ids (not shifted by position).
+    expect(syncEdgeIds({ mappings: [a, b, c], ids }, [b, c])).toEqual([ids[1], ids[2]])
+
+    // An edited row (a new object in its place) keeps its id.
+    const bEdited = { ...b, propertyName: 'body' }
+    expect(syncEdgeIds({ mappings: [a, b, c], ids }, [a, bEdited, c])).toEqual(ids)
+
+    // An added row gets a new id; the others keep theirs.
+    const d = { sourceId: 's4', propertyName: 'author' }
+    const grown = syncEdgeIds({ mappings: [a, b, c], ids }, [a, b, c, d])
+    expect(grown.slice(0, 3)).toEqual(ids)
+    expect(ids).not.toContain(grown[3])
   })
 })
