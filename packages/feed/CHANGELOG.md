@@ -11,6 +11,10 @@ All notable changes to this package are documented in this file.
 - A weak `If-None-Match` (`W/"…"`) for the current ETag gets a 304. Proxies that compress the response mark its ETag weak, so their clients never got one.
 - An archive request whose year or month isn't an integer (`NaN` from a non-numeric path segment) returns 400 instead of passing the range check and failing with 500.
 
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits
@@ -40,7 +44,7 @@ All notable changes to this package are documented in this file.
 - The cache config is read once per process instead of on every request, and per-request logs (cache hits and misses, item counts, image probes) only print under `DEBUG=seedFeed`.
 - Breaking: `GraphQLItem` (use `FeedItem`), `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are no longer exported. Import `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`.
 - `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
-- `express`, `@types/express` and `graphql-request` are no longer dependencies.
+- `express`, `@types/express` and `graphql-request` are no longer dependencies. `debug` is a new one: the per-request logs print under `DEBUG=seedFeed`.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read; they never did anything.
 
 ### Commits
@@ -68,6 +72,10 @@ All notable changes to this package are documented in this file.
 
 - correct env var and rich-field docs (803c2bfc)
 - import query helpers directly, FeedItem type, drop unused deps (a3079128)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.5 (2026-10-17)
 

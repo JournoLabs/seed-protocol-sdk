@@ -78,7 +78,6 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking
 
-- `getPublishUploadData(item, options)` takes the options second, as the SDK's does.
 - **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
 - `useArweaveBundler` is deprecated. `true` changes nothing; `false` makes `initPublish` throw `PublishPaymentConfigError`. Apps that left it unset now upload data items and need `signDataItems` or a `dataItemSigner` (at `createPublish` or in the config).
 - Removed: the `signArweaveTransactions` and `arweaveJwk` options (config and `createPublish`), the `SerializedPublishUpload` and `ArweaveTransactionInfoResult` types, and the context fields `reimbursementTransactionId`, `reimbursementConfirmed`, `requestResponse`, `transactionKeys`, `uploaderState` and `currentTransactionIndex`.
@@ -103,6 +102,10 @@ All notable changes to this project will be documented in this file.
 - eas, sdk: one EAS model-schema lookup and one model_uids rule (02e732aa)
 - revoke retracted properties after attesting; unpublish revokes the seed first (62759057)
 - Unload items the publish actors reload, and ensureEasSchemas' related items (deacc79f)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.7 (2026-10-18)
 

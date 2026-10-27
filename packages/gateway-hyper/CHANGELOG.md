@@ -36,7 +36,7 @@ All notable changes to this package are documented in this file.
   `keyPair` for the key the client presents, so it can go on a key allowlist. The default is
   still a new key per run. `TunnelSession` and `connectTunnel`'s result expose `clientKey`.
   `seed-gateway connect` takes `--key-file` and `--print-key`.
-- Every DHT entry point takes `bootstrap` nodes, for a private or local HyperDHT network.
+- Every DHT entry point in the library takes `bootstrap` nodes, for a private or local HyperDHT network. The `seed-gateway` CLI has no flag for it in this release.
 - `serveTunnel` takes `onEvent`, called with a `TunnelEvent` for each stream and each step of a
   request, and `requestIdHeader`, which sends each request's id upstream (replacing any value
   the client sent). `seed-gateway serve` takes `--trace` and `--request-id-header`.
@@ -66,6 +66,14 @@ All notable changes to this package are documented in this file.
 
 - ADR 0024 raw TCP mode; tracing and raw mode runbook (87cd7e95)
 - allowlist and client key runbook, changelog notes (9023086f)
+
+## 0.7.9 (2026-10-22)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.6 (2026-10-17)
 

@@ -4,6 +4,10 @@
 
 - The published declarations include the module declarations for corestore, hyperdrive, hyperswarm, hypercore-id-encoding and serve-drive (`dist/shims.d.ts`), so they compile without `skipLibCheck` (TS7016 before), and relative imports carry `.js` for `moduleResolution: node16` and `nodenext`.
 
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.10 (2026-10-24)
 
 ### Commits
@@ -19,6 +23,10 @@
 #### Other
 
 - feed: import query helpers directly, FeedItem type, drop unused deps (a3079128)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.5 (2026-10-17)
 

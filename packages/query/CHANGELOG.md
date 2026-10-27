@@ -63,6 +63,10 @@ All notable changes to this package are documented in this file.
 - send the collection change check alongside the seed list (fdb38985)
 - Clear a property: clear() and clear({ retract: true }) (ADR 0021) (fdd7e375)
 
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.6 (2026-10-17)
 
 - `getSeeds(seedUids, options)` reads many seeds, of any schemas, in one set of indexer requests and returns a `Map` keyed by UID as given. It takes the `getSeed` assemble options (no changelog) and `pins`, and shares the item cache with `getSeed`.

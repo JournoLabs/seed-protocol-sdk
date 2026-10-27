@@ -10,6 +10,22 @@
 - `UseFieldMapperResult.conflicts`' doc comment says it holds every row that maps an already-mapped property, the first such row included, as `findConflicts` does.
 - The README says `rssXmlToSources` needs `seedVitePlugin({ includeNodePolyfills: true })` in a Vite browser build: `rss-parser` imports Node's `timers`.
 
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.10 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.9 (2026-10-22)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.7 (2026-10-18)
 
 ### Commits
