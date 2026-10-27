@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, pendingWrites, seeds } from '@/seedSchema'
 import { Item } from '@/Item/Item'
@@ -95,6 +95,9 @@ testDescribe('item lifecycle through the outbox', () => {
 
   it('a row that can’t be written fails the whole create, staged files included', async () => {
     const seedsBefore = (await db().select({ localId: seeds.localId }).from(seeds)).length
+    // Other tests share this database and leave failed creates of their own (a dangling relation
+    // is refused): read only the ops this create appends.
+    const [{ lastOpId }] = await db().select({ lastOpId: sql<number>`coalesce(max(${pendingWrites.id}), 0)` }).from(pendingWrites)
     await db().run(
       sql.raw(
         "CREATE TRIGGER fail_body_insert BEFORE INSERT ON metadata WHEN NEW.property_name = 'body' BEGIN SELECT RAISE(ABORT, 'body row refused'); END",
@@ -106,11 +109,12 @@ testDescribe('item lifecycle through the outbox', () => {
       await db().run(sql.raw('DROP TRIGGER fail_body_insert'))
     }
     expect((await db().select({ localId: seeds.localId }).from(seeds)).length).toBe(seedsBefore)
-    const [failed] = await db()
+    const failed = await db()
       .select()
       .from(pendingWrites)
-      .where(and(eq(pendingWrites.kind, 'create'), eq(pendingWrites.status, 'failed')))
-    expect(failed.error).toMatch(/body row refused/)
+      .where(and(gt(pendingWrites.id, lastOpId), eq(pendingWrites.kind, 'create'), eq(pendingWrites.status, 'failed')))
+    expect(failed).toHaveLength(1)
+    expect(failed[0]!.error).toMatch(/body row refused/)
     await vi.waitFor(async () => expect(await stagedFiles()).toEqual([]), { timeout: 5000 })
   }, 30000)
 
