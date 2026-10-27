@@ -119,6 +119,8 @@ function App() {
 }
 ```
 
+`config` is the publish config. `PublishProvider` renders a `SeedProvider`, and passes it `seedConfig` (as its `config`), `addresses` and `onInitError`: with `seedConfig` set, the provider initializes the Seed client, so the app needs no `SeedProvider` of its own.
+
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
 ### Who pays

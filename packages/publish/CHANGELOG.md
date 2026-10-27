@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `PublishProvider` (both entries) takes `seedConfig`, `addresses` and `onInitError` and passes them to the `SeedProvider` it renders, which initializes the Seed client when `seedConfig` is set (decision D25). It passed only the QueryClient, so the client had to be started some other way (`client.init`, `SeedClientGate`).
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the `~/` imports kept from the source's path alias are relative. Eight declarations imported `~/…` paths, which no consumer resolves, so types such as `SeedSigner` in their signatures were errors.
 - A tab that opens while another tab is uploading no longer marks that publish `interrupted`. `restoreFromDb` takes the publish lock before deciding a row can't be resumed, and gives it back after marking an abandoned one. It marked the other tab's live publish, whose later progress saves were then skipped as stale.
 - `uploadApiBaseUrl` is optional in `PublishConfig`; it is still required unless `payment.storage` is `'user'`, which `initPublish` checks. The resolved config's is `''` when unset.
