@@ -24,6 +24,11 @@ export interface CachedFeedContent {
    * the same inputs. Entries written before fingerprints existed have none and never match.
    */
   fingerprint?: string;
+  /**
+   * The site config the body was built for (see siteFingerprint). The stale fallback only serves
+   * an entry built for the same site, since sites can share a cache directory.
+   */
+  siteFingerprint?: string;
 }
 
 /**

@@ -797,6 +797,11 @@ function capitalize(str: string): string {
 }
 
 /** Hash of what a feed body is built from besides its items' content (see CachedFeedContent). */
+/** The site config a body was built for; sites sharing a cache directory differ here. */
+function siteFingerprint(siteConfig: FeedConfig): string {
+  return generateETag(JSON.stringify(siteConfig))
+}
+
 function feedFingerprint(inputs: {
   sourceEtag?: string
   siteConfig: FeedConfig
@@ -881,7 +886,7 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
     })
 
     if (cacheEnabled) {
-      const cached = await cache.getFeedContent(schemaName, format, contentKeyOptions, fingerprint)
+      const cached = await cache.getFeedContent(schemaName, format, contentKeyOptions, { fingerprint })
       if (cached) return cachedFeedResponse(request, cached, 'HIT')
     }
 
@@ -896,7 +901,13 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
       ? await cache.setFeedContent(
           schemaName,
           format,
-          { content, contentType, etag, fingerprint },
+          {
+            content,
+            contentType,
+            etag,
+            fingerprint,
+            siteFingerprint: siteFingerprint(request.siteConfig),
+          },
           contentKeyOptions,
         )
       : null
@@ -909,7 +920,9 @@ async function serveFeed(request: FeedRequest): Promise<Response> {
   } catch (error) {
     console.error(`Feed generation error for ${schemaName}:${format}:`, error)
     if (cacheEnabled) {
-      const stale = await cache.getFeedContent(schemaName, format, contentKeyOptions)
+      const stale = await cache.getFeedContent(schemaName, format, contentKeyOptions, {
+        siteFingerprint: siteFingerprint(request.siteConfig),
+      })
       if (stale) {
         return cachedFeedResponse(request, stale, 'STALE', { Warning: '110 - "Response is stale"' })
       }
@@ -1026,13 +1039,13 @@ export async function handleArchiveFeedRequest(
   cacheBust?: string,
   siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<Response> {
-  if (year < 1970 || year > 2100) {
+  if (!Number.isInteger(year) || year < 1970 || year > 2100) {
     return new Response(
       JSON.stringify({ error: `Invalid year: ${year}` }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
-  if (month < 1 || month > 12) {
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
     return new Response(
       JSON.stringify({ error: `Invalid month: ${month}` }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
