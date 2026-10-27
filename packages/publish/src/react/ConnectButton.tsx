@@ -185,12 +185,15 @@ const ConnectButton: FC = () => {
       lastSyncedOwnedKey.current = ownedKey
       try {
         const adminAddress = activeWallet.getAdminAccount?.()?.address
-        // A wallet with a separate admin account, or the modular executor's ManagedAccount, is a
-        // smart account; otherwise the connected account is a plain key (in-app or injected).
+        // With the modular executor the connected account is an in-app EOA publishing as the
+        // ManagedAccount. A wallet with a separate admin account is a smart account; otherwise the
+        // connected account is a plain key (in-app or injected).
         const isSmart =
           !!managedAddress ||
           (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
-        const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
+        const publishWallet = fromThirdwebAccount(account, {
+          kind: managedAddress ? "modular" : isSmart ? "smart" : "eoa",
+        })
         // Data items need an ECDSA signer. With the modular executor the connected account is an
         // EOA (or EIP-7702 on one) acting for the ManagedAccount; otherwise a smart wallet's admin
         // EOA signs them.

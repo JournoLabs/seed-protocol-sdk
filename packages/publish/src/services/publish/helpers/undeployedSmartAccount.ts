@@ -19,8 +19,8 @@ export type DirectEasProblem =
  * the wallet has to say (`useDirectEas` skips this check).
  *
  * - The wallet sends from another address: EAS would record that address as the attester.
- * - `kind: 'smart'`: an undeployed smart account; direct EAS would attest one transaction per Seed
- *   instead of the account's multiPublish.
+ * - `kind: 'smart'` or `'modular'`: the publisher is an undeployed smart account; direct EAS would
+ *   attest one transaction per Seed instead of the account's multiPublish.
  * - No kind: unknown, refused rather than guessed.
  * - An EOA whose signer isn't the publisher: it would attest as someone else.
  *
@@ -37,7 +37,7 @@ export function directEasProblem(
   const kind =
     wallet?.kind ??
     (session && sameAddress(session.signer.address, wallet?.signer?.address) ? session.kind : undefined)
-  if (kind === 'smart') return 'smart_account'
+  if (kind === 'smart' || kind === 'modular') return 'smart_account'
   if (kind !== 'eoa') return 'unknown_wallet_kind'
   if (!sameAddress(wallet?.signer?.address, publisherAddress)) return 'signer_is_not_publisher'
   return null

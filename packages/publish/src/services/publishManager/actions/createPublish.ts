@@ -10,7 +10,7 @@ import {
 import { ethers } from 'ethers'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
-import { getPublishWallet } from '~/helpers/publishWalletRegistry'
+import { dataItemSignerForPublish, getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { settleCreatePublish } from '../createPublishResult'
 import { holdItemUntilStopped } from '../holdPublishItem'
 
@@ -88,7 +88,12 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         modelName: item.modelName,
         schemaId: item.schemaUid,
         signDataItems: options?.signDataItems,
-        dataItemSigner: coerceDataItemSigner(options?.dataItemSigner),
+        // A caller's signer, else the config's, else the wallet's EOA (A4): every entry point
+        // signs data items the same way.
+        dataItemSigner:
+          coerceDataItemSigner(options?.dataItemSigner) ??
+          coerceDataItemSigner(publishCfg.dataItemSigner) ??
+          dataItemSignerForPublish(wallet, address as string),
         publishMode: options?.publishMode ?? 'patch',
         publishRunId,
         arweaveUploadTags: arweaveUploadTags.length ? arweaveUploadTags : undefined,

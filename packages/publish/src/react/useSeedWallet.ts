@@ -69,6 +69,7 @@ export function useSeedWallet(): UseSeedWalletResult {
         txSender,
         ownedAddresses: [wallet.signer.address, txSender.address],
         publisherAddress: wallet.signer.address,
+        ...(wallet.kind && { kind: wallet.kind }),
       }
       await setPublishWallet(next)
       setSession(next)

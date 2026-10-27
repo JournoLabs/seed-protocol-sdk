@@ -40,10 +40,11 @@ export interface SeedTxSender {
 /**
  * What account a PublishWallet publishes from. `'eoa'`: a plain key, whose address is the signer
  * (publish may attest straight to EAS from it before it has any code). `'smart'`: a smart account
- * (ManagedAccount, thirdweb smart wallet). Unset: unknown, treated like `'smart'` when choosing
- * direct EAS.
+ * (ManagedAccount, thirdweb smart wallet), whose signatures can't sign data items. `'modular'`: the
+ * modular executor's in-app EOA (EIP-7702), which publishes as the user's ManagedAccount; its
+ * signer is an EOA, so it signs data items. Unset: unknown, refused when choosing direct EAS.
  */
-export type PublishWalletKind = 'eoa' | 'smart'
+export type PublishWalletKind = 'eoa' | 'smart' | 'modular'
 
 export type PublishWallet = {
   signer: SeedSigner

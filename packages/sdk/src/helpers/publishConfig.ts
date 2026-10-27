@@ -54,6 +54,11 @@ export async function getPublisherForNewSeedsWithTimeout(): Promise<string | und
 export type ItemPublishOptions = {
   /** 'patch' (default) updates the current version; 'new_version' starts one. */
   publishMode?: 'patch' | 'new_version'
+  /**
+   * Signs this publish's Arweave data items: an EOA's signer, such as an ethers `Wallet` or a
+   * @seedprotocol/publish `SeedSigner`. Defaults to the publish wallet's EOA.
+   */
+  dataItemSigner?: { readonly address: string; signMessage(...args: never[]): Promise<string> }
   [option: string]: unknown
 }
 
