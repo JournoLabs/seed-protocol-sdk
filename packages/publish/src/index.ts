@@ -36,6 +36,7 @@ export {
   DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'
 export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
+export { MissingSignedDataItemsError } from './services/publish/actors/uploadViaBundler'
 export {
   PublishNotAuthorizedError,
   PUBLISH_AUTHORIZATION_HEADER,
