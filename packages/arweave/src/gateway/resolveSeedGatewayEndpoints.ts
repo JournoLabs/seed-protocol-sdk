@@ -184,10 +184,10 @@ const LOOPBACK_HOSTNAME = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$|\.local
  */
 function sidecarReachableFromHere(config: SeedGatewayConfig, origin: string | undefined): boolean {
   if (config.hyper?.probeSidecarFromBrowser) return true
-  const pageOrigin =
-    origin ??
-    (typeof window !== 'undefined' && typeof window.location?.origin === 'string' ? window.location.origin : undefined)
-  if (!pageOrigin || typeof window === 'undefined') return true
+  const browserWindow = (globalThis as { window?: { location?: { origin?: string } } }).window
+  if (!browserWindow) return true
+  const pageOrigin = origin ?? browserWindow.location?.origin
+  if (!pageOrigin) return true
   try {
     return LOOPBACK_HOSTNAME.test(new URL(pageOrigin).hostname)
   } catch {
