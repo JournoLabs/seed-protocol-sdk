@@ -5,6 +5,7 @@ import { createEasGraphQLClient } from '../src/EasClient/createEasGraphQLClient.
 import { BaseQueryClient } from '../src/QueryClient/BaseQueryClient.js'
 import { DefaultQueryClient } from '../src/default/QueryClient.js'
 import { getItemVersionsFromEas } from '../src/api.js'
+import { fetchEasModelSchemas } from '../src/modelSchemas.js'
 import { easTimingLogger, timedFetchQuery } from '../src/easTiming.js'
 
 const seedUids = ['0x' + '01'.repeat(32), '0x' + '02'.repeat(32), '0x' + '03'.repeat(32)]
@@ -80,4 +81,11 @@ describe('EAS request timing', () => {
     expect(indexerFetch).toHaveBeenCalledTimes(1)
     expect(lines).toEqual([])
   })
+
+  it('logs the model schema lookup', async () => {
+    debug.enable('seedEas:timing')
+    await fetchEasModelSchemas([{ name: 'Post', level: 'exact' }])
+    expect(lines.map(plain).some((line) => /^fetchQuery fetchEasModelSchemas network \d+ms$/.test(line))).toBe(true)
+  })
+
 })

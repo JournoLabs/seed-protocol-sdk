@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- A tab that opens while another tab is uploading no longer marks that publish `interrupted`. `restoreFromDb` takes the publish lock before deciding a row can't be resumed, and gives it back after marking an abandoned one. It marked the other tab's live publish, whose later progress saves were then skipped as stale.
+- `uploadApiBaseUrl` is optional in `PublishConfig`; it is still required unless `payment.storage` is `'user'`, which `initPublish` checks. The resolved config's is `''` when unset.
+- `MissingSignedDataItemsError` is exported, so a resumed publish's upload failure can be matched with `instanceof` as well as `code: 'SIGNED_DATA_ITEMS_MISSING'`.
 - Cost estimates measure charged bytes on the signed data items (each upload plus its ANS-104 header and tags), as Turbo and the bundler charge them. An upload just under Turbo's free size was estimated free though its signed data item is charged.
 - With user-paid storage, `estimatePublishCost` reads Turbo's free data item size from its `/v1/info` (cached 10 minutes per upload URL) and falls back to 102,400 bytes when Turbo doesn't answer. It always used 102,400; Turbo reports 107,520. Estimates report it as `arweave.freeBytes`, and where uploads go as `arweave.uploadTo`.
 - `watchPublishCost`'s built-in price refresh keeps the estimate's gas, charged bytes, payers, upload target and testnet, and applies the new rates (new `repricePublishCostEstimate`). It recomputed with only `evmUserPays`, so a Turbo or testnet estimate was repriced as an upload-API mainnet one.

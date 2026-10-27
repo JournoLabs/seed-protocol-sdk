@@ -125,8 +125,11 @@ export interface PublishConfig {
    * How non-Thirdweb wallets submit txs. Defaults to `eip7702` when `bundlerUrl` is set, else `eoa`.
    */
   accountMode?: PublishAccountMode
-  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Data items are uploaded to its bundler routes. */
-  uploadApiBaseUrl: string
+  /**
+   * Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Data
+   * items are uploaded to its bundler routes. Required unless `payment.storage` is `'user'`.
+   */
+  uploadApiBaseUrl?: string
   /**
    * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
    * them once at app bootstrap with
@@ -367,6 +370,7 @@ export interface ResolvedPublishConfig extends PublishConfig {
    * Use {@link requireManagedAccountFactoryAddress} where a factory is mandatory.
    */
   thirdwebAccountFactoryAddress: string | undefined
+  /** `''` when unset (user-paid storage). */
   uploadApiBaseUrl: string
   /** Resolved verification origin (defaults to uploadApiBaseUrl). */
   arweaveUploadVerificationBaseUrl: string
@@ -424,8 +428,8 @@ export function getPublishConfig(): ResolvedPublishConfig {
       '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
-  const arweaveUploadVerificationBaseUrl =
-    config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
+  const uploadApiBaseUrl = config.uploadApiBaseUrl ?? ''
+  const arweaveUploadVerificationBaseUrl = config.arweaveUploadVerificationBaseUrl ?? uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
   const useModularExecutor = config.useModularExecutor ?? false
   const chain = config.chain ?? DEFAULT_PUBLISH_CHAIN
@@ -441,6 +445,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
     easChain,
     useDirectEas: config.useDirectEas ?? false,
     useModularExecutor,
+    uploadApiBaseUrl,
     arweaveUploadVerificationBaseUrl,
     arweaveGraphqlUrl,
     autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,

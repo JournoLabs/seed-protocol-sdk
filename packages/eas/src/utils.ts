@@ -1,8 +1,5 @@
 import { keccak256Hex } from './keccak.js'
 
-export const toSnakeCase = (str: string): string =>
-  str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
-
 /** EIP-55 checksum for a 20-byte hex address (with or without 0x prefix). */
 export function checksumAddress(address: string): string {
   const addr = address.toLowerCase().replace(/^0x/, '')

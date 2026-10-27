@@ -4,6 +4,11 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `normalizeBytes32Hex` returns `''` for a value that isn't 64 hex digits (with or without `0x`). It left-padded short values and turned non-hex characters into `0`, so `collectPublishedBatch({ seedUid: '0xabc' })` built a batch for a padded UID. Decoded BigNumber values (`{ hex }`) are padded by the new `bytes32FromNumberHex`.
+- **Breaking:** `toSnakeCase` is removed. It kept the old rule (`HTMLPage` → `htmlpage`); use `easName`.
+- A caller's abort signal keeps the 30 s request timeout where `AbortSignal.any` or `AbortSignal.timeout` don't exist (Safari before 17.4, Node before 20.3). The timeout dropped when a caller passed a signal, and didn't apply at all without `AbortSignal.timeout`.
+- `fetchEasModelSchemas` logs its lookup under `DEBUG=seedEas:timing`, like the other api helpers.
+- `engines` declares Node 20.18.1 or later: `@seedprotocol/eas/node` uses `process.getBuiltinModule` (Node 20.16) and undici 7 (20.18.1).
 - `getSeedsBySchemaName(schemaName, limit, skip, { attesters })` adds an `attester: { in: [...] }` condition with each address checksummed. With no address in the list, it returns `[]` without a request.
 - `checksumAddresses(addresses)` checksums a list for an `attester` or `recipient` filter and drops values that aren't 20-byte hex addresses. `getSeedsFromSchemaUids`, `getPublishedByFromEas`, `getDomainOwnershipFromEas` and `getPublishAuthorizationFromEas` use it, so a non-address in their address lists is left out of the request instead of sent.
 
