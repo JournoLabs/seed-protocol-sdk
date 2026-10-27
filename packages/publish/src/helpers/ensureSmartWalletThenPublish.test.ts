@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
-import { isPublishWallet, isSeedSigner } from './seedSigner'
+import { isPublishWallet } from './seedSigner'
 
 const cfg = { useModularExecutor: true as boolean }
 const getConnectedManagedAccountAddressMock = mock(() =>
@@ -34,7 +34,7 @@ mock.module('./thirdweb', () => ({
 }))
 
 mock.module('./adapters/thirdwebAccount', () => ({
-  fromThirdwebAccount: (account: { address: string }) => {
+  fromThirdwebAccount: (account: { address: string }, options?: { kind?: string }) => {
     const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
     const SEED_TX_SENDER_BRAND = Symbol.for('seedprotocol.SeedTxSender')
     const address = account.address as `0x${string}`
@@ -49,7 +49,7 @@ mock.module('./adapters/thirdwebAccount', () => ({
       },
       { [SEED_TX_SENDER_BRAND]: true as const },
     )
-    return { signer, txSender }
+    return { signer, txSender, ...(options?.kind && { kind: options.kind }) }
   },
 }))
 
@@ -118,7 +118,10 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
     expect(address).toBe('0xmanaged0000000000000000000000000000000001')
     expect(isPublishWallet(account)).toBe(true)
     expect(account.signer.address.toLowerCase()).toBe(modular.address.toLowerCase())
-    expect(isSeedSigner(opts?.dataItemSigner)).toBe(true)
+    // The in-app EOA publishes as the ManagedAccount; createPublish picks its data item signer
+    // (the session's, else this EOA's), so none is fixed here.
+    expect(account.kind).toBe('modular')
+    expect(opts?.dataItemSigner).toBeUndefined()
     expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
   })
 

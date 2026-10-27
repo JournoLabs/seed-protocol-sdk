@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `ItemPublishOptions.dataItemSigner` is typed: an object with an `address` and `signMessage`, such as an ethers `Wallet` or a @seedprotocol/publish `SeedSigner`. Any value type-checked through the index signature.
 - New `entityLoadError(instance)`: the error an entity's last load failed with, while its `status` is `'error'`.
 - Emitting `syncDbWithEas` or `fs.downloadAll.request` on `eventEmitter` warns once outside production that nothing handles it any more, and what to call instead (`client.syncFromEas()`). Both did nothing silently since the SDK stopped listening for them.
 - `client.removeLocalCopiesForAddresses(addresses, { includeUnpublished })` keeps a local copy that holds unpublished edits (a metadata row with no attestation uid) or a pending outbox op when its publisher is still an owned address, and lists it in the new `keptSeedLocalIds` (decision D24). It deleted those with the rest, so edits not yet published or applied were lost. `{ includeUnpublished: true }` removes them too.
