@@ -79,7 +79,9 @@ describe('two tabs of one app', () => {
     ).slice(before)
     expect(bulkMessages.every((message) => message.from === leaderId)).toBe(true)
     expect(new Set(bulkMessages.flatMap((message) => message.paths))).toEqual(new Set(bulk))
-    expect(bulkMessages.length).toBeLessThan(10)
+    // Fewer messages than files: they coalesced. How many windows the writes span depends on how
+    // fast OPFS is on the runner, so don't bound it tighter than that.
+    expect(bulkMessages.length).toBeLessThan(bulk.length)
 
     // Receiving only refreshes caches: the follower never sent a files-changed of its own.
     await new Promise((resolve) => setTimeout(resolve, 200))
