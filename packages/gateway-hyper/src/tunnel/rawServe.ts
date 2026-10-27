@@ -4,7 +4,7 @@ import HyperDHT from 'hyperdht'
 import { createAllowlist } from './allowlist'
 import { safeEmitter } from './events'
 import { pipeRaw } from './rawPipe'
-import { encodePublicKeyZ32, loadOrCreateOperatorKeypair, toOperatorKeypair } from '../keys'
+import { encodePublicKeyZ32, resolveOperatorKeypair } from '../keys'
 import type { ServeRawTunnelOptions, ServeRawTunnelResult } from '../types'
 
 /** Default operator key file for raw mode, apart from the framed tunnel's key. */
@@ -34,9 +34,7 @@ export function parseTcpUpstream(upstream: string): { host: string; port: number
 export async function serveRawTunnel(options: ServeRawTunnelOptions): Promise<ServeRawTunnelResult> {
   const upstream = parseTcpUpstream(options.upstream)
   const allowlist = createAllowlist(options.allowlist)
-  const keypair = options.keyPair
-    ? toOperatorKeypair(options.keyPair)
-    : loadOrCreateOperatorKeypair(options.keyFile ?? DEFAULT_RAW_OPERATOR_KEY_FILE)
+  const keypair = resolveOperatorKeypair(options, DEFAULT_RAW_OPERATOR_KEY_FILE)
   const emit = safeEmitter(options.onEvent)
   const open = new Set<Duplex>()
   let connections = 0

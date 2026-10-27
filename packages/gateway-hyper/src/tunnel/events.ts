@@ -128,3 +128,17 @@ export function createIdSource(): { stream: () => string; request: () => string 
     request: () => `${run}-r${++requests}`,
   }
 }
+
+/** One `tunnel-trace` line per event: ISO time, event name, then `key=value` fields. */
+export function formatTunnelEvent(
+  event: TunnelEvent | RawTunnelEvent | RawClientEvent,
+  now = new Date(),
+): string {
+  const parts = [now.toISOString(), 'tunnel-trace', event.name]
+  for (const [key, value] of Object.entries(event)) {
+    if (key === 'name' || value === undefined || value === null) continue
+    const text = String(value)
+    parts.push(`${key}=${/[\s"=]/.test(text) ? JSON.stringify(text) : text}`)
+  }
+  return parts.join(' ')
+}

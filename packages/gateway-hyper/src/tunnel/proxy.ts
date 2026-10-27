@@ -6,7 +6,11 @@ import type { UpstreamPhase } from './events'
 import type { TunnelMeta } from '../types'
 
 /** Default idle limit on the operator's upstream socket. */
-export const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000
+/**
+ * Above @seedprotocol/publish's 120 s batch upload, so an upload API that stays quiet while it
+ * stores a large batch answers before the operator gives up on it.
+ */
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 130_000
 
 export type ProxyTunnelRequestOptions = {
   /** Fail with `UpstreamTimeoutError` once the upstream socket is idle this long. 0 disables. */

@@ -11,11 +11,11 @@ import {
   type TunnelEventListener,
   type UpstreamPhase,
 } from './events'
-import { encodePublicKeyZ32, loadOrCreateOperatorKeypair } from '../keys'
+import { encodePublicKeyZ32, resolveOperatorKeypair } from '../keys'
 import type { ServeTunnelOptions, ServeTunnelResult } from '../types'
 
 export type TunnelConnectionOptions = {
-  /** Idle limit on each upstream request. Default 30 000; 0 disables. */
+  /** Idle limit on each upstream request. Default 130 000; 0 disables. */
   upstreamTimeoutMs?: number
   /** Receives this stream's events; see `TunnelEvent`. */
   onEvent?: TunnelEventListener
@@ -184,9 +184,13 @@ export async function serveTunnelConnection(
  */
 export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTunnelResult> {
   const upstream = options.upstream.replace(/\/$/, '')
-  const keyFile = options.keyFile ?? '.seed/gateway-tunnel/operator.key.json'
+  if (/^https:\/\//i.test(upstream)) {
+    throw new Error(
+      `serveTunnel speaks plain HTTP to its upstream; got ${upstream}. Point it at an http:// origin, or use serveRawTunnel (seed-gateway serve --raw) to carry TLS end to end.`,
+    )
+  }
   const allowlist = createAllowlist(options.allowlist)
-  const keypair = loadOrCreateOperatorKeypair(keyFile)
+  const keypair = resolveOperatorKeypair(options, '.seed/gateway-tunnel/operator.key.json')
   const emit = safeEmitter(options.onEvent)
   const ids = createIdSource()
 
@@ -208,7 +212,9 @@ export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTun
     },
     (socket) => {
       const verdict = allowlist.check(socket)
-      // Refuse before serveTunnelConnection attaches a reader, so nothing is read.
+      // Refuse before serveTunnelConnection attaches a reader, so nothing is read. The client
+      // gets a 403 for the request it sends, rather than a reset it can't tell from a network
+      // failure.
       if (!verdict.ok) {
         emit?.({
           name: 'stream.refused',
@@ -217,7 +223,13 @@ export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTun
           host: verdict.host,
         })
         socket.on('error', () => {})
-        socket.destroy()
+        const refusal = errorResponse(
+          403,
+          `Gateway Hyper: this operator's allowlist doesn't include this client (address ${verdict.host ?? 'unknown'}).`,
+        )
+        writeTunnelResponse(socket, { status: refusal.status, headers: refusal.headers }, refusal.body)
+          .then(() => socket.end())
+          .catch(() => socket.destroy())
         return
       }
       const streamId = ids.stream()

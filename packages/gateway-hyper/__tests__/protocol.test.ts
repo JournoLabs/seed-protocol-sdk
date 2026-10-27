@@ -44,4 +44,12 @@ describe('gateway-hyper protocol', () => {
     expect(parsed.meta).toEqual(meta)
     expect(parsed.body.toString()).toBe('ok')
   })
+
+  it("says the other side runs in raw mode when it sends plain HTTP instead of a frame", async () => {
+    const [writer, reader] = duplexPair()
+    const readPromise = readTunnelResponse(reader)
+    writer.write(Buffer.from('HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n'))
+    await expect(readPromise).rejects.toThrow(/plain HTTP.*raw mode/)
+  })
+
 })
