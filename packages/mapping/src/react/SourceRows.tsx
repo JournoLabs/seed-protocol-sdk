@@ -234,7 +234,7 @@ export function SourceRows({
               {row.state === 'conflict' && (
                 <div
                   className={slotClass('validation', classNames)}
-                  style={{ color: 'var(--fm-danger)' }}
+                  style={{ color: 'var(--sfm-color-danger)' }}
                 >
                   property already mapped by another row
                 </div>

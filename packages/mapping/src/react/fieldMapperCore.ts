@@ -588,17 +588,31 @@ export function newRowId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+/**
+ * Row ids for `next`, carried over from `prev` so a row keeps its id (and React key) when others
+ * are added or removed: a mapping object still in the list keeps its id; an edited one (a new
+ * object where an old one went) takes the id of the old one it replaced, in order; any other
+ * gets a new id.
+ */
 export function syncEdgeIds(
-  prev: string[],
-  mappingCount: number,
+  prev: { mappings: readonly FieldMapping[]; ids: readonly string[] },
+  next: readonly FieldMapping[],
 ): string[] {
-  if (prev.length === mappingCount) return prev
-  if (prev.length > mappingCount) return prev.slice(0, mappingCount)
-  const next = [...prev]
-  while (next.length < mappingCount) {
-    next.push(newRowId('edge'))
-  }
-  return next
+  if (prev.mappings === next && prev.ids.length === next.length) return [...prev.ids]
+  const kept = new Map<FieldMapping, number>()
+  prev.mappings.forEach((mapping, index) => {
+    if (prev.ids[index] !== undefined && !kept.has(mapping)) kept.set(mapping, index)
+  })
+  const used = new Set<number>()
+  const ids: (string | undefined)[] = next.map((mapping) => {
+    const index = kept.get(mapping)
+    if (index === undefined || used.has(index)) return undefined
+    used.add(index)
+    return prev.ids[index]
+  })
+  const nextSet = new Set(next)
+  const freed = prev.ids.filter((_, index) => !used.has(index) && !nextSet.has(prev.mappings[index]!))
+  return ids.map((id) => id ?? freed.shift() ?? newRowId('edge'))
 }
 
 export function filterPropertyNames(

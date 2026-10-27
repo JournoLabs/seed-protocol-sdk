@@ -25,11 +25,8 @@ export function coerceValue(rawValue: string, dataType: string): unknown {
     return parseFloat(String(rawValue)) || 0
   }
   if (dataType === 'Boolean') {
-    return (
-      rawValue === 'true' ||
-      rawValue === '1' ||
-      String(rawValue).toLowerCase() === 'yes'
-    )
+    const v = String(rawValue).trim().toLowerCase()
+    return v === 'true' || v === '1' || v === 'yes'
   }
   if (dataType === 'Json') {
     try {
@@ -97,7 +94,7 @@ function applyLookupEdge(
   target: TargetProperty,
   lookups: MappingLookups | undefined,
 ): { value: string | string[] } | { unmatched: string } {
-  const rawValue = normalizeLookupKey(source.value || source.label)
+  const rawValue = normalizeLookupKey(source.value ?? '')
   const mapped = resolveLookupMapped(mapping, rawValue, lookups)
   if (mapped === undefined) {
     return { unmatched: rawValue }
@@ -140,8 +137,8 @@ export function applyMapping(
     // Never copy a raw string onto relation / list-of-relation targets.
     if (isRelationLookupTarget(target)) continue
 
-    const raw = source.value || source.label
-    properties[mapping.propertyName] = coerceValue(raw, target.dataType)
+    // The value only: an empty field copies as empty, not as its label (the field's name).
+    properties[mapping.propertyName] = coerceValue(source.value ?? '', target.dataType)
   }
 
   return properties
@@ -187,8 +184,7 @@ export async function applyMappingAsync(
         : undefined
       if (!source) continue
       if (isRelationLookupTarget(target)) continue
-      const raw = source.value || source.label
-      properties[mapping.propertyName] = coerceValue(raw, target.dataType)
+      properties[mapping.propertyName] = coerceValue(source.value ?? '', target.dataType)
       continue
     }
 

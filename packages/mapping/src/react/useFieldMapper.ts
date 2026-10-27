@@ -58,14 +58,20 @@ export function useFieldMapper({
     mappingsPropRef.current = mappings
     mappingsRef.current = mappings
   }
-  const edgeIdsRef = useRef<string[]>([])
-  edgeIdsRef.current = syncEdgeIds(edgeIdsRef.current, mappingsRef.current.length)
-  const edgeIds = edgeIdsRef.current
+  // The ids and the mappings they were given for, so a row keeps its id across edits elsewhere.
+  const edgeIdsRef = useRef<{ mappings: readonly FieldMapping[]; ids: string[] }>({ mappings: [], ids: [] })
+  if (edgeIdsRef.current.mappings !== mappingsRef.current) {
+    edgeIdsRef.current = {
+      mappings: mappingsRef.current,
+      ids: syncEdgeIds(edgeIdsRef.current, mappingsRef.current),
+    }
+  }
+  const edgeIds = edgeIdsRef.current.ids
 
   const commitMappings = useCallback(
     (next: FieldMapping[]) => {
       mappingsRef.current = next
-      edgeIdsRef.current = syncEdgeIds(edgeIdsRef.current, next.length)
+      edgeIdsRef.current = { mappings: next, ids: syncEdgeIds(edgeIdsRef.current, next) }
       onChange(next)
     },
     [onChange],

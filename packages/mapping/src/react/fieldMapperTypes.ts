@@ -93,7 +93,7 @@ export type UseFieldMapperResult = {
   propertyOptions: FieldMapperOption[]
   addableProperties: TargetProperty[]
   coverage: FieldMapperCoverage
-  /** Row ids whose property is already filled by an earlier row. Empty in property mode. */
+  /** Ids of rows that map the same property as another row, the first such row included. Empty in property mode. */
   conflicts: Set<string>
   setSource: (rowId: string, sourceId: string | null) => void
   setProperty: (rowId: string, propertyName: string) => void
