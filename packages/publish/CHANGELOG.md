@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- New `describePublishRun(value)`: the display phase of a publish machine value (`preparing`, `uploading`, `attesting`, `retracting`, `done`, `failed` or `stopped`), whether the run waits for `retry` (`awaitingRetry`), and whether it has ended (`terminal`). Every state of the publish machine is mapped; no value or an unknown one reads as `preparing`, not terminal.
+- `useItemPublishStatus().isActive` is false once the run's value is terminal (`success`, `failure`, `stopping`). It was true with a `success` or `failure` value while the final save was written, because the run stays in `publishProcesses` until that save finishes, and while the row still read `in_progress`. A run waiting for `retry` stays active.
+
 ## 0.7.12 (2026-10-27)
 
 - `PublishProvider` (both entries) takes `seedConfig`, `addresses` and `onInitError` and passes them to the `SeedProvider` it renders, which initializes the Seed client when `seedConfig` is set (decision D25). It passed only the QueryClient, so the client had to be started some other way (`client.init`, `SeedClientGate`).

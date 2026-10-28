@@ -13,6 +13,66 @@ export function getDisplayStepId(machineValue: string): string {
   return machineValue
 }
 
+/** Coarse phase of a publish run, for UIs that show one label per stage. */
+export type PublishRunPhase =
+  | 'preparing'
+  | 'uploading'
+  | 'attesting'
+  | 'retracting'
+  | 'done'
+  | 'failed'
+  | 'stopped'
+
+export type PublishRunDescription = {
+  phase: PublishRunPhase
+  /** The run is parked on an error and continues when it receives `retry` (`PublishManager.retryAttestations`). */
+  awaitingRetry: boolean
+  /** The publish machine reached a final state; it will not change again. */
+  terminal: boolean
+}
+
+/**
+ * Every top-level state of `publishMachine` (`services/publish/index.ts`). The machine has no
+ * nested states, so its value is always one of these names. A test fails when a machine state
+ * is missing here.
+ */
+export const PUBLISH_RUN_STATE_PHASES: Readonly<Record<string, PublishRunDescription>> = {
+  authorizing: { phase: 'preparing', awaitingRetry: false, terminal: false },
+  checking: { phase: 'preparing', awaitingRetry: false, terminal: false },
+  preparingHtmlEmbedded: { phase: 'preparing', awaitingRetry: false, terminal: false },
+  creatingArweaveDataItems: { phase: 'uploading', awaitingRetry: false, terminal: false },
+  uploadingViaBundler: { phase: 'uploading', awaitingRetry: false, terminal: false },
+  // Runs between the two uploads of an Html item with embedded media.
+  rewritingHtmlEmbedded: { phase: 'uploading', awaitingRetry: false, terminal: false },
+  creatingArweaveDataItemsPhase2: { phase: 'uploading', awaitingRetry: false, terminal: false },
+  uploadingViaBundlerPhase2: { phase: 'uploading', awaitingRetry: false, terminal: false },
+  creatingAttestations: { phase: 'attesting', awaitingRetry: false, terminal: false },
+  attestationFailureRecoverable: { phase: 'attesting', awaitingRetry: true, terminal: false },
+  creatingAttestationsDirectToEas: { phase: 'attesting', awaitingRetry: false, terminal: false },
+  attestationFailureRecoverableDirectToEas: { phase: 'attesting', awaitingRetry: true, terminal: false },
+  revokingRetractedProperties: { phase: 'retracting', awaitingRetry: false, terminal: false },
+  retractionFailureRecoverable: { phase: 'retracting', awaitingRetry: true, terminal: false },
+  // Reached only on `redundantPublishProcess`: another run already covers the item.
+  stopping: { phase: 'stopped', awaitingRetry: false, terminal: true },
+  [PublishMachineStates.SUCCESS]: { phase: 'done', awaitingRetry: false, terminal: true },
+  [PublishMachineStates.FAILURE]: { phase: 'failed', awaitingRetry: false, terminal: true },
+}
+
+const NOT_STARTED: PublishRunDescription = { phase: 'preparing', awaitingRetry: false, terminal: false }
+
+/**
+ * The display phase of a publish machine value (`usePublishProcess().value`,
+ * `useItemPublishStatus().publishValue`). `undefined`, or a value this version does not know,
+ * reads as `preparing` and not terminal.
+ */
+export function describePublishRun(value: string | undefined): PublishRunDescription {
+  const entry =
+    value !== undefined && Object.hasOwn(PUBLISH_RUN_STATE_PHASES, value)
+      ? PUBLISH_RUN_STATE_PHASES[value]
+      : undefined
+  return { ...(entry ?? NOT_STARTED) }
+}
+
 type PublishRowStatus = 'in_progress' | 'completed' | 'failed' | 'interrupted'
 
 /**
