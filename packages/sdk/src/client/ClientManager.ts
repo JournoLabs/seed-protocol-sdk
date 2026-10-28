@@ -251,8 +251,11 @@ const clientInstance = {
   },
   /**
    * Initialise the SDK. Calls made while an init is running share it. Once initialised, a
-   * call with the same config resolves at once and applies any change in `addresses`; a
-   * call with a different config throws INIT_CONFIG_CONFLICT_MESSAGE (call stop() first).
+   * call with the same config resolves at once and replaces the stored addresses with any
+   * different non-empty `addresses`; an empty set (`[]`, the value hosts pass before a wallet
+   * connects) keeps them, so remounting a gate doesn't drop a connected wallet. Clear them with
+   * `setAddresses([])`. A call with a different config throws INIT_CONFIG_CONFLICT_MESSAGE
+   * (call stop() first).
    */
   init: async (options: SeedConstructorOptions): Promise<void> => {
     if (activeInitConfig !== undefined && !isEqual(activeInitConfig, options?.config)) {
@@ -268,6 +271,7 @@ const clientInstance = {
     }
     if (isRepeat && options?.addresses !== undefined) {
       const wanted = normalizeAddressConfig(options.addresses)
+      if (wanted.owned.length === 0 && wanted.watched.length === 0) return
       const current = { owned: await getOwnedAddressesFromDb(), watched: await getWatchedAddressesFromDb() }
       if (!isEqual(wanted, current)) {
         await clientInstance.setAddresses(wanted)
