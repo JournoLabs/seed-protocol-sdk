@@ -51,4 +51,39 @@ describe('feed items', () => {
     expect(item!.html).toBe(`<p><img src="https://arweave.net/raw/${TX}"></p>`)
     expect((item!.image as { arweaveUrl: string }).arweaveUrl).toBe(`https://arweave.net/raw/${IMAGE}`)
   })
+
+  it('give a stored transaction an ar:// guid that stays put when the public gateway changes', async () => {
+    const record = { seedUid: '0xstored', data: { seedUid: '0xstored', title: 'Stored', storageTransactionId: TX } }
+    mockQueryBySchema.mockResolvedValue({ items: [Object.freeze(record)] })
+    const items = []
+    for (const publicArweaveBaseUrl of ['https://arweave.net', 'https://gateway.example']) {
+      setResolvedSeedGatewayEndpoints({
+        mode: 'http-gateway',
+        arweaveHost: 'arweave.net',
+        arweaveProtocol: 'https',
+        arweaveBaseUrl: 'https://arweave.net',
+        arweaveGraphqlUrl: 'https://arweave.net/graphql',
+        uploadApiBaseUrl: '',
+        activePath: 'http-gateway',
+        publicArweaveBaseUrl,
+      } as any)
+      items.push((await getFeedItemsBySchemaName('post'))[0]!)
+    }
+    expect(items.map((item) => item.guid)).toEqual([`ar://${TX}`, `ar://${TX}`])
+    expect(items.map((item) => item.link)).toEqual([
+      `https://arweave.net/raw/${TX}`,
+      `https://gateway.example/raw/${TX}`,
+    ])
+  })
+
+  it('keep an item\'s own link as its guid', async () => {
+    const record = {
+      seedUid: '0xlinked',
+      data: { seedUid: '0xlinked', title: 'Linked', storageTransactionId: TX, link: 'https://example.com/p/1' },
+    }
+    mockQueryBySchema.mockResolvedValue({ items: [Object.freeze(record)] })
+    const [item] = await getFeedItemsBySchemaName('post')
+    expect(item!.guid).toBe('https://example.com/p/1')
+  })
 })
+

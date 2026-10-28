@@ -31,4 +31,22 @@ describe('createFeed item ids', () => {
     expect(atom).toContain('<id>https://example.com/posts/1</id>')
     expect(json.items[0].id).toBe('https://example.com/posts/1')
   })
+
+  it('keeps an item\'s own Atom updated and links', async () => {
+    const own = {
+      ...post,
+      updated: '2026-10-01T00:00:00.000Z',
+      links: [{ href: 'https://example.com/elsewhere/1' }],
+    }
+    const atom = await createFeed([own as any], 'post', 'atom')
+    expect(atom).toContain('<updated>2026-10-01T00:00:00.000Z</updated>')
+    expect(atom).toContain('href="https://example.com/elsewhere/1"')
+    expect(atom).not.toContain('href="https://example.com/posts/1"')
+  })
+
+  it('marks an ar:// guid as not a permalink in RSS', async () => {
+    const rss = await createFeed([{ ...post, guid: 'ar://feedTx' } as any], 'post', 'rss')
+    expect(rss).toContain('<guid isPermaLink="false">ar://feedTx</guid>')
+  })
 })
+
