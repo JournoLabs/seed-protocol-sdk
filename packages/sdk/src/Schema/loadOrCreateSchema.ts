@@ -6,8 +6,8 @@ import { applySchemaFile, resolveSchemaRow, SCHEMA_FILE_FORMAT } from '@/helpers
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
-import { eq, desc } from 'drizzle-orm'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
+import { and, eq, desc } from 'drizzle-orm'
 import debug from 'debug'
 import { evictionLog, type ActorBacked } from '@/helpers/entity/entityCache'
 import { holdChild } from '@/helpers/entity/entityLifecycle'
@@ -44,6 +44,31 @@ const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
     logger(`Error querying model IDs for schema ${schemaId}:`, error)
     return []
   }
+}
+
+/**
+ * The schema's unsaved local edits, from the rows' is_edited flags, as Schema `_editedProperties`
+ * keys: `schema:models` for a model created at runtime, `<model>:<property>` for an edited or added
+ * property. A load starts with them, so edits made while no instance held the schema still reach
+ * the next saveNewVersion.
+ */
+const getEditedKeysForSchema = async (db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>, schemaId: number): Promise<string[]> => {
+  const editedModels = await db
+    .select({ id: modelsTable.id })
+    .from(modelSchemas)
+    .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+    .where(and(eq(modelSchemas.schemaId, schemaId), eq(modelsTable.isEdited, true)))
+    .limit(1)
+  const editedProperties: Array<{ modelName: string; propertyName: string }> = await db
+    .select({ modelName: modelsTable.name, propertyName: propertiesTable.name })
+    .from(modelSchemas)
+    .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+    .innerJoin(propertiesTable, eq(propertiesTable.modelId, modelsTable.id))
+    .where(and(eq(modelSchemas.schemaId, schemaId), eq(propertiesTable.isEdited, true)))
+  return [
+    ...(editedModels.length > 0 ? ['schema:models'] : []),
+    ...editedProperties.map(({ modelName, propertyName }) => `${modelName}:${propertyName}`),
+  ]
 }
 
 /**
@@ -90,6 +115,8 @@ export type LoadedSchema = {
   loadedAt: number
   dbVersion: number
   dbUpdatedAt: number
+  /** `_editedProperties` keys of the rows' unsaved local edits; the schema loads as a draft when any */
+  editedKeys: string[]
   /** True when no row or file had this name and the schema was created */
   created: boolean
 }
@@ -185,6 +212,7 @@ export async function loadOrCreateSchema(schemaName: string, owner?: ActorBacked
       loadedAt,
       dbVersion: created.schema.version,
       dbUpdatedAt: loadedAt,
+      editedKeys: [],
       created: true,
     }
   }
@@ -192,6 +220,7 @@ export async function loadOrCreateSchema(schemaName: string, owner?: ActorBacked
   logger(`Found schema record: name="${row.name}", isDraft=${row.isDraft}`)
   const { schema } = await resolveSchemaRow(row, db)
   const modelIds = row.id ? await getModelIdsForSchema(row.id) : []
+  const editedKeys = row.id ? await getEditedKeysForSchema(db, row.id) : []
   await createModelInstances(modelIds, since, owner)
   return {
     schema,
@@ -200,6 +229,7 @@ export async function loadOrCreateSchema(schemaName: string, owner?: ActorBacked
     loadedAt,
     dbVersion: row.version || schema.version,
     dbUpdatedAt: row.updatedAt || loadedAt,
+    editedKeys,
     created: false,
   }
 }

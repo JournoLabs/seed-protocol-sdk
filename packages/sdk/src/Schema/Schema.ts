@@ -934,7 +934,7 @@ export class Schema {
       },
     )
     // Clear edited flags on the cached ModelProperty instances of the edited keys, then on the rows
-    // (schema, those properties, the schema's models) in one transaction.
+    // (schema, the edited keys' properties, the schema's models) in one transaction.
     const { ModelProperty } = await import('../ModelProperty/ModelProperty')
     const thisSchemaName = this.schemaName
     const clearedKeys: Array<{ modelName: string; propertyName: string }> = []
@@ -950,8 +950,8 @@ export class Schema {
           (!ctx._schemaName || ctx._schemaName === thisSchemaName)
         )
       })
-      if (!cachedInstance) continue
-      cachedInstance.getService().send({ type: 'clearEdited' })
+      // The row's flag clears too when no instance is cached: a load reads it back as an edit
+      cachedInstance?.getService().send({ type: 'clearEdited' })
       clearedKeys.push({ modelName, propertyName })
     }
 

@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A Schema loaded after a ModelProperty edit or rename, or after a model was created at runtime, starts as a draft with those edits, read from the rows' `is_edited` flags, so `saveNewVersion()` writes them to the next version file. It loaded with no edits and returned `''`, leaving a rename made while no Schema instance was loaded (or before a reload) in the database but never in a schema file. `saveNewVersion` now clears `is_edited` on each saved property's row even when no instance of the property is cached.
+
 ## 0.7.12 (2026-10-27)
 
 - `TabLockTimeoutError` is exported from `@seedprotocol/sdk/node`. Node throws it when a storage-value or ItemStorage save waits longer than the lock timeout (60 s), through Web Locks on Node 24.5+ or the in-process fallback before that.

@@ -173,7 +173,7 @@ export const schemaMachine = setup({
       },
       {
         actions: assign(({ event }) => {
-          const { schema, schemaRecord, modelIds, loadedAt, dbVersion, dbUpdatedAt } = event.output
+          const { schema, schemaRecord, modelIds, loadedAt, dbVersion, dbUpdatedAt, editedKeys } = event.output
           return {
             schemaName: schema.metadata.name,
             $schema: schema.$schema,
@@ -183,9 +183,9 @@ export const schemaMachine = setup({
             enums: schema.enums,
             migrations: schema.migrations,
             nameMatch: schema.nameMatch,
-            _isDraft: false,
-            _isEdited: schemaRecord?.isEdited ?? false,
-            _editedProperties: new Set<string>(),
+            _isDraft: editedKeys.length > 0,
+            _isEdited: (schemaRecord?.isEdited ?? false) || editedKeys.length > 0,
+            _editedProperties: new Set<string>(editedKeys),
             _validationErrors: undefined,
             id: schema.id, // schemaFileId (string)
             _dbId: schemaRecord?.id, // Database integer ID
