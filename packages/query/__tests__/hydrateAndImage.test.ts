@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   BaseArweaveClient,
+  isGatewayHostCircuitOpen,
   resetGatewayCircuitBreakerForTests,
   setArweaveContentReadTransform,
 } from '@seedprotocol/arweave'
@@ -152,6 +153,49 @@ describe('hydrateArweaveRichTextInItems', () => {
     await hydrateArweaveRichTextInItems(items)
     expect(items[0]!.html).toBe('<p>from a fallback</p>')
     expect(fetchMock.mock.calls[0]![0]).toBe(url)
+  })
+
+  it('tries the next gateway on a 404 without opening the first gateway\'s circuit', async () => {
+    const url = `https://arweave.net/${txId(6)}`
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (requested: string) =>
+        requested.startsWith('https://arweave.net/')
+          ? { ok: false, status: 404, headers: { get: () => '' } }
+          : htmlResponse('<p>from a fallback</p>'),
+      ),
+    )
+
+    const items = [{ html: url }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe('<p>from a fallback</p>')
+    expect(isGatewayHostCircuitOpen('https://arweave.net')).toBe(false)
+  })
+
+  it('opens a gateway\'s circuit on a 5xx or 429', async () => {
+    for (const [n, status] of [[7, 503], [8, 429]] as const) {
+      resetGatewayCircuitBreakerForTests()
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, headers: { get: () => '' } })))
+      await hydrateArweaveRichTextInItems([{ html: `https://arweave.net/${txId(n)}` }])
+      expect(isGatewayHostCircuitOpen('https://arweave.net')).toBe(true)
+    }
+  })
+
+  it('fetches a /raw/ link as /raw/ on each gateway', async () => {
+    const url = `https://arweave.net/raw/${txId(9)}`
+    const fetchMock = vi.fn(async (requested: string) =>
+      requested.startsWith('https://arweave.net/')
+        ? { ok: false, status: 404, headers: { get: () => '' } }
+        : htmlResponse('<p>raw</p>'),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const items = [{ html: url }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe('<p>raw</p>')
+    const requested = fetchMock.mock.calls.map(([u]) => u)
+    expect(requested[0]).toBe(url)
+    expect(requested.slice(1).every((u) => u.endsWith(`/raw/${txId(9)}`))).toBe(true)
   })
 
   it('moves the hydrated body\'s Arweave links onto the reader\'s first gateway', async () => {
