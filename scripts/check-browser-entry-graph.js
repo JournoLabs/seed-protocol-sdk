@@ -24,7 +24,7 @@ const FORBIDDEN = [
   { name: 'node:crypto', re: /(?:from|import)\s+['"]node:crypto['"]/ },
   { name: 'drizzle-orm/migrator', re: /(?:from|import)\s+['"]drizzle-orm\/migrator['"]/ },
   { name: 'js-sha3', re: /(?:from|import)\s+['"]js-sha3['"]/ },
-  // Node-only EAS dispatcher (@seedprotocol/eas/node), loaded with createRequire.
+  // Node-only EAS dispatcher (@seedprotocol/eas/node), loaded with a dynamic import.
   { name: 'undici', re: /['"]undici['"]/ },
   // Loading these registers Node clients over the page's own (SDK) clients.
   {

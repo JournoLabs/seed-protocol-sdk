@@ -42,7 +42,8 @@ function withTimeout(init: FetchInit, timeoutMs: number): { init: FetchInit; don
 export type EasGraphQLClientOptions = {
   /**
    * Passed to `fetch` as `dispatcher` on every request (Node's fetch takes an undici
-   * `Dispatcher` there; other runtimes ignore it). `@seedprotocol/eas/node` sets one.
+   * `Dispatcher` there; other runtimes ignore it). A promise is awaited before each request is
+   * sent. `@seedprotocol/eas/node` sets one.
    */
   dispatcher?: unknown
 }
@@ -57,8 +58,13 @@ export function createEasGraphQLClient(
     // Resolved per call, so a fetch replaced after construction (tests, polyfills) is used.
     fetch: (input: Parameters<typeof fetch>[0], init?: FetchInit) => {
       const { init: timed, done } = withTimeout(init, timeoutMs)
-      const requestInit = dispatcher ? ({ ...timed, dispatcher } as FetchInit) : timed
-      return timedEasFetch(() => fetch(input, requestInit), init).finally(done)
+      const send = async () => {
+        const resolved: unknown = await dispatcher
+        // Aborted (caller or timeout) while the dispatcher was resolving: don't send.
+        if (timed?.signal?.aborted) throw timed.signal.reason
+        return fetch(input, resolved ? ({ ...timed, dispatcher: resolved } as FetchInit) : timed)
+      }
+      return timedEasFetch(send, init).finally(done)
     },
   })
 }

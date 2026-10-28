@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `createEasNodeDispatcher` is async and returns `Promise<Dispatcher | undefined>`. It loads undici's Agent with `import('undici/lib/dispatcher/agent.js')`, which bundlers resolve from `@seedprotocol/eas` and `@vercel/nft` traces. It loaded it with `createRequire(import.meta.url)`, so in an app that bundles `@seedprotocol/eas` (Astro with `ssr.noExternal`) the require resolved from the app's chunk and the first EAS request failed with "Cannot find module 'undici/lib/dispatcher/agent.js'" where only eas could reach undici (Bun isolated installs), and serverless functions shipped without undici. `NodeEasClient` creates the dispatcher once and awaits it before each request, so the first request still goes through the Agent.
+- `createEasGraphQLClient`'s `dispatcher` option takes a promise, awaited before each request is sent.
+
 ## 0.7.12 (2026-10-27)
 
 - **Breaking:** `normalizeBytes32Hex` returns `''` for a value that isn't 64 hex digits (with or without `0x`). It left-padded short values and turned non-hex characters into `0`, so `collectPublishedBatch({ seedUid: '0xabc' })` built a batch for a padded UID. Decoded BigNumber values (`{ hex }`) are padded by the new `bytes32FromNumberHex`.
