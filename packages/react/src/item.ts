@@ -61,6 +61,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const [, setEasHydrationTick] = useState(0)
   /** Bumped when one of the item's property values changes. */
   const [, setPropertyValuesTick] = useState(0)
+  /** Bumped when one of the item's `IDENTITY_FIELDS` changes. */
+  const [, setIdentityTick] = useState(0)
   const [isMachineBusy, setIsMachineBusy] = useState(false)
   const [machineError, setMachineError] = useState<Error | null>(null)
   const hasSeenIdleRef = useRef(false)
@@ -119,17 +121,26 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }, [queryClient])
 
   // Follow the item: busy after it loaded and its machine left idle (publishing), or a failed load.
+  // Also re-render when its uids or publish state change while it stays idle (sync, another tab,
+  // a publish recorded late, unpublish).
   useEffect(() => {
     hasSeenIdleRef.current = false
     setIsMachineBusy(false)
     setMachineError(null)
     if (!item) return
 
-    const subscription: Subscription = item.getService().subscribe({
+    const service = item.getService()
+    let identity = identityFields(service.getSnapshot()?.context)
+    const subscription: Subscription = service.subscribe({
       // Stopped (unloaded elsewhere, dropped by another tab or a purge): look the item up again
       complete: refetch,
       next: (snapshot: any) => {
         if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
+        const nextIdentity = identityFields(snapshot.context)
+        if (IDENTITY_FIELDS.some((_, i) => !Object.is(nextIdentity[i], identity[i]))) {
+          identity = nextIdentity
+          setIdentityTick((n) => n + 1)
+        }
         if (item.status === 'error') {
           setMachineError(new Error('Item service error'))
           setIsMachineBusy(false)
@@ -196,6 +207,20 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     error: machineError ?? (query.error as Error | null),
   }
 }
+
+/** Item context fields that say which seed and version it is and its publish state. */
+const IDENTITY_FIELDS = [
+  'seedUid',
+  'latestVersionUid',
+  'latestVersionLocalId',
+  'lastVersionPublishedAt',
+  'attestationCreatedAt',
+  'revokedAt',
+  'publisher',
+] as const
+
+const identityFields = (context: object | undefined) =>
+  IDENTITY_FIELDS.map((key) => (context as Record<string, unknown> | undefined)?.[key])
 
 /** Item.retain, stable for useHeldEntities. */
 const retainItem = (item: IItem<any>) => Item.retain(item)
