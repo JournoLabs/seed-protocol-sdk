@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `useItem` re-renders when the item's `seedUid`, `latestVersionUid`, `latestVersionLocalId`, `lastVersionPublishedAt`, `attestationCreatedAt`, `revokedAt` or `publisher` changes while it stays idle (sync, another tab, a publish recorded late, unpublish). It re-rendered only on busy, idle and error transitions, so the component kept showing the draft's uids until something else rendered it.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, `useItems`, `useItem`, `useItemProperty` and `useCreateItem` were missing (TS2305) and named re-exports were typed `any`.

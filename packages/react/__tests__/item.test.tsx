@@ -212,6 +212,18 @@ function UseItemRenderLog({ seedLocalId, log }: { seedLocalId?: string; log: Ite
   return <div data-testid="render-log-title">{String(title ?? '')}</div>
 }
 
+/** Shows a Post's uids from useItem. */
+function UseItemIdentity({ seedLocalId }: { seedLocalId: string }) {
+  const { item, isLoading } = useItem({ modelName: 'Post', seedLocalId })
+  return (
+    <div>
+      <div data-testid="item-identity-loading">{isLoading ? 'true' : 'false'}</div>
+      <div data-testid="item-seed-uid">{item?.seedUid ?? ''}</div>
+      <div data-testid="item-latest-version-uid">{String(item?.latestVersionUid ?? '')}</div>
+    </div>
+  )
+}
+
 // Test component for useItems
 function UseItemsTest({
   modelName,
@@ -1044,6 +1056,27 @@ describe('React Item Hooks Integration Tests', () => {
             () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
             { timeout: WAIT_TIMEOUT_MS },
           )
+        })
+
+        // Sync, another tab or a late publish recording updates the uids of an item that stays idle.
+        it.each([
+          ['latestVersionUid', 'item-latest-version-uid'],
+          ['seedUid', 'item-seed-uid'],
+        ] as const)('shows a new %s that arrives while the item is idle', async (field, testId) => {
+          const item = testItem1!
+          const uid = `0x${'ab'.repeat(32)}`
+          render(<UseItemIdentity seedLocalId={item.seedLocalId} />, { container })
+          await waitFor(() => expect(screen.getByTestId('item-identity-loading').textContent).toBe('false'), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          expect(screen.getByTestId(testId).textContent).not.toBe(uid)
+          await waitForItemIdle(item)
+
+          item.getService().send({ type: 'updateContext', [field]: uid })
+
+          await waitFor(() => expect(screen.getByTestId(testId).textContent).toBe(uid), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
         })
 
         it('loads an item that is not in the cache, as before', async () => {
