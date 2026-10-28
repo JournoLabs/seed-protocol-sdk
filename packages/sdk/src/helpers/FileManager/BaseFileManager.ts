@@ -45,6 +45,9 @@ export abstract class BaseFileManager {
 
   static initializeFileSystem(workingDir?: string): Promise<void> {
     if (this.fileSystemInitialized) {
+      // The mount doesn't depend on the directory. An init after stop() with another filesDir
+      // still has to move the root, or schema files and saves go to the first one.
+      if (workingDir) this.workingDir = workingDir
       return Promise.resolve()
     }
     if (this.initializePromise) {

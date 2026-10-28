@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `client.init` after `client.stop()` with another `filesDir` uses the new directory. The file system kept the first init's directory, so the second init applied the first directory's schema files to the new database (`Schema.all()` returned both schemas), and file reads and saves went to the first directory.
 - New `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`), exported from both entries (decision D36). `Item.find` rejects with it once `readyTimeout` passes without an open database, and client methods throw it after `client.stop()`. Both threw a plain `Error` with that message, which callers could tell from a load failure only by its text. The message is unchanged.
 - `IItemProperty.save` takes `{ timeoutMs }`, like `ItemProperty.save`, so code holding an `IItemProperty` (such as `useItemProperty().property`) can pass it without a cast.
 - `entityLoadError` is exported from `@seedprotocol/sdk/node`.
