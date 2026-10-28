@@ -91,6 +91,7 @@ export { checkBrowserSupport, type BrowserFeature, type BrowserSupport } from '.
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
+export { ClientNotInitializedError } from './client/errors'
 export {
   MODEL_AMBIGUOUS_EVENT,
   type ModelAmbiguousEventPayload,

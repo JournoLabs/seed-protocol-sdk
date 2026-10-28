@@ -38,6 +38,11 @@ describe('@seedprotocol/sdk/node error exports', () => {
     expect(missing).toEqual([])
   })
 
+  it('exports entityLoadError', async () => {
+    const nodeEntry = (await import('@/node/index')) as Record<string, unknown>
+    expect(typeof nodeEntry.entityLoadError).toBe('function')
+  })
+
   it('exports exportArchive', async () => {
     const nodeEntry = (await import('@/node/index')) as Record<string, unknown>
     expect(typeof nodeEntry.exportArchive).toBe('function')

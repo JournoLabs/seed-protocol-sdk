@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest'
 import { client } from '@/client'
 import { CLIENT_ALREADY_STOPPED_WARNING } from '@/client/ClientManager'
-import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
+import { ClientNotInitializedError } from '@/client/errors'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
- * After client.stop(), client methods throw CLIENT_NOT_INITIALIZED, and another stop() or
+ * After client.stop(), client methods throw ClientNotInitializedError, and another stop() or
  * unload() warns and does nothing. init() starts the client again.
  */
 describe('client after stop()', () => {
@@ -26,8 +26,8 @@ describe('client after stop()', () => {
     expect(await client.getAddresses()).toBeDefined()
     client.stop()
 
-    await expect(client.getAddresses()).rejects.toThrow(CLIENT_NOT_INITIALIZED)
-    await expect(client.setAddresses({ owned: [], watched: [] })).rejects.toThrow(CLIENT_NOT_INITIALIZED)
+    await expect(client.getAddresses()).rejects.toThrow(ClientNotInitializedError)
+    await expect(client.setAddresses({ owned: [], watched: [] })).rejects.toThrow(ClientNotInitializedError)
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(() => client.stop()).not.toThrow()

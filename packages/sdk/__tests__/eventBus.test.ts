@@ -48,3 +48,26 @@ describe('removed request events', () => {
     }
   })
 })
+
+/**
+ * Dev-only warnings stay quiet in a browser production bundle that has no `process` global (batch 14
+ * item 5): reading `globalThis.process?.env` counted that as development.
+ */
+describe('dev-only warnings without a process global', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not warn for a removed request event', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      vi.stubGlobal('process', undefined)
+      eventEmitter.emit('fs.downloadAll.request')
+      vi.unstubAllGlobals()
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      warn.mockRestore()
+    }
+  })
+})

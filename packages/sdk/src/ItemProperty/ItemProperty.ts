@@ -67,6 +67,7 @@ import {
 } from './propertyWrite'
 import { getPropertyDefinitionsByFileId, propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import { addCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
+import { isProduction } from '@/helpers/isProduction'
 import type { PropertyType as PropertyRowType } from '@/seedSchema'
 import {
   ModelPropertyDataTypes,
@@ -219,9 +220,6 @@ type PropertyWrite = { done: Promise<void>; opId?: string }
 
 /** A `save()` still waiting after this long logs a warning outside production (decision D30). */
 const SLOW_SAVE_WARNING_MS = 10_000
-
-const isProduction = (): boolean =>
-  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production'
 
 /** A timer that doesn't keep a Node process running. */
 function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {

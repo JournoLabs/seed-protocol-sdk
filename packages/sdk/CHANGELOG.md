@@ -4,6 +4,10 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- New `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`), exported from both entries (decision D36). `Item.find` rejects with it once `readyTimeout` passes without an open database, and client methods throw it after `client.stop()`. Both threw a plain `Error` with that message, which callers could tell from a load failure only by its text. The message is unchanged.
+- `IItemProperty.save` takes `{ timeoutMs }`, like `ItemProperty.save`, so code holding an `IItemProperty` (such as `useItemProperty().property`) can pass it without a cast.
+- `entityLoadError` is exported from `@seedprotocol/sdk/node`.
+- The slow-save warning and the removed-event warning read `process.env.NODE_ENV` in the form bundlers replace, so a browser production build no longer logs them. They read it through `globalThis.process`, which bundlers leave alone, so a bundle with no `process` global, or with the `process` polyfill and its empty `env`, counted as development. With no `process` and no replacement they now stay quiet.
 - A Schema loaded after a ModelProperty edit or rename, or after a model was created at runtime, starts as a draft with those edits, read from the rows' `is_edited` flags, so `saveNewVersion()` writes them to the next version file. It loaded with no edits and returned `''`, leaving a rename made while no Schema instance was loaded (or before a reload) in the database but never in a schema file. `saveNewVersion` now clears `is_edited` on each saved property's row even when no instance of the property is cached.
 
 ## 0.7.12 (2026-10-27)
