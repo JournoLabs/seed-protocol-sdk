@@ -35,6 +35,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0023](0023-sealed-versions.md) | An owner can seal a Version; revoking a sealed value still removes it | Proposed |
 | [0024](0024-raw-tcp-tunnel-mode.md) | gateway-hyper carries raw TCP as a second protocol, on its own key | Accepted |
 | [0025](0025-gateway-neutral-html-links.md) | Published Html names one gateway; every Seed reader re-hosts its links | Accepted |
+| [0026](0026-statement-and-blob-stores.md) | Seeds publish through statement and blob stores, and link across stores through proxy Seeds | Proposed |
 
 ## Writing one
 
