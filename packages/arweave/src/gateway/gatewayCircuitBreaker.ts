@@ -107,6 +107,16 @@ export function beginGatewayHostHalfOpenProbe(hostOrUrl: string, now = Date.now(
   }
 }
 
+/**
+ * End a half-open probe that gave no answer (the caller aborted it) without recording a result, so
+ * the next caller may probe the host.
+ */
+export function cancelGatewayHostHalfOpenProbe(hostOrUrl: string): void {
+  const key = normalizeGatewayHostKey(hostOrUrl)
+  const c = key ? circuits.get(key) : undefined
+  if (c) c.halfOpenProbeInFlight = false
+}
+
 export function recordGatewayHostSuccess(hostOrUrl: string): void {
   const key = normalizeGatewayHostKey(hostOrUrl)
   if (!key) return

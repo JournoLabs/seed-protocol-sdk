@@ -5,6 +5,7 @@ import {
 } from '../constants.js'
 import {
   beginGatewayHostHalfOpenProbe,
+  cancelGatewayHostHalfOpenProbe,
   isGatewayHostCircuitOpen,
   recordGatewayHostFailure,
   recordGatewayHostSuccess,
@@ -62,11 +63,23 @@ export function getLastHealthyReadGatewayHost(): string | null {
   return lastHealthyReadGatewayHost
 }
 
-/**
- * GET /info with timeout. Treat 2xx + JSON object as healthy.
- * Records circuit-breaker success/failure for the host.
- */
-export async function probeGateway(baseUrl: string, signal?: AbortSignal): Promise<boolean> {
+export type ProbeGatewayOptions = {
+  /** Aborts the probe. A probe the caller aborts resolves false and isn't counted as a failure. */
+  signal?: AbortSignal
+  /** Gives up (and counts a failure) after this long, with or without `signal`. Default 5 s. */
+  timeoutMs?: number
+  /**
+   * Record the result in the gateway circuit breaker, and skip a host whose circuit is open.
+   * Default true. Pass false for a status check that shouldn't change which gateways reads use.
+   */
+  recordCircuit?: boolean
+}
+
+/** GET /info. Healthy when it answers 2xx with a JSON object. */
+export async function probeGateway(
+  baseUrl: string,
+  { signal, timeoutMs = PROBE_TIMEOUT_MS, recordCircuit = true }: ProbeGatewayOptions = {},
+): Promise<boolean> {
   const url = `${baseUrl.replace(/\/$/, '')}/info`
   let hostKey = baseUrl
   try {
@@ -75,47 +88,48 @@ export async function probeGateway(baseUrl: string, signal?: AbortSignal): Promi
     hostKey = baseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')
   }
 
-  if (isGatewayHostCircuitOpen(hostKey)) {
+  if (recordCircuit) {
+    if (isGatewayHostCircuitOpen(hostKey)) return false
+    beginGatewayHostHalfOpenProbe(hostKey)
+  }
+  const record = (healthy: boolean): boolean => {
+    if (recordCircuit) {
+      if (healthy) recordGatewayHostSuccess(hostKey)
+      else recordGatewayHostFailure(hostKey)
+    }
+    return healthy
+  }
+  const callerAborted = (): boolean => {
+    if (recordCircuit) cancelGatewayHostHalfOpenProbe(hostKey)
     return false
   }
-  beginGatewayHostHalfOpenProbe(hostKey)
+  if (signal?.aborted) return callerAborted()
 
-  let timer: ReturnType<typeof setTimeout> | undefined
   const controller = new AbortController()
-  const effectiveSignal = signal ?? controller.signal
-  if (!signal) {
-    timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
-  }
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const onAbort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', onAbort, { once: true })
   try {
     const response = await fetch(url, {
       method: 'GET',
-      signal: effectiveSignal,
+      signal: controller.signal,
       headers: { Accept: 'application/json' },
     })
-    if (!response.ok) {
-      recordGatewayHostFailure(hostKey)
-      return false
-    }
+    if (!response.ok) return record(false)
     const text = await response.text()
-    if (!text.trim()) {
-      recordGatewayHostFailure(hostKey)
-      return false
-    }
+    if (!text.trim()) return record(false)
     try {
       const json = JSON.parse(text) as unknown
-      const ok = typeof json === 'object' && json !== null
-      if (ok) recordGatewayHostSuccess(hostKey)
-      else recordGatewayHostFailure(hostKey)
-      return ok
+      return record(typeof json === 'object' && json !== null)
     } catch {
-      recordGatewayHostFailure(hostKey)
-      return false
+      return record(false)
     }
   } catch {
-    recordGatewayHostFailure(hostKey)
-    return false
+    if (signal?.aborted) return callerAborted()
+    return record(false)
   } finally {
-    if (timer) clearTimeout(timer)
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
   }
 }
 
@@ -129,7 +143,7 @@ export async function selectFirstHealthyReadGateway(
     if (!h) continue
     if (isGatewayHostCircuitOpen(h)) continue
     const baseUrl = `${protocol}://${h}`
-    if (await probeGateway(baseUrl, signal)) {
+    if (await probeGateway(baseUrl, { signal })) {
       return h
     }
   }
