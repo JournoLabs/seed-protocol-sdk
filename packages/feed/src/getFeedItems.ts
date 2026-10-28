@@ -86,11 +86,11 @@ export const setFeedItemDefaults = (
   }
 
   const currentLink = (item.link || item.Link) as string | undefined
-  if (
+  const linkDefaulted =
     !currentLink ||
     currentLink === 'undefined' ||
     (typeof currentLink === 'string' && currentLink.trim() === '')
-  ) {
+  if (linkDefaulted) {
     item.link = defaultLink
     item.Link = defaultLink
   } else {
@@ -108,7 +108,9 @@ export const setFeedItemDefaults = (
     currentGuid === 'undefined' ||
     (typeof currentGuid === 'string' && currentGuid.trim() === '')
   ) {
-    item.guid = item.link || defaultLink
+    // A stored transaction's guid is its ar:// URI (D34), so it doesn't change with the gateway
+    // (`arweaveDomain`) the link is on. An item with its own link keeps that link as its guid.
+    item.guid = storageTransactionId && linkDefaulted ? `ar://${storageTransactionId}` : item.link || defaultLink
     item.Guid = item.guid
   } else {
     if (!item.guid || item.guid === 'undefined') {
@@ -298,11 +300,15 @@ function seedRecordsToFeedItems(
   )
 }
 
+/** Keys `withPublicArweaveLinks` leaves as they are. */
+const GUID_KEYS = new Set(['guid', 'Guid'])
+
 /**
  * `value` with every Arweave link on the public gateway: a field that is a link, and the links in
  * Html fields (ADR 0025). Query gives this reader's URLs (hydrated bodies and image URLs on its
  * first read gateway, which on a Hyper feed server is the local sidecar); RSS readers are outside
- * Seed and need public ones. Returns new arrays and objects; query's records stay as they are.
+ * Seed and need public ones. A `guid` keeps its value. Returns new arrays and objects; query's
+ * records stay as they are.
  */
 function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown {
   if (typeof value === 'string') {
@@ -313,7 +319,8 @@ function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown 
   if (Array.isArray(value)) return value.map((v) => withPublicArweaveLinks(v, publicBaseUrl))
   if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, v]) => [key, withPublicArweaveLinks(v, publicBaseUrl)]),
+      // A guid is an identifier, not a link to follow: it keeps the value it was given (D34).
+      Object.entries(value).map(([key, v]) => [key, GUID_KEYS.has(key) ? v : withPublicArweaveLinks(v, publicBaseUrl)]),
     )
   }
   return value

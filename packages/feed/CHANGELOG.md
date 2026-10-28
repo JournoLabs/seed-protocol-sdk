@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** an item with a storage transaction and no link of its own has the RSS `guid` `ar://<transactionId>` (D34), so Atom entry ids and JSON Feed item ids are that too (D26). Its `link` is still the public gateway URL. The guid was the gateway URL, so changing `arweaveDomain` changed every such item's guid and feed readers showed the items again; after this release they show them again once more, then never on a gateway change. RSS marks these guids `isPermaLink="false"`. A guid is no longer moved onto the public gateway with the item's other Arweave links. A cached feed body keeps the old guids until it is rebuilt.
+- An Atom entry keeps an item's own `title`, `updated` and `links` again. 0.7.12 moved the item's fields before the defaults, so the defaults replaced them.
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Feed declared none.
 
 ## 0.7.12 (2026-10-27)
@@ -11,7 +13,7 @@ All notable changes to this package are documented in this file.
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
 - Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
 - **Breaking:** Atom entry ids and JSON Feed item ids are the item's RSS `guid` (its `guid` field, else its link), so the three formats identify an item the same way (D26). They were the Seed UID. Feed readers show each item of an existing Atom or JSON feed once more as new after the upgrade.
-- The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed.
+- The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed. Cache entries written before 0.7.12 have no site config recorded, so the stale fallback never serves them.
 - A weak `If-None-Match` (`W/"…"`) for the current ETag gets a 304. Proxies that compress the response mark its ETag weak, so their clients never got one.
 - An archive request whose year or month isn't an integer (`NaN` from a non-numeric path segment) returns 400 instead of passing the range check and failing with 500.
 
