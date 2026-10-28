@@ -35,7 +35,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.18.1"
   },
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js && node ../../scripts/ship-ambient-dts.js src/shims.d.ts",
