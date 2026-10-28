@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - New `disconnectPublishWallet()` and `markPublishWalletConnected()` in `@seedprotocol/publish/thirdweb`. `disconnectPublishWallet` removes the in-app auth token from thirdweb's default `walletToken-{clientId}` key and the `seedProtocol:inAppPublish:` one, clears the registered publish wallet, and stops `syncPublishInAppAuthToken` from copying a default-key token back to the prefixed key until `markPublishWalletConnected` runs. `ConnectButton` calls them on disconnect and connect. thirdweb's `logout` removed only the prefixed key, so the next sync restored the session from the default key and a reload signed back in a user who had chosen Disconnect, with the JWT still in localStorage.
+- New `describePublishRun(value)`: the display phase of a publish machine value (`preparing`, `uploading`, `attesting`, `retracting`, `done`, `failed` or `stopped`), whether the run waits for `retry` (`awaitingRetry`), and whether it has ended (`terminal`). Every state of the publish machine is mapped; no value or an unknown one reads as `preparing`, not terminal.
+- `useItemPublishStatus().isActive` is false once the run's value is terminal (`success`, `failure`, `stopping`). It was true with a `success` or `failure` value while the final save was written, because the run stays in `publishProcesses` until that save finishes, and while the row still read `in_progress`. A run waiting for `retry` stays active.
 
 ## 0.7.12 (2026-10-27)
 

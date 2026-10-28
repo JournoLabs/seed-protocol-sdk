@@ -168,10 +168,13 @@ export type { ArweaveL1FinalizeJobRow } from './hooks/useArweaveL1Finalize'
 export { getArweave } from './helpers/blockchain'
 export { buildPublishAnchorBytes, verifyDataItem } from './helpers/arweave'
 export {
+  describePublishRun,
   getDisplayStepId,
   getPublishMachineValueForUi,
   resolvePublishDisplayValue,
   type PublishRowForDisplay,
+  type PublishRunDescription,
+  type PublishRunPhase,
 } from './helpers/publishDisplayHelpers'
 export {
   ensureWalletThenPublish,
