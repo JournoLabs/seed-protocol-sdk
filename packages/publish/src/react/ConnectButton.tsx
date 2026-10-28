@@ -17,9 +17,12 @@ import {
   getSmartWalletAddressForAdmin,
   getWalletsForConnectButton,
   syncPublishInAppAuthToken,
+  disconnectPublishWallet,
+  markPublishWalletConnected,
+  userChosePublishWalletDisconnect,
 } from "../helpers/thirdweb"
 import { fromThirdwebAccount } from "../helpers/adapters/thirdwebAccount"
-import { setPublishWallet, clearPublishWallet } from "../helpers/publishWalletRegistry"
+import { setPublishWallet } from "../helpers/publishWalletRegistry"
 import { usePublishConfig } from "./PublishConfigContext"
 import { getPublishConfig } from "../config"
 import type { Account, Wallet } from "thirdweb/wallets"
@@ -27,9 +30,6 @@ import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
 import { PublishManager } from "../services/publishManager"
 import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
-
-/** Session flag so we do not force autoConnect after an explicit UI disconnect (survives reload). */
-const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
 
 function reportWalletSetupWarning(err: unknown) {
   // Expected when managed-wallet autoConnect is still catching up; publish prep retries.
@@ -119,14 +119,7 @@ const ConnectButton: FC = () => {
     }
     if (navType !== "reload") return
 
-    let userChoseDisconnect = false
-    try {
-      userChoseDisconnect =
-        sessionStorage.getItem(USER_DISCONNECTED_SESSION_KEY) === "1"
-    } catch {
-      userChoseDisconnect = false
-    }
-    if (userChoseDisconnect) return
+    if (userChosePublishWalletDisconnect()) return
 
     if (!prev || isAutoConnecting || connectionStatus !== "disconnected") return
     if (reloadAutoConnectRetried.current) return
@@ -262,23 +255,14 @@ const ConnectButton: FC = () => {
   ])
 
   const handleDisconnect = () => {
-    try {
-      sessionStorage.setItem(USER_DISCONNECTED_SESSION_KEY, "1")
-    } catch {
-      /* private mode / SSR */
-    }
-    void clearPublishWallet()
+    void disconnectPublishWallet()
     PublishManager.stopAll()
   }
 
   const handleConnect = async (activeWallet: Wallet, _allConnectedWallets: Wallet[]) => {
     const account = activeWallet.getAccount()
     if (!account) return
-    try {
-      sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
-    } catch {
-      /* ignore */
-    }
+    markPublishWalletConnected()
     console.log('[ConnectButton] Connected', account.address)
     try {
       await syncActiveWalletToSeed(activeWallet)
