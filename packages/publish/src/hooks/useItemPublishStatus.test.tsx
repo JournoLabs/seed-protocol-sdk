@@ -2,7 +2,6 @@ import { afterAll, describe, expect, test } from 'bun:test'
 // @ts-expect-error jsdom ships no types and @types/jsdom isn't installed
 import { JSDOM } from 'jsdom'
 import React, { act } from 'react'
-import { BaseDb } from '@seedprotocol/sdk'
 import { createActor, fromCallback, fromPromise } from 'xstate'
 import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../test-utils/waitUntil'
 
@@ -11,6 +10,9 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, I
 // No DB at startup: restore finishes at once.
 process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '0'
 
+// Loaded after jsdom: the SDK imports parse5 as ESM while jsdom require()s it, and a static
+// import of both lets Bun hit that require() mid-load ("require() async module").
+const { BaseDb } = await import('@seedprotocol/sdk')
 const { createRoot } = await import('react-dom/client')
 const { useItemPublishStatus } = await import('./useItemPublishStatus')
 const { PublishManager } = await import('../services/publishManager')
