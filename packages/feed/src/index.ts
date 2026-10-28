@@ -577,12 +577,12 @@ export const createFeed = (
         entries: transformedItems.map((item) => {
           // Atom entries require: id, title, updated, links
           const entry: any = {
-            ...item, // Preserve all dynamic properties
-            // The same identifier as RSS's guid (D26)
-            id: item.guid || item.id || item.link,
             title: item.title || 'Untitled',
             updated: item.date || item.pubDate || now,
             links: item.link ? [{ href: item.link }] : [],
+            ...item, // Preserve all dynamic properties, the item's own title, updated and links included
+            // The same identifier as RSS's guid (D26)
+            id: item.guid || item.id || item.link,
           }
           if (item.content) entry.content = item.content
           if (item.description) entry.summary = item.description
