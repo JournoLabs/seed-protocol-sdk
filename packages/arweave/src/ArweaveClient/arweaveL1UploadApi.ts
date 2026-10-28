@@ -187,7 +187,7 @@ export async function queryArweaveGatewayTransactionWithFallback(
   const signal = init?.signal
   for (const host of ordered) {
     const base = `${protocol}://${host}`
-    if (!(await probeGateway(base, signal ?? undefined))) continue
+    if (!(await probeGateway(base, { signal: signal ?? undefined }))) continue
     const gqlUrl = `${protocol}://${host}/graphql`
     const result = await queryArweaveGatewayTransaction(gqlUrl, dataItemId, init)
     if (result !== null) {

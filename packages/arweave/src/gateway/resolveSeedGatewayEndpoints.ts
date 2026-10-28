@@ -12,6 +12,8 @@ import type {
 } from '../types/gateway.js'
 
 const PROBE_TTL_MS = 3 * 60 * 1000
+/** A failed probe is retried sooner, like the read gateway selector's unhealthy result. */
+const PROBE_FAILURE_TTL_MS = 60 * 1000
 
 let sidecarProbeCache: { healthy: boolean; expiresAt: number } | null = null
 const proxyProbeCache = new Map<string, { healthy: boolean; expiresAt: number }>()
@@ -39,7 +41,11 @@ function publicArweaveBaseUrl(config: SeedGatewayConfig): string {
   return `${protocol}://${host}`
 }
 
-function sidecarOrigin(config: SeedGatewayConfig): {
+/**
+ * The local Hyper sidecar's address from `hyper.localSidecarHost` and `hyper.localSidecarPort`,
+ * else the defaults. `host` leaves out port 80 and 443; `baseUrl` always has the port.
+ */
+export function resolveSidecarOrigin(config: SeedGatewayConfig): {
   host: string
   port: number
   baseUrl: string
@@ -91,27 +97,25 @@ export function resolveProxyBaseUrl(
   return `https://${raw.replace(/\/$/, '')}`
 }
 
+/**
+ * Probes `baseUrl`, cached per `cacheKey`: a healthy result for 3 minutes, a failure for 60 s. A
+ * probe cut short by `signal` (the caller or the resolve's `timeoutMs`) is not cached.
+ */
 async function probeUrlHealthy(
   baseUrl: string,
   cacheKey: 'sidecar' | string,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const now = Date.now()
-  if (cacheKey === 'sidecar') {
-    if (sidecarProbeCache && now < sidecarProbeCache.expiresAt) {
-      return sidecarProbeCache.healthy
-    }
-    const healthy = await probeGateway(baseUrl, signal)
-    sidecarProbeCache = { healthy, expiresAt: now + PROBE_TTL_MS }
-    return healthy
-  }
-
-  const cached = proxyProbeCache.get(cacheKey)
+  const cached = cacheKey === 'sidecar' ? sidecarProbeCache : proxyProbeCache.get(cacheKey)
   if (cached && now < cached.expiresAt) {
     return cached.healthy
   }
-  const healthy = await probeGateway(baseUrl, signal)
-  proxyProbeCache.set(cacheKey, { healthy, expiresAt: now + PROBE_TTL_MS })
+  const healthy = await probeGateway(baseUrl, { signal })
+  if (!healthy && signal?.aborted) return false
+  const entry = { healthy, expiresAt: now + (healthy ? PROBE_TTL_MS : PROBE_FAILURE_TTL_MS) }
+  if (cacheKey === 'sidecar') sidecarProbeCache = entry
+  else proxyProbeCache.set(cacheKey, entry)
   return healthy
 }
 
@@ -134,7 +138,7 @@ function buildHttpEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpo
 }
 
 function buildHyperEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpoints {
-  const sidecar = sidecarOrigin(config)
+  const sidecar = resolveSidecarOrigin(config)
   const key = config.hyper?.gatewayHyperKey?.trim()
   return {
     mode: 'hyper',
@@ -197,6 +201,12 @@ function sidecarReachableFromHere(config: SeedGatewayConfig, origin: string | un
 
 export type ResolveSeedGatewayEndpointsOptions = {
   signal?: AbortSignal
+  /**
+   * Time allowed for all of this resolve's probes together. A probe still running when it runs out
+   * counts as unreachable for this resolve only: it isn't cached or recorded in the circuit breaker.
+   * Each probe also times out on its own after 5 s.
+   */
+  timeoutMs?: number
   /** Skip cache and probe sidecar / proxy again. */
   forceSidecarProbe?: boolean
   /**
@@ -234,6 +244,26 @@ export async function resolveSeedGatewayEndpoints(
   if (options?.forceSidecarProbe) {
     invalidateSidecarProbeCache()
   }
+  if (options?.timeoutMs === undefined) return resolveEndpoints(config, options)
+
+  const budget = new AbortController()
+  const timer = setTimeout(() => budget.abort(), options.timeoutMs)
+  const callerSignal = options.signal
+  const onAbort = () => budget.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) onAbort()
+  else callerSignal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await resolveEndpoints(config, { ...options, signal: budget.signal })
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', onAbort)
+  }
+}
+
+async function resolveEndpoints(
+  config: SeedGatewayConfig,
+  options?: ResolveSeedGatewayEndpointsOptions,
+): Promise<ResolvedSeedGatewayEndpoints> {
 
   const mode: SeedGatewayTransportMode = config.transport ?? 'http-gateway'
   const shouldProbe = config.hyper?.probeSidecar !== false
@@ -276,7 +306,7 @@ export async function resolveSeedGatewayEndpoints(
   const proxy = await tryProxyEndpoints({ ...config, transport: mode }, options)
   if (proxy) return proxy
 
-  const sidecar = sidecarOrigin(config)
+  const sidecar = resolveSidecarOrigin(config)
   if (
     shouldProbe &&
     sidecarReachableFromHere(config, options?.origin) &&

@@ -70,7 +70,7 @@ See [GATEWAY_HYPER.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main
 | | Gateway constants and env helpers: `DEFAULT_ARWEAVE_HOST`, `DEFAULT_ARWEAVE_GATEWAYS`, `ARWEAVE_HOST_ENV_KEYS`, `resolveArweaveHostFromEnv`, `getArweaveReadGatewayHostsForPrimary` |
 | | Read gateways: `ensureReadGatewaySelected`, `selectFirstHealthyReadGateway`, `probeGateway`, `getArweaveReadBaseUrls`, `fetchArweaveRawFromBaseUrl`, `fetchArweaveRawTextAcrossGateways`, `setPreferredArweaveReadBaseUrls` |
 | | Circuit breaker: `configureGatewayCircuitBreaker`, `isGatewayHostCircuitOpen`, `recordGatewayHostSuccess` / `recordGatewayHostFailure` |
-| | Gateway config: `resolveSeedGatewayEndpoints`, `seedGatewayConfigFromSeedConfig`, `seedGatewayConfigFromClientContext`, `SeedGatewayConfig`, `ResolvedSeedGatewayEndpoints` |
+| | Gateway config: `resolveSeedGatewayEndpoints`, `resolveSidecarOrigin`, `seedGatewayConfigFromSeedConfig`, `seedGatewayConfigFromClientContext`, `SeedGatewayConfig`, `ResolvedSeedGatewayEndpoints` |
 | | Upload pipeline status: `getArweaveUploadStatus`, `isArweaveL1AnchoringComplete`, `getUploadPipelineTransactionStatus`, `queryArweaveGatewayTransactionWithFallback` |
 | | Media / relation refs: `classifyMediaRef`, `normalizeFeedItemFields`, `getArweaveUrlForTransaction`, `resolveSeedRssImageRelationRef`, `resolveSeedIdsFromRefString` |
 | | GraphQL documents (e.g. `GET_TRANSACTION_TAGS`) and types (`TransactionStatus`, `TransactionTag`, `GetDataOptions`, `DownloadResult`) |

@@ -94,6 +94,8 @@ export const gateway = {
 
 Relative `proxyBaseUrl` resolves against `window.location.origin` in the browser. Node/SSR resolution needs an absolute URL or `resolveSeedGatewayEndpoints(config, { origin })`.
 
+`resolveSeedGatewayEndpoints` probes `{proxyBaseUrl}/info` and the sidecar's `/info`, each for at most 5 s. Pass `{ timeoutMs }` to cap the whole resolve: a probe still running when it runs out counts as unreachable for that resolve only, and isn't cached or counted by the circuit breaker. A healthy probe is cached for 3 minutes and a failed one for 60 s.
+
 **Security:** the proxy is a privileged relay to upload + gateway APIs. Authenticate and rate-limit the route; do not expose an open unauthenticated proxy on the public internet.
 
 Prefer **Node.js** for `@seedprotocol/gateway-hyper` (Bun may crash on Holepunch N-API).
