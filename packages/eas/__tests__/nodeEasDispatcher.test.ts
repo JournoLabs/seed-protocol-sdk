@@ -26,6 +26,15 @@ describe('EAS fetch dispatcher', () => {
     expect(dispatcherOfLastCall()).toBe(dispatcher)
   })
 
+  it('createEasGraphQLClient awaits a dispatcher promise before the request', async () => {
+    vi.stubGlobal('fetch', okFetch)
+    const dispatcher = {}
+    await createEasGraphQLClient('https://indexer.example.com/graphql', 50, { dispatcher: Promise.resolve(dispatcher) }).request(
+      '{ schemas { id } }',
+    )
+    expect(dispatcherOfLastCall()).toBe(dispatcher)
+  })
+
   it('createEasGraphQLClient passes none by default', async () => {
     vi.stubGlobal('fetch', okFetch)
     await createEasGraphQLClient('https://indexer.example.com/graphql', 50).request('{ schemas { id } }')
@@ -55,13 +64,15 @@ describe('EAS fetch dispatcher', () => {
     expect(dispatcherOfLastCall()).toBeUndefined()
   })
 
-  it('createEasNodeDispatcher returns undefined under Bun', () => {
+  it('createEasNodeDispatcher resolves to undefined under Bun or Deno', async () => {
     const versions = process.versions
-    Object.defineProperty(process, 'versions', { value: { ...versions, bun: '1.3.14' }, configurable: true })
-    try {
-      expect(createEasNodeDispatcher()).toBeUndefined()
-    } finally {
-      Object.defineProperty(process, 'versions', { value: versions, configurable: true })
+    for (const runtime of [{ bun: '1.3.14' }, { deno: '2.5.0' }]) {
+      Object.defineProperty(process, 'versions', { value: { ...versions, ...runtime }, configurable: true })
+      try {
+        await expect(createEasNodeDispatcher()).resolves.toBeUndefined()
+      } finally {
+        Object.defineProperty(process, 'versions', { value: versions, configurable: true })
+      }
     }
   })
 
@@ -70,12 +81,12 @@ describe('EAS fetch dispatcher', () => {
     const mock = new MockAgent()
     setGlobalDispatcher(mock)
     try {
-      expect(createEasNodeDispatcher()).toBeUndefined()
+      await expect(createEasNodeDispatcher()).resolves.toBeUndefined()
     } finally {
       setGlobalDispatcher(previous)
       await mock.close()
     }
-    const plain = createEasNodeDispatcher()
+    const plain = await createEasNodeDispatcher()
     expect(plain).toBeInstanceOf(Agent)
     await plain!.close()
   })

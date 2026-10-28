@@ -16,18 +16,18 @@ export type NodeEasClientOptions = {
 
 /** {@link DefaultEasClient} whose requests go through a dispatcher tuned for EAS indexers. */
 export class NodeEasClient extends DefaultEasClient {
-  private dispatcher: Dispatcher | false | undefined
+  private dispatcher: Promise<Dispatcher | undefined> | undefined
 
   constructor(private readonly options: NodeEasClientOptions = {}) {
     super()
-    this.dispatcher = options.dispatcher
   }
 
-  protected override getDispatcher(): Dispatcher | undefined {
-    if (this.dispatcher === undefined) {
-      this.dispatcher = createEasNodeDispatcher(this.options.dispatcherOptions) ?? false
-    }
-    return this.dispatcher || undefined
+  /** Created once, on first use; each request awaits it before calling fetch. */
+  protected override getDispatcher(): Promise<Dispatcher | undefined> {
+    const { dispatcher, dispatcherOptions } = this.options
+    this.dispatcher ??=
+      dispatcher === undefined ? createEasNodeDispatcher(dispatcherOptions) : Promise.resolve(dispatcher || undefined)
+    return this.dispatcher
   }
 }
 
