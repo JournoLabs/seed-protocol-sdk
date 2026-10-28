@@ -30,10 +30,19 @@ export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/grap
  */
 export const DEFAULT_ARWEAVE_GATEWAYS = [
   'arweave.net',
-  'permagate.io',
   'zigza.xyz',
   'ar.seedprotocol.io',
 ] as const
+
+/**
+ * Gateways recognized in stored links but never read from: their `/<id>` URLs still parse as
+ * Arweave links and get re-hosted onto a read gateway. `permagate.io` was a default until it went
+ * down (404 "Application not found" on `/info`, `/raw/<id>` and `/graphql`, 2026-10-27).
+ */
+const RETIRED_ARWEAVE_GATEWAYS = ['permagate.io'] as const
+
+/** {@link DEFAULT_ARWEAVE_GATEWAYS} and the retired gateways: hosts whose `/<id>` paths are Arweave links. */
+export const KNOWN_ARWEAVE_GATEWAYS: readonly string[] = [...DEFAULT_ARWEAVE_GATEWAYS, ...RETIRED_ARWEAVE_GATEWAYS]
 
 const READ_GATEWAYS_ENV_KEYS = ['ARWEAVE_READ_GATEWAYS', 'NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS'] as const
 
@@ -114,7 +123,7 @@ export function isKnownArweaveGatewayHostname(hostname: string): boolean {
   if (!h) return false
   if (h.endsWith('arweave.net')) return true
   if (h.endsWith('ar-io.net')) return true
-  for (const g of DEFAULT_ARWEAVE_GATEWAYS) {
+  for (const g of KNOWN_ARWEAVE_GATEWAYS) {
     const gl = g.toLowerCase()
     if (h === gl || h.endsWith(`.${gl}`)) return true
   }

@@ -81,7 +81,7 @@ reader's gateway list:
   the stored Html.
 
 The reader's read list continues with the public gateway and the default list (`arweave.net`,
-`permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`) after any sidecar or proxy, unless the app
+`zigza.xyz`, `ar.seedprotocol.io`; `permagate.io` was in it until it went down in October 2026) after any sidecar or proxy, unless the app
 replaces the list (`ARWEAVE_READ_GATEWAYS`). Transaction status checks still ask only the sidecar or
 proxy while one is active: a data item it just accepted isn't on the public gateways yet, and their
 404 would read as missing.

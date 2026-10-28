@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ARWEAVE_GRAPHQL_TIMEOUT_MS, DefaultArweaveClient } from '../../src/default/ArweaveClient.js'
+import { ARWEAVE_GRAPHQL_TIMEOUT_MS, DefaultArweaveClient } from '../../src/index.js'
 import { NodeArweaveClient } from '../../src/node/ArweaveClient.js'
 import { setPreferredArweaveReadBaseUrls } from '../../src/gateway/gatewayState.js'
 import { BaseArweaveClient } from '../../src/ArweaveClient/BaseArweaveClient.js'

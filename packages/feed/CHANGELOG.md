@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Feed declared none.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).

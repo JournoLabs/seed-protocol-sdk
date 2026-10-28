@@ -50,16 +50,6 @@ async function fetchStatusFromBaseUrl(baseUrl: string, transactionId: string, ti
 }
 
 /**
- * HTTP status of `GET {gateway}/{id}`, trying read gateways in order
- * ({@link getArweaveReadBaseUrls}: preferred, then the configured host, then public fallbacks; only
- * the proxy or sidecar when one is the active path). A gateway's 2xx-4xx answer is returned as is
- * (a 404 isn't retried elsewhere). A timeout, network error, 5xx or 429 moves on to the next
- * gateway, and gateways whose circuit is open are skipped. When none answers within the total
- * budget the status is 504 if the last attempt timed out, otherwise that attempt's status. A
- * gateway after the first is only asked while the budget left covers its timeout or
- * {@link MIN_TRANSACTION_STATUS_ATTEMPT_MS}, whichever is shorter.
- */
-/**
  * Read gateways for a status check. While a sidecar or proxy is the active path, only it and the
  * preferred gateways are asked: a data item it just accepted isn't on the public gateways yet, and
  * their 404 would read as missing.
@@ -72,6 +62,16 @@ function transactionStatusBaseUrls(): string[] {
   return urls.filter((url) => local.has(url))
 }
 
+/**
+ * HTTP status of `GET {gateway}/{id}`, trying read gateways in order
+ * ({@link getArweaveReadBaseUrls}: preferred, then the configured host, then public fallbacks; only
+ * the proxy or sidecar when one is the active path). A gateway's 2xx-4xx answer is returned as is
+ * (a 404 isn't retried elsewhere). A timeout, network error, 5xx or 429 moves on to the next
+ * gateway, and gateways whose circuit is open are skipped. When none answers within the total
+ * budget the status is 504 if the last attempt timed out, otherwise that attempt's status. A
+ * gateway after the first is only asked while the budget left covers its timeout or
+ * {@link MIN_TRANSACTION_STATUS_ATTEMPT_MS}, whichever is shorter.
+ */
 export async function fetchTransactionStatusAcrossGateways(
   transactionId: string,
   options: TransactionStatusFetchOptions = {},

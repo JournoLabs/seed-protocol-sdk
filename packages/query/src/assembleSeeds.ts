@@ -251,7 +251,8 @@ async function processSeeds(
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
   opts: {
-    dropSeedsWithOnlyRevokedVersions?: boolean
+    /** Leave out seeds with no version from their attester that isn't revoked. */
+    dropUnpublishedSeeds?: boolean
     /**
      * Versions already fetched with `getVersionsForSeeds(…, { includeRevoked: true })` for these
      * seeds (and possibly others, which are ignored), so the request isn't made again.
@@ -291,13 +292,12 @@ async function processSeeds(
   const allVersions = keepAttestationsFromRefAttester(fetchedVersions, seeds)
   const itemVersions = allVersions.filter((v) => v.revoked !== true)
 
-  if (opts.dropSeedsWithOnlyRevokedVersions) {
-    // Like the SDK (latest published version skips revoked ones): every version revoked means
-    // no published version, so the seed is left out. A seed with no version at all is kept.
+  if (opts.dropUnpublishedSeeds) {
+    // Like the SDK (latest published version skips revoked ones): a seed with no version, or
+    // whose versions were all revoked, has no published version and is left out.
     const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
-    for (const version of allVersions) {
-      const seedUid = version.refUID
-      if (seedsWithLiveVersion.has(seedUid) || !requested.has(seedUid)) continue
+    for (const seedUid of seedUids) {
+      if (seedsWithLiveVersion.has(seedUid)) continue
       ctx.assembledItems.delete(seedUid)
       ctx.seedUidToModelType.delete(seedUid)
       ctx.droppedSeedUids.add(seedUid)
@@ -635,7 +635,7 @@ export async function assembleSeedRecords(
   for (const seed of seeds) if (seed) ctx.requestedSeedUids.add(seed.id)
 
   await processSeeds(ctx, seeds, dataSource, {
-    dropSeedsWithOnlyRevokedVersions: true,
+    dropUnpublishedSeeds: true,
     versions: request.versions,
     pins: request.pins && activePins(request.pins),
   })

@@ -245,17 +245,13 @@ describe.sequential('local and remote query sources: seeds with revoked versions
     { seedUid: mixed.seed.uid, versionUid: mixed.versions[0]!.uid, title: 'mixed live' },
   ]
 
-  it('lists the same published seeds from both sources; all-revoked and revoked seeds are left out', async () => {
+  it('lists the same published seeds from both sources; all-revoked, revoked and unversioned seeds are left out', async () => {
     const fromLocal = await list(local)
     const fromRemote = await list(remote)
 
     expect(fromLocal).toEqual(expectedPublished)
-    // Unchanged existing difference: the remote source lists a seed with no version at all (no
-    // versionUid, no data); the local source requires a published version.
-    expect(fromRemote).toEqual([
-      ...expectedPublished,
-      { seedUid: noVersions.seed.uid, versionUid: '', title: undefined },
-    ])
+    // A seed with no version at all is left out by both, like getSeed and getSeeds.
+    expect(fromRemote).toEqual(expectedPublished)
   })
 
   it('getSeed-style assembly leaves out a seed whose versions are all revoked, in both sources', async () => {

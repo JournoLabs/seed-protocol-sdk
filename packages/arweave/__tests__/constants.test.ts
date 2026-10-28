@@ -5,8 +5,10 @@ import {
   DEFAULT_ARWEAVE_GATEWAYS,
   DEFAULT_ARWEAVE_HOST,
   getArweaveReadGatewayHostsForPrimary,
+  isKnownArweaveGatewayHostname,
   resolveArweaveHostFromEnv,
 } from '../src/constants.js'
+import { parseArweaveTransactionLink } from '../src/htmlLinks.js'
 
 describe('resolveArweaveHostFromEnv', () => {
   const keys = ['NEXT_PUBLIC_ARWEAVE_HOST', 'ARWEAVE_HOST', 'VITE_ARWEAVE_HOST'] as const
@@ -53,6 +55,12 @@ describe('getArweaveReadGatewayHostsForPrimary', () => {
   it('keeps every default gateway after a custom primary', () => {
     const hosts = getArweaveReadGatewayHostsForPrimary('gateway.example')
     expect(hosts).toEqual(['gateway.example', ...DEFAULT_ARWEAVE_GATEWAYS])
+  })
+
+  it('reads from no retired gateway, but still recognizes its links', () => {
+    expect(DEFAULT_ARWEAVE_GATEWAYS).not.toContain('permagate.io')
+    expect(isKnownArweaveGatewayHostname('permagate.io')).toBe(true)
+    expect(parseArweaveTransactionLink(`https://permagate.io/${'a'.repeat(43)}`)?.transactionId).toBe('a'.repeat(43))
   })
 
   it('defaults to arweave.net, with Seed\'s gateway kept as a fallback', () => {
