@@ -1,6 +1,6 @@
 import { parseFragment } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
-import { DEFAULT_ARWEAVE_GATEWAYS, isKnownArweaveGatewayHostname } from './constants.js'
+import { KNOWN_ARWEAVE_GATEWAYS, isKnownArweaveGatewayHostname } from './constants.js'
 import { getArweaveReadBaseUrls } from './gateway/readBaseUrls.js'
 
 /**
@@ -67,7 +67,7 @@ function isGatewayHost(host: string, baseUrls: readonly string[]): boolean {
   const h = host.toLowerCase()
   if (isKnownArweaveGatewayHostname(h.replace(/:\d+$/, ''))) return true
   const rootBases = baseUrls.filter((baseUrl) => splitBase(baseUrl)?.path === '')
-  for (const gateway of [...rootBases.map(hostOf), ...DEFAULT_ARWEAVE_GATEWAYS]) {
+  for (const gateway of [...rootBases.map(hostOf), ...KNOWN_ARWEAVE_GATEWAYS]) {
     if (gateway && (h === gateway || h.endsWith(`.${gateway}`))) return true
   }
   return false
@@ -219,7 +219,7 @@ function mayHoldArweaveLinks(html: string, baseUrls: readonly string[]): boolean
   if (html.includes('ar://') || html.includes('/raw/')) return true
   const lower = html.toLowerCase()
   if (lower.includes('arweave.net') || lower.includes('ar-io.net')) return true
-  for (const host of [...baseUrls.map(hostOf), ...DEFAULT_ARWEAVE_GATEWAYS]) {
+  for (const host of [...baseUrls.map(hostOf), ...KNOWN_ARWEAVE_GATEWAYS]) {
     if (host && lower.includes(host)) return true
   }
   return false

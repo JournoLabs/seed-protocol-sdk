@@ -23,6 +23,11 @@ describe('getPublicArweaveBaseUrl', () => {
     expect(getPublicArweaveBaseUrl()).toBe('https://gateway.example')
   })
 
+  it('never writes an app proxy read host before endpoints resolve', () => {
+    BaseArweaveClient.setHost('app.example.com/api/seed-gateway')
+    expect(getPublicArweaveRawUrl(TX)).toBe(`https://arweave.net/raw/${TX}`)
+  })
+
   it('treats an empty arweaveDomain as the default host', async () => {
     setResolvedSeedGatewayEndpoints(await resolveSeedGatewayEndpoints({ transport: 'http-gateway', arweaveDomain: '' }))
     expect(getPublicArweaveRawUrl(TX)).toBe(`https://arweave.net/raw/${TX}`)
