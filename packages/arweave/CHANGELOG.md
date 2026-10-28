@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `parseArweaveTransactionLink` reads `{base}/<id>` back as a link when `base` is a read base URL with a path prefix, such as an app proxy at `https://app.example/api/seed-gateway`. `rehostArweaveLinksInHtml` writes that form for `/<id>` links, but at 0.7.12 nothing parsed it, so `publishedArweaveLinksInHtml` uploaded such links with the proxy URL, `nextArweaveGatewayUrl` (and `SeedHtml`'s load failover) returned `undefined` for them, and re-hosting left them on the proxy. A base with a path prefix no longer makes `/<id>` on its host's root a link: `https://app.example/<id>` parsed as one at 0.7.12.
+- `nextArweaveGatewayUrl` finds the base a URL is on by origin and whole path segments, taking the longest match. With `https://app.example` and `https://app.example/api/seed-gateway` both in the list, a URL on the second moved to the second again instead of the next gateway.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the type import of arweave-js's `CreateTransactionInterface` names `arweave/web/common.js`, which nodenext finds (`arweave/web` was TS2307).

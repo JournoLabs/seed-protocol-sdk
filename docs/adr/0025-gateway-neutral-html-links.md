@@ -69,7 +69,10 @@ reader's gateway list:
   `https?://<host>/<id>` on a known gateway: the configured read list, the default list, and
   `isKnownArweaveGatewayHostname`. `<id>` is a 43-character base64url transaction id. `/raw/` is
   specific to Arweave gateways, so it is matched on any host; a bare `/<id>` path is too common to
-  match on unknown hosts.
+  match on unknown hosts. A read-list base URL with a path prefix (an app proxy such as
+  `https://app.example/api/seed-gateway`) is matched as `{base}/<id>`, and only there: other paths
+  on its host are not links. (Amended 2026-10-27; at 0.7.12 those links did not parse, so publish
+  uploaded them with the proxy URL.)
 - It keeps the path form it found: `/raw/<id>` stays `/raw/<id>`, `/<id>` stays `/<id>`. Gateways
   treat them differently (`/raw/` skips manifest resolution; `arweave.net` redirects `/<id>` to a
   sandbox subdomain). `ar://<id>` becomes `/raw/<id>`.
