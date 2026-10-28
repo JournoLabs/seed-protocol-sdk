@@ -115,3 +115,50 @@ describe('publishedArweaveLinksInHtml', () => {
     )
   })
 })
+
+describe('a base URL with a path prefix (an app proxy)', () => {
+  const PROXY = 'https://app.example/api/seed-gateway'
+  const proxied = [PROXY, 'https://arweave.net', 'https://permagate.io']
+
+  it('reads a bare /<id> under the prefix back as a link', () => {
+    expect(parseArweaveTransactionLink(`${PROXY}/${TX}/index.html?v=2#top`, { baseUrls: proxied })).toEqual({
+      transactionId: TX,
+      form: 'bare',
+      rest: '/index.html?v=2#top',
+    })
+    expect(parseArweaveTransactionLink(`https://APP.example:443/api/seed-gateway/${TX}`, { baseUrls: proxied })).toEqual({
+      transactionId: TX,
+      form: 'bare',
+      rest: '',
+    })
+  })
+
+  it('does not treat other paths on the same host, or the prefix on other hosts, as links', () => {
+    expect(parseArweaveTransactionLink(`https://app.example/${TX}`, { baseUrls: proxied })).toBeUndefined()
+    expect(parseArweaveTransactionLink(`https://app.example/api/other/${TX}`, { baseUrls: proxied })).toBeUndefined()
+    expect(parseArweaveTransactionLink(`https://blog.example/api/seed-gateway/${TX}`, { baseUrls: proxied })).toBeUndefined()
+  })
+
+  it('fails a bare link over to the next gateway', () => {
+    expect(nextArweaveGatewayUrl(`${PROXY}/${TX}`, { baseUrls: proxied })).toBe(`https://arweave.net/${TX}`)
+  })
+
+  it('fails over from the longest matching base when bases share a host', () => {
+    const shared = ['https://app.example', PROXY, 'https://arweave.net']
+    expect(nextArweaveGatewayUrl(`${PROXY}/raw/${TX}`, { baseUrls: shared })).toBe(`https://arweave.net/raw/${TX}`)
+  })
+
+  it('moves a re-hosted bare link off the proxy for upload and for another reader', () => {
+    const html = rehostArweaveLinksInHtml(`<img src="https://arweave.net/${TX}">`, { baseUrls: proxied })
+    expect(html).toBe(`<img src="${PROXY}/${TX}">`)
+    expect(publishedArweaveLinksInHtml(html, { publicBaseUrl: 'https://arweave.net', baseUrls: proxied })).toBe(
+      `<img src="https://arweave.net/${TX}">`,
+    )
+    expect(publishedArweaveLinksInHtml(html, { to: 'ar', publicBaseUrl: 'https://arweave.net', baseUrls: proxied })).toBe(
+      `<img src="ar://${TX}">`,
+    )
+    expect(rehostArweaveLinksInHtml(html, { baseUrls: ['https://permagate.io', PROXY] })).toBe(
+      `<img src="https://permagate.io/${TX}">`,
+    )
+  })
+})

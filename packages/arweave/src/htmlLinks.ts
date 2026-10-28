@@ -33,20 +33,50 @@ const hostOf = (url: string): string | undefined => {
   }
 }
 
-/** Hosts whose `/<id>` paths are Arweave transactions: the read list, the defaults, known gateways. */
+/** A base URL's origin and path prefix (no trailing slash; `''` at the root). */
+function splitBase(baseUrl: string): { origin: string; path: string } | undefined {
+  try {
+    const url = new URL(baseUrl)
+    return { origin: url.origin, path: url.pathname.replace(/\/+$/, '') }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The base URL in `baseUrls` that `url` is on, and the path after the base's path. When several
+ * match (`https://host` and `https://host/proxy`), the one with the longest path wins.
+ */
+function findBase(url: URL, baseUrls: readonly string[]): { index: number; path: string } | undefined {
+  let found: { index: number; path: string; prefixLength: number } | undefined
+  baseUrls.forEach((baseUrl, index) => {
+    const base = splitBase(baseUrl)
+    if (!base || base.origin !== url.origin) return
+    if (base.path && !url.pathname.startsWith(`${base.path}/`)) return
+    if (found && found.prefixLength >= base.path.length) return
+    found = { index, path: url.pathname.slice(base.path.length), prefixLength: base.path.length }
+  })
+  return found && { index: found.index, path: found.path }
+}
+
+/**
+ * Hosts whose root `/<id>` paths are Arweave transactions: known gateways, the defaults, and read
+ * base URLs at a host's root. A base with a path prefix (an app proxy) only claims paths under it.
+ */
 function isGatewayHost(host: string, baseUrls: readonly string[]): boolean {
   const h = host.toLowerCase()
   if (isKnownArweaveGatewayHostname(h.replace(/:\d+$/, ''))) return true
-  for (const gateway of [...baseUrls.map(hostOf), ...DEFAULT_ARWEAVE_GATEWAYS]) {
+  const rootBases = baseUrls.filter((baseUrl) => splitBase(baseUrl)?.path === '')
+  for (const gateway of [...rootBases.map(hostOf), ...DEFAULT_ARWEAVE_GATEWAYS]) {
     if (gateway && (h === gateway || h.endsWith(`.${gateway}`))) return true
   }
   return false
 }
 
 /**
- * Parse `ar://<id>`, `<any host>/raw/<id>` (any path prefix, so an app proxy's URL counts too) or a
- * gateway's `/<id>`. A bare `/<id>` on a host that isn't a known gateway is not a link: the path
- * shape is too common elsewhere.
+ * Parse `ar://<id>`, `<any host>/raw/<id>` (any path prefix, so an app proxy's URL counts too), a
+ * gateway's `/<id>`, or `{base}/<id>` on a base URL in `baseUrls`, path prefix included. A bare
+ * `/<id>` anywhere else is not a link: the path shape is too common elsewhere.
  */
 export function parseArweaveTransactionLink(
   url: string,
@@ -65,8 +95,12 @@ export function parseArweaveTransactionLink(
   const suffix = parsed.search + parsed.hash
   const rawPath = RAW_PATH.exec(parsed.pathname)
   if (rawPath) return { transactionId: rawPath[1]!, form: 'raw', rest: (rawPath[2] ?? '') + suffix }
-  const barePath = BARE_PATH.exec(parsed.pathname)
-  if (barePath && isGatewayHost(parsed.host, options?.baseUrls ?? getArweaveReadBaseUrls())) {
+  const baseUrls = options?.baseUrls ?? getArweaveReadBaseUrls()
+  const base = findBase(parsed, baseUrls)
+  const barePath =
+    (base && BARE_PATH.exec(base.path)) ||
+    (isGatewayHost(parsed.host, baseUrls) ? BARE_PATH.exec(parsed.pathname) : null)
+  if (barePath) {
     return { transactionId: barePath[1]!, form: 'bare', rest: (barePath[2] ?? '') + suffix }
   }
   return undefined
@@ -86,7 +120,12 @@ export function nextArweaveGatewayUrl(url: string, options?: ArweaveLinkOptions)
   const baseUrls = options?.baseUrls ?? getArweaveReadBaseUrls()
   const link = parseArweaveTransactionLink(url, { baseUrls })
   if (!link) return undefined
-  const current = baseUrls.findIndex((base) => url.startsWith(`${base.replace(/\/+$/, '')}/`))
+  let current = -1
+  try {
+    current = findBase(new URL(url.trim()), baseUrls)?.index ?? -1
+  } catch {
+    // ar://<id> and other non-http links are on no base URL
+  }
   const next = baseUrls[current + 1]
   return next ? buildArweaveTransactionLink(link, next) : undefined
 }
