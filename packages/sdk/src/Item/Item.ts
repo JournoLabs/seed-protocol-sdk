@@ -2,8 +2,8 @@ import { IItem, IItemProperty } from '@/interfaces'
 import type { DeleteOp, DeleteResult } from '@/outbox'
 import { timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
+import { ClientNotInitializedError } from '@/client/errors'
 import {
-  CLIENT_NOT_INITIALIZED,
   INTERNAL_PROPERTY_NAMES,
   PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
 } from '@/helpers/constants'
@@ -879,7 +879,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * or it isn't ready in `readyTimeout`.
    *
    * Called while `client.init` runs, it waits for the database to open. It throws
-   * `CLIENT_NOT_INITIALIZED` when the database isn't open within `readyTimeout` (no init, a
+   * `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`) when the database isn't open within `readyTimeout` (no init, a
    * failed or stopped client): an undefined result would read as "no such item".
    */
   static async find({
@@ -904,7 +904,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    if (!(await whenDbReady(readyTimeout))) throw new Error(CLIENT_NOT_INITIALIZED)
+    if (!(await whenDbReady(readyTimeout))) throw new ClientNotInitializedError()
 
     let cached = false
     let held: Item<any> | undefined

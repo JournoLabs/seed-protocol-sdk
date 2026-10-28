@@ -7,7 +7,7 @@ import { clientManagerMachine }   from '@/client/clientManagerMachine'
 // import { BaseDb }                 from '@/db/Db/BaseDb'
 // import { appState }               from '@/seedSchema'
 // import { eq }                     from 'drizzle-orm'
-import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
+import { ClientNotInitializedError } from '@/client/errors'
 import { ClientManagerState } from '@/client/constants'
 import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
@@ -102,7 +102,7 @@ const ensureInitialized = () => {
   const snapshot = clientManager.getSnapshot()
   // After stop() the stopped actor's context still says isInitialized, so check its status too.
   if (snapshot.status !== 'active' || !snapshot.context.isInitialized) {
-    throw new Error(CLIENT_NOT_INITIALIZED);
+    throw new ClientNotInitializedError();
   }
 }
 

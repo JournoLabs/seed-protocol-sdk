@@ -1,3 +1,5 @@
+import { isProduction } from '@/helpers/isProduction'
+
 type EventKey = string | symbol
 type Listener = (...args: any[]) => void
 
@@ -10,9 +12,6 @@ const REMOVED_REQUEST_EVENTS = new Map<EventKey, string>([
   ['fs.downloadAll.request', "files are downloaded after each sync; call client.syncFromEas() to sync"],
 ])
 const warnedRemovedEvents = new Set<EventKey>()
-
-const isProduction = (): boolean =>
-  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production'
 
 class SeedEventEmitter {
   private listeners = new Map<EventKey, Set<Listener>>()
