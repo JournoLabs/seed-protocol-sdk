@@ -27,10 +27,28 @@ describe('client.init called again', () => {
 
   it('resolves with the same config and applies changed addresses', async () => {
     const owned = '0x' + 'a'.repeat(40)
+    const other = '0x' + 'b'.repeat(40)
     await client.init({ ...options, config: structuredClone(options.config), addresses: { owned: [owned] } })
     expect(await client.getAddresses()).toEqual({ owned: [owned], watched: [] })
 
+    await client.init({ ...options, addresses: { owned: [other] } })
+    expect(await client.getAddresses()).toEqual({ owned: [other], watched: [] })
+  })
+
+  it('keeps the addresses set after init when called again with addresses: []', async () => {
+    // A host inits with [] before the wallet connects, adds the wallet's addresses, then remounts
+    // its gate, which calls init with the same options.
+    const owned = '0x' + 'c'.repeat(40)
     await client.init({ ...options, addresses: [] })
+    await client.setAddresses({ owned: [owned] })
+
+    await client.init({ ...options, addresses: [] })
+    expect(await client.getAddresses()).toEqual({ owned: [owned], watched: [] })
+
+    await client.init({ ...options, addresses: { owned: [], watched: [] } })
+    expect(await client.getAddresses()).toEqual({ owned: [owned], watched: [] })
+
+    await client.setAddresses([])
     expect(await client.getAddresses()).toEqual({ owned: [], watched: [] })
   })
 
