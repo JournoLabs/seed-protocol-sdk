@@ -161,7 +161,8 @@ function buildOrderedHostsForProbe(): string[] {
  *
  * When every probe fails, keeps the last known healthy host (if any) instead of
  * treating the preferred-but-unreachable host as selected, and caches
- * `healthy: false` so {@link isReadGatewayKnownHealthy} reflects that.
+ * `healthy: false` so {@link isReadGatewayKnownHealthy} reflects that. When `signal` aborts before a
+ * host passes, nothing is cached and it returns the last healthy host (else the current one).
  */
 export async function ensureReadGatewaySelected(signal?: AbortSignal): Promise<string> {
   if (BaseArweaveClient.isReadGatewayLocked()) {
@@ -181,6 +182,11 @@ export async function ensureReadGatewaySelected(signal?: AbortSignal): Promise<s
     const ordered = buildOrderedHostsForProbe()
     const protocol = BaseArweaveClient.getProtocol()
     const picked = await selectFirstHealthyReadGateway(ordered, protocol, signal)
+
+    // An aborted probe says nothing about the gateways: keep the cache and host as they were.
+    if (!picked && signal?.aborted) {
+      return lastHealthyReadGatewayHost ?? BaseArweaveClient.getHost()
+    }
 
     if (!BaseArweaveClient.isReadGatewayLocked()) {
       if (picked) {

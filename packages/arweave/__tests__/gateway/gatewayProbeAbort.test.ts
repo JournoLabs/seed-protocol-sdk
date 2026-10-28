@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { probeGateway, resetArweaveReadGatewayForTests } from '../../src/ArweaveClient/selectReadGateway.js'
+import {
+  ensureReadGatewaySelected,
+  invalidateReadGatewayCache,
+  isReadGatewayKnownHealthy,
+  probeGateway,
+  resetArweaveReadGatewayForTests,
+} from '../../src/ArweaveClient/selectReadGateway.js'
 import {
   invalidateSidecarProbeCache,
   resolveSeedGatewayEndpoints,
@@ -82,6 +88,35 @@ describe('probeGateway', () => {
     expect(await probeGateway(PROXY, { recordCircuit: false })).toBe(false)
     vi.stubGlobal('fetch', vi.fn(async () => healthyInfo()))
     expect(await probeGateway(PROXY)).toBe(true)
+  })
+})
+
+describe('ensureReadGatewaySelected', () => {
+  it("doesn't cache an aborted probe: the next call probes again", async () => {
+    vi.stubGlobal('fetch', vi.fn(hangingFetch))
+    const controller = new AbortController()
+    const selecting = ensureReadGatewaySelected(controller.signal)
+    controller.abort()
+    await selecting
+
+    const fetchMock = vi.fn(async () => healthyInfo())
+    vi.stubGlobal('fetch', fetchMock)
+    await ensureReadGatewaySelected()
+    expect(fetchMock).toHaveBeenCalled()
+    expect(isReadGatewayKnownHealthy()).toBe(true)
+  })
+
+  it("an aborted probe doesn't mark the read gateway unhealthy", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => healthyInfo()))
+    const healthyHost = await ensureReadGatewaySelected()
+    invalidateReadGatewayCache()
+
+    vi.stubGlobal('fetch', vi.fn(hangingFetch))
+    const controller = new AbortController()
+    const selecting = ensureReadGatewaySelected(controller.signal)
+    controller.abort()
+    expect(await selecting).toBe(healthyHost)
+    expect(isReadGatewayKnownHealthy()).toBe(true)
   })
 })
 
