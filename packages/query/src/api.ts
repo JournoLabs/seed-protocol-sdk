@@ -241,6 +241,11 @@ export function normalizeAttesters(attesters: readonly string[]): string[] | nul
   return out.size > 0 ? [...out] : null
 }
 
+/**
+ * The schema's Seeds as SeedRecords. Like `getSeed` and `getSeeds`, a Seed with no
+ * Version from its attester, or whose Versions were all revoked, is left out; `limit` and `skip`
+ * count listed Seeds, so a page can come back shorter than `limit`.
+ */
 export async function queryBySchema(
   schemaName: string,
   options?: QueryBySchemaOptions,

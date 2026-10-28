@@ -113,6 +113,10 @@ export type GetSeedResult = SeedRecord & {
 }
 
 export type QueryBySchemaOptions = AssembleOptions & {
+  /**
+   * Seeds to list, 100 by default. Seeds with no Version that isn't revoked are dropped after
+   * listing, so a page can hold fewer items than `limit` while later pages still have more.
+   */
   limit?: number
   skip?: number
   /**

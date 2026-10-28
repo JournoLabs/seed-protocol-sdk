@@ -303,6 +303,7 @@ describe('query source local / remote / auto', () => {
     expect(await getSeed('0xunpublished', { source: 'local' })).toBeNull()
     expect(await getSeed('0xunpublished', { source: 'local', include: 'changelog' })).toBeNull()
     expect(await getSeeds(['0xunpublished'], { source: 'local' })).toEqual(new Map())
+    expect((await queryBySchema('post', { source: 'local' })).items).toEqual([])
   })
 
   it('source auto reads remote when the local seed has no Versions', async () => {

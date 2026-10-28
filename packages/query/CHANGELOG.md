@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - Body hydration (`hydrateStorage`) treats a gateway's 4xx other than 429, such as a 404 for a body it doesn't have yet, as a miss: it tries the next read gateway and leaves the first one's circuit closed. A 404 opened the circuit, which took that gateway out of every Arweave read, status check and probe in the process for 60 s.
 - Body hydration fetches a `/raw/<id>` link as `{gateway}/raw/<id>` on each gateway. It fetched `{gateway}/<id>`, which on `arweave.net` redirects to a sandbox subdomain and for a manifest returns the manifest's index instead of the manifest.
+- **Breaking:** `queryBySchema`, `queryBySchemaForMonth` and `assembleSeeds` leave out a seed with no Versions from its attester, as `getSeed` and `getSeeds` have since 0.7.12. They returned a record with `versionUid: ''` and no properties. `limit` and `skip` still count listed seeds, so a page can come back shorter than `limit` while later pages have more.
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Query declared none.
 
 ## 0.7.12 (2026-10-27)
