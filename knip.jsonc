@@ -87,6 +87,8 @@
         "src/index.ts",
         "__tests__/**/*.test.{ts,tsx}",
         "__tests__/setup.browser.ts",
+        // Type tests, compiled by tsconfig.typetests.json.
+        "__tests__/types/**/*.ts",
         // Loaded by __tests__/react-app/index.html.
         "__tests__/react-app/src/main.tsx"
       ],
