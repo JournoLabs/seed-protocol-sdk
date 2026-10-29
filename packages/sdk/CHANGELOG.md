@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Listing a directory in the browser (`Schema.load`, `listCompleteSchemaFiles`, `fs.promises.readdir`) skips a file another context removed between the listing and its stat. The removal surfaced as `TypeError: Cannot set property message of ... which has only a getter`: OPFS's `NotFoundError` reached ZenFS unconverted, and ZenFS failed to append to its read-only message. The OPFS mount's `stat` now fails with `ENOENT` for a removed file and `EIO` for other OPFS errors.
+
 ## 0.7.13 (2026-10-29)
 
 - New `client.resetLocalData({ otherTabsTimeoutMs, filesDir })` (browser) deletes the database and every file under `filesDir` from OPFS and resolves with `{ deleted, failed }`: an entry it can't remove (a file another tab holds open) is listed in `failed` with the browser's error, and the rest are still removed. It stops the client from any state, including after a failed init, posts `close-db` to the other tabs of the database, waits up to `otherTabsTimeoutMs` (default 10 000) for them to close it, and unmounts the file system, so `init` works again without a reload and starts empty. An `init` during the reset waits for it. Each coordinating tab now holds the Web Lock `seed:open:<db>` in shared mode while its database is open; the reset takes it exclusively. A tab that hears `close-db` stops its client and unmounts its file system; it doesn't reload. The client snapshot's new `context.stopReason` (`ClientStopReason`: `'stop' | 'reset'`) says why a stopped client stopped. localStorage is left alone (see `clearInAppPublishSession` in @seedprotocol/publish). In Node, `resetLocalData` throws.

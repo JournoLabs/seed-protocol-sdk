@@ -171,6 +171,18 @@ describe('TolerantWebAccess', () => {
     expect(fs._sync.existsSync('/gone.txt')).toBe(false)
   })
 
+  it('stat() of a file removed before it was indexed fails with ENOENT, not the DOMException', async () => {
+    // Skipped by the mount walk (busy), so stat() reads it from its handle; then another context
+    // removes it. ZenFS's readdir skips ENOENT entries, and adds to the message of any other error,
+    // which a DOMException's getter-only message refuses ("Cannot set property message").
+    let error: DOMException | undefined = new DOMException('busy', 'InvalidStateError')
+    const fs = await mount(dir('', [file('schema_v1.json', 5, () => error)]))
+    expect(fs.index.get('/schema_v1.json')).toBeUndefined()
+
+    error = new DOMException('gone', 'NotFoundError')
+    await expect(fs.stat('/schema_v1.json')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('forgets a file removed between listing and getFile()', async () => {
     const fs = await mount(dir('', [file('seed.db-journal', 512, domError('NotFoundError'))]))
     expect(fs.index.get('/seed.db-journal')).toBeUndefined()
