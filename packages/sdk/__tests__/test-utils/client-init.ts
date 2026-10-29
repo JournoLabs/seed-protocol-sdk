@@ -481,8 +481,16 @@ export async function setupTestEnvironment(options: {
     console.log(`[setupTestEnvironment] Changed working directory to: ${testProjectPath}`)
   }
   
-  // Create config
-  const config = createTestConfig(options.configOverrides)
+  // Browser files share one OPFS database, so addresses an earlier file connected are still stored.
+  // Init without `addresses` keeps them: its startup EAS sync acts on that wallet and schedules a
+  // download of its files from arweave.net, which the network guard fails in whatever test is
+  // running, and the file's unstamped drafts become read-only. `addresses: []` clears them before
+  // the sync. Files that pass their own addresses keep them.
+  const config = createTestConfig(
+    !isNodeEnv && !options.configOverrides?.addresses
+      ? { ...options.configOverrides, addresses: [] }
+      : options.configOverrides,
+  )
   
   // In Node.js, ensure the filesDir directory exists before client initialization
   if (isNodeEnv && config.config.filesDir) {
@@ -524,16 +532,6 @@ export async function setupTestEnvironment(options: {
   // instance. Start each browser test file with only the Seed Protocol schema.
   if (!isNodeEnv) {
     await cleanupTestSchemaData()
-  }
-
-  // Init no longer clears stored addresses when given none (persistInitAddresses), so addresses an
-  // earlier browser file connected would make this file's unstamped drafts read-only. Start each
-  // file without them unless it passes its own.
-  if (!isNodeEnv && !options.configOverrides?.addresses) {
-    const { BaseDb } = await import('@/db/Db/BaseDb')
-    const { appState } = await import('@/seedSchema')
-    const { eq } = await import('drizzle-orm')
-    await BaseDb.getAppDb()?.delete(appState).where(eq(appState.key, 'addresses'))
   }
 
   // Return the test project path so tests can use it

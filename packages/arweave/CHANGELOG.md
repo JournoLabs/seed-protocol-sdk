@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `ArweaveTransaction` is the arweave package's `Transaction`, and `createTransaction` (on `BaseArweaveClient`, `IArweaveClient` and the default client) returns `Promise<ArweaveTransaction>`. Both were `any`, so code that read a property `Transaction` doesn't have now fails to type-check. Nothing changed at runtime.
+
 ## 0.7.13 (2026-10-29)
 
 - **Breaking:** `probeGateway(baseUrl, { signal, timeoutMs, recordCircuit })` takes an options object; it took the signal as its second argument. It times out after `timeoutMs` (default 5 s) whether or not a `signal` is passed: with a signal it had no timeout. A probe the caller aborts resolves `false` without counting as a failure in the gateway circuit breaker. It counted, and since one failure opens a host's circuit for 60 s, a caller's own time budget blocked the host (for a relative proxy, the app's own host) from reads and probes. `recordCircuit: false` probes a host whose circuit is open and leaves the breaker as it is, for status checks.

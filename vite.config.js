@@ -343,6 +343,8 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/nestedWorkerShim.test.ts',
             'packages/sdk/__tests__/browser/db/opfsHandleHeld.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
+            // Browser-only: covers setupTestEnvironment's browser path (shared OPFS database).
+            'packages/sdk/__tests__/browser/setupTestEnvironmentAddresses.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
             'packages/sdk/__tests__/browser/multiTab.e2e.test.ts',
             'packages/sdk/__tests__/browser/resetLocalData.test.ts',

@@ -1,4 +1,4 @@
-import { constants, Inode, vfs } from '@zenfs/core'
+import { constants, ErrnoError, Inode, vfs } from '@zenfs/core'
 import type { CreationOptions, InodeLike } from '@zenfs/core'
 import { dirname, join } from '@zenfs/core/path'
 import { WebAccess, WebAccessFS } from '@zenfs/dom'
@@ -7,6 +7,10 @@ import debug from 'debug'
 import { isSkippableOpfsEntryError } from './opfsErrors'
 
 const logger = debug('seedSdk:browser:helpers:tolerantWebAccess')
+
+/** kerium errno numbers (Errno isn't re-exported by @zenfs/core). */
+const ENOENT = 2
+const EIO = 5
 
 /** The touch WebAccessFS inherits from ZenFS's Async mixin, under its own override. */
 const asyncTouch: WebAccessFS['touch'] = Object.getPrototypeOf(WebAccessFS.prototype).touch
@@ -126,7 +130,20 @@ export class TolerantWebAccessFS extends WebAccessFS {
    */
   async stat(path: string): Promise<Inode> {
     const indexed = this.index.has(path)
-    const inode = (await super.stat(path)) as Inode
+    let inode: Inode
+    try {
+      inode = (await super.stat(path)) as Inode
+    } catch (error) {
+      // WebAccessFS.stat reads a file it hasn't indexed from its handle and lets OPFS's DOMException
+      // through when the file was removed in between (another context, or an unlink racing a
+      // readdir). ZenFS expects an errno error: readdir skips ENOENT entries, and it appends to the
+      // message of other errors, which a DOMException's getter-only message refuses.
+      if (!(error instanceof DOMException)) throw error
+      const converted = new ErrnoError(error.name == 'NotFoundError' ? ENOENT : EIO, error.message)
+      converted.path = path
+      converted.cause = error
+      throw converted
+    }
     // While mounting, sizes were just read and crossCopy stats every file.
     if (!(this as unknown as AsyncState)._isInitialized) return inode
     if (!indexed) await this._cacheIndexed(path, inode)
