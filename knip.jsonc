@@ -75,7 +75,8 @@
       "ignore": ["__tests__/fixtures/next-app/.next*/**"]
     },
     "packages/publish": {
-      "entry": ["src/index.ts", "src/thirdweb.ts", "src/**/*.test.{ts,tsx}"],
+      // test-utils/parse5Loaded.bun.ts is a preload in bunfig.toml.
+      "entry": ["src/index.ts", "src/thirdweb.ts", "src/**/*.test.{ts,tsx}", "test-utils/*.bun.ts"],
       "project": ["src/**/*.{ts,tsx}", "test-utils/**/*.ts"]
     },
     "packages/query": {
