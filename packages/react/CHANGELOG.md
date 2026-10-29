@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `useGlobalServiceStatus()` returns `stopReason`: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client, `'stop'` for `client.stop()` or `client.unload()`, undefined while the client isn't stopped.
 - `useItemProperty` returns `valueStatus` and re-renders when it changes, so an editor can wait for an Html or Image file instead of a timer.
 - `useItem` re-renders when the item's `seedUid`, `latestVersionUid`, `latestVersionLocalId`, `lastVersionPublishedAt`, `attestationCreatedAt`, `revokedAt` or `publisher` changes while it stays idle (sync, another tab, a publish recorded late, unpublish). It re-rendered only on busy, idle and error transitions, so the component kept showing the draft's uids until something else rendered it.
 

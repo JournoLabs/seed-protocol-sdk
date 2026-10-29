@@ -140,6 +140,28 @@ export interface SeedConstructorOptions {
   readonly multiTab?: MultiTabMode
 }
 
+/** Options for `client.resetLocalData()`. */
+export interface ResetLocalDataOptions {
+  /**
+   * How long to wait for other tabs of this database to close it before deleting anyway
+   * (default 10 000 ms). Files a tab still holds open then show up in `failed`.
+   */
+  otherTabsTimeoutMs?: number
+  /**
+   * The directory to delete. Defaults to the `filesDir` of the last `client.init` in this page,
+   * else `.seed`.
+   */
+  filesDir?: string
+}
+
+/** What `client.resetLocalData()` deleted, and what it couldn't. Paths start with `filesDir`. */
+export interface ResetLocalDataResult {
+  /** Every file and directory removed, children before their directory. */
+  deleted: string[]
+  /** Entries that are still there, with the browser's error (`<name>: <message>`). */
+  failed: { path: string; error: string }[]
+}
+
 /**
  * Options for Entity.create() when default behavior is to wait until idle.
  * waitForReady defaults to true; pass { waitForReady: false } for sync return.

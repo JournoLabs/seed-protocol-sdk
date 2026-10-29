@@ -61,6 +61,16 @@ const seedTab = {
     })
   },
   isLeader: () => isLeaderTab(),
+  resetLocalData: (options?: { otherTabsTimeoutMs?: number }) => client.resetLocalData(options),
+  /** The client snapshot's status and, once stopped, why. */
+  clientStatus(): { status: string; stopReason?: string } {
+    const snapshot = client.getService().getSnapshot()
+    return { status: snapshot.status, stopReason: snapshot.context.stopReason }
+  },
+  async seedCount(): Promise<number> {
+    const rows = await db().values<[number]>(sql`SELECT COUNT(*) FROM seeds`)
+    return Number(rows[0][0])
+  },
   async appliedMigrations(): Promise<number> {
     const rows = await db().values<[number]>(sql`SELECT COUNT(*) FROM __drizzle_migrations`)
     return Number(rows[0][0])

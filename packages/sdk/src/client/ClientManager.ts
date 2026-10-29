@@ -1,4 +1,10 @@
-import type { AddressConfiguration, SeedConstructorOptions } from '@/types'
+import type {
+  AddressConfiguration,
+  ClientStopReason,
+  ResetLocalDataOptions,
+  ResetLocalDataResult,
+  SeedConstructorOptions,
+} from '@/types'
 import { isEqual } from 'lodash-es'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 import debug                      from 'debug'
@@ -41,7 +47,10 @@ import { registerClientActor } from '@/client/readiness'
 import { setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
 import { evictAllEntities } from '@/helpers/entity/entityLifecycle'
 import { stopOutbox } from '@/outbox/outbox'
-import { stopTabCoordination } from '@/helpers/tabCoordinator'
+import { onTabMessage, releaseDbOpenLock, stopTabCoordination } from '@/helpers/tabCoordinator'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { isBrowser } from '@/helpers/environment'
+import { applySeedConfigDefaults, DEFAULT_FILES_DIR } from '@/client/seedConfigDefaults'
 import { whenCanonicalizeModelTypesSettled } from '@/db/canonicalizeModelTypes'
 
 const logger               = debug('seedSdk:client')
@@ -92,6 +101,8 @@ const notifyServiceListeners = () => {
 
 /** Config of the init that is running or has succeeded; cleared when init fails or the client stops. */
 let activeInitConfig: SeedConstructorOptions['config'] | undefined
+/** Config of the last init in this page, kept through failures and stops: resetLocalData's filesDir. */
+let lastInitConfig: SeedConstructorOptions['config'] | undefined
 
 export const INIT_CONFIG_CONFLICT_MESSAGE =
   'client.init was already called with a different config. The SDK keeps the config it was ' +
@@ -112,6 +123,11 @@ export const CLIENT_ALREADY_STOPPED_WARNING =
 
 /** Set while a stop releases the client's resources; init waits for it. */
 let stopping: Promise<void> | undefined
+/** Set while resetLocalData runs; init waits for it. */
+let resetting: Promise<unknown> | undefined
+
+/** How long resetLocalData waits for other tabs to close the database by default. */
+const RESET_OTHER_TABS_TIMEOUT_MS = 10_000
 
 /**
  * Shared by stop() and unload(). Stops the client in any state, including after a failed or
@@ -119,7 +135,13 @@ let stopping: Promise<void> | undefined
  * leadership and the database (closed, so its file is released). A repeat call after a stop warns
  * and does nothing.
  */
-const stopClient = async ({ unsubscribe }: { unsubscribe: boolean }): Promise<void> => {
+const stopClient = async ({
+  unsubscribe,
+  reason = 'stop',
+}: {
+  unsubscribe: boolean
+  reason?: ClientStopReason
+}): Promise<void> => {
   if (clientManager.getSnapshot().status === 'stopped') {
     console.warn(CLIENT_ALREADY_STOPPED_WARNING)
     return
@@ -131,6 +153,8 @@ const stopClient = async ({ unsubscribe }: { unsubscribe: boolean }): Promise<vo
   // The next init sets its own period. Instances waiting out this one are evicted with the rest
   // (releaseClientResources), which cancels their timers.
   setEntityUnloadGraceMs(undefined)
+  // The stopped actor keeps its last snapshot, so its context says why it stopped.
+  clientManager.send({ type: 'updateContext', context: { stopReason: reason } })
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()
@@ -150,11 +174,54 @@ const releaseClientResources = async (): Promise<void> => {
   evictAllEntities()
   stopTabCoordination()
   await BaseDb.close()
+  // Only now: a reset waiting for it may delete the database file.
+  releaseDbOpenLock()
+}
+
+/**
+ * Another tab is resetting this database: stop the client, and drop the file system's mount,
+ * whose index lists files about to be deleted. The app decides what to do next (reload, show a
+ * message, init again); the snapshot says `status: 'stopped'`, `context.stopReason: 'reset'`.
+ */
+const stopForOtherTabReset = async (): Promise<void> => {
+  if (clientManager.getSnapshot().status !== 'stopped') {
+    await stopClient({ unsubscribe: false, reason: 'reset' })
+  } else if (stopping) {
+    await stopping
+  }
+  await BaseFileManager.unmountFileSystem()
+}
+
+onTabMessage((message) => {
+  if (message.type !== 'close-db') return
+  void stopForOtherTabReset().catch((error) => logger('stopping for another tab\'s reset failed:', error))
+})
+
+const resetLocalData = async (options: ResetLocalDataOptions = {}): Promise<ResetLocalDataResult> => {
+  if (!isBrowser()) {
+    throw new Error('client.resetLocalData() runs in the browser only; in Node, stop the client and delete filesDir.')
+  }
+  const filesDir =
+    options.filesDir ||
+    clientManager.getSnapshot().context.filesDir ||
+    applySeedConfigDefaults(lastInitConfig)?.filesDir ||
+    DEFAULT_FILES_DIR
+  if (clientManager.getSnapshot().status !== 'stopped') {
+    await stopClient({ unsubscribe: false, reason: 'reset' })
+  } else if (stopping) {
+    await stopping
+  }
+  const { resetBrowserLocalData } = await import('@/browser/helpers/resetLocalData')
+  return resetBrowserLocalData({
+    filesDir,
+    otherTabsTimeoutMs: options.otherTabsTimeoutMs ?? RESET_OTHER_TABS_TIMEOUT_MS,
+  })
 }
 
 const coalescedInit = createCoalescedAsync(async (options: any) => {
-  // A stop still closing the database: open it again only once that's done.
+  // A stop still closing the database, or a reset deleting it: open it again only once that's done.
   if (stopping) await stopping
+  if (resetting) await resetting
 
   // If the actor is stopped (e.g., from a previous failed test), restart it
   const snapshot = clientManager.getSnapshot()
@@ -263,6 +330,7 @@ const clientInstance = {
     }
     const isRepeat = activeInitConfig !== undefined
     activeInitConfig = options?.config
+    lastInitConfig = options?.config
     try {
       await coalescedInit(options)
     } catch (error) {
@@ -399,6 +467,24 @@ const clientInstance = {
   stop: () => stopClient({ unsubscribe: false }),
   /** As `stop`, and also ends the client's internal state subscription. */
   unload: () => stopClient({ unsubscribe: true }),
+  /**
+   * Deletes this database's local data (browser only): stops the client in this tab (from any
+   * state), asks the other tabs of the database to stop theirs (`close-db`), waits up to
+   * `otherTabsTimeoutMs` for them, then removes `filesDir` from OPFS entry by entry and unmounts
+   * the file system. Resolves with what it deleted and what it couldn't, rather than throwing on
+   * the first failure. A client the reset stops, here or in another tab, ends with snapshot
+   * `status: 'stopped'` and `context.stopReason: 'reset'`. `init` works again without a reload and
+   * waits for a reset in progress. localStorage is left alone.
+   */
+  resetLocalData: (options?: ResetLocalDataOptions): Promise<ResetLocalDataResult> => {
+    const run = resetLocalData(options)
+    const settled = run.catch(() => {})
+    resetting = settled
+    void settled.then(() => {
+      if (resetting === settled) resetting = undefined
+    })
+    return run
+  },
 }
 
 // Export the singleton instance

@@ -206,6 +206,17 @@ export class BrowserFileManager implements IFileManager {
     }
   }
 
+  /**
+   * Replaces the OPFS mount at `/` with an empty in-memory one, as ZenFS starts out. The OPFS
+   * mount's index (paths, sizes, what `TolerantWebAccessFS` last saw) goes with it.
+   */
+  async unmountFileSystem(): Promise<void> {
+    if (!this.zenfsCache) return
+    const { mounts, umount, mount, InMemory } = this.zenfsCache
+    if (mounts.has('/')) umount('/')
+    mount('/', InMemory.create({ label: 'root' }))
+  }
+
   async downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult> {
     const fileDownloader = new FileDownloader()
     return fileDownloader.downloadAll(params)

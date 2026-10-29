@@ -38,3 +38,11 @@ export function internalStatus() {
   if (internalStatus === 'loading') return known
   return known
 }
+
+export function stopReason() {
+  const { stopReason } = useGlobalServiceStatus()
+  const known: 'stop' | 'reset' | undefined = stopReason
+  // @ts-expect-error not a stop reason
+  if (stopReason === 'failed') return known
+  return known
+}

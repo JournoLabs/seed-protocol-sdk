@@ -33,7 +33,7 @@ function StatusProbe({ percentLog }: { percentLog?: number[] }) {
   const isClientReady = useIsClientReady()
   const { dbsAreReady } = useDbsAreReady()
   const isDbReady = useIsDbReady()
-  const { status, internalStatus } = useGlobalServiceStatus()
+  const { status, internalStatus, stopReason } = useGlobalServiceStatus()
   const { services, percentComplete: servicesPercent } = useServices()
   const { percentComplete } = useService(useClientService())
   percentLog?.push(percentComplete)
@@ -44,6 +44,7 @@ function StatusProbe({ percentLog }: { percentLog?: number[] }) {
       <div data-testid="db-ready">{String(isDbReady)}</div>
       <div data-testid="status">{String(status)}</div>
       <div data-testid="internal-status">{String(internalStatus)}</div>
+      <div data-testid="stop-reason">{String(stopReason)}</div>
       <div data-testid="services-current">{String(services[0] === client.getService())}</div>
       <div data-testid="services-percent">{servicesPercent}</div>
       <div data-testid="service-percent">{percentComplete}</div>
@@ -99,6 +100,7 @@ describe('client status hooks across stop and init', () => {
     // A stopped client's last state is idle; the hook mustn't report it as running
     expect(text('status')).toBe('stopped')
     expect(text('internal-status')).toBe('stopped')
+    expect(text('stop-reason')).toBe('stop')
     expect(gateLoadingShown()).toBe(true)
 
     percentLog.length = 0
@@ -108,6 +110,7 @@ describe('client status hooks across stop and init', () => {
     expect(text('dbs-ready')).toBe('true')
     expect(text('db-ready')).toBe('true')
     expect(text('internal-status')).toBe('ready')
+    expect(text('stop-reason')).toBe('undefined')
     expect(text('services-current')).toBe('true')
     expect(text('services-percent')).toBe('100')
     expect(text('service-percent')).toBe('100')

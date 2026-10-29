@@ -315,6 +315,48 @@ The browser build stores files under the [Origin Private File System](https://de
 
 3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.7.7` / `1.2.14`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
 
+### Deleting local data
+
+`client.resetLocalData()` deletes the database and every file under `filesDir` from OPFS, for a "start fresh" action when local data stops the app from opening. It works from any client state, including after a failed `client.init`, and needs no reload:
+
+```ts
+import { client } from '@seedprotocol/sdk'
+
+const { deleted, failed } = await client.resetLocalData()
+if (failed.length) {
+  // Each entry is { path, error }, e.g. `${filesDir}/db/seed.db` still open in a tab that didn't close.
+}
+await client.init(options) // starts on an empty database
+```
+
+It stops this tab's client, which closes the database, and posts `close-db` to the other tabs of the same database, each of which stops its client ([MULTI_TAB.md](./MULTI_TAB.md#resetting-local-data)). It waits up to `otherTabsTimeoutMs` (default 10 000) for them to close the database, then deletes `filesDir` one entry at a time. An entry it can't remove goes in `failed` with the browser's error (`NoModificationAllowedError: …`) and the rest are still removed; a directory with a failed entry stays. `deleted` lists what went, children before their directory. Last, it unmounts the file system, whose index still lists the deleted files; the next `init` mounts it again.
+
+The directory is the `filesDir` of the last `client.init` in the page, else `.seed`; pass `{ filesDir }` to name another. A `client.init` called while the reset runs waits for it, in this tab and the others.
+
+A client the reset stops, in this tab or another, ends with `status: 'stopped'` and `context.stopReason: 'reset'` on its snapshot; `client.stop()` and `client.unload()` set `'stop'`. In React, `useGlobalServiceStatus()` returns `stopReason`. The SDK never reloads or navigates: the app decides whether another tab reloads, shows a message or calls `init` again. Outside React, read it from `client.subscribeService`, which runs when the client stops. The tab that called `resetLocalData` sees `'reset'` too, before the delete has finished, so act on it only in the others:
+
+```ts
+let resettingHere = false
+
+client.subscribeService((service) => {
+  const snapshot = service.getSnapshot()
+  if (snapshot.status === 'stopped' && snapshot.context.stopReason === 'reset' && !resettingHere) {
+    showDataDeletedNotice() // or location.reload()
+  }
+})
+
+async function startFresh() {
+  resettingHere = true
+  try {
+    return await client.resetLocalData()
+  } finally {
+    resettingHere = false
+  }
+}
+```
+
+The SDK keeps nothing in localStorage, so the reset leaves it alone. `@seedprotocol/publish/thirdweb` stores the in-app wallet session there; call its `clearInAppPublishSession()` too if the reset should sign the user out. `resetLocalData` throws in Node.
+
 ## Next.js
 
 Use the SDK only in the browser: in client components, initialized through `SeedClientGate`. Wrap your config with `withSeed` from [`@seedprotocol/next`](../packages/next/README.md), which aliases `fs` to ZenFS in browser builds, keeps the SDK's Node code out of server builds, and sends the cross-origin isolation headers under `next dev` and `next start`:
