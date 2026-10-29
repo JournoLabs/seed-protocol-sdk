@@ -1,9 +1,8 @@
-import type { Address, Hex, LocalAccount, SignableMessage } from 'viem'
-import { createPublicClient, http, type Hash } from 'viem'
-import { entryPoint08Address } from 'viem/account-abstraction'
+import type { Address, LocalAccount, SignableMessage } from 'viem'
+import { createPublicClient, http } from 'viem'
+import { createPaymasterClient, entryPoint08Address } from 'viem/account-abstraction'
 import { createSmartAccountClient } from 'permissionless'
 import { to7702SimpleSmartAccount } from 'permissionless/accounts'
-import { createPimlicoClient } from 'permissionless/clients/pimlico'
 import {
   brandTxSender,
   requireSignTypedData,
@@ -12,19 +11,19 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
-import { ManagedAccountPublishError } from '../../errors'
-import { userOpFailureError } from '../describeRevert'
+import { isManagedAccountPublishError } from '../../errors'
+import { assertUserOpSucceeded, bundlerFeesPerGas } from './userOps'
 
 export type CreatePermissionlessTxSenderOptions = {
   signer: SeedSigner
   bundlerUrl: string
-  /** Sponsoring paymaster. Defaults to `bundlerUrl`. */
+  /** Sponsoring paymaster, asked with ERC-7677 `pm_getPaymasterStubData` / `pm_getPaymasterData`. Defaults to `bundlerUrl`. */
   paymasterUrl?: string
   /** `false` sends without a paymaster: the account pays its own gas. Default `true`. */
   sponsored?: boolean
 }
 
-function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
+export function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
   return {
     address: signer.address,
     type: 'local',
@@ -99,65 +98,33 @@ export async function createPermissionlessTxSender(
     },
   })
 
-  const pimlicoUrl = paymasterUrl ?? bundlerUrl
-  const pimlicoClient = createPimlicoClient({
-    transport: http(pimlicoUrl),
-    entryPoint: {
-      address: entryPoint08Address,
-      version: '0.8',
-    },
-  })
-
   const smartAccountClient = createSmartAccountClient({
     account: simpleAccount,
     chain,
     bundlerTransport: http(bundlerUrl),
-    ...(sponsored ? { paymaster: pimlicoClient } : {}),
+    ...(sponsored ? { paymaster: createPaymasterClient({ transport: http(paymasterUrl ?? bundlerUrl) }) } : {}),
     userOperation: {
-      estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
+      estimateFeesPerGas: bundlerFeesPerGas(bundlerUrl, () => publicClient.estimateFeesPerGas()),
     },
   })
 
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
     sendTransaction: async (tx: SeedTxRequest) => {
-      let receipt: UserOpReceiptLike
       try {
-        const userOpHash = await smartAccountClient.sendUserOperation({
+        const hash = await smartAccountClient.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
         })
-        receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash })
+        const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })
+        return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
       } catch (err) {
+        if (isManagedAccountPublishError(err)) throw err
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(
           `@seedprotocol/publish: permissionless/EIP-7702 send failed (${msg}). Ensure bundlerUrl/paymasterUrl support EntryPoint v0.8, or use accountMode: 'eoa' / Thirdweb adapter.`,
           { cause: err },
         )
       }
-      return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
     },
   })
-}
-
-type UserOpReceiptLike = { success: boolean; reason?: string; receipt: { transactionHash: Hash } }
-
-/**
- * Returns the transaction hash of a successful UserOp, and throws for a failed one. The
- * bundle transaction itself succeeds when a UserOp in it fails, so its receipt alone would
- * pass a failed publish off as a success.
- * @throws ManagedAccountPublishError `USEROP_REVERTED` or `USEROP_FAILED_NO_REASON`
- * @internal Exported for unit tests.
- */
-export function assertUserOpSucceeded(receipt: UserOpReceiptLike, sender?: string): Hex {
-  const txHash = receipt.receipt.transactionHash as Hex
-  if (receipt.success) return txHash
-  const reason = receipt.reason
-  if (reason && !/^0x[0-9a-f]*$/i.test(reason)) {
-    throw new ManagedAccountPublishError(
-      `The publish UserOp in transaction ${txHash} failed: ${reason}`,
-      'USEROP_REVERTED',
-      sender,
-    )
-  }
-  throw userOpFailureError({ txHash, revertData: reason as Hex | undefined, sender })
 }

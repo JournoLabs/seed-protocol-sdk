@@ -89,7 +89,18 @@ initPublish({
 })
 ```
 
-`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. ModularCore / ManagedAccount session-key flows remain Thirdweb-only.
+`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. `paymasterUrl` is asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`. Fees come from the bundler's `pimlico_getUserOperationGasPrice` when it answers that method, and from the chain's estimate otherwise.
+
+To send as a Seed ManagedAccount without Thirdweb, build its sender with `createManagedAccountTxSender`. It sends UserOps through any EntryPoint v0.6 bundler, sponsored by an ERC-7677 paymaster unless `sponsored: false`, and raises the bundler's `callGasLimit` estimate by `CALL_GAS_HEADROOM_BPS` (1.2x) before the paymaster signs. Without `managedAddress` it uses the account the signer administers through the factory, and its first UserOp deploys it. A session key the account granted can sign too; pass `managedAddress` then.
+
+```ts
+const txSender = await createManagedAccountTxSender({
+  signer: owner.signer, // admin EOA or session key
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  paymasterUrl: import.meta.env.VITE_PAYMASTER_URL,
+})
+await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, admin: { signer: owner.signer, txSender } })
+```
 
 ### Recipe 3: Thirdweb ConnectButton (batteries-included)
 

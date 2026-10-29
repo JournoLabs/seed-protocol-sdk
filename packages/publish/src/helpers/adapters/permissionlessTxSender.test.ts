@@ -2,7 +2,8 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { entryPoint06Address, entryPoint08Address } from 'viem/account-abstraction'
 import { encodeErrorResult } from 'viem'
 import { seedErrorsAbi } from '../abi/seedErrors'
-import { assertBundlerSupportsEntryPoint08, assertUserOpSucceeded } from './permissionlessTxSender'
+import { assertBundlerSupportsEntryPoint08 } from './permissionlessTxSender'
+import { assertUserOpSucceeded } from './userOps'
 
 let entryPoints: unknown = []
 const server = Bun.serve({

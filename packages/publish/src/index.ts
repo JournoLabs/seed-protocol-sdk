@@ -99,6 +99,11 @@ export {
   fromWindowEthereum,
 } from './helpers/adapters/eip1193'
 export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
+export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
+export {
+  createManagedAccountTxSender,
+  type CreateManagedAccountTxSenderOptions,
+} from './helpers/adapters/managedAccountTxSender'
 export {
   setPublishWallet,
   getPublishWallet,
