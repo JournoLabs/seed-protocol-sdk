@@ -11,6 +11,7 @@ export { assembleSeedChangelog } from './assembleChangelog.js'
 export {
   getSeed,
   getSeeds,
+  getSeedAttestations,
   normalizeUidPrefix,
   normalizeAttesters,
   queryBySchema,
@@ -28,6 +29,7 @@ export {
   normalizeSourceMode,
 } from './source/index.js'
 export type { QueryDataSource, ResolvedQuerySource, SeedListFilter } from './source/index.js'
+export type { SeedAttestations, SeedPropertyAttestation } from './seedAttestations.js'
 
 export {
   buildFlatSnapshotFromProperties,

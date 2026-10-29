@@ -25,6 +25,11 @@ import {
   getRemoteQueryDataSource,
 } from './source/index.js'
 import type { QueryDataSource, SeedListFilter } from './source/types.js'
+import {
+  toSeedPropertyAttestation,
+  type SeedAttestations,
+  type SeedPropertyAttestation,
+} from './seedAttestations.js'
 import type {
   AssembleOptions,
   GetSeedOptions,
@@ -611,6 +616,80 @@ export async function getSeeds(
   for (const [uid, given] of givenByUid) {
     const record = found.get(uid)
     if (record) result.set(given, record)
+  }
+  return result
+}
+
+/**
+ * Each seed's record with the property attestations it is assembled from, as attested: EAS field
+ * name, type and value. For exports that need the on-chain types (`@seedprotocol/rdf`), which a
+ * `SeedRecord` doesn't keep. Same seeds, versions and pins as getSeeds; records are assembled with
+ * `relations: 'uids'`, without storage hydration, and never read from or written to the query cache.
+ * Keyed as given; seeds that aren't found are left out.
+ */
+export async function getSeedAttestations(
+  seedUids: readonly string[],
+  options?: Pick<GetSeedsOptions, 'source' | 'pins'>,
+): Promise<Map<string, SeedAttestations>> {
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
+
+  const givenByUid = new Map<string, string>()
+  for (const given of seedUids) {
+    if (typeof given !== 'string' || given.trim() === '') continue
+    const uid = given.trim().toLowerCase()
+    if (!givenByUid.has(uid)) givenByUid.set(uid, given.trim())
+  }
+  const requested = [...givenByUid.keys()]
+  if (requested.length === 0) return new Map()
+
+  const pins = new Map<string, VersionPin>()
+  for (const [uid, pin] of options?.pins ?? []) {
+    const active = pinOf(pin)
+    if (active) pins.set(uid.trim().toLowerCase(), active)
+  }
+
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
+  const found = new Map<string, SeedAttestations>()
+
+  /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
+  const readFrom = async (dataSource: QueryDataSource, uids: string[]): Promise<string[]> => {
+    const [seeds, versions] = await Promise.all([
+      dataSource.getSeedsByUids(uids),
+      dataSource.getVersionsForSeeds(uids, { includeRevoked: true }),
+    ])
+    const published = seedUidsWithVersions(seeds, versions)
+    const seedByUid = new Map(
+      seeds.filter((seed) => published.has(seed.id.toLowerCase())).map((seed) => [seed.id.toLowerCase(), seed]),
+    )
+    const toAssemble = uids
+      .map((uid) => seedByUid.get(uid))
+      .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
+    const assembled = await assembleSeedRecords(
+      toAssemble,
+      { relations: 'uids', hydrateStorage: false },
+      dataSource,
+      { versions, pins },
+    )
+    for (const record of assembled.records) {
+      const properties = (assembled.properties.get(record.seedUid) ?? [])
+        .map(toSeedPropertyAttestation)
+        .filter((p): p is SeedPropertyAttestation => p !== null)
+      found.set(record.seedUid.toLowerCase(), { record, properties })
+    }
+    return uids.filter((uid) => !seedByUid.has(uid))
+  }
+
+  const missing = await readFrom(resolved.dataSource, requested)
+  // auto: seeds the local source doesn't have → remote
+  if (missing.length > 0 && mode === 'auto' && resolved.dataSource.kind === 'local') {
+    await readFrom(getRemoteQueryDataSource(), missing)
+  }
+
+  const result = new Map<string, SeedAttestations>()
+  for (const [uid, given] of givenByUid) {
+    const entry = found.get(uid)
+    if (entry) result.set(given, entry)
   }
   return result
 }
