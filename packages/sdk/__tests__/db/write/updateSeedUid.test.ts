@@ -66,28 +66,23 @@ testDescribe('updateSeedUid and persistSeedUid', () => {
     // Should not throw; no rows updated is acceptable
   })
 
-  it('updateSeedUid does not overwrite existing publisher (immutability)', async () => {
-    const { item } = await createItemWithBasicPropertiesOnly({
-      title: 'Publisher immutability test',
-      count: 1,
-    })
-    const seedLocalId = item.seedLocalId!
+  // A draft stamped with the EOA and attested by the smart account kept the EOA, so local reads
+  // named the wrong attester (PermaPress seed-draft-ownership-next ask 2).
+  it("updateSeedUid gives a draft seed the attester as publisher, and leaves a sealed seed's alone", async () => {
+    const eoa = '0x' + '1'.repeat(40)
+    const smartAccount = '0x' + '2'.repeat(40)
     const db = BaseDb.getAppDb()
 
-    // Set initial publisher directly in DB (simulates creation with publisher)
-    const originalPublisher = '0xOriginalPublisher1234567890abcdef1234567890'
-    await db.update(seeds).set({ publisher: originalPublisher }).where(eq(seeds.localId, seedLocalId))
+    const { item: draft } = await createItemWithBasicPropertiesOnly({ title: 'Draft publisher', count: 1 })
+    await db.update(seeds).set({ publisher: eoa }).where(eq(seeds.localId, draft.seedLocalId!))
+    await updateSeedUid({ seedLocalId: draft.seedLocalId!, seedUid: '0x' + '9'.repeat(64), publisher: smartAccount })
+    const [draftRow] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, draft.seedLocalId!))
+    expect(draftRow?.publisher).toBe(smartAccount)
 
-    // Try to overwrite with different publisher via updateSeedUid
-    await updateSeedUid({
-      seedLocalId,
-      seedUid: '0x' + '9'.repeat(64),
-      publisher: '0xDifferentPublisher1234567890abcdef12345678',
-    })
-
-    // Publisher should remain unchanged
-    const [row] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, seedLocalId))
-    expect(row?.publisher).toBe(originalPublisher)
+    // A republish after unpublish: the seed was attested before, so its publisher stays.
+    await updateSeedUid({ seedLocalId: draft.seedLocalId!, seedUid: '0x' + '8'.repeat(64), publisher: eoa })
+    const [sealedRow] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, draft.seedLocalId!))
+    expect(sealedRow?.publisher).toBe(smartAccount)
   })
 
   it('createSeed sets publisher when getPublisherForNewSeeds is configured', async () => {

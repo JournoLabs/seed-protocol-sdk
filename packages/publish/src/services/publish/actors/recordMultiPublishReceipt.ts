@@ -92,6 +92,7 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
       versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
       pairs: propertyPairs,
       resolvedSeedUids,
+      publisher: publisherAddress,
     })
   }
 

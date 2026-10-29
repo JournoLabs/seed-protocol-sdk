@@ -14,8 +14,10 @@ type UpdateSeedUidProps = {
 }
 
 /**
- * Updates seedUid and optionally publisher, in one transaction. Publisher is immutable once set:
- * we never overwrite an existing publisher (set at creation or from attestation). A seed row
+ * Updates seedUid and optionally publisher, in one transaction. `publisher` is the address that
+ * attested: it replaces the publisher of a row that was an unsealed draft (no uid, no stored
+ * attestation), which was only a guess at who would publish, and fills in a blank one. A sealed
+ * row's publisher is never changed. A seed row
  * another writer inserted for the same uid (a sync that ran while this was published) is merged
  * into this one first, since seeds.uid is unique.
  */
@@ -32,7 +34,7 @@ export const updateSeedUid = async ({
   const normalizedPublisher = normalizePublisher(publisher)
   await BaseDb.transaction(async (tx) => {
     const [row] = await tx
-      .select({ uid: seeds.uid, publisher: seeds.publisher })
+      .select({ uid: seeds.uid, publisher: seeds.publisher, attestationRaw: seeds.attestationRaw })
       .from(seeds)
       .where(eq(seeds.localId, seedLocalId))
       .limit(1)
@@ -40,8 +42,9 @@ export const updateSeedUid = async ({
     for (const duplicate of await otherSeedRowsWithUid(tx, seedUid, seedLocalId)) {
       await mergeSeedRowInto(tx, duplicate, seedLocalId)
     }
+    const wasDraft = !isValidEasAttestationUid(row.uid) && !row.attestationRaw
     const shouldSetPublisher =
-      normalizedPublisher != null && (row.publisher == null || row.publisher === '')
+      normalizedPublisher != null && (wasDraft || row.publisher == null || row.publisher === '')
     // A different uid is a new seed attestation (a republish after unpublish): the revocation and
     // the stored attestation belonged to the old one.
     const replacesSeedAttestation =
