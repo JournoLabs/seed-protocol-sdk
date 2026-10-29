@@ -22,7 +22,7 @@ failed; attestation failures that wait for `PublishManager.retryAttestations` al
 When using the publish package with `ConnectButton` and its publish flow:
 
 1. **ensureEasSchemasForItem** runs before `getPublishPayload`. It:
-   - Registers EAS schemas for each item property via the SchemaRegistry contract
+   - Registers the EAS schemas the publish attests under via the SchemaRegistry contract: each seed's model, the properties with a value (or an empty value that removes an earlier attestation), and `string storage_transaction_id` for a seed that uploads a file
    - Adds naming attestations so EASSCAN displays schemas with friendly names
    - Populates the SDK's schema map so `getPublishPayload` can resolve schema UIDs
 
@@ -202,7 +202,7 @@ EAS schemas must be:
 
 If a schema is registered but has no naming attestation, attestations will work but EASSCAN will not show a friendly name. The publish package's `ensureEasSchemasForItem` handles both steps.
 
-Property `dataType` values are matched case-insensitively (`html` and `Html` both use the `bytes32` schema). Automation session keys cannot register or name schemas. If a schema is missing, unattended publish fails before the UserOp and tells you to call `ensureEasSchemasForItem` once with the owner ManagedAccount wallet. See [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md).
+Property `dataType` values are matched case-insensitively (`html` and `Html` both use the `bytes32` schema). Automation session keys cannot register or name schemas. If a schema is missing, unattended publish fails before the UserOp with `EasSchemasNotRegisteredError`. Register a model's schemas ahead of time, with no item, by calling `ensureEasSchemasForModels` with the owner ManagedAccount wallet. See [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md).
 
 ## Tool PublishedBy sidecar
 

@@ -54,6 +54,7 @@ export {
   isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
   PublishRetractionError,
   Eip7702ModularAccountPublishError,
@@ -135,8 +136,13 @@ export type {
 } from './services/publishCost'
 export {
   ensureEasSchemasForItem,
+  ensureEasSchemasForModels,
 } from './services/publish/helpers/ensureEasSchemas'
-export type { EnsureEasSchemasOptions } from './services/publish/helpers/ensureEasSchemas'
+export type {
+  EnsureEasSchemasOptions,
+  EnsureEasSchemasForModelsOptions,
+  EnsureEasSchemasResult,
+} from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
 export {

@@ -75,6 +75,27 @@ export class ManagedAccountPublishError extends Error {
   }
 }
 
+/**
+ * EAS schemas a publish needs are missing and the account can't register them: an automation
+ * session key may call only the executor module. The owner wallet registers them with
+ * `ensureEasSchemasForModels` (or `ensureEasSchemasForItem`). Thrown before any transaction.
+ */
+export class EasSchemasNotRegisteredError extends Error {
+  readonly code = 'EAS_SCHEMAS_NOT_REGISTERED' as const
+
+  constructor(
+    /** The missing schema definitions, e.g. `string word_count`. */
+    public readonly missing: string[],
+  ) {
+    const list = missing.map((def) => `"${def}"`).join(', ')
+    super(
+      `${missing.length === 1 ? `schema ${list} is` : `schemas ${list} are`} not registered; automation keys can't register schemas. ` +
+        'Call ensureEasSchemasForModels with the owner wallet first.',
+    )
+    this.name = 'EasSchemasNotRegisteredError'
+  }
+}
+
 /** Thrown by `waitForPublishReceipt` when the transaction was mined but reverted. */
 export class PublishTransactionRevertedError extends Error {
   constructor(
