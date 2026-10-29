@@ -15,6 +15,7 @@ import { executorModuleAbi } from '../abi/executor'
 import { MODULE_TYPE_EXECUTOR, seedExecutorRouterAbi } from '../abi/seedExecutorRouter'
 import { easAbi } from '../abi/eas'
 import { schemaRegistryAbi } from '../abi/schemaRegistry'
+import { accountPermissionsAbi } from '../abi/accountPermissions'
 import type { SeedTxRequest } from '../seedSigner'
 import { getPublishPublicClient } from '../chainClient'
 import { getPublishConfig, requireManagedAccountFactoryAddress } from '../../config'
@@ -215,6 +216,55 @@ export function encodeSetEas(to: Address, eas: Address): SeedTxRequest {
       args: [eas],
     }),
   }
+}
+
+/** A ManagedAccount session-key request, as `setPermissionsForSigner` takes it. */
+export type SignerPermissionRequest = {
+  signer: Address
+  /** 0: set a session key's permissions; 1: add an admin; 2: remove one. */
+  isAdmin: number
+  approvedTargets: readonly Address[]
+  nativeTokenLimitPerTransaction: bigint
+  permissionStartTimestamp: bigint
+  permissionEndTimestamp: bigint
+  reqValidityStartTimestamp: bigint
+  reqValidityEndTimestamp: bigint
+  uid: Hex
+}
+
+export type SignerPermissions = {
+  approvedTargets: readonly Address[]
+  nativeTokenLimitPerTransaction: bigint
+  startTimestamp: bigint
+  endTimestamp: bigint
+}
+
+/** `setPermissionsForSigner(req, signature)` on `account`. Anyone may send it. */
+export function encodeSetPermissionsForSigner(
+  account: Address,
+  req: SignerPermissionRequest,
+  signature: Hex,
+): SeedTxRequest {
+  return {
+    to: account,
+    data: encodeFunctionData({
+      abi: accountPermissionsAbi,
+      functionName: 'setPermissionsForSigner',
+      args: [req, signature],
+    }),
+  }
+}
+
+export async function readPermissionsForSigner(
+  account: Address,
+  signer: Address,
+): Promise<SignerPermissions> {
+  return getPublishPublicClient().readContract({
+    address: account,
+    abi: accountPermissionsAbi,
+    functionName: 'getPermissionsForSigner',
+    args: [signer],
+  })
 }
 
 export async function readGetEas(managedAddress: Address): Promise<Address> {

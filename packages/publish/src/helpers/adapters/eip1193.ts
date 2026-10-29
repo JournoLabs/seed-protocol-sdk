@@ -54,6 +54,10 @@ export async function fromEip1193Provider(
             : { raw: message.raw as Hex | Uint8Array },
       })
     },
+    signTypedData: async (args) =>
+      walletClient.signTypedData({ ...args, account: address! } as Parameters<
+        typeof walletClient.signTypedData
+      >[0]),
   })
 
   const txSender = brandTxSender({

@@ -1,71 +1,36 @@
-import { getContract, sendTransaction } from 'thirdweb'
-import {
-  addSessionKey,
-  removeSessionKey,
-  shouldUpdateSessionKey,
-} from 'thirdweb/extensions/erc4337'
 import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
-import { isContractDeployed, readUntil, waitForPublishReceipt } from './chainClient'
+import { isContractDeployed, readUntil } from './chainClient'
 import { readIsActiveSigner } from './contracts'
-import {
-  buildAutomationSessionKeyPermissions,
-  toThirdwebSessionKeyPermissions,
-} from './automationSessionKeyPermissions'
-import { getClient, getManagedAccountWallet } from './thirdweb'
-import { getPublishThirdwebChain } from './thirdwebChain'
+import { buildAutomationSessionKeyPermissions } from './automationSessionKeyPermissions'
 import { getPublishChainName } from './chainConfig'
+import type { PublishWallet } from './seedSigner'
+import { REMOVE_SESSION_KEY, sessionKeyNeedsGrant, setSessionKeyPermissions } from './sessionKeys'
 
-const MSG_UNAVAILABLE = () =>
-  `Could not connect the managed publishing account to authorize an automation session key on ${getPublishChainName()}. Reconnect and try again.`
 const MSG_ACTIVATION_FAILED = () =>
   `Could not authorize the automation session key on your publishing account on ${getPublishChainName()}.`
 const MSG_REMOVAL_FAILED = () =>
   `Could not remove the automation session key from your publishing account on ${getPublishChainName()}.`
 
-async function getManagedAccountForSessionKeyAdmin(managedAddress: string) {
-  const managedWallet = getManagedAccountWallet()
-  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
-  const managedAccount = managedWallet.getAccount()
-  if (!managedAccount) {
-    throw new ManagedAccountPublishError(
-      MSG_UNAVAILABLE(),
-      'MODULAR_SIGNER_ACTIVATION_FAILED',
-      managedAddress,
-    )
-  }
-  return managedAccount
-}
-
 /**
  * Ensures `sessionKeyAddress` is an active automation session signer on the ManagedAccount
- * with **executor-module-only** approved targets. Signed by the managed EIP-4337 wallet (user).
+ * with **executor-module-only** approved targets. `admin.signer` (an admin EOA of the account)
+ * signs the grant and `admin.txSender` sends it; see {@link setSessionKeyPermissions}.
  */
 export async function ensureAutomationSessionKey(params: {
   managedAddress: string
   sessionKeyAddress: string
   /** Unix seconds end time for the session key (optional). */
   expiresAt?: number
+  admin: PublishWallet
 }): Promise<void> {
-  const { managedAddress, sessionKeyAddress, expiresAt } = params
-  const managedAccount = await getManagedAccountForSessionKeyAdmin(managedAddress)
-
-  const accountContract = getContract({
-    client: getClient(),
-    chain: getPublishThirdwebChain(),
-    address: managedAddress,
-  })
-  const permissions = toThirdwebSessionKeyPermissions(
-    buildAutomationSessionKeyPermissions({ expiresAt }),
-  )
+  const { managedAddress, sessionKeyAddress, expiresAt, admin } = params
+  const { approvedTargets } = buildAutomationSessionKeyPermissions({ expiresAt })
+  const grant = { approvedTargets, ...(expiresAt != null && expiresAt > 0 && { endsAt: expiresAt }) }
 
   let shouldUpdate = false
   try {
-    shouldUpdate = await shouldUpdateSessionKey({
-      accountContract,
-      sessionKeyAddress,
-      newPermissions: permissions,
-    })
+    shouldUpdate = await sessionKeyNeedsGrant(managedAddress as Address, sessionKeyAddress as Address, grant)
   } catch (cause) {
     throw new ManagedAccountPublishError(
       MSG_ACTIVATION_FAILED(),
@@ -76,26 +41,16 @@ export async function ensureAutomationSessionKey(params: {
   }
 
   if (shouldUpdate) {
-    try {
-      const tx = addSessionKey({
-        contract: accountContract,
-        account: managedAccount,
-        sessionKeyAddress,
-        permissions,
-      })
-      const result = await sendTransaction({ account: managedAccount, transaction: tx })
-      await waitForPublishReceipt(result.transactionHash as `0x${string}`)
-    } catch (cause) {
-      throw new ManagedAccountPublishError(
-        MSG_ACTIVATION_FAILED(),
-        'MODULAR_SIGNER_ACTIVATION_FAILED',
-        managedAddress,
-        cause,
-      )
-    }
+    await setSessionKeyPermissions({
+      managedAddress: managedAddress as Address,
+      sessionKeyAddress: sessionKeyAddress as Address,
+      grant,
+      admin,
+      failureMessage: MSG_ACTIVATION_FAILED(),
+    })
   }
 
-  // Right after addSessionKey, a lagging RPC node can still report the key inactive.
+  // Right after the grant, a lagging RPC node can still report the key inactive.
   const active = await readUntil(
     () => isAutomationSessionActive(managedAddress, sessionKeyAddress),
     Boolean,
@@ -111,37 +66,22 @@ export async function ensureAutomationSessionKey(params: {
 }
 
 /**
- * Removes an automation session key from the ManagedAccount (user-signed via managed wallet).
+ * Removes an automation session key from the ManagedAccount. `admin` signs and sends as in
+ * {@link ensureAutomationSessionKey}. An undeployed account has no keys, so there is nothing to send.
  */
 export async function removeAutomationSessionKey(params: {
   managedAddress: string
   sessionKeyAddress: string
+  admin: PublishWallet
 }): Promise<void> {
-  const { managedAddress, sessionKeyAddress } = params
-  const managedAccount = await getManagedAccountForSessionKeyAdmin(managedAddress)
-
-  const accountContract = getContract({
-    client: getClient(),
-    chain: getPublishThirdwebChain(),
-    address: managedAddress,
+  if (!(await isContractDeployed(params.managedAddress))) return
+  await setSessionKeyPermissions({
+    managedAddress: params.managedAddress as Address,
+    sessionKeyAddress: params.sessionKeyAddress as Address,
+    grant: REMOVE_SESSION_KEY,
+    admin: params.admin,
+    failureMessage: MSG_REMOVAL_FAILED(),
   })
-
-  try {
-    const tx = removeSessionKey({
-      contract: accountContract,
-      account: managedAccount,
-      sessionKeyAddress,
-    })
-    const result = await sendTransaction({ account: managedAccount, transaction: tx })
-    await waitForPublishReceipt(result.transactionHash as `0x${string}`)
-  } catch (cause) {
-    throw new ManagedAccountPublishError(
-      MSG_REMOVAL_FAILED(),
-      'MODULAR_SIGNER_ACTIVATION_FAILED',
-      managedAddress,
-      cause,
-    )
-  }
 }
 
 /**

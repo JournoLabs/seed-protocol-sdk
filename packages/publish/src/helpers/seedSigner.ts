@@ -1,4 +1,4 @@
-import type { Address, Hex, SignableMessage } from 'viem'
+import type { Address, Hex, SignableMessage, TypedData, TypedDataDefinition } from 'viem'
 import { retryNonceTooLow } from './retryNonceTooLow'
 import { ethers } from 'ethers'
 
@@ -22,6 +22,24 @@ export interface SeedSigner {
    * Plain string is UTF-8 prefixed hash.
    */
   signMessage(args: { message: SignableMessage }): Promise<Hex>
+
+  /**
+   * EIP-712 signature (`eth_signTypedData_v4`). Optional: data item signing doesn't need it, but
+   * ManagedAccount session-key grants and smart-account UserOps do (see {@link requireSignTypedData}).
+   */
+  signTypedData?<const T extends TypedData | Record<string, unknown>, P extends keyof T | 'EIP712Domain'>(
+    args: TypedDataDefinition<T, P>,
+  ): Promise<Hex>
+}
+
+/** `signer.signTypedData`, bound; throws when the signer doesn't implement it. */
+export function requireSignTypedData(signer: SeedSigner): NonNullable<SeedSigner['signTypedData']> {
+  if (typeof signer.signTypedData !== 'function') {
+    throw new Error(
+      `@seedprotocol/publish: signer ${signer.address} has no signTypedData, which ManagedAccount session keys and smart-account UserOps need. fromEthersWallet, fromEip1193Provider and fromThirdwebAccount provide it.`,
+    )
+  }
+  return signer.signTypedData.bind(signer)
 }
 
 /**
@@ -107,6 +125,15 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
             ? raw
             : new Uint8Array(raw)
       return (await wallet.signMessage(bytes)) as Hex
+    },
+    signTypedData: async ({ domain, types, message }) => {
+      // ethers derives EIP712Domain from `domain` and rejects it in `types`.
+      const { EIP712Domain: _domainType, ...rest } = types as Record<string, ethers.TypedDataField[]>
+      return (await wallet.signTypedData(
+        (domain ?? {}) as ethers.TypedDataDomain,
+        rest,
+        message as Record<string, unknown>,
+      )) as Hex
     },
   })
   const txSender = brandTxSender({

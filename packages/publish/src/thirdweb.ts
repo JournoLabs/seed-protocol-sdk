@@ -30,7 +30,8 @@ export {
 } from './helpers/thirdweb'
 
 export { getPublishThirdwebChain } from './helpers/thirdwebChain'
-export { seedPaymaster, CALL_GAS_HEADROOM_BPS } from './helpers/seedPaymaster'
+export { seedPaymaster } from './helpers/seedPaymaster'
+export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
 
 export { default as ConnectButton } from './react/ConnectButton'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider.thirdweb'
@@ -52,20 +53,17 @@ export {
   type ModularExecutorPublishPrepResult,
 } from './helpers/ensureManagedAccountReady'
 export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702ModularAccountReady'
-export { ensureManagedSignerSessionKey } from './helpers/ensureManagedSignerSessionKey'
 export { ensureModularPublishBootstrap } from './helpers/ensureModularPublishBootstrap'
-export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'
 export { approvedTargetsForAutomationPublish } from './helpers/approvedTargetsForAutomationPublish'
 export {
   ensureAutomationSessionKey,
   removeAutomationSessionKey,
-  isAutomationSessionActive,
-} from './helpers/ensureAutomationSessionKey'
+} from './helpers/thirdwebAutomationSessionKey'
+export { isAutomationSessionActive } from './helpers/ensureAutomationSessionKey'
 export {
   PUBLISH_AUTOMATION_SCOPES,
   buildAutomationSessionKeyPermissions,
   hashAutomationSessionKeyPermissions,
-  toThirdwebSessionKeyPermissions,
   type AutomationSessionKeyPermissions,
 } from './helpers/automationSessionKeyPermissions'
 export {
