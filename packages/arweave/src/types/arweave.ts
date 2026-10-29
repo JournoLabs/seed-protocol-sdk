@@ -1,4 +1,4 @@
-import type Transaction from 'arweave/web/lib/transaction.js'
+import type * as TransactionModule from 'arweave/web/lib/transaction.js'
 
 /**
  * Transaction presence / status as returned by {@link BaseArweaveClient.getTransactionStatus}.
@@ -51,7 +51,7 @@ export type DownloadResult = {
 /**
  * An unsigned Arweave transaction (the arweave package's `Transaction`).
  */
-export type ArweaveTransaction = Transaction
+export type ArweaveTransaction = TransactionModule.default
 
 /**
  * Options for creating a transaction
