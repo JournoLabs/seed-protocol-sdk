@@ -111,4 +111,8 @@ describe('relationLookup', () => {
       }),
     ).toBe('Mira Chen')
   })
+
+  it("reads an empty value as '', not the source's label", () => {
+    expect(sampleValueFromSource({ id: 'author', label: 'author', kind: 'rssField', value: '' })).toBe('')
+  })
 })

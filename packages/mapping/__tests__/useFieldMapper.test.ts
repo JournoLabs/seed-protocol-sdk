@@ -208,6 +208,19 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     )
   })
 
+  it("previews an empty source as its value, not its label, as apply copies it", () => {
+    const empty: SourceNode = { id: 'fm-author', label: 'author', kind: 'frontmatter', value: '' }
+    expect(previewForEdge(empty, undefined, { target: targets[0] })).toBe('')
+    // A lookup entry keyed by the label doesn't match, as it wouldn't at apply.
+    expect(
+      previewForEdge(empty, 'lookup', {
+        target: targets[3],
+        lookups: { author: { author: 'uid-1' } },
+        propertyName: 'author',
+      }),
+    ).toMatch(/‹lookup ref/)
+  })
+
   it('keeps extract/file placeholders', () => {
     expect(previewForEdge(sources[1], 'extract')).toMatch(/‹extract/)
     expect(previewForEdge(sources[1], 'file')).toMatch(/‹file/)

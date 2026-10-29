@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { lookupEntriesFromMapping, normalizeLookupKey } from '../relationLookup'
+import { lookupEntriesFromMapping, normalizeLookupKey, sampleValueFromSource } from '../relationLookup'
 import type {
   FieldMapping,
   LookupEntry,
@@ -48,7 +48,7 @@ function LookupBlock({
   compact?: boolean
 }) {
   const source = sources.find((s) => s.id === mapping.sourceId)
-  const sampleKey = normalizeLookupKey(source?.value || source?.label || '')
+  const sampleKey = sampleValueFromSource(source)
   const entries = lookupEntriesFromMapping(mapping)
   const keys = new Set<string>(
     entries.map((e) => normalizeLookupKey(e.value)).filter(Boolean),

@@ -1,5 +1,9 @@
 # @seedprotocol/vite
 
+## Unreleased
+
+- `seedVitePlugin`'s doc comment is back on it in `dist/index.d.ts`. Since 0.7.12 it sat on the `KNOWN_OPTIONS` constant, so editors showed no description for the plugin.
+
 ## 0.7.12 (2026-10-27)
 
 - `@zenfs/core` (`^2.7.7`) and `@zenfs/dom` (`^1.2.14`) are declared optional peers, the versions the SDK installs. `peerDependenciesMeta` marked them optional with no `peerDependencies` entry, which npm ignores and pnpm reads as optional peers of any version.
