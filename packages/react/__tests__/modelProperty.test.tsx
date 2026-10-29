@@ -21,6 +21,7 @@ import {
   Model,
   ModelProperty,
   loadAllSchemasFromDb,
+  ClientNotInitializedError,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
@@ -1089,6 +1090,26 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           })
       })
       expect(String((thrown as Error)?.message)).toContain('Test Schema Properties-3')
+      expect(result.current.error).toBe(thrown)
+    })
+
+    it('rejects with ClientNotInitializedError while the database is not open', async () => {
+      const { result } = renderHook(() => useCreateModelProperty())
+      const getAppDb = vi.spyOn(BaseDb, 'getAppDb').mockReturnValue(null as never)
+      let thrown: unknown
+      try {
+        await act(async () => {
+          await result.current
+            .create('Test Schema Properties', 'Post', { name: 'tooEarly', dataType: 'Text' })
+            .catch((err: unknown) => {
+              thrown = err
+            })
+        })
+      } finally {
+        getAppDb.mockRestore()
+      }
+      expect(thrown).toBeInstanceOf(ClientNotInitializedError)
+      expect((thrown as ClientNotInitializedError).code).toBe('CLIENT_NOT_INITIALIZED')
       expect(result.current.error).toBe(thrown)
     })
   })
