@@ -97,7 +97,8 @@ export function applyResolveToEdge(
 
 /**
  * Copy prior `derive` / `assemble` onto a newly connected origin
- * when the next edge did not already set a conflicting job.
+ * when the next edge did not already set a conflicting job, and a lookup's entries onto the
+ * lookup that replaces it.
  */
 export function withPreservedExtras(
   next: FieldMapping,
@@ -124,6 +125,11 @@ export function withPreservedExtras(
 
   if (out.resolve === 'assemble' && prev.assemble && !out.assemble) {
     out = { ...out, assemble: prev.assemble }
+  }
+
+  // Moving a lookup to another source (`author` to `dc:creator`) names the same people
+  if (out.resolve === 'lookup' && !out.lookup && prev.resolve === 'lookup' && prev.lookup) {
+    out = { ...out, lookup: prev.lookup }
   }
 
   return omitEmptySourceId(stripLookupUnlessLookup(out))

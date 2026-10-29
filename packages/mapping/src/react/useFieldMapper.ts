@@ -156,7 +156,7 @@ export function useFieldMapper({
   )
 
   const autoMap = useCallback(() => {
-    const next = onAutoMap ? onAutoMap() : defaultAutoMap(sources, targets)
+    const next = onAutoMap ? onAutoMap() : defaultAutoMap(sources, targets, mappingsRef.current)
     commitMappings(next)
     setDrafts([])
     setExtraPropertyNames(new Set())

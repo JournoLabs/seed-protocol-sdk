@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { lookupEntriesFromMapping, normalizeLookupKey, sampleValueFromSource } from '../relationLookup'
+import { lookupEntriesFromMapping, lookupKey, normalizeLookupKey, sampleValueFromSource } from '../relationLookup'
 import type {
   FieldMapping,
   LookupEntry,
@@ -14,11 +14,11 @@ function upsertEntry(
   value: string,
   ref: string,
 ): LookupEntry[] {
-  const key = normalizeLookupKey(value)
+  const key = lookupKey(value)
   const trimmed = ref.trim()
-  const next = entries.filter((e) => normalizeLookupKey(e.value) !== key)
+  const next = entries.filter((e) => lookupKey(e.value) !== key)
   if (!trimmed) return next
-  next.push({ value: key, ref: trimmed })
+  next.push({ value: normalizeLookupKey(value), ref: trimmed })
   return next
 }
 
@@ -50,15 +50,16 @@ function LookupBlock({
   const source = sources.find((s) => s.id === mapping.sourceId)
   const sampleKey = sampleValueFromSource(source)
   const entries = lookupEntriesFromMapping(mapping)
-  const keys = new Set<string>(
-    entries.map((e) => normalizeLookupKey(e.value)).filter(Boolean),
-  )
-  if (sampleKey) keys.add(sampleKey)
-  const keyList = [...keys]
+  // One row per lookupKey, shown as its entry spells it (else as the sample does)
+  const shownByKey = new Map<string, string>()
+  for (const e of entries) {
+    const shown = normalizeLookupKey(e.value)
+    if (shown && !shownByKey.has(lookupKey(shown))) shownByKey.set(lookupKey(shown), shown)
+  }
+  if (sampleKey && !shownByKey.has(lookupKey(sampleKey))) shownByKey.set(lookupKey(sampleKey), sampleKey)
+  const keyList = [...shownByKey.values()]
   const target = targetsByName.get(mapping.propertyName)
-  const refByKey = new Map(
-    entries.map((e) => [normalizeLookupKey(e.value), e.ref]),
-  )
+  const refByKey = new Map(entries.map((e) => [lookupKey(e.value), e.ref]))
 
   return (
     <div className="fm-lookup-block">
@@ -85,7 +86,7 @@ function LookupBlock({
               className="fm-lookup-input"
               type="text"
               placeholder="ref"
-              value={refByKey.get(key) ?? ''}
+              value={refByKey.get(lookupKey(key)) ?? ''}
               onChange={(e) =>
                 onLookupChange(mapping, upsertEntry(entries, key, e.target.value))
               }
