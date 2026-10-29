@@ -9,6 +9,7 @@ import type {
   DownloadFilesParams,
   DownloadResult,
   CreateTransactionOptions,
+  ArweaveTransaction,
 } from '../types/arweave.js'
 import { GET_TRANSACTION_TAGS } from '../ArweaveClient/queries.js'
 import { fetchTransactionStatusAcrossGateways } from '../gateway/transactionStatus.js'
@@ -171,7 +172,7 @@ export class DefaultArweaveClient implements IArweaveClient {
   async createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions,
-  ): Promise<any> {
+  ): Promise<ArweaveTransaction> {
     const arweave = await getArweaveInstance()
 
     const tx = await arweave.createTransaction({

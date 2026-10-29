@@ -49,6 +49,7 @@ import type { FeedFormat, FeedItem, TransformOptions, FeedConfig, ImageMetadata 
 
 export type { TransformOptions } from './types';
 import { generateAtomFeed, generateJsonFeed } from 'feedsmith';
+import type { Atom, Json } from 'feedsmith/types';
 import { generateRssXml } from './rss/generateRssXml';
 import { CacheManager } from './cache/CacheManager';
 import { loadCacheConfig } from './cache/config';
@@ -221,7 +222,7 @@ function applyRssImageCandidate(
   }
 
   if (Array.isArray(item.authors) && item.authors.length > 0) {
-    rssItem['media:credit'] = item.authors.map((author: any) => ({
+    rssItem['media:credit'] = item.authors.map((author: { name?: string; displayName?: string }) => ({
       value: author.name || author.displayName || 'Unknown',
       role: 'author',
     }))
@@ -388,6 +389,20 @@ async function withImageMetadata(
   return enrichFeedItemsWithMedia(items, schemaName, imageService, cache)
 }
 
+/** A feed item's own properties plus the standard feed fields transformToFeedItems maps them to. */
+type TransformedFeedItem = Record<string, unknown> & {
+  id: unknown
+  title: unknown
+  link: unknown
+  description: string
+  content: string
+  pubDate: Date
+  date: Date
+  guid: unknown
+  _imageMetadata?: ImageMetadata
+  _hasImage?: boolean
+}
+
 /**
  * Transforms GraphQL items into feed items.
  * This function preserves all dynamic properties from the items.
@@ -395,7 +410,7 @@ async function withImageMetadata(
 function transformToFeedItems(
   items: FeedItem[],
   options: TransformOptions
-): any[] {
+): TransformedFeedItem[] {
   const { itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
 
   const filtered = filterItemsByRichTextDataUriImagePolicy(
@@ -403,7 +418,7 @@ function transformToFeedItems(
     richTextDataUriImages,
   ) as FeedItem[]
 
-  return filtered.map((item: any) => {
+  return filtered.map((item) => {
     // Determine item ID - try multiple possible fields
     const itemId = item.id || item.seedUid || item.SeedUid || item.storageTransactionId || item.storage_transaction_id
 
@@ -416,12 +431,12 @@ function transformToFeedItems(
     if (item.pubDate || item.PubDate) {
       // pubDate might be a string like "Mon, 07 Apr 2025 00:03:29 GMT"
       const pubDateStr = item.pubDate || item.PubDate
-      date = new Date(pubDateStr)
+      date = new Date(pubDateStr as string)
     } else if (item.timeCreated) {
       // timeCreated is a Unix timestamp
-      date = new Date(item.timeCreated * 1000)
+      date = new Date(Number(item.timeCreated) * 1000)
     } else if (item.publishedAt || item.createdAt || item.updatedAt) {
-      const dateValue = item.publishedAt || item.createdAt || item.updatedAt
+      const dateValue: unknown = item.publishedAt || item.createdAt || item.updatedAt
       date = dateValue && typeof dateValue === 'object' && dateValue.constructor === Date
         ? dateValue as Date
         : new Date(dateValue as string | number)
@@ -433,7 +448,7 @@ function transformToFeedItems(
     const content = pickFeedItemContent(item)
 
     // Start with all properties from the item to preserve dynamic schema
-    const feedItem: any = {
+    const feedItem: TransformedFeedItem = {
       ...item, // Preserve all dynamic properties first
       // Map to standard feed fields
       id: itemId,
@@ -462,7 +477,7 @@ function transformToFeedItems(
 
     // Add image metadata if available from enrichment
     if (item._imageMetadata && item._hasImage) {
-      const imageMeta: ImageMetadata = item._imageMetadata
+      const imageMeta = item._imageMetadata as ImageMetadata
       feedItem._imageMetadata = imageMeta
       feedItem._hasImage = true
     }
@@ -576,8 +591,7 @@ export const createFeed = (
         } : undefined,
         entries: transformedItems.map((item) => {
           // Atom entries require: id, title, updated, links
-          const entry: any = {
-            title: item.title || 'Untitled',
+          const entry: Record<string, unknown> = {
             updated: item.date || item.pubDate || now,
             links: item.link ? [{ href: item.link }] : [],
             ...item, // Preserve all dynamic properties, the item's own title, updated and links included
@@ -589,9 +603,9 @@ export const createFeed = (
           
           // Add image as enclosure link if available
           if (item._imageMetadata && item._hasImage) {
-            const imageMeta: ImageMetadata = item._imageMetadata
+            const imageMeta = item._imageMetadata
             if (!entry.links) entry.links = []
-            entry.links.push({
+            ;(entry.links as unknown[]).push({
               href: imageMeta.url,
               rel: 'enclosure',
               type: imageMeta.mimeType || 'image/jpeg',
@@ -599,15 +613,17 @@ export const createFeed = (
             })
             
             // Enhance content with image if not already present
-            if (imageMeta.url && entry.content && !entry.content.includes(imageMeta.url)) {
+            const entryContent = entry.content as string | { value?: string; includes(url: string): boolean } | undefined
+            if (imageMeta.url && entryContent && !entryContent.includes(imageMeta.url)) {
               const imageHtml = `<img src="${imageMeta.url}" alt="${item.title || ''}"${imageMeta.width ? ` width="${imageMeta.width}"` : ''}${imageMeta.height ? ` height="${imageMeta.height}"` : ''} />`
-              entry.content = typeof entry.content === 'string' 
-                ? `${imageHtml}\n${entry.content}`
-                : { type: 'html', value: `${imageHtml}\n${entry.content.value || entry.content}` }
+              entry.content = typeof entryContent === 'string'
+                ? `${imageHtml}\n${entryContent}`
+                : { type: 'html', value: `${imageHtml}\n${entryContent.value || entryContent}` }
             }
           }
           
-          return entry
+          // Dynamic properties pass through unchecked; id, title and updated are always set
+          return entry as unknown as Atom.Entry<Date>
         }),
       }
       return Promise.resolve(generateAtomFeed(atomFeed) as string)
@@ -629,7 +645,7 @@ export const createFeed = (
         } : undefined,
         items: transformedItems.map((item) => {
           // JSON items require: id
-          const jsonItem: any = {
+          const jsonItem: Record<string, unknown> = {
             ...item, // Preserve all dynamic properties
             // The same identifier as RSS's guid (D26)
             id: item.guid || item.id || item.link,
@@ -642,12 +658,12 @@ export const createFeed = (
           
           // Add image and attachments if available
           if (item._imageMetadata && item._hasImage) {
-            const imageMeta: ImageMetadata = item._imageMetadata
+            const imageMeta = item._imageMetadata
             jsonItem.image = imageMeta.url
             
             // Add as attachment
             if (!jsonItem.attachments) jsonItem.attachments = []
-            jsonItem.attachments.push({
+            ;(jsonItem.attachments as unknown[]).push({
               url: imageMeta.url,
               mime_type: imageMeta.mimeType || 'image/jpeg',
               size_in_bytes: imageMeta.size,
@@ -655,13 +671,15 @@ export const createFeed = (
             })
             
             // Enhance content_html with image if not already present
-            if (imageMeta.url && jsonItem.content_html && !jsonItem.content_html.includes(imageMeta.url)) {
+            const contentHtml = jsonItem.content_html as string | undefined
+            if (imageMeta.url && contentHtml && !contentHtml.includes(imageMeta.url)) {
               const imageHtml = `<img src="${imageMeta.url}" alt="${item.title || ''}"${imageMeta.width ? ` width="${imageMeta.width}"` : ''}${imageMeta.height ? ` height="${imageMeta.height}"` : ''} />`
-              jsonItem.content_html = `${imageHtml}\n${jsonItem.content_html}`
+              jsonItem.content_html = `${imageHtml}\n${contentHtml}`
             }
           }
           
-          return jsonItem
+          // Dynamic properties pass through unchecked; id is always set
+          return jsonItem as unknown as Json.Item<Date>
         }),
       }
       const jsonResult = generateJsonFeed(jsonFeed)
@@ -681,9 +699,9 @@ export const createFeed = (
         webMaster: siteConfig.author?.email,
         pubDate: now,
         lastBuildDate: now,
-        items: transformedItems.map((item: any) => {
+        items: transformedItems.map((item) => {
           // RSS items can have dynamic properties
-          const rssItem: any = {
+          const rssItem: Record<string, unknown> = {
             ...item, // Preserve all dynamic properties
           }
           
@@ -727,32 +745,33 @@ export const createFeed = (
           }
           
           // Use Dublin Core namespace for additional metadata
-          rssItem.dc = {}
+          const dc: { date?: unknown; dates?: Date[]; identifier?: unknown[]; source?: unknown } = {}
+          rssItem.dc = dc
           
           // Add date using dc namespace (supports multiple dates)
           if (item.date || item.pubDate) {
-            rssItem.dc.date = item.date || item.pubDate
+            dc.date = item.date || item.pubDate
           }
           if (item.timeCreated) {
             // Convert Unix timestamp to Date for dc namespace
-            const timeCreatedDate = new Date(item.timeCreated * 1000)
-            if (!rssItem.dc.dates) rssItem.dc.dates = []
-            rssItem.dc.dates.push(timeCreatedDate)
+            const timeCreatedDate = new Date(Number(item.timeCreated) * 1000)
+            if (!dc.dates) dc.dates = []
+            dc.dates.push(timeCreatedDate)
           }
           
           // Add identifier using dc namespace
           if (item.seedUid || item.SeedUid) {
-            if (!rssItem.dc.identifier) rssItem.dc.identifier = []
-            rssItem.dc.identifier.push(item.seedUid || item.SeedUid)
+            if (!dc.identifier) dc.identifier = []
+            dc.identifier.push(item.seedUid || item.SeedUid)
           }
           if (item.storageTransactionId || item.storage_transaction_id) {
-            if (!rssItem.dc.identifier) rssItem.dc.identifier = []
-            rssItem.dc.identifier.push(item.storageTransactionId || item.storage_transaction_id)
+            if (!dc.identifier) dc.identifier = []
+            dc.identifier.push(item.storageTransactionId || item.storage_transaction_id)
           }
           
           // Add source/relation for import_url
           if (item.import_url || item.importUrl) {
-            rssItem.dc.source = item.import_url || item.importUrl
+            dc.source = item.import_url || item.importUrl
           }
           
           // Include raw custom fields as well (FeedSmith may preserve them)
