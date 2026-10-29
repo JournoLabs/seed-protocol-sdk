@@ -23,10 +23,14 @@ export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './brow
 export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'
 export { createNewItem } from './db/write/createNewItem'
 export { updateVersionUid } from './db/write/updateVersionUid'
+export { recordPublishRequest } from './db/write/recordPublishRequest'
 export {
   applyPropertyAttestationUidsFromPublish,
 } from './db/write/applyPropertyAttestationUidsFromPublish'
-export type { PropertyAttestationApplyPair } from './db/write/applyPropertyAttestationUidsFromPublish'
+export type {
+  ApplyPropertyAttestationUidsParams,
+  PropertyAttestationApplyPair,
+} from './db/write/applyPropertyAttestationUidsFromPublish'
 export { getVersionData } from './db/read/subqueries/versionData'
 export { getMetadataLatest } from './db/read/subqueries/metadataLatest'
 export {

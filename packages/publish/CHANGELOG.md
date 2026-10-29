@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- A contract publish records each request's version uid and property uids in one transaction (the SDK's `recordPublishRequest`). They were separate writes, so a reader between them, such as `getPublishPendingDiff` on a change-feed dispatch after a first publish, saw the version published and every property still pending. The direct-to-EAS path still records the version when its own transaction confirms, since the properties go in a later one.
 - `ensureEasSchemasForItem` asks only for the schemas a publish of the item attests: each seed's own model, properties with a value or with an empty value that removes a live attestation (ADR 0021), and `string storage_transaction_id` for a seed that uploads a file. It asked for every property of every model in the publish graph, set or not, plus the model of every relation, so an automation run failed on a schema nothing would attest under (an Image draft with no alt text stopped on `string alt`), and an owner publish registered schemas no attestation used.
 - Publish passes the attesting address to the SDK when it records property attestations, so those rows name it as publisher (see the SDK changelog).
 - The package no longer ships declarations for its `.tsx` tests (`dist/react/useSeedWallet.test.d.ts`, `dist/hooks/usePublishCostEstimate.test.d.ts`): the build excludes `src/**/*.test.tsx` as well as `*.test.ts`.
