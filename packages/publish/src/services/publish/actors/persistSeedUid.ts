@@ -44,14 +44,17 @@ export async function persistSeedUidSafely(
   const persist = item.persistSeedUid
   if (typeof persist !== 'function') return
 
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('persistSeedUid timed out')), PERSIST_SEED_UID_TIMEOUT_MS),
-  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('persistSeedUid timed out')), PERSIST_SEED_UID_TIMEOUT_MS)
+  })
 
   try {
     await Promise.race([persist.call(item, address, attestationCreatedAtMs), timeout])
   } catch (err) {
     logger('persistSeedUid failed (attestations already on-chain):', err)
     // Don't throw - attestations are confirmed; DB write is best-effort
+  } finally {
+    clearTimeout(timer)
   }
 }
