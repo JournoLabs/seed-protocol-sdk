@@ -122,8 +122,9 @@ describe('client status hooks across stop and init', () => {
     }
   })
 
-  it('does not call init again when an inline initConfig re-renders with the same values', () => {
+  it('does not call init again when an inline initConfig re-renders with the same values', async () => {
     const initSpy = vi.spyOn(client, 'init').mockResolvedValue(undefined as never)
+    const setSpy = vi.spyOn(client, 'setAddresses').mockResolvedValue(undefined)
     const schema = { metadata: { name: 'Inline Gate Schema' }, models: {} }
 
     const { rerender } = render(
@@ -138,8 +139,18 @@ describe('client status hooks across stop and init', () => {
     )
     expect(initSpy).toHaveBeenCalledTimes(1)
 
+    // New addresses go to setAddresses; a new schema runs init again
+    const addresses = ['0x0000000000000000000000000000000000000001']
     rerender(
-      <SeedClientGate initConfig={{ ...initConfig, addresses: ['0x0000000000000000000000000000000000000001'] }} schema={{ ...schema }}>
+      <SeedClientGate initConfig={{ ...initConfig, addresses }} schema={{ ...schema }}>
+        <div />
+      </SeedClientGate>,
+    )
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(addresses))
+    expect(initSpy).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <SeedClientGate initConfig={{ ...initConfig, addresses }} schema={{ ...schema, models: { Other: {} } }}>
         <div />
       </SeedClientGate>,
     )
