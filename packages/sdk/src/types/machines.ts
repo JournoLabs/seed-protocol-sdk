@@ -10,6 +10,12 @@ export type FromCallbackInput<T, P = undefined> = {
   event?: P
 }
 
+/**
+ * Why the client stopped: `'stop'` for `client.stop()` or `client.unload()`, `'reset'` when
+ * `client.resetLocalData()` in this tab or another tab of the same database stopped it.
+ */
+export type ClientStopReason = 'stop' | 'reset'
+
 export type ClientManagerContext = {
   isInitialized: boolean
   addressesSet: boolean
@@ -37,4 +43,6 @@ export type ClientManagerContext = {
   schema?: string | SchemaFileFormat
   initError?: Error | string
   saveError?: Error | string
+  /** Set as the client stops; read it once the snapshot's `status` is `'stopped'`. */
+  stopReason?: ClientStopReason
 }

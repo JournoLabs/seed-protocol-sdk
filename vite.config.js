@@ -345,6 +345,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
             'packages/sdk/__tests__/browser/multiTab.e2e.test.ts',
+            'packages/sdk/__tests__/browser/resetLocalData.test.ts',
             // Browser-only: wraps the sqlite-proxy driver; Node's better-sqlite3 session has no async client.
             'packages/sdk/__tests__/browser/db/insertConflicts.test.ts',
             'packages/sdk/__tests__/browser/db/importSingleWrite.test.ts',

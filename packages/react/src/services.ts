@@ -3,6 +3,7 @@ import { ActorRef } from 'xstate'
 import pluralize from 'pluralize'
 import debug from 'debug'
 import { ClientManagerState, MachineIds } from '@seedprotocol/sdk'
+import type { ClientStopReason } from '@seedprotocol/sdk'
 import { isDbReadyState } from './db'
 import { useClientSelector, useClientService } from './client'
 
@@ -219,11 +220,14 @@ export const useServices = () => {
 
 /**
  * The client manager's state. `'stopped'` after `client.stop()` until the next init starts: a stopped
- * actor keeps its last state (`'idle'`), which would read as ready.
+ * actor keeps its last state (`'idle'`), which would read as ready. `stopReason` says why while
+ * stopped: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client,
+ * else `'stop'`. It is undefined while the client isn't stopped.
  */
 export const useGlobalServiceStatus = (): {
   status: ClientManagerState | 'stopped'
   internalStatus: ClientManagerState | 'ready' | 'stopped'
+  stopReason: ClientStopReason | undefined
 } => {
   const status = useClientSelector((snapshot): ClientManagerState | 'stopped' =>
     snapshot.status === 'active' ? (snapshot.value as ClientManagerState) : 'stopped',
@@ -238,8 +242,13 @@ export const useGlobalServiceStatus = (): {
         : (snapshot.value as ClientManagerState),
   )
 
+  const stopReason = useClientSelector((snapshot): ClientStopReason | undefined =>
+    snapshot.status === 'active' ? undefined : (snapshot.context.stopReason ?? 'stop'),
+  )
+
   return {
     status,
     internalStatus,
+    stopReason,
   }
 }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { setConfigRef } from '../config'
 import {
+  clearInAppPublishSession,
   disconnectPublishWallet,
   markPublishWalletConnected,
   syncPublishInAppAuthToken,
@@ -86,5 +87,41 @@ describe('disconnecting the publish wallet', () => {
     syncPublishInAppAuthToken()
 
     expect(localStorage.getItem(PREFIXED_KEY)).toBe('jwt-2')
+  })
+})
+
+describe('clearInAppPublishSession', () => {
+  test('removes the prefixed keys, the default token key and the disconnect flag; other keys stay', async () => {
+    signIn('jwt-1')
+    localStorage.setItem('seedProtocol:inAppPublish:thirdwebEwsWalletUserId-test-client', 'user-1')
+    localStorage.setItem('app:theme', 'dark')
+    sessionStorage.setItem('seedProtocol:publish:userChoseWalletDisconnect', '1')
+
+    await clearInAppPublishSession()
+
+    expect(localStorage.getItem(PREFIXED_KEY)).toBeNull()
+    expect(localStorage.getItem(BARE_KEY)).toBeNull()
+    expect(localStorage.getItem('seedProtocol:inAppPublish:thirdwebEwsWalletUserId-test-client')).toBeNull()
+    expect(sessionStorage.getItem('seedProtocol:publish:userChoseWalletDisconnect')).toBeNull()
+    expect(localStorage.getItem('app:theme')).toBe('dark')
+  })
+
+  test('a later sync has nothing to restore', async () => {
+    signIn('jwt-1')
+    await clearInAppPublishSession()
+
+    syncPublishInAppAuthToken()
+
+    expect(localStorage.getItem(PREFIXED_KEY)).toBeNull()
+    expect(localStorage.getItem(BARE_KEY)).toBeNull()
+  })
+
+  test('removes the prefixed keys before publish is configured', async () => {
+    localStorage.setItem(PREFIXED_KEY, 'jwt-1')
+    setConfigRef(null)
+
+    await clearInAppPublishSession()
+
+    expect(localStorage.getItem(PREFIXED_KEY)).toBeNull()
   })
 })

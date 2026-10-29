@@ -116,6 +116,39 @@ export async function disconnectPublishWallet(): Promise<void> {
 }
 
 /**
+ * Removes the in-app wallet session this package stores: every localStorage key under
+ * `seedProtocol:inAppPublish:`, thirdweb's default `walletToken-{clientId}` key that
+ * {@link syncPublishInAppAuthToken} mirrors, and the sessionStorage flag
+ * {@link disconnectPublishWallet} sets. Also clears the registered publish wallet. The user has to
+ * sign in again. Without publish config (no `thirdwebClientId`) the default key is left. thirdweb's own other keys and a wallet connected in thirdweb's React state are
+ * left alone; disconnect that wallet (or reload) as well. Meant for a "delete local data" action,
+ * beside the SDK's `client.resetLocalData()`, which leaves localStorage alone.
+ */
+export async function clearInAppPublishSession(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      const keys: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key?.startsWith(SEED_IN_APP_SESSION_PREFIX)) keys.push(key)
+      }
+      // Works before initPublish too: without a client id there is no default key to know of.
+      const thirdwebClientId = getConfigRef()?.thirdwebClientId
+      if (thirdwebClientId) keys.push(`walletToken-${thirdwebClientId}`)
+      for (const key of keys) localStorage.removeItem(key)
+    } catch {
+      /* private mode */
+    }
+    try {
+      sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
+    } catch {
+      /* private mode */
+    }
+  }
+  await clearPublishWallet()
+}
+
+/**
  * Copies Thirdweb in-app auth tokens between default localStorage keys and the
  * prefixed keys used by publish in-app wallets (`seedProtocol:inAppPublish:`).
  *

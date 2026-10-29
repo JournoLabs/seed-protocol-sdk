@@ -71,6 +71,23 @@ sees a changed file's new size on its next async `stat()`.
 The SQLite database and its journal are written by SQLocal's worker through its own OPFS VFS, so
 they never produce file messages.
 
+## Resetting local data
+
+`client.resetLocalData()` ([GETTING_STARTED.md](./GETTING_STARTED.md#deleting-local-data)) has to
+delete a database other tabs may have open. Each coordinating tab holds the Web Lock
+`seed:open:<db>` in shared mode from the start of `client.init` until its database has closed. The
+resetting tab stops its own client, requests `seed:open:<db>` exclusively, then posts `close-db` on
+`seed:tabs:<db>`. A tab that hears it stops its client, as `client.stop()` does, and unmounts its file
+system; its snapshot reads `status: 'stopped'`, `context.stopReason: 'reset'`. Once every tab has
+let go, the reset holds the lock while it deletes, so an `init` in any tab waits for the delete to
+finish before it opens the database again.
+
+If a tab doesn't let go within `otherTabsTimeoutMs`, the reset deletes without the lock, and the
+files that tab still has open (usually `seed.db`) come back in `failed`. That happens with a tab
+using `multiTab: 'off'` (it has no channel and holds no lock), a tab running an SDK older than this
+lock, or a tab whose stop hangs. A tab whose client was already stopped never hears `close-db`, so it
+keeps its file-system mount; reload it before calling `init` there.
+
 ## What stays stale
 
 Schema and Model metadata on existing instances, ModelProperty instances and module-level lookup

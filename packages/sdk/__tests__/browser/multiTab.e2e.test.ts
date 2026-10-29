@@ -101,6 +101,27 @@ describe('two tabs of one app', () => {
     await vi.waitFor(async () => expect(await tabs.callSeedTab(follower, 'isLeader')).toBe(true), { timeout: WAIT_TIMEOUT_MS })
   }, 120_000)
 
+  it('a reset in one tab stops the other, deletes everything, and both init again on an empty database', async () => {
+    const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
+    open.push(a, b)
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+    await tabs.callSeedTab(b, 'insertSeed')
+    const notePath = await tabs.callSeedTab(b, 'saveFile', 'files/reset-note.txt', 'before the reset')
+
+    const result = await tabs.callSeedTab(a, 'resetLocalData')
+
+    // b closed its database when asked, so nothing was left open.
+    expect(result.failed).toEqual([])
+    expect(result.deleted).toEqual(expect.arrayContaining([`/${testDir}/db/seed.db`, notePath, `/${testDir}`]))
+    expect(await tabs.callSeedTab(b, 'clientStatus')).toEqual({ status: 'stopped', stopReason: 'reset' })
+    expect(await tabs.callSeedTab(a, 'clientStatus')).toEqual({ status: 'stopped', stopReason: 'reset' })
+
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+    expect(await tabs.callSeedTab(a, 'seedCount')).toBe(0)
+    expect(await tabs.callSeedTab(b, 'seedCount')).toBe(0)
+    expect(await tabs.callSeedTab(b, 'readFileSync', notePath)).toBeNull()
+  }, 60000)
+
   it('transactions in both tabs at once neither lose updates nor fail busy', async () => {
     const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
     open.push(a, b)
