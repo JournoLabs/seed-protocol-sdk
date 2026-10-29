@@ -50,6 +50,7 @@ import { loadProperty } from './loadProperty'
 import { createSessionObjectUrl, isSessionObjectUrl, revokeSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { timed } from '@/helpers/timing'
 import { eventEmitter } from '@/eventBus'
+import { FILES_CHANGED_EVENT } from '@/helpers/tabEvents'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -181,6 +182,12 @@ const revokeHeldObjectUrls = (service: object) => {
   if (!held) return
   for (const url of held) revokeSessionObjectUrl(url)
   held.clear()
+}
+
+
+/** Whether two `missingFile` values say the same thing (both found, or missing at the same path). */
+function sameMissingFile(a: { path?: string } | null | undefined, b: { path?: string } | null | undefined): boolean {
+  return !a || !b ? !a === !b : a.path === b.path
 }
 
 /** Thrown by ItemProperty.save() when the value failed validation (enum, pattern, minLength, maxLength). */
@@ -442,6 +449,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // The file a stored value names: an Image or File shows a session URL (one already minted for
         // the same file is kept), Html and ItemStorage their text
         const fileKind = isImage ? 'image' : isFile ? 'file' : isItemStorage ? 'itemStorage' : isHtml ? 'html' : undefined
+        // Image, File and Html: whether this pass found the file (undefined leaves missingFile as it is)
+        let missingFile: { path?: string } | null | undefined
         if (fileKind && context.refResolvedValue) {
           try {
             let found: boolean
@@ -473,6 +482,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               found = display.renderValue !== undefined
               renderValue = display.renderValue
               if (found && (fileKind === 'image' || fileKind === 'file')) mintedDisplayValue = display.renderValue
+            }
+            if (fileKind !== 'itemStorage') {
+              // Not found while the context still shows content this property resolved before (an
+              // Html body fetched through its transaction, an image's URL during an FS race): that
+              // content stays, so the value isn't missing.
+              const showsResolved =
+                context.renderValue != null && context.renderValue !== '' && context.renderValue !== context.propertyValue
+              missingFile =
+                found || isFileValue || isBlobValue
+                  ? null
+                  : showsResolved
+                    ? (context.missingFile ?? null)
+                    : {
+                        path: BaseFileManager.getFilesPath(
+                          storageSubdir(fileKind, context.localStorageDir),
+                          context.refResolvedValue,
+                        ),
+                      }
             }
             if (!found) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -538,7 +565,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // Update context with renderValue instead of BehaviorSubject
         // The reactive proxy will handle reactivity
         const currentRenderValue = context.renderValue || context.propertyValue
-        if (currentRenderValue === renderValue) {
+        const renderChanged = currentRenderValue !== renderValue
+        const missingChanged = missingFile !== undefined && !sameMissingFile(missingFile, context.missingFile)
+        if (!renderChanged && !missingChanged) {
           return
         }
 
@@ -546,8 +575,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // sent as renderValue alone, the next pass minted another, and so on about 60 times a second.
         this._service.send({
           type: 'updateContext',
-          renderValue,
-          ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
+          ...(renderChanged && {
+            renderValue,
+            ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
+          }),
+          ...(missingChanged && { missingFile }),
         })
       },
     )
@@ -560,6 +592,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       this._subscription?.unsubscribe()
       revokeHeldObjectUrls(this._service)
     })
+
+    // A missing file that lands later (a download, another tab's save) is read again
+    const onFilesChanged = (paths: unknown) => {
+      const missing = this._service.getSnapshot().context.missingFile
+      if (!missing || !Array.isArray(paths)) return
+      const name = missing.path?.split('/').pop()
+      if (name && !paths.some((path) => typeof path === 'string' && path.split('/').pop() === name)) return
+      this._service.send({ type: 'rehydrateFromDb' })
+    }
+    eventEmitter.on(FILES_CHANGED_EVENT, onFilesChanged)
+    onEntityTeardown(this, () => eventEmitter.off(FILES_CHANGED_EVENT, onFilesChanged))
 
     // Set up liveQuery subscription for cross-instance updates
     this._setupLiveQuerySubscription()
@@ -1509,9 +1552,31 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (choice === 'remote') this._service.send({ type: 'rehydrateFromDb' })
   }
 
+  /**
+   * Whether `value` holds an Image, File or Html property's content: `'fetching'` while the property
+   * loads (a load downloads a file that isn't on disk), `'missing'` when the file wasn't found, else
+   * `'resolved'`. While `'missing'`, `value` is undefined and `missingFile` says where the file was
+   * looked for; the property reads it again when that file is saved (a download, another tab).
+   * Other properties are always `'resolved'`.
+   */
+  get valueStatus(): 'resolved' | 'fetching' | 'missing' {
+    const context = this._getSnapshotContext()
+    const kind = storedValueKind(context.propertyRecordSchema, context)
+    if (kind !== 'image' && kind !== 'file' && kind !== 'html') return 'resolved'
+    if (this.status === 'loading') return 'fetching'
+    return context.missingFile ? 'missing' : 'resolved'
+  }
+
+  /** While `valueStatus` is `'missing'`: the file looked for (`path`, when the value names one). Else null. */
+  get missingFile(): { path?: string } | null {
+    return this._getSnapshotContext().missingFile ?? null
+  }
+
   get value() {
     // Use string literal to avoid circular dependency
     const context = this._getSnapshotContext()
+    // The stored value names a file that isn't there: it's a storage seed id or file name, not content
+    if (context.missingFile) return undefined
     const normalizedDataType = normalizeDataType(this._dataType)
     if (normalizedDataType === 'Image') {
       // For Image: prefer renderValue (blob URL from hydrate/save) for display; fallback to refResolvedValue (filename)

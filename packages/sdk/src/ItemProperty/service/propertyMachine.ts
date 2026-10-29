@@ -95,6 +95,7 @@ export const propertyMachine = setup({
           refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
           refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
           localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,
+          missingFile: property.missingFile !== undefined ? property.missingFile : context.missingFile,
         }))
       }),
     },

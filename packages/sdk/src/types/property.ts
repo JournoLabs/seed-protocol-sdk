@@ -92,5 +92,10 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
    * it was pending (ADR 0019); null when there is none.
    */
   conflict?: import('@/outbox/conflicts').PropertyConflict | null
+  /**
+   * Image, File and Html: the file the stored value names wasn't found (on disk, or for Html through
+   * its transaction), with the path looked up when the value names one. Null once found.
+   */
+  missingFile?: { path?: string } | null
 }
 

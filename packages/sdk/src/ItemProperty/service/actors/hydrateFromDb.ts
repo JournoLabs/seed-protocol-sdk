@@ -5,7 +5,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { currentPropertyRow } from '@/db/read/currentPropertyRow'
-import { resolveStorageDisplay, storedValueKind } from '@/storageValue/resolve'
+import { resolveStorageDisplay, storedValueKind, missingFileOf } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:property:actors:hydrateFromDb')
 
@@ -54,12 +54,14 @@ export const hydrateFromDb = fromCallback<
     // A stored display value is a stale session URL for Image, File and Html (see resolveStorageDisplay)
     let refResolvedDisplayValue = kind ? undefined : row.refResolvedDisplayValue
     let renderValue: string | string[] | undefined = refResolvedDisplayValue ?? undefined
+    let missingFile: { path?: string } | null | undefined
     if (row.pendingText !== undefined) {
       // A pending Html value: its file isn't written until its op is prepared
       renderValue = row.pendingText
     } else if (kind && kind !== 'itemStorage') {
       try {
         const display = await resolveStorageDisplay(kind, row, { fetch: true })
+        missingFile = missingFileOf(kind, row, display)
         refResolvedValue = display.ref.refResolvedValue
         localStorageDir = display.ref.localStorageDir
         if (display.renderValue !== undefined) {
@@ -93,6 +95,7 @@ export const hydrateFromDb = fromCallback<
       // Html shows its text; with no file found the context keeps what it showed
       ...(kind === 'html' && renderValue === undefined ? {} : { renderValue }),
       conflict,
+      ...(missingFile !== undefined && { missingFile }),
       populatedFromDb: true,
     })
   }
