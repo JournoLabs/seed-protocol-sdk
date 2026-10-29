@@ -143,6 +143,22 @@ describe('applyMappingAsync', () => {
     },
   ]
 
+  it("passes an empty field's value, not its name, as the url", async () => {
+    const urls: string[] = []
+    await applyMappingAsync(
+      [{ id: 'fm-link', label: 'link', kind: 'frontmatter', value: '' }],
+      [{ sourceId: 'fm-link', propertyName: 'html', resolve: 'extract' }],
+      [{ name: 'html', dataType: 'Html' }],
+      {
+        resolve: async (ctx) => {
+          urls.push(ctx.url)
+          return ''
+        },
+      },
+    )
+    expect(urls).toEqual([''])
+  })
+
   it('resolves extract and file via host callback', async () => {
     const result = await applyMappingAsync(
       linkSources,

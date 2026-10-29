@@ -23,10 +23,10 @@ export function normalizeLookupKey(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim()
 }
 
-/** Normalized sample string for a source node (value, then label). */
+/** Normalized sample string for a source node: its value only, as apply looks it up. */
 export function sampleValueFromSource(source: SourceNode | undefined): string {
   if (!source) return ''
-  return normalizeLookupKey(source.value || source.label)
+  return normalizeLookupKey(source.value ?? '')
 }
 
 /**

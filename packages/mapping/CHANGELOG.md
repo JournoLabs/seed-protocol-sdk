@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- An `extract` or `file` edge on a source with an empty value passes `''` as the resolve callback's `url`, and lookups take their sample from the value only (`sampleValueFromSource`, the field mapper's previews and `LookupEditor`). 0.7.12 made `applyMapping` value-only but these still fell back to the source's `label`, so the field's name went to the resolve callback as a URL, and a lookup entry written in the editor for an empty source was stored under the label and never matched at apply.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).

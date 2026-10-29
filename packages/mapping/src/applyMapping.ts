@@ -66,7 +66,8 @@ function urlFromSource(source: SourceNode): string {
   if (typeof source.meta?.url === 'string' && source.meta.url.trim()) {
     return source.meta.url.trim()
   }
-  return (source.value || source.label).trim()
+  // The value only, as for copies: an empty field's url is '', not its label (the field's name).
+  return (source.value ?? '').trim()
 }
 
 function contentTypeFromSource(source: SourceNode): string | undefined {

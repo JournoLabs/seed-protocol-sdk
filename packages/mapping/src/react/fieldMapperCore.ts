@@ -134,7 +134,7 @@ export function previewForEdge(
     return `‹file stored from ${truncateSample(source.value, 48)}›`
   }
   if (resolve === 'lookup') {
-    const raw = source.value || source.label
+    const raw = source.value ?? ''
     const mapping = options?.mapping ?? {
       sourceId: source.id,
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
@@ -157,7 +157,7 @@ export function previewForEdge(
     return ''
   }
   if (options?.target) {
-    const raw = source.value || source.label
+    const raw = source.value ?? ''
     const coerced = coerceValue(raw, options.target.dataType)
     if (typeof coerced === 'string') return truncateSample(coerced, 80)
     if (typeof coerced === 'number' || typeof coerced === 'boolean') {
