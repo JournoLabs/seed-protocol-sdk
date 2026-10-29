@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Lookups match case-insensitively: a source value finds an entry with the same new `lookupKey` (NFC, collapsed whitespace, trimmed, case-folded), so a feed that prints "mira chen" once finds the "Mira Chen" entry. `normalizeLookupKey` adds NFC and still keeps case; it's the form entries are stored in. `LookupEditor` shows one row per key.
+- `applyMapping` takes `onUnmatched`, called with `{ sourceId, propertyName, value }` for each lookup value that has no entry. Only `applyMappingAsync` reported misses.
+- An empty source value on a lookup edge is no lookup: `applyMappingAsync` no longer lists it as an error, and `onUnmatched` isn't called for it.
+- `autoMap(sources, targets, previous)` keeps the entries a property that stays a lookup has in `previous`, and `useFieldMapper`'s Auto-map passes its current mappings. One Auto-map click dropped every assignment.
+- `withPreservedExtras` keeps a lookup's entries when it moves to another source (`author` to `dc:creator`); they were dropped.
+- New `collectLookupValues(items, mapping)`: each distinct value a lookup's source holds across a feed's items, in first-seen spelling.
+
 - An `extract` or `file` edge on a source with an empty value passes `''` as the resolve callback's `url`, and lookups take their sample from the value only (`sampleValueFromSource`, the field mapper's previews and `LookupEditor`). 0.7.12 made `applyMapping` value-only but these still fell back to the source's `label`, so the field's name went to the resolve callback as a URL, and a lookup entry written in the editor for an empty source was stored under the label and never matched at apply.
 
 ## 0.7.12 (2026-10-27)

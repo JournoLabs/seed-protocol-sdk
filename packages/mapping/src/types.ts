@@ -61,6 +61,14 @@ export type TargetProperty = {
   required?: boolean
 }
 
+/** A lookup value with no entry, as `applyMapping`'s `onUnmatched` reports it. */
+export type UnmatchedLookup = {
+  sourceId: string
+  propertyName: string
+  /** The source value, as {@link normalizeLookupKey} stores it. */
+  value: string
+}
+
 /** One origin string → opaque host ref for `resolve: 'lookup'`. */
 export type LookupEntry = {
   /** Trimmed origin source string (e.g. RSS author). */

@@ -14,6 +14,7 @@ import type {
   ResolveContext,
   SourceNode,
   TargetProperty,
+  UnmatchedLookup,
   UrlMediaClass,
 } from './types'
 
@@ -89,13 +90,15 @@ function classFromSource(source: SourceNode): UrlMediaClass | undefined {
   return undefined
 }
 
+/** A lookup edge's value; `skip` for an empty source value, which is no lookup. */
 function applyLookupEdge(
   mapping: FieldMapping,
   source: SourceNode,
   target: TargetProperty,
   lookups: MappingLookups | undefined,
-): { value: string | string[] } | { unmatched: string } {
+): { value: string | string[] } | { unmatched: string } | { skip: true } {
   const rawValue = normalizeLookupKey(source.value ?? '')
+  if (!rawValue) return { skip: true }
   const mapped = resolveLookupMapped(mapping, rawValue, lookups)
   if (mapped === undefined) {
     return { unmatched: rawValue }
@@ -108,13 +111,14 @@ function applyLookupEdge(
  * Missing sources or unknown target properties are skipped (no throw).
  * `resolve: 'extract' | 'file' | 'derive' | 'assemble'` edges are skipped.
  * Use `applyMappingAsync` for extract/file. Derive/assemble stay host-applied.
- * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups).
+ * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups). A value
+ * with no entry is left out and reported to `onUnmatched`; an empty value is no lookup.
  */
 export function applyMapping(
   sources: SourceNode[],
   mappings: FieldMapping[],
   targets: TargetProperty[],
-  options?: { lookups?: MappingLookups },
+  options?: { lookups?: MappingLookups; onUnmatched?: (miss: UnmatchedLookup) => void },
 ): PropertyBag {
   const byId = new Map(sources.map((s) => [s.id, s]))
   const byName = new Map(targets.map((t) => [t.name, t]))
@@ -131,6 +135,8 @@ export function applyMapping(
       const result = applyLookupEdge(mapping, source, target, options?.lookups)
       if ('value' in result) {
         properties[mapping.propertyName] = result.value
+      } else if ('unmatched' in result) {
+        options?.onUnmatched?.({ sourceId: source.id, propertyName: mapping.propertyName, value: result.unmatched })
       }
       continue
     }
@@ -206,7 +212,7 @@ export async function applyMappingAsync(
       const result = applyLookupEdge(mapping, source, target, options.lookups)
       if ('value' in result) {
         properties[mapping.propertyName] = result.value
-      } else {
+      } else if ('unmatched' in result) {
         errors.push({
           sourceId: mapping.sourceId,
           propertyName: mapping.propertyName,

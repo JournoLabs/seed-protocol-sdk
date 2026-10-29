@@ -146,10 +146,23 @@ const { properties, errors } = await applyMappingAsync(
 )
 // Unmatched values are omitted from the bag and listed in errors[].
 // Do not fetch identities inside apply — persist the assignment, then apply.
+
+// Sync apply reports the misses through a callback:
+applyMapping(itemSources, mappings, postTargets, {
+  onUnmatched: ({ propertyName, value }) => holdItem(propertyName, value),
+})
 ```
 
+A source value matches an entry when their `lookupKey` is the same: NFC, internal whitespace
+collapsed, trimmed and case-folded, so `mira chen` finds the `Mira Chen` entry. Entries are stored
+with case kept (`normalizeLookupKey`). An empty source value is no lookup: it is neither applied nor
+reported as unmatched. `collectLookupValues(items, mapping)` lists every distinct value a lookup's
+source holds across a feed's items, for an editor that assigns them all.
+
 `autoMap` pairs alias matches such as `author` → `authors` with
-`resolve: 'lookup'` and **empty** entries. It never invents refs.
+`resolve: 'lookup'` and **empty** entries. It never invents refs. Pass the current mappings as its
+third argument and a property that stays a lookup keeps its entries; `useFieldMapper` does. Moving a
+lookup to another source (`withPreservedExtras`) keeps its entries too.
 
 `MappingDocument.lookups` / `applyMappingAsync({ lookups })` remain a read-only
 fallback for 0.6.0 documents. Prefer `FieldMapping.lookup.entries`.

@@ -15,6 +15,7 @@ export type {
   ResolveCallback,
   ApplyMappingError,
   ApplyMappingAsyncResult,
+  UnmatchedLookup,
 } from './types'
 
 export { applyMapping, applyMappingAsync, coerceValue } from './applyMapping'
@@ -32,6 +33,8 @@ export type { ApplyMappingAsyncOptions } from './applyMapping'
 export {
   isRelationLookupTarget,
   normalizeLookupKey,
+  lookupKey,
+  collectLookupValues,
   sampleValueFromSource,
   lookupEntriesFromMapping,
   lookupRefFromEntries,
