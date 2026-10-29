@@ -6,6 +6,7 @@ import { to7702SimpleSmartAccount } from 'permissionless/accounts'
 import { createPimlicoClient } from 'permissionless/clients/pimlico'
 import {
   brandTxSender,
+  requireSignTypedData,
   type SeedSigner,
   type SeedTxRequest,
   type SeedTxSender,
@@ -36,11 +37,8 @@ function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
         '@seedprotocol/publish: permissionless EIP-7702 path does not use signTransaction',
       )
     },
-    signTypedData: async () => {
-      throw new Error(
-        '@seedprotocol/publish: signTypedData is not implemented on SeedSigner yet',
-      )
-    },
+    signTypedData: async (args) =>
+      requireSignTypedData(signer)(args as Parameters<NonNullable<SeedSigner['signTypedData']>>[0]),
   }
 }
 
