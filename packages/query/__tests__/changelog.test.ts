@@ -210,11 +210,11 @@ describe('applyChangelogFilters', () => {
 })
 
 describe('buildAssembleOptionsKey changelog fingerprint', () => {
-  it('preserves e1-h1 for default data include', () => {
-    expect(buildAssembleOptionsKey()).toBe('e1-h1')
-    expect(buildAssembleOptionsKey({ include: 'data' })).toBe('e1-h1')
+  it('preserves e3-h1 for default data include', () => {
+    expect(buildAssembleOptionsKey()).toBe('e3-h1')
+    expect(buildAssembleOptionsKey({ include: 'data' })).toBe('e3-h1')
     expect(buildAssembleOptionsKey({ include: 'data', changelog: {} })).toBe(
-      'e1-h1',
+      'e3-h1',
     )
   })
 
@@ -222,7 +222,7 @@ describe('buildAssembleOptionsKey changelog fingerprint', () => {
     const withCl = buildAssembleOptionsKey({
       include: 'data+changelog',
     })
-    expect(withCl).toBe('e1-h1-i1-gv-s0-l0')
+    expect(withCl).toBe('e3-h1-i1-gv-s0-l0')
     expect(withCl).not.toBe(buildAssembleOptionsKey())
   })
 
@@ -238,6 +238,6 @@ describe('buildAssembleOptionsKey changelog fingerprint', () => {
           limit: 50,
         },
       }),
-    ).toBe('e0-h0-i2-gp-s1700000000-l50')
+    ).toBe('e4-h0-i2-gp-s1700000000-l50')
   })
 })

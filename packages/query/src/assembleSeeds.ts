@@ -9,13 +9,13 @@ import {
 import { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 import {
   publicListRelationPropertyKey,
+  relationPropertyKey,
   stripListRelationStorageAliasesForPublicKey,
   tryCoerceJsonStringArray,
 } from './listRelationKey.js'
 import { enrichImageSeedClone } from './imageRelationEnrichment.js'
 import { hydrateArweaveRichTextInItems } from './hydrateArweaveRichText.js'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
-import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import {
   setFieldStorageModel,
   setListElementStorageModels,
@@ -183,14 +183,9 @@ async function processItemProperty(
 
   if (isBytes32Relation || isNamingConventionRelation) {
     isRelation = true
+    isList = Array.isArray(metadata.value)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
     if (Array.isArray(metadata.value)) {
-      isList = true
-      if (isNamingConventionRelation) {
-        const result = parseEasRelationPropertyName(propertyNameSnake)
-        if (result) {
-          propertyNameSnake = result.propertyName
-        }
-      }
       metadata.value.forEach((value: string) => {
         if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
       })

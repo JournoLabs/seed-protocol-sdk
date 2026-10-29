@@ -84,7 +84,9 @@ const { items: owned } = await queryBySchema('publication', {
 
 Options on every API: `relations` (default `'expand'`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass), `source` (default `'remote'`).
 
-`relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'urls'` resolves Html/File relations to URLs and leaves the rest as seed UIDs. `'uids'` leaves every relation as a seed UID under its stored key (`author_id`, `author_ids`) and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
+`relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'urls'` resolves Html/File relations to URLs and leaves the rest as seed UIDs. `'uids'` leaves every relation as a seed UID and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
+
+In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, so whether the key was plural is lost; the key returned is always the plural (`featured_portfolio_clip_ids` comes back as `featureds`).
 
 ## Many seeds (`getSeeds`)
 
