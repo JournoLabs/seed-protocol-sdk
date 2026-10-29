@@ -44,7 +44,7 @@ const version = (id: string, seedUid: string): AttestationLike => ({
   decodedDataJson: '',
 })
 
-/** A post relating to an author (nested on expand) and an Html body (a URL on expand and urls). */
+/** A post relating to an author (nested on expand) and an Html body (a URL on expand). */
 function makeSource(calls: string[], extraProps: AttestationLike[] = []): QueryDataSource {
   const seeds = new Map([
     [POST, seed(POST, 'post')],
@@ -162,12 +162,6 @@ describe('relations modes', () => {
     return record!.data
   }
 
-  it("'urls' resolves the Html relation to a URL and leaves the author a uid", async () => {
-    const data = await assemble({ relations: 'urls' })
-    expect(data.body).toEqual(expect.stringContaining(BODY_TX))
-    expect(data.author).toBe(AUTHOR)
-  })
-
   it("'expand' also nests the author", async () => {
     const data = await assemble({ relations: 'expand' })
     expect(data.body).toEqual(expect.stringContaining(BODY_TX))
@@ -198,7 +192,6 @@ describe('relations modes', () => {
   it('gives each mode its own cache key', () => {
     expect(buildAssembleOptionsKey()).toBe('e3-h1')
     expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e3-h1')
-    expect(buildAssembleOptionsKey({ relations: 'urls' })).toBe('e4-h1')
     expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e5-h1')
     expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e5-h0')
   })

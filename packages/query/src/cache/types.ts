@@ -92,11 +92,11 @@ function includeCode(include?: ChangelogInclude): string {
   return 'i2' // changelog
 }
 
-const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e3', urls: 'e4', uids: 'e5' }
+const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e3', uids: 'e5' }
 
 /**
  * Build a stable key for assemble options that affect cached payloads.
- * Relations modes map to `e3` (expand), `e4` (urls) and `e5` (uids). The codes changed from
+ * Relations modes map to `e3` (expand) and `e5` (uids). The codes changed from
  * e1, e0 and e2 when relation keys became the same in every mode, so no stored payload of the old shape is read.
  */
 export function buildAssembleOptionsKey(options?: {

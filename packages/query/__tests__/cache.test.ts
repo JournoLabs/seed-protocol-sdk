@@ -36,8 +36,8 @@ describe('buildAssembleOptionsKey', () => {
 
   it('encodes false flags', () => {
     expect(
-      buildAssembleOptionsKey({ relations: 'urls', hydrateStorage: false }),
-    ).toBe('e4-h0')
+      buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false }),
+    ).toBe('e5-h0')
   })
 
   it('isolates changelog include from default key', () => {
@@ -180,7 +180,7 @@ describe('CacheManager collection + item', () => {
     expect(got?.optionsKey).toBe(KEY)
     expect(got?.dependencies).toEqual(deps('0xseed'))
 
-    const otherKey = buildAssembleOptionsKey({ relations: 'urls' })
+    const otherKey = buildAssembleOptionsKey({ relations: 'uids' })
     expect(await cache.getItem('0xseed', otherKey)).toBeNull()
 
     await cache.clearItem('0xseed', KEY)
