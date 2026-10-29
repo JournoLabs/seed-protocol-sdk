@@ -322,6 +322,7 @@ export default defineConfig({
             'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',
             'packages/publish/src/services/publish/helpers/ensureEasSchemas.savedRowSchemaUid.test.ts',
             'packages/publish/src/services/publish/helpers/ensureEasSchemas.attestedOnly.test.ts',
+            'packages/publish/src/services/publish/helpers/ensureEasSchemas.forModels.test.ts',
             'packages/react/__tests__/**/*.node.test.tsx',
           ],
           // Paths are relative to `dir: '.'` (the repo root). The old `node/**`-style patterns were written for

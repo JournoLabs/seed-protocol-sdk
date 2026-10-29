@@ -366,6 +366,7 @@ export {
   type PublishPropertyKind,
   type GetPublishGraphOptions,
 } from './db/read/publishGraph'
+export { getPublishModels, type PublishModel, type GetPublishModelsOptions } from './db/read/publishModels'
 export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,

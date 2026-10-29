@@ -104,6 +104,7 @@ mock.module('@seedprotocol/sdk', () => ({
   ModelPropertyDataTypes: { File: 'File', Html: 'Html', Image: 'Image', Text: 'Text' },
   normalizeDataType,
   getPublishGraph: async () => publishGraph(),
+  getPublishModels: async () => [],
   publishRemovesValue: async () => false,
   getEasSchemaUidForExactDefinition: async () => undefined,
   setSchemaUidForSchemaDefinition: () => {},
@@ -207,7 +208,7 @@ describe('ensureEasSchemasForItem', () => {
     await expect(
       ensureEasSchemasForItem(postItem() as never, wallet(), { managedAddress: MANAGED }),
     ).rejects.toThrow(
-      'schema "string title" is not registered; automation keys can\'t register schemas. Call ensureEasSchemasForItem with the owner wallet first.',
+      'schema "string title" is not registered; automation keys can\'t register schemas. Call ensureEasSchemasForModels with the owner wallet first.',
     )
     expect(sendTransaction).not.toHaveBeenCalled()
     expect(registerSchema).not.toHaveBeenCalled()
