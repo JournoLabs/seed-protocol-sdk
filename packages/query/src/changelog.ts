@@ -1,6 +1,6 @@
 import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
-import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
+import { relationPropertyKey } from './listRelationKey.js'
 import type {
   AttestationLike,
   ChangelogEntry,
@@ -66,15 +66,8 @@ export function decodePropertyAttestation(
   let isList = false
   if (isBytes32Relation || isNamingConventionRelation) {
     isRelation = true
-    if (Array.isArray(metadata.value)) {
-      isList = true
-      if (isNamingConventionRelation) {
-        const result = parseEasRelationPropertyName(propertyNameSnake)
-        if (result?.isList) {
-          propertyNameSnake = result.propertyName
-        }
-      }
-    }
+    isList = Array.isArray(metadata.value)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
   }
 
   let propertyValue: string | string[] = metadata.value as string | string[]

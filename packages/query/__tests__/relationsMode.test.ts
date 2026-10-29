@@ -45,7 +45,7 @@ const version = (id: string, seedUid: string): AttestationLike => ({
 })
 
 /** A post relating to an author (nested on expand) and an Html body (a URL on expand and urls). */
-function makeSource(calls: string[]): QueryDataSource {
+function makeSource(calls: string[], extraProps: AttestationLike[] = []): QueryDataSource {
   const seeds = new Map([
     [POST, seed(POST, 'post')],
     [AUTHOR, seed(AUTHOR, 'author')],
@@ -58,6 +58,7 @@ function makeSource(calls: string[]): QueryDataSource {
     prop('0xp3', POST_V, 'body_id', BODY, 'bytes32'),
     prop('0xp4', AUTHOR_V, 'name', 'Ada'),
     prop('0xp5', BODY_V, 'storage_transaction_id', BODY_TX),
+    ...extraProps,
   ]
   const call = async <T>(name: string, result: T): Promise<T> => {
     calls.push(name)
@@ -104,21 +105,17 @@ describe("relations: 'uids'", () => {
     expect(items[0]!.data.title).toBe('Hello')
   })
 
-  it('keeps relation values as seed uids under their stored keys', async () => {
+  it('keeps relation values as seed uids under their schema keys', async () => {
     const [record] = await assembleSeeds(
       'post',
       [seed(POST, 'post')],
       { relations: 'uids', hydrateStorage: false },
-      makeSource(calls),
+      makeSource(calls, [prop('0xp6', POST_V, 'editor_identity_ids', [AUTHOR], 'bytes32[]')]),
     )
-    expect(record!.data).toMatchObject({
-      author_id: AUTHOR,
-      authorId: AUTHOR,
-      body_id: BODY,
-      bodyId: BODY,
-    })
-    expect(record!.data).not.toHaveProperty('author')
-    expect(record!.data).not.toHaveProperty('body')
+    expect(record!.data).toMatchObject({ author: AUTHOR, body: BODY, editors: [AUTHOR] })
+    for (const storageKey of ['author_id', 'authorId', 'body_id', 'bodyId', 'editor_identity_ids', 'editorIdentityIds']) {
+      expect(record!.data).not.toHaveProperty(storageKey)
+    }
   })
 
   it('names only the seed and its head version as dependencies', async () => {
@@ -144,12 +141,12 @@ describe("relations: 'uids'", () => {
     registerLocalQuerySource(makeSource(calls))
     const opts = { source: 'local', hydrateStorage: false, relations: 'uids' } as const
 
-    expect((await getSeed(POST, opts))?.data.author_id).toBe(AUTHOR)
+    expect((await getSeed(POST, opts))?.data.author).toBe(AUTHOR)
     expect(calls.splice(0)).toEqual(['seed', 'versions', 'properties'])
     // getSeeds reads the requested seeds themselves with getSeedsByUids.
-    expect((await getSeeds([POST], opts)).get(POST)?.data.author_id).toBe(AUTHOR)
+    expect((await getSeeds([POST], opts)).get(POST)?.data.author).toBe(AUTHOR)
     expect(calls.splice(0)).toEqual(['seeds', 'versions', 'properties'])
-    expect((await queryBySchemaForMonth('post', 2026, 10, opts))[0]?.data.author_id).toBe(AUTHOR)
+    expect((await queryBySchemaForMonth('post', 2026, 10, opts))[0]?.data.author).toBe(AUTHOR)
     expect(calls.splice(0)).toEqual(['list', 'versions', 'properties'])
   })
 })
@@ -168,7 +165,7 @@ describe('relations modes', () => {
   it("'urls' resolves the Html relation to a URL and leaves the author a uid", async () => {
     const data = await assemble({ relations: 'urls' })
     expect(data.body).toEqual(expect.stringContaining(BODY_TX))
-    expect(data.author_id).toBe(AUTHOR)
+    expect(data.author).toBe(AUTHOR)
   })
 
   it("'expand' also nests the author", async () => {
@@ -177,16 +174,32 @@ describe('relations modes', () => {
     expect(data.author).toMatchObject({ seedUid: AUTHOR, name: 'Ada' })
   })
 
+  it("'expand' keeps a relation whose seed is missing under its schema key", async () => {
+    const MISSING = '0x' + '9'.repeat(64)
+    const [record] = await assembleSeeds(
+      'post',
+      [seed(POST, 'post')],
+      { relations: 'expand', hydrateStorage: false },
+      makeSource([], [
+        prop('0xp6', POST_V, 'editor_id', MISSING, 'bytes32'),
+        prop('0xp7', POST_V, 'reviewer_identity_ids', [MISSING], 'bytes32[]'),
+      ]),
+    )
+    expect(record!.data).toMatchObject({ editor: MISSING, reviewers: [MISSING] })
+    expect(record!.data).not.toHaveProperty('editor_id')
+    expect(record!.data).not.toHaveProperty('reviewer_identity_ids')
+  })
+
   it("defaults to 'expand'", async () => {
     expect(relationsModeOf(undefined)).toBe('expand')
     expect(await assemble({})).toEqual(await assemble({ relations: 'expand' }))
   })
 
   it('gives each mode its own cache key', () => {
-    expect(buildAssembleOptionsKey()).toBe('e1-h1')
-    expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e1-h1')
-    expect(buildAssembleOptionsKey({ relations: 'urls' })).toBe('e0-h1')
-    expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e2-h1')
-    expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e2-h0')
+    expect(buildAssembleOptionsKey()).toBe('e3-h1')
+    expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e3-h1')
+    expect(buildAssembleOptionsKey({ relations: 'urls' })).toBe('e4-h1')
+    expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e5-h1')
+    expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e5-h0')
   })
 })

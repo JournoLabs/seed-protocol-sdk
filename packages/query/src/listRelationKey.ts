@@ -26,6 +26,17 @@ export function publicListRelationPropertyKey(propertyKey: string): string {
 }
 
 /**
+ * The key a relation property is returned under, from its EAS name, in every `relations` mode: a
+ * list's schema key (`author_identity_ids` → `authors`), a single relation's name without `_id`
+ * (`author_id` → `author`). A list's EAS name is `singular(key) + Model + Ids`, which doesn't keep
+ * whether the key was plural (`featured` and `featureds` give the same name); this returns the plural.
+ */
+export function relationPropertyKey(easPropertyName: string, isList: boolean): string {
+  if (isList) return publicListRelationPropertyKey(easPropertyName)
+  return easPropertyName.endsWith('_id') ? easPropertyName.slice(0, -3) : easPropertyName
+}
+
+/**
  * Removes keys that are storage aliases for the same list relation as `publicKey`
  * (e.g. delete `authorIdentityIds` when `authors` is the canonical field).
  */
