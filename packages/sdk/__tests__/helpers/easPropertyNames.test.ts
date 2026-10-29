@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { easPropertyNameForPublish, easSchemaDefinitionForProperty } from '@/helpers/metadataPropertyNames'
+import {
+  assertModelNameCanPublish,
+  assertPropertyNameCanPublish,
+  easPropertyNameForPublish,
+  easSchemaDefinitionForProperty,
+} from '@/helpers/metadataPropertyNames'
 import { warnOnEasNameCollisions } from '@/helpers/schemaApply'
 
 describe('easPropertyNameForPublish (ADR 0008)', () => {
@@ -62,5 +67,30 @@ describe('warnOnEasNameCollisions', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+// ethers parses EAS schema strings and refuses these words as names, so publish failed only when it
+// encoded the first attestation (`string view`).
+describe('reserved ABI words', () => {
+  it.each(['view', 'event', 'storage', 'error', 'function', 'struct', 'indexed', 'returns'])(
+    'refuses a property published as "%s"',
+    (name) => {
+      expect(() => assertPropertyNameCanPublish(name, { dataType: 'Text' })).toThrow(`publishes as "${name}"`)
+    },
+  )
+
+  it('checks the EAS form, not the key', () => {
+    expect(() => assertModelNameCanPublish('View')).toThrow('Model "View" publishes as "view"')
+    expect(() => assertPropertyNameCanPublish('eventId', { dataType: 'Relation', ref: 'Event' })).toThrow(
+      'publishes as "event"',
+    )
+    expect(() => assertPropertyNameCanPublish('views', { dataType: 'Text' })).not.toThrow()
+    expect(() => assertPropertyNameCanPublish('layout', { dataType: 'Text' })).not.toThrow()
+  })
+
+  it('allows a List of relations, which publishes with its `<Model>Ids` suffix', () => {
+    expect(() => assertPropertyNameCanPublish('event', { dataType: 'List', refValueType: 'Relation' })).not.toThrow()
+    expect(() => assertPropertyNameCanPublish('event', { dataType: 'List', ref: 'Identity' })).not.toThrow()
   })
 })

@@ -48,6 +48,27 @@ testDescribe('schema file validation rules', () => {
     )
   })
 
+  it('rejects a property whose EAS name is a reserved ABI word', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    const file = schemaFile('rules-reserved-property', 'Rules Reserved Property', {
+      view: { id: 'rules-reserved-property-view', type: 'Text' },
+    })
+    await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).rejects.toThrow(
+      'RuleNote.view: Property "view" publishes as "view"',
+    )
+  })
+
+  it('rejects a model whose EAS name is a reserved ABI word', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    const file = {
+      ...schemaFile('rules-reserved-model', 'Rules Reserved Model', {}),
+      models: { Event: { id: 'rules-reserved-model-event', properties: { title: { id: 'rules-reserved-model-title', type: 'Text' } } } },
+    }
+    await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).rejects.toThrow(
+      'Event: Model "Event" publishes as "event"',
+    )
+  })
+
   it('loads a custom rule with a warning, ignores it, and renames the property', async () => {
     const { importJsonSchema } = await import('@/imports/json')
     const { BaseDb } = await import('@/db/Db/BaseDb')
