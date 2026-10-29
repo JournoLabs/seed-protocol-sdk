@@ -124,7 +124,7 @@ const mappings = [
     propertyName: 'authors',
     resolve: 'lookup' as const,
     lookup: {
-      entries: [{ value: 'Jane Doe', ref: 'identity-seed-uid' }],
+      entries: [{ value: 'Jane Doe', refs: ['identity-seed-uid'] }],
     },
   },
 ]
@@ -152,6 +152,32 @@ applyMapping(itemSources, mappings, postTargets, {
   onUnmatched: ({ propertyName, value }) => holdItem(propertyName, value),
 })
 ```
+
+An entry maps one string to an ordered list of refs, so a joint byline such as "Mira Chen and Sam
+Ortiz" can name both people, lead first. A document saved with `{ value, ref }` entries reads as
+`refs: [ref]`; `lookupEntriesFromMapping` returns entries in the `refs` shape. A Relation target holds
+one ref, so an entry with several gives it the first.
+
+Set `split` on a lookup edge to look up the parts of a string that has no entry of its own:
+
+```ts
+{
+  sourceId: 'rss-author',
+  propertyName: 'authors',
+  resolve: 'lookup',
+  split: { separators: ['and', '&'] }, // DEFAULT_LOOKUP_SEPARATORS
+  lookup: { entries: [{ value: 'Mira Chen', refs: ['mira'] }, { value: 'Sam Ortiz', refs: ['sam'] }] },
+}
+// "Sam Ortiz & Mira Chen" applies as ['sam', 'mira']
+```
+
+The whole string's own entry wins; only a string without one is split. `and` splits only as a word
+with spaces around it, in any case, and `,` is available but left out of the default because feeds
+print "Chen, Mira". The refs of the parts that have entries are applied in the string's order, and
+each part without one is reported to `onUnmatched` with `splitFrom` set to the whole string
+(`applyMappingAsync` lists it in `errors`). `useFieldMapper`'s `setLookupSplit(rowId, separators)` and
+a lookup row's `onSplitChange` set or clear it; `splitLookupValue` and `resolveLookup` expose the same
+rules to a host that matches strings itself.
 
 A source value matches an entry when their `lookupKey` is the same: NFC, internal whitespace
 collapsed, trimmed and case-folded, so `mira chen` finds the `Mira Chen` entry. Entries are stored

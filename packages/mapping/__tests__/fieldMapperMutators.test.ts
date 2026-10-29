@@ -190,14 +190,14 @@ describe('applyLookupEntriesToMappings', () => {
       'property',
       'author',
       [],
-      [{ value: 'Ada', ref: 'local_1' }],
+      [{ value: 'Ada', refs: ['local_1'] }],
     )
     expect(assigned).toEqual([
       {
         sourceId: 'fm-title',
         propertyName: 'author',
         resolve: 'lookup',
-        lookup: { entries: [{ value: 'Ada', ref: 'local_1' }] },
+        lookup: { entries: [{ value: 'Ada', refs: ['local_1'] }] },
       },
     ])
 
@@ -218,7 +218,7 @@ describe('applyLookupEntriesToMappings', () => {
         sourceId: 'fm-title',
         propertyName: 'author',
         resolve: 'lookup',
-        lookup: { entries: [{ value: 'Ada', ref: 'local_1' }] },
+        lookup: { entries: [{ value: 'Ada', refs: ['local_1'] }] },
       },
     ]
     const next = mappings.filter((m) => m.propertyName !== 'author')

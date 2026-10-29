@@ -2,6 +2,7 @@ import type {
   DeriveSpec,
   FieldMapping,
   LookupEntry,
+  LookupSeparator,
   MappingLookups,
   ResolveJob,
   SourceNode,
@@ -56,6 +57,7 @@ export type FieldMapperRow = {
 
 export type FieldMapperLookupRow = FieldMapperRow & {
   onLookupChange: (entries: LookupEntry[]) => void
+  onSplitChange: (separators: LookupSeparator[] | null) => void
 }
 
 export type FieldMapperTransformOptions = (
@@ -100,6 +102,8 @@ export type UseFieldMapperResult = {
   setTransform: (rowId: string, resolve: ResolveJob | null) => void
   /** Write `lookup.entries` on the edge for this row. Empty list omits `lookup`. */
   setLookupEntries: (rowId: string, entries: LookupEntry[]) => void
+  /** Write `split` on the lookup edge for this row; `null` or `[]` looks up whole values only. */
+  setLookupSplit: (rowId: string, separators: LookupSeparator[] | null) => void
   /** Write `assemble.blocks` on an assemble edge. */
   setAssembleBlocks: (rowId: string, blocks: string[]) => void
   /** Write or clear `derive` on the edge. Creates a derive-only edge in property mode when missing. */

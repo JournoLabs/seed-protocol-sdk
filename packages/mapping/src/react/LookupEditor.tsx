@@ -9,16 +9,21 @@ import type {
 import type { FieldMapperSlot } from './fieldMapperSlots'
 import { slotClass } from './fieldMapperSlots'
 
+/** Refs typed into the fallback input, separated by commas or spaces (refs are ids without either). */
+function parseRefsInput(text: string): string[] {
+  return text.split(/[\s,]+/).filter(Boolean)
+}
+
 function upsertEntry(
   entries: LookupEntry[],
   value: string,
-  ref: string,
+  refsText: string,
 ): LookupEntry[] {
   const key = lookupKey(value)
-  const trimmed = ref.trim()
+  const refs = parseRefsInput(refsText)
   const next = entries.filter((e) => lookupKey(e.value) !== key)
-  if (!trimmed) return next
-  next.push({ value: normalizeLookupKey(value), ref: trimmed })
+  if (refs.length === 0) return next
+  next.push({ value: normalizeLookupKey(value), refs })
   return next
 }
 
@@ -59,7 +64,7 @@ function LookupBlock({
   if (sampleKey && !shownByKey.has(lookupKey(sampleKey))) shownByKey.set(lookupKey(sampleKey), sampleKey)
   const keyList = [...shownByKey.values()]
   const target = targetsByName.get(mapping.propertyName)
-  const refByKey = new Map(entries.map((e) => [lookupKey(e.value), e.ref]))
+  const refsByKey = new Map(entries.map((e) => [lookupKey(e.value), e.refs.join(', ')]))
 
   return (
     <div className="fm-lookup-block">
@@ -70,7 +75,7 @@ function LookupBlock({
         </h4>
       )}
       <div className="fm-lookup-hint">
-        Map source strings to refs. Host owns Identity search/create.
+        Map source strings to refs, comma-separated for several. Host owns Identity search/create.
       </div>
       {keyList.length === 0 ? (
         <div className="fm-lookup-hint">
@@ -85,8 +90,8 @@ function LookupBlock({
             <input
               className="fm-lookup-input"
               type="text"
-              placeholder="ref"
-              value={refByKey.get(lookupKey(key)) ?? ''}
+              placeholder="ref, ref"
+              value={refsByKey.get(lookupKey(key)) ?? ''}
               onChange={(e) =>
                 onLookupChange(mapping, upsertEntry(entries, key, e.target.value))
               }

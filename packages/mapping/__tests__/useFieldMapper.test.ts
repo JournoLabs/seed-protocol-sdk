@@ -175,7 +175,7 @@ describe('buildPropertyModeRows', () => {
           sourceId: 'rss-author',
           propertyName: 'author',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Ada', ref: 'seed:identity/ada' }] },
+          lookup: { entries: [{ value: 'Ada', refs: ['seed:identity/ada'] }] },
         },
       ],
     })
@@ -248,7 +248,7 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
           sourceId: 'rss-author',
           propertyName: 'author',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Ada', ref: 'uid-1' }] },
+          lookup: { entries: [{ value: 'Ada', refs: ['uid-1'] }] },
         },
         {
           sourceId: 'rss-link',

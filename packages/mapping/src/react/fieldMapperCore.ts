@@ -8,11 +8,12 @@ import {
 } from '../edgeMapping'
 import {
   isRelationLookupTarget,
-  resolveLookupMapped,
+  resolveLookup,
   sampleValueFromSource,
   shapeLookupValue,
   stripLookup,
   withLookupEntries,
+  withLookupSplit,
 } from '../relationLookup'
 import {
   normalizeMappingFromSourceId,
@@ -22,6 +23,7 @@ import type {
   DeriveSpec,
   FieldMapping,
   LookupEntry,
+  LookupSeparator,
   MappingLookups,
   ResolveJob,
   SourceNode,
@@ -140,15 +142,12 @@ export function previewForEdge(
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
       resolve: 'lookup' as const,
     }
-    const mapped = resolveLookupMapped(mapping, raw, options?.lookups)
-    if (mapped !== undefined) {
-      const shaped = options?.target
-        ? shapeLookupValue(mapped, options.target)
-        : mapped
-      if (Array.isArray(shaped)) {
-        return truncateSample(shaped.join(', '), 80)
-      }
-      return truncateSample(String(shaped), 80)
+    const { refs, unmatched } = resolveLookup(mapping, raw, options?.lookups)
+    if (refs.length > 0) {
+      const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
+      const shown = Array.isArray(shaped) ? shaped : [shaped]
+      const missing = unmatched.map((part) => `‹lookup ref for "${truncateSample(part, 48)}"›`)
+      return truncateSample([...shown, ...missing].join(', '), 80)
     }
     return `‹lookup ref for "${truncateSample(source.value, 48)}"›`
   }
@@ -216,10 +215,7 @@ export function rowState(args: {
   }
   if (actual === 'lookup') {
     const sample = args.sampleValue ?? ''
-    if (
-      !sample ||
-      resolveLookupMapped(args.mapping, sample, args.lookups) === undefined
-    ) {
+    if (!sample || resolveLookup(args.mapping, sample, args.lookups).unmatched.length > 0) {
       return 'needsLookup'
     }
   }
@@ -323,6 +319,24 @@ export function applyDeriveToMappings(
   return next
 }
 
+function updateLookupEdge(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  update: (edge: FieldMapping) => FieldMapping,
+): FieldMapping[] | null {
+  const index =
+    rowKey === 'property'
+      ? mappings.findIndex((m) => m.propertyName === rowId)
+      : edgeIds.indexOf(rowId)
+  const prev = index < 0 ? undefined : mappings[index]
+  if (!prev || prev.resolve !== 'lookup') return null
+  const next = [...mappings]
+  next[index] = update(prev)
+  return next
+}
+
 export function applyLookupEntriesToMappings(
   mappings: FieldMapping[],
   rowKey: 'property' | 'source',
@@ -330,22 +344,17 @@ export function applyLookupEntriesToMappings(
   edgeIds: string[],
   entries: LookupEntry[],
 ): FieldMapping[] | null {
-  if (rowKey === 'property') {
-    const index = mappings.findIndex((m) => m.propertyName === rowId)
-    if (index < 0) return null
-    const prev = mappings[index]!
-    if (prev.resolve !== 'lookup') return null
-    const next = [...mappings]
-    next[index] = withLookupEntries(prev, entries)
-    return next
-  }
-  const edgeIndex = edgeIds.indexOf(rowId)
-  if (edgeIndex < 0) return null
-  const prev = mappings[edgeIndex]
-  if (!prev || prev.resolve !== 'lookup') return null
-  const next = [...mappings]
-  next[edgeIndex] = withLookupEntries(prev, entries)
-  return next
+  return updateLookupEdge(mappings, rowKey, rowId, edgeIds, (edge) => withLookupEntries(edge, entries))
+}
+
+export function applyLookupSplitToMappings(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  separators: LookupSeparator[] | null,
+): FieldMapping[] | null {
+  return updateLookupEdge(mappings, rowKey, rowId, edgeIds, (edge) => withLookupSplit(edge, separators))
 }
 
 export function upsertPropertyMapping(

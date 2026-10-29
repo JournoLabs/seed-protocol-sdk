@@ -65,17 +65,26 @@ export type TargetProperty = {
 export type UnmatchedLookup = {
   sourceId: string
   propertyName: string
-  /** The source value, as {@link normalizeLookupKey} stores it. */
+  /** The source value, or the part of it that missed when the edge splits, as {@link normalizeLookupKey} stores it. */
   value: string
+  /** The whole source value `value` was split from. Absent when the whole value missed. */
+  splitFrom?: string
 }
 
-/** One origin string → opaque host ref for `resolve: 'lookup'`. */
+/**
+ * One origin string → an ordered list of opaque host refs for `resolve: 'lookup'`. A joint byline
+ * ("Mira Chen and Sam Ortiz") names several refs, lead first. A stored `{ value, ref }` from an
+ * older document reads as `refs: [ref]` ({@link lookupEntriesFromMapping}).
+ */
 export type LookupEntry = {
   /** Trimmed origin source string (e.g. RSS author). */
   value: string
-  /** Opaque host-stable id (`seedLocalId` or `seedUid`). Package does not interpret it. */
-  ref: string
+  /** Opaque host-stable ids (`seedLocalId` or `seedUid`), in the order the value names them. Package does not interpret them. */
+  refs: string[]
 }
+
+/** A separator a lookup edge's `split` breaks a value on: ` and ` (spaces around it, any case), `&`, or `,`. */
+export type LookupSeparator = 'and' | '&' | ','
 
 /**
  * Source → property edge.
@@ -91,6 +100,11 @@ export type FieldMapping = {
   resolve?: ResolveJob
   /** Stored string → ref assignments for `resolve: 'lookup'`. Omit or empty = unassigned. */
   lookup?: { entries: LookupEntry[] }
+  /**
+   * On a lookup edge: a value with no entry of its own is split on these separators and each part
+   * is looked up. Omit to look up whole values only.
+   */
+  split?: { separators: LookupSeparator[] }
   /** Optional derive spec. Legal on `resolve: 'derive'` or as copy fallback. */
   derive?: DeriveSpec
   /** Named blocks for `resolve: 'assemble'`. Host-owned names. */

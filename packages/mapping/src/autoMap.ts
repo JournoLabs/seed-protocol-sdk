@@ -168,7 +168,7 @@ function findHtmlTarget(
  * Heuristic auto-map: full-document / full-text first, then RSS aliases,
  * URL fan-out (copy only), media file/extract jobs, then fuzzy name match.
  * Never maps a raw URL onto html / Image / File without `resolve`.
- * A property that stays a lookup keeps the entries it has in `previous` (the current mappings).
+ * A property that stays a lookup keeps the entries and `split` it has in `previous` (the current mappings).
  */
 export function autoMap(
   sources: SourceNode[],
@@ -375,7 +375,11 @@ export function autoMap(
 
   return mappings.map((mapping) => {
     if (mapping.resolve !== 'lookup' || mapping.lookup) return mapping
-    const kept = previous.find((p) => p.propertyName === mapping.propertyName && p.resolve === 'lookup')?.lookup
-    return kept?.entries.length ? { ...mapping, lookup: kept } : mapping
+    const kept = previous.find((p) => p.propertyName === mapping.propertyName && p.resolve === 'lookup')
+    return {
+      ...mapping,
+      ...(kept?.lookup?.entries.length ? { lookup: kept.lookup } : {}),
+      ...(kept?.split ? { split: kept.split } : {}),
+    }
   })
 }

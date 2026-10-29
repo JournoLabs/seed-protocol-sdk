@@ -249,6 +249,8 @@ export function SourceRows({
                       sampleValue: row.sampleValue ?? '',
                       onLookupChange: (entries) =>
                         mapper.setLookupEntries(row.id, entries),
+                      onSplitChange: (separators) =>
+                        mapper.setLookupSplit(row.id, separators),
                     })}
                   </div>
                 ) : (

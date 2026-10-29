@@ -6,16 +6,19 @@ import {
   isDeriveKeepOnClear,
   withPreservedExtras,
 } from '../edgeMapping'
+import { lookupEntriesFromMapping } from '../relationLookup'
 import type {
   DeriveSpec,
   FieldMapping,
   LookupEntry,
+  LookupSeparator,
   ResolveJob,
 } from '../types'
 import {
   applyAssembleBlocksToMappings,
   applyDeriveToMappings,
   applyLookupEntriesToMappings,
+  applyLookupSplitToMappings,
   attachLookupIfNeeded,
   buildPropertyModeRows,
   buildPropertyOptions,
@@ -432,7 +435,7 @@ export function useFieldMapper({
           : next[edgeIdsRef.current.ids.indexOf(rowId)]
       if (!edge) return
       const table = Object.fromEntries(
-        (edge.lookup?.entries ?? []).map((e) => [e.value, e.ref]),
+        lookupEntriesFromMapping(edge).map((e) => [e.value, e.refs.length === 1 ? e.refs[0]! : e.refs]),
       )
       const merged = { ...lookups }
       if (Object.keys(table).length === 0) {
@@ -443,6 +446,20 @@ export function useFieldMapper({
       onLookupsChange(merged)
     },
     [rowKey, commitMappings, onLookupsChange, lookups],
+  )
+
+  const setLookupSplit = useCallback(
+    (rowId: string, separators: LookupSeparator[] | null) => {
+      const next = applyLookupSplitToMappings(
+        mappingsRef.current,
+        rowKey,
+        rowId,
+        edgeIdsRef.current.ids,
+        separators,
+      )
+      if (next) commitMappings(next)
+    },
+    [rowKey, commitMappings],
   )
 
   const setAssembleBlocks = useCallback(
@@ -604,6 +621,7 @@ export function useFieldMapper({
     setProperty,
     setTransform,
     setLookupEntries,
+    setLookupSplit,
     setAssembleBlocks,
     setDerive,
     addRow,

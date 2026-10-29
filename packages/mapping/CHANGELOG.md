@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking:** a lookup entry names an ordered list of refs: `LookupEntry` is `{ value, refs: string[] }`, and `ref` is removed from the type. A stored `{ value, ref }` still applies, read as `refs: [ref]`, and `lookupEntriesFromMapping` returns it in the new shape. `lookupRefFromEntries` is replaced by `lookupRefsFromEntries`, which returns the list, and `resolveLookupMapped` by `resolveLookup`, which returns `{ refs, unmatched, split }`. A Relation target given several refs takes the first. The fallback `LookupEditor` takes refs separated by commas or spaces.
+- A lookup edge takes `split: { separators }` (`'and'`, `'&'`, `','`; `DEFAULT_LOOKUP_SEPARATORS` is `['and', '&']`). A string with no entry of its own is split and each part is looked up; the known parts' refs apply in the string's order, and each unknown part is reported with `splitFrom`. New `splitLookupValue`, `withLookupSplit`, `useFieldMapper().setLookupSplit` and `FieldMapperLookupRow.onSplitChange`. Moving a lookup to another source, and Auto-map, keep `split`.
 - Lookups match case-insensitively: a source value finds an entry with the same new `lookupKey` (NFC, collapsed whitespace, trimmed, case-folded), so a feed that prints "mira chen" once finds the "Mira Chen" entry. `normalizeLookupKey` adds NFC and still keeps case; it's the form entries are stored in. `LookupEditor` shows one row per key.
 - `applyMapping` takes `onUnmatched`, called with `{ sourceId, propertyName, value }` for each lookup value that has no entry. Only `applyMappingAsync` reported misses.
 - An empty source value on a lookup edge is no lookup: `applyMappingAsync` no longer lists it as an error, and `onUnmatched` isn't called for it.

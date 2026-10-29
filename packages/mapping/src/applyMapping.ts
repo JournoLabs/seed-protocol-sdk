@@ -1,7 +1,7 @@
 import {
   isRelationLookupTarget,
   normalizeLookupKey,
-  resolveLookupMapped,
+  resolveLookup,
   shapeLookupValue,
 } from './relationLookup'
 import { resolveMappingSource } from './resolvedSources'
@@ -90,20 +90,26 @@ function classFromSource(source: SourceNode): UrlMediaClass | undefined {
   return undefined
 }
 
-/** A lookup edge's value; `skip` for an empty source value, which is no lookup. */
+/**
+ * A lookup edge's value (absent when nothing matched) and the misses to report. An empty source
+ * value is no lookup: no value and no misses. A split value that is partly known keeps the known
+ * parts' refs and reports each unknown part.
+ */
 function applyLookupEdge(
   mapping: FieldMapping,
   source: SourceNode,
   target: TargetProperty,
   lookups: MappingLookups | undefined,
-): { value: string | string[] } | { unmatched: string } | { skip: true } {
+): { value?: string | string[]; misses: UnmatchedLookup[] } {
   const rawValue = normalizeLookupKey(source.value ?? '')
-  if (!rawValue) return { skip: true }
-  const mapped = resolveLookupMapped(mapping, rawValue, lookups)
-  if (mapped === undefined) {
-    return { unmatched: rawValue }
-  }
-  return { value: shapeLookupValue(mapped, target) }
+  const { refs, unmatched, split } = resolveLookup(mapping, rawValue, lookups)
+  const misses = unmatched.map((value) => ({
+    sourceId: source.id,
+    propertyName: mapping.propertyName,
+    value,
+    ...(split ? { splitFrom: rawValue } : {}),
+  }))
+  return refs.length > 0 ? { value: shapeLookupValue(refs, target), misses } : { misses }
 }
 
 /**
@@ -132,12 +138,9 @@ export function applyMapping(
     if (!source || !target) continue
 
     if (mapping.resolve === 'lookup') {
-      const result = applyLookupEdge(mapping, source, target, options?.lookups)
-      if ('value' in result) {
-        properties[mapping.propertyName] = result.value
-      } else if ('unmatched' in result) {
-        options?.onUnmatched?.({ sourceId: source.id, propertyName: mapping.propertyName, value: result.unmatched })
-      }
+      const { value, misses } = applyLookupEdge(mapping, source, target, options?.lookups)
+      if (value !== undefined) properties[mapping.propertyName] = value
+      for (const miss of misses) options?.onUnmatched?.(miss)
       continue
     }
 
@@ -209,15 +212,16 @@ export async function applyMappingAsync(
         continue
       }
 
-      const result = applyLookupEdge(mapping, source, target, options.lookups)
-      if ('value' in result) {
-        properties[mapping.propertyName] = result.value
-      } else if ('unmatched' in result) {
+      const { value, misses } = applyLookupEdge(mapping, source, target, options.lookups)
+      if (value !== undefined) properties[mapping.propertyName] = value
+      for (const miss of misses) {
         errors.push({
           sourceId: mapping.sourceId,
           propertyName: mapping.propertyName,
           resolve: 'lookup',
-          message: `No lookup entry for "${result.unmatched}"`,
+          message: miss.splitFrom
+            ? `No lookup entry for "${miss.value}" (split from "${miss.splitFrom}")`
+            : `No lookup entry for "${miss.value}"`,
         })
       }
       continue

@@ -5,12 +5,12 @@ import { describe, expect, it } from 'vitest'
 import { applyMapping, applyMappingAsync } from '../src/applyMapping'
 import { autoMap } from '../src/autoMap'
 import { withPreservedExtras } from '../src/edgeMapping'
-import { collectLookupValues, lookupKey, lookupRefFromEntries, normalizeLookupKey } from '../src/relationLookup'
-import type { FieldMapping, SourceNode, TargetProperty, UnmatchedLookup } from '../src/types'
+import { collectLookupValues, lookupKey, lookupRefsFromEntries, normalizeLookupKey } from '../src/relationLookup'
+import type { FieldMapping, LookupEntry, SourceNode, TargetProperty, UnmatchedLookup } from '../src/types'
 
 const authors: TargetProperty = { name: 'authors', dataType: 'List', refValueType: 'Relation', ref: 'Identity' }
 const author = (value: string, id = 'rss-author'): SourceNode => ({ id, label: 'author', kind: 'rssField', value })
-const lookupEdge = (entries: Array<{ value: string; ref: string }>): FieldMapping => ({
+const lookupEdge = (entries: LookupEntry[]): FieldMapping => ({
   sourceId: 'rss-author',
   propertyName: 'authors',
   resolve: 'lookup',
@@ -29,8 +29,8 @@ describe('lookupKey', () => {
   })
 
   it('finds an entry whatever case the feed printed', () => {
-    const entries = [{ value: 'Mira Chen', ref: 'local_1' }]
-    expect(lookupRefFromEntries(entries, 'mira chen')).toBe('local_1')
+    const entries = [{ value: 'Mira Chen', refs: ['local_1'] }]
+    expect(lookupRefsFromEntries(entries, 'mira chen')).toEqual(['local_1'])
     expect(applyMapping([author('MIRA CHEN')], [lookupEdge(entries)], [authors])).toEqual({ authors: ['local_1'] })
   })
 })
@@ -38,7 +38,7 @@ describe('lookupKey', () => {
 describe('unmatched lookups', () => {
   it('sync apply reports a value with no entry', () => {
     const misses: UnmatchedLookup[] = []
-    const bag = applyMapping([author('Sam Ortiz')], [lookupEdge([{ value: 'Mira Chen', ref: 'local_1' }])], [authors], {
+    const bag = applyMapping([author('Sam Ortiz')], [lookupEdge([{ value: 'Mira Chen', refs: ['local_1'] }])], [authors], {
       onUnmatched: (miss) => misses.push(miss),
     })
     expect(bag).toEqual({})
@@ -47,7 +47,7 @@ describe('unmatched lookups', () => {
 
   it('an empty value is no lookup, in sync and async apply', async () => {
     const misses: UnmatchedLookup[] = []
-    const edges = [lookupEdge([{ value: 'Mira Chen', ref: 'local_1' }])]
+    const edges = [lookupEdge([{ value: 'Mira Chen', refs: ['local_1'] }])]
     expect(applyMapping([author('  ')], edges, [authors], { onUnmatched: (miss) => misses.push(miss) })).toEqual({})
     expect(misses).toEqual([])
     expect((await applyMappingAsync([author('')], edges, [authors])).errors).toEqual([])
@@ -55,7 +55,7 @@ describe('unmatched lookups', () => {
 })
 
 describe('keeping entries', () => {
-  const entries = [{ value: 'Mira Chen', ref: 'local_1' }]
+  const entries = [{ value: 'Mira Chen', refs: ['local_1'] }]
 
   it('autoMap keeps the entries of a property that stays a lookup', () => {
     const mappings = autoMap([author('Mira Chen')], [authors], [lookupEdge(entries)])
