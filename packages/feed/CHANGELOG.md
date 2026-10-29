@@ -2,11 +2,22 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - **Breaking:** an item with a storage transaction and no link of its own has the RSS `guid` `ar://<transactionId>` (D34), so Atom entry ids and JSON Feed item ids are that too (D26). Its `link` is still the public gateway URL. The guid was the gateway URL, so changing `arweaveDomain` changed every such item's guid and feed readers showed the items again; after this release they show them again once more, then never on a gateway change. RSS marks these guids `isPermaLink="false"`. A guid is no longer moved onto the public gateway with the item's other Arweave links. A cached feed body keeps the old guids until it is rebuilt.
 - An Atom entry keeps an item's own `title`, `updated` and `links` again. 0.7.12 moved the item's fields before the defaults, so the defaults replaced them.
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Feed declared none.
+
+### Commits
+
+#### Breaking
+
+- a stored transaction's guid is ar://<id>, so it survives a gateway change (D34) (c4131e0e)
+
+#### Fixes
+
+- Atom entries keep an item's own title, updated and links (e8425b31)
+- arweave, query: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
 
 ## 0.7.12 (2026-10-27)
 

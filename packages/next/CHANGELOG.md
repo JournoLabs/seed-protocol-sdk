@@ -1,5 +1,9 @@
 # @seedprotocol/next
 
+## 0.7.13 (2026-10-29)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.12 (2026-10-27)
 
 - New `dir` option: the directory `withSeed` resolves the SDK and `next` from, and makes Turbopack alias paths relative to. Pass the config file's directory when Next.js runs from somewhere else (a monorepo root). It defaults to `process.cwd()`, which skipped the aliases in that case.

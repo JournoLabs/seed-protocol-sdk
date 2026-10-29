@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - Creating attestations no longer checks EAS schemas a second time. `createAttestations` and `createAttestationsDirectToEas` called `ensureEasSchemasForItem` again after the `checking` state had run it for the same item and wallet. Every run passes `checking` first, and a restored run was persisted past it.
 - `persistSeedUidSafely` clears its 15 s timeout once the write settles. The timer stayed armed after a successful write, keeping the process alive and rejecting a promise nobody read 15 s later.
@@ -17,6 +17,23 @@ All notable changes to this project will be documented in this file.
 - New `disconnectPublishWallet()` and `markPublishWalletConnected()` in `@seedprotocol/publish/thirdweb`. `disconnectPublishWallet` removes the in-app auth token from thirdweb's default `walletToken-{clientId}` key and the `seedProtocol:inAppPublish:` one, clears the registered publish wallet, and stops `syncPublishInAppAuthToken` from copying a default-key token back to the prefixed key until `markPublishWalletConnected` runs. `ConnectButton` calls them on disconnect and connect. thirdweb's `logout` removed only the prefixed key, so the next sync restored the session from the default key and a reload signed back in a user who had chosen Disconnect, with the JWT still in localStorage.
 - New `describePublishRun(value)`: the display phase of a publish machine value (`preparing`, `uploading`, `attesting`, `retracting`, `done`, `failed` or `stopped`), whether the run waits for `retry` (`awaitingRetry`), and whether it has ended (`terminal`). Every state of the publish machine is mapped; no value or an unknown one reads as `preparing`, not terminal.
 - `useItemPublishStatus().isActive` is false once the run's value is terminal (`success`, `failure`, `stopping`). It was true with a `success` or `failure` value while the final save was written, because the run stays in `publishProcesses` until that save finishes, and while the row still read `in_progress`. A run waiting for `retry` stays active.
+
+### Commits
+
+#### Features
+
+- clearInAppPublishSession removes the stored in-app wallet session (f12a2e5a)
+- ensureEasSchemasForModels registers a model's EAS schemas without an item (e9baae43)
+- sdk: an edit back to the attested value leaves no draft (6f39e4e8)
+
+#### Fixes
+
+- skip the second EAS schema check in attestations; clear the persistSeedUid timeout (52ab8d28)
+- ensureEasSchemasForItem asks only for schemas the publish attests (43196475)
+- sdk: publish records the attester as publisher on draft rows (1d07b478)
+- build excludes .tsx tests, so no test declarations ship (b85f1342)
+- useItemPublishStatus isActive is false once the run is terminal; add describePublishRun (fa21fdf1)
+- Disconnect removes the in-app token so sync can't restore it (d4e51c63)
 
 ## 0.7.12 (2026-10-27)
 

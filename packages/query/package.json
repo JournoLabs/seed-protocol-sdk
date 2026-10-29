@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/query",
-  "version": "0.7.12",
+  "version": "0.7.13",
   "description": "Read canonical Seed Protocol JSON (seeds, collections, changelogs) from EAS attestations or a local SQLite source, with memory and disk caching",
   "keywords": [
     "seed-protocol",

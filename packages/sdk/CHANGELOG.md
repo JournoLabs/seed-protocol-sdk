@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - New `client.resetLocalData({ otherTabsTimeoutMs, filesDir })` (browser) deletes the database and every file under `filesDir` from OPFS and resolves with `{ deleted, failed }`: an entry it can't remove (a file another tab holds open) is listed in `failed` with the browser's error, and the rest are still removed. It stops the client from any state, including after a failed init, posts `close-db` to the other tabs of the database, waits up to `otherTabsTimeoutMs` (default 10 000) for them to close it, and unmounts the file system, so `init` works again without a reload and starts empty. An `init` during the reset waits for it. Each coordinating tab now holds the Web Lock `seed:open:<db>` in shared mode while its database is open; the reset takes it exclusively. A tab that hears `close-db` stops its client and unmounts its file system; it doesn't reload. The client snapshot's new `context.stopReason` (`ClientStopReason`: `'stop' | 'reset'`) says why a stopped client stopped. localStorage is left alone (see `clearInAppPublishSession` in @seedprotocol/publish). In Node, `resetLocalData` throws.
 - New `getPublishModels(modelNames, { schemaName, followRefs })`: the models a publish of items of those models attests, read from the loaded definitions with no seed, each with every property and its publish kind. It includes the storage models (Image, File, Html) storage-seed properties reach and, with `followRefs` (default true), the models relation and list properties name. A name with no model throws; a name two schemas define throws `AmbiguousModelError` unless `schemaName` is given.
@@ -20,6 +20,28 @@ All notable changes to this package are documented in this file.
 - `entityLoadError` is exported from `@seedprotocol/sdk/node`.
 - The slow-save warning and the removed-event warning read `process.env.NODE_ENV` in the form bundlers replace, so a browser production build no longer logs them. They read it through `globalThis.process`, which bundlers leave alone, so a bundle with no `process` global, or with the `process` polyfill and its empty `env`, counted as development. With no `process` and no replacement they now stay quiet.
 - A Schema loaded after a ModelProperty edit or rename, or after a model was created at runtime, starts as a draft with those edits, read from the rows' `is_edited` flags, so `saveNewVersion()` writes them to the next version file. It loaded with no edits and returned `''`, leaving a rename made while no Schema instance was loaded (or before a reload) in the database but never in a schema file. `saveNewVersion` now clears `is_edited` on each saved property's row even when no instance of the property is cached.
+
+### Commits
+
+#### Breaking
+
+- refuse model and property names that publish as a reserved ABI word (aa4fcaf5)
+- a file-backed value whose file is missing reads as undefined; add valueStatus (3942b9c7)
+
+#### Features
+
+- client.resetLocalData deletes the local database and files, stopping other tabs (97e82b67)
+- publish: ensureEasSchemasForModels registers a model's EAS schemas without an item (e9baae43)
+- an edit back to the attested value leaves no draft (6f39e4e8)
+
+#### Fixes
+
+- publish: ensureEasSchemasForItem asks only for schemas the publish attests (43196475)
+- publish records the attester as publisher on draft rows (1d07b478)
+- repeat client.init with empty addresses keeps the stored ones (f57dc2cd)
+- init after stop with another filesDir moves the files root (5c2cda3d)
+- ClientNotInitializedError (D36), IItemProperty.save timeoutMs, entityLoadError on ./node, production check bundlers replace (4a5bf4ae)
+- a Schema loaded after a property rename saves it in saveNewVersion (6dcae17a)
 
 ## 0.7.12 (2026-10-27)
 

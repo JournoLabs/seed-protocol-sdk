@@ -1,8 +1,14 @@
 # @seedprotocol/vite
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - `seedVitePlugin`'s doc comment is back on it in `dist/index.d.ts`. Since 0.7.12 it sat on the `KNOWN_OPTIONS` constant, so editors showed no description for the plugin.
+
+### Commits
+
+#### Fixes
+
+- seedVitePlugin's doc comment sits on the function again (96b01666)
 
 ## 0.7.12 (2026-10-27)
 

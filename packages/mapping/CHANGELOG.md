@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - **Breaking:** a lookup entry names an ordered list of refs: `LookupEntry` is `{ value, refs: string[] }`, and `ref` is removed from the type. A stored `{ value, ref }` still applies, read as `refs: [ref]`, and `lookupEntriesFromMapping` returns it in the new shape. `lookupRefFromEntries` is replaced by `lookupRefsFromEntries`, which returns the list, and `resolveLookupMapped` by `resolveLookup`, which returns `{ refs, unmatched, split }`. A Relation target given several refs takes the first. The fallback `LookupEditor` takes refs separated by commas or spaces.
 - A lookup edge takes `split: { separators }` (`'and'`, `'&'`, `','`; `DEFAULT_LOOKUP_SEPARATORS` is `['and', '&']`). A string with no entry of its own is split and each part is looked up; the known parts' refs apply in the string's order, and each unknown part is reported with `splitFrom`. New `splitLookupValue`, `withLookupSplit`, `useFieldMapper().setLookupSplit` and `FieldMapperLookupRow.onSplitChange`. Moving a lookup to another source, and Auto-map, keep `split`.
@@ -12,6 +12,17 @@
 - New `collectLookupValues(items, mapping)`: each distinct value a lookup's source holds across a feed's items, in first-seen spelling.
 
 - An `extract` or `file` edge on a source with an empty value passes `''` as the resolve callback's `url`, and lookups take their sample from the value only (`sampleValueFromSource`, the field mapper's previews and `LookupEditor`). 0.7.12 made `applyMapping` value-only but these still fell back to the source's `label`, so the field's name went to the resolve callback as a URL, and a lookup entry written in the editor for an empty source was stored under the label and never matched at apply.
+
+### Commits
+
+#### Features
+
+- joint bylines: lookup entries name a list of refs, and a lookup edge can split (a024b1a5)
+
+#### Fixes
+
+- case-insensitive lookups, sync unmatched reporting, entries kept through Auto-map and source changes (32e55f77)
+- extract/file urls and lookup samples use the source value only (ac651eea)
 
 ## 0.7.12 (2026-10-27)
 

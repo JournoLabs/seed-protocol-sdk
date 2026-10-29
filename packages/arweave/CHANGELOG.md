@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - **Breaking:** `probeGateway(baseUrl, { signal, timeoutMs, recordCircuit })` takes an options object; it took the signal as its second argument. It times out after `timeoutMs` (default 5 s) whether or not a `signal` is passed: with a signal it had no timeout. A probe the caller aborts resolves `false` without counting as a failure in the gateway circuit breaker. It counted, and since one failure opens a host's circuit for 60 s, a caller's own time budget blocked the host (for a relative proxy, the app's own host) from reads and probes. `recordCircuit: false` probes a host whose circuit is open and leaves the breaker as it is, for status checks.
 - `resolveSeedGatewayEndpoints` takes `timeoutMs`, a budget for all of one resolve's probes. A probe cut short by it or by `signal` isn't cached: it was cached as unreachable for 3 minutes, so a proxy probe aborted once was skipped until the cache expired. A failed probe is cached for 60 s, a healthy one for 3 minutes as before; both were 3 minutes.
@@ -14,6 +14,16 @@ All notable changes to this package are documented in this file.
 - `ARWEAVE_GRAPHQL_TIMEOUT_MS` is exported from the package entry. The 0.7.12 notes named it, but only the module defined it.
 - `fetchTransactionStatusAcrossGateways` has its doc comment in the published `.d.ts` again; at 0.7.12 a private helper's comment sat between them.
 - `nextArweaveGatewayUrl` finds the base a URL is on by origin and whole path segments, taking the longest match. With `https://app.example` and `https://app.example/api/seed-gateway` both in the list, a URL on the second moved to the second again instead of the next gateway.
+
+### Commits
+
+#### Fixes
+
+- an aborted read-gateway selection isn't cached as unhealthy (49bbe9b5)
+- an aborted gateway probe doesn't open the breaker or cache as down (3f1670e8)
+- query, feed: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
+- permagate.io leaves the default read list; public base URL skips a proxy read host (a6678a26)
+- parse /<id> links under a read base's path prefix (bad9bd80)
 
 ## 0.7.12 (2026-10-27)
 

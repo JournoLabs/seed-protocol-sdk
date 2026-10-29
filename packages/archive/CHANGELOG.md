@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.13 (2026-10-29)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).

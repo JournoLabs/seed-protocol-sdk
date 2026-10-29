@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - `useGlobalServiceStatus()` returns `stopReason`: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client, `'stop'` for `client.stop()` or `client.unload()`, undefined while the client isn't stopped.
 - `useItemProperty` returns `valueStatus` and re-renders when it changes, so an editor can wait for an Html or Image file instead of a timer.
@@ -11,6 +11,20 @@ All notable changes to this package are documented in this file.
 - `useGlobalServiceStatus()` types `status` as `ClientManagerState | 'stopped'` and `internalStatus` as `ClientManagerState | 'ready' | 'stopped'`. Since 0.7.12 both were `string`, so a `switch` on them lost its exhaustiveness check.
 - `useCreateModelProperty().create` rejects with `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`) while the database isn't open. It rejected with `No stored schema has the name or schema file id "<id>"`, which read as a typo.
 - `useCreateItem` compares arrays and plain objects in a call's values and options by contents when deciding whether a call repeats one in flight. A double click on a create whose values held an array or object built in the click handler created two items. A `File`, `Blob` or other object still has to be the same object.
+
+### Commits
+
+#### Features
+
+- sdk: client.resetLocalData deletes the local database and files, stopping other tabs (97e82b67)
+
+#### Fixes
+
+- sdk: a file-backed value whose file is missing reads as undefined; add valueStatus (3942b9c7)
+- useCreateItem compares array and object values by contents for repeats (aa73fe2e)
+- useCreateModelProperty rejects with ClientNotInitializedError before the database opens (265fe1f3)
+- useGlobalServiceStatus types status as ClientManagerState | 'stopped' (a49f5b94)
+- useItem re-renders when an idle item's uids or publish state change (b04a1157)
 
 ## 0.7.12 (2026-10-27)
 

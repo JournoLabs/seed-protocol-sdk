@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - **Breaking:** `relations: 'urls'` is removed, and `RelationsMode` is `'expand' | 'uids'`. It resolved Html/File relations to URLs like `'expand'` but left other related seeds as UIDs, and it fetched the same related seeds, so it saved no requests. Use `'expand'`, or `'uids'` to skip fetching related seeds. The item cache codes for `'expand'` (`e3`) and `'uids'` (`e5`) are unchanged.
 - **Breaking:** relation properties come back under their schema key in every `relations` mode and in changelog entries: `author_id` as `author`, a list's `author_identity_ids` as `authors`. With `relations: 'uids'` they kept the EAS name (and its camelCase copy, `authorId`), and with `'expand'` or `'urls'` a relation whose related seed was missing or had no storage transaction kept it too, so one record changed shape with the mode and the data. The item cache's option codes changed, so payloads cached in the old shape aren't read.
@@ -10,6 +10,22 @@ All notable changes to this package are documented in this file.
 - Body hydration fetches a `/raw/<id>` link as `{gateway}/raw/<id>` on each gateway. It fetched `{gateway}/<id>`, which on `arweave.net` redirects to a sandbox subdomain and for a manifest returns the manifest's index instead of the manifest.
 - **Breaking:** `queryBySchema`, `queryBySchemaForMonth` and `assembleSeeds` leave out a seed with no Versions from its attester, as `getSeed` and `getSeeds` have since 0.7.12. They returned a record with `versionUid: ''` and no properties. `limit` and `skip` still count listed seeds, so a page can come back shorter than `limit` while later pages have more.
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Query declared none.
+
+### Commits
+
+#### Breaking
+
+- return relations under their schema key in every relations mode (bebbbf88)
+
+#### Fixes
+
+- queryBySchema leaves out seeds with no Versions, like getSeed and getSeeds (b78d932e)
+- arweave, feed: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
+- hydration skips a gateway's 404 without opening its circuit, and keeps /raw/ links raw (ec7ada95)
+
+#### Other
+
+- expand-only relation resolution now that 'urls' is gone (14f23342)
 
 ## 0.7.12 (2026-10-27)
 

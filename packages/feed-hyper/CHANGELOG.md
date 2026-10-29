@@ -1,8 +1,14 @@
 # Changelog — @seedprotocol/feed-hyper
 
-## Unreleased
+## 0.7.13 (2026-10-29)
 
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. It was `>=20`.
+
+### Commits
+
+#### Fixes
+
+- arweave, query, feed: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
 
 ## 0.7.12 (2026-10-27)
 
