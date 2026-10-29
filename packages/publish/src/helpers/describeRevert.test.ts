@@ -6,10 +6,10 @@ import { describeFailedUserOp, describeRevert, explainUserOpError } from './desc
 
 const TX = `0x${'ab'.repeat(32)}`
 const SENDER = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-const unknownLocalId = encodeErrorResult({
+const outOfBounds = encodeErrorResult({
   abi: seedErrorsAbi,
-  errorName: 'UnknownPublishLocalId',
-  args: ['abc123'],
+  errorName: 'PublishIndexOutOfBounds',
+  args: [3n, 2n],
 })
 
 /** What thirdweb throws for a logged custom error: it decodes the reason without an ABI. */
@@ -24,7 +24,24 @@ function thirdwebUndecodedError(data: Hex): unknown {
 
 describe('describeRevert', () => {
   test('decodes Seed errors with their arguments', () => {
-    expect(describeRevert(unknownLocalId)).toBe('reverted with UnknownPublishLocalId(abc123)')
+    expect(describeRevert(outOfBounds)).toBe('reverted with PublishIndexOutOfBounds(3, 2)')
+  })
+
+  test("decodes the three-phase multiPublish's reference errors", () => {
+    const schema = `0x${'05'.repeat(32)}` as Hex
+    const found = `0x${'00'.repeat(31)}02` as Hex
+    const mismatch = encodeErrorResult({
+      abi: seedErrorsAbi,
+      errorName: 'PlaceholderMismatch',
+      args: [0n, 1n, schema, found],
+    })
+    expect(describeRevert(mismatch)).toBe(`reverted with PlaceholderMismatch(0, 1, ${schema}, ${found})`)
+    const pastEnd = encodeErrorResult({
+      abi: seedErrorsAbi,
+      errorName: 'ListElementOutOfBounds',
+      args: [1n, schema, 4n, 2n],
+    })
+    expect(describeRevert(pastEnd)).toBe(`reverted with ListElementOutOfBounds(1, ${schema}, 4, 2)`)
   })
 
   test('decodes Error(string)', () => {
@@ -49,7 +66,7 @@ describe('describeFailedUserOp', () => {
   })
 
   test('decodes revert data when there is some', () => {
-    expect(describeFailedUserOp(TX, unknownLocalId)).toContain('reverted with UnknownPublishLocalId(abc123)')
+    expect(describeFailedUserOp(TX, outOfBounds)).toContain('reverted with PublishIndexOutOfBounds(3, 2)')
   })
 })
 
@@ -71,10 +88,10 @@ describe('explainUserOpError', () => {
   })
 
   test('names a custom error thirdweb could not decode', () => {
-    const original = thirdwebUndecodedError(unknownLocalId)
+    const original = thirdwebUndecodedError(outOfBounds)
     const explained = explainUserOpError(original) as ManagedAccountPublishError
     expect(explained.code).toBe('USEROP_REVERTED')
-    expect(explained.message).toContain('reverted with UnknownPublishLocalId')
+    expect(explained.message).toContain('reverted with PublishIndexOutOfBounds')
     expect(explained.underlyingCause).toBe(original)
   })
 

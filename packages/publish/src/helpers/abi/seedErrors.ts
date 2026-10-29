@@ -13,15 +13,6 @@ export const seedErrorsAbi = [
       { name: 'length', type: 'uint256' },
     ],
   },
-  { type: 'error', name: 'UnknownPublishLocalId', inputs: [{ name: 'publishLocalId', type: 'string' }] },
-  {
-    type: 'error',
-    name: 'PublishTargetAlreadyAttested',
-    inputs: [
-      { name: 'requestIndex', type: 'uint256' },
-      { name: 'targetIndex', type: 'uint256' },
-    ],
-  },
   {
     type: 'error',
     name: 'EmptyAttestationData',
@@ -45,6 +36,50 @@ export const seedErrorsAbi = [
     inputs: [
       { name: 'targetIndex', type: 'uint256' },
       { name: 'propertySchemaUid', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRelationEncoding',
+    inputs: [
+      { name: 'targetIndex', type: 'uint256' },
+      { name: 'propertySchemaUid', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidListEncoding',
+    inputs: [
+      { name: 'targetIndex', type: 'uint256' },
+      { name: 'propertySchemaUid', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'ListElementOutOfBounds',
+    inputs: [
+      { name: 'targetIndex', type: 'uint256' },
+      { name: 'propertySchemaUid', type: 'bytes32' },
+      { name: 'elementIndex', type: 'uint256' },
+      { name: 'length', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'ElementIndexOnSingleRelation',
+    inputs: [
+      { name: 'targetIndex', type: 'uint256' },
+      { name: 'propertySchemaUid', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'PlaceholderMismatch',
+    inputs: [
+      { name: 'requestIndex', type: 'uint256' },
+      { name: 'targetIndex', type: 'uint256' },
+      { name: 'propertySchemaUid', type: 'bytes32' },
+      { name: 'found', type: 'bytes32' },
     ],
   },
   // SeedProtocolExtensionBase (the executor module's AttestationFailed() has no argument)
