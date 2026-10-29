@@ -2,7 +2,7 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
-import { resolvePublishPayloadValues, type IItem } from '@seedprotocol/sdk'
+import type { IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
@@ -25,13 +25,7 @@ import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
 import { listCreatedAttestationPairsFromReceipt } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
-import {
-  normalizePublishRequest,
-  applyPropertiesToUpdatePlaceholders,
-  hasCrossPayloadUnresolved,
-  filterPropertiesToUpdateForBatch,
-  toHex32,
-} from './publishRequestNormalize'
+import { normalizePublishRequest } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
 import debug from 'debug'
@@ -39,11 +33,6 @@ import debug from 'debug'
 const logger = debug('seedProtocol:services:publish:actors')
 
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
-
-type ReceiptLike = {
-  blockNumber?: bigint
-  logs?: Array<{ address?: string; data?: string; topics?: unknown[] }>
-}
 
 type PublishRoutingInput = {
   useModularExecutor: boolean
@@ -279,111 +268,31 @@ async function executeCreateAttestations(
       }
     }
 
-    const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)
+    // One transaction for the whole graph: the contract creates every seed before it attests any
+    // property, so a reference in any direction is filled with its seed uid (encodeMultiPublish).
+    const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
+    const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
+    const result = await sendPublishTx(payloadForContract)
 
-    let effectiveRequests: any[]
-    let lastAttestationReceipt: ReceiptLike | null = null
-    const batchExtraUids: string[] = []
-
-    if (needsSequential) {
-      let workingPayload = structuredClone(reqs) as any[]
-      const resolvedUids: Record<string, string> = {}
-      const resolvedVersionUids: Record<string, string> = {}
-
-      for (let i = 0; i < workingPayload.length; i++) {
-        workingPayload = await resolvePublishPayloadValues(workingPayload as any, resolvedUids)
-        const rawReq = workingPayload[i]
-        const batchLocalIds = new Set([rawReq.localId])
-        const reqForPublish = {
-          ...rawReq,
-          propertiesToUpdate: filterPropertiesToUpdateForBatch(rawReq.propertiesToUpdate, batchLocalIds),
-        }
-        const normalizedOne = normalizePublishRequest(reqForPublish)
-        const byLocalIdSingle = new Map([[normalizedOne.localId, normalizedOne]])
-        applyPropertiesToUpdatePlaceholders([normalizedOne], byLocalIdSingle)
-
-        const result = await sendPublishTx([normalizedOne])
-
-        const receipt = await waitForPublishReceipt(result.transactionHash)
-        if (!receipt) {
-          throw new Error('Failed to send transaction')
-        }
-
-        lastAttestationReceipt = receipt
-        for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
-          if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
-        }
-        const {
-          requests: [recorded],
-        } = await recordMultiPublishReceipt({
-          receipt,
-          requests: [normalizedOne],
-          rootSeedLocalId: item.seedLocalId,
-          useModularExecutor,
-          contractAddressForEvents: routing.contractAddressForEvents,
-          publisherAddress: address,
-          resolvedSeedUids: resolvedUids,
-        })
-
-        if (recorded?.versionUid && toHex32(recorded.versionUid) !== ZERO_BYTES32) {
-          resolvedVersionUids[rawReq.localId] = recorded.versionUid
-        }
-        const hadZeroSeedUid =
-          !normalizedOne.seedUid || toHex32(normalizedOne.seedUid) === ZERO_BYTES32
-        const seedUidFromTx = hadZeroSeedUid ? recorded?.seedUid : undefined
-        if (seedUidFromTx && toHex32(seedUidFromTx) !== ZERO_BYTES32) {
-          resolvedUids[rawReq.localId] = seedUidFromTx
-          workingPayload[i] = { ...workingPayload[i], seedUid: seedUidFromTx }
-          batchExtraUids.push(seedUidFromTx)
-        }
-      }
-
-      for (const p of workingPayload) {
-        const id = p?.localId
-        const su = p?.seedUid
-        if (id && su && toHex32(su) !== ZERO_BYTES32) {
-          resolvedUids[id] = toHex32(su)
-        }
-      }
-
-      const fullyResolved = await resolvePublishPayloadValues(structuredClone(reqs), resolvedUids)
-      effectiveRequests = fullyResolved.map((r: any) =>
-        normalizePublishRequest({
-          ...r,
-          seedUid: resolvedUids[r.localId] ?? r.seedUid,
-          versionUid: resolvedVersionUids[r.localId] ?? r.versionUid,
-        }),
-      )
-    } else {
-      const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
-
-      const byLocalId = new Map(normalizedRequests.map((r: any) => [r?.localId, r]))
-      applyPropertiesToUpdatePlaceholders(normalizedRequests, byLocalId)
-
-      const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-      const result = await sendPublishTx(payloadForContract)
-
-      const receipt = await waitForPublishReceipt(result.transactionHash)
-      if (!receipt) {
-        throw new Error('Failed to send transaction')
-      }
-
-      lastAttestationReceipt = receipt
-      for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
-        if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
-      }
-      // Every request in the transaction (the item and the related items published with it)
-      // records its own seed, version and property uids.
-      const recorded = await recordMultiPublishReceipt({
-        receipt,
-        requests: payloadForContract,
-        rootSeedLocalId: item.seedLocalId,
-        useModularExecutor,
-        contractAddressForEvents: routing.contractAddressForEvents,
-        publisherAddress: address,
-      })
-      effectiveRequests = recorded.requests
+    const receipt = await waitForPublishReceipt(result.transactionHash)
+    if (!receipt) {
+      throw new Error('Failed to send transaction')
     }
+
+    const batchExtraUids: string[] = []
+    for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
+      if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
+    }
+    // Every request in the transaction (the item and the related items published with it)
+    // records its own seed, version and property uids.
+    const { requests: effectiveRequests } = await recordMultiPublishReceipt({
+      receipt,
+      requests: payloadForContract,
+      rootSeedLocalId: item.seedLocalId,
+      useModularExecutor,
+      contractAddressForEvents: routing.contractAddressForEvents,
+      publisherAddress: address,
+    })
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)
     const itemWithPersist = item as {
@@ -392,9 +301,7 @@ async function executeCreateAttestations(
     const rootRequest = effectiveRequests.find((r) => r?.localId === item.seedLocalId)
     const rootSeedUid = rootRequest?.seedUid
     if (rootSeedUid && rootSeedUid !== ZERO_BYTES32) {
-      const seedAttMs = lastAttestationReceipt
-        ? await attestationMsFromReceipt(lastAttestationReceipt)
-        : undefined
+      const seedAttMs = await attestationMsFromReceipt(receipt)
       await persistSeedUidSafely(itemWithPersist, address, seedAttMs)
     }
 

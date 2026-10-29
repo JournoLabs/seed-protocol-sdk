@@ -117,19 +117,37 @@ const elementsOf = (payload: any[], localId: string) =>
 
 const indexOf = (payload: any[], localId: string) => payload.findIndex((p) => p.localId === localId)
 
-/** No attestation encodes the local id of a seed that this publish doesn't create. */
+/**
+ * No attestation encodes the local id of a seed that this publish doesn't create, and each one it
+ * does create is filled by a reference from that seed's request (encodeMultiPublish refuses one
+ * that isn't).
+ */
 const expectNoDanglingLocalRefs = (payload: any[]) => {
   const inBatch = new Set(payload.map((p) => p.localId))
+  const filledBy = (source: string, target: any, schema: string, elementIndex?: number) =>
+    payload
+      .find((p) => p.localId === source)
+      .propertiesToUpdate.some(
+        (u: any) =>
+          u.publishLocalId === target.localId &&
+          u.propertySchemaUid.toLowerCase() === schema.toLowerCase() &&
+          (elementIndex === undefined ? !u.listElement : u.listElement && u.elementIndex === elementIndex),
+      )
   for (const p of payload) {
     for (const a of p.listOfAttestations) {
-      if (a._unresolvedValue) expect(inBatch.has(a._unresolvedValue)).toBe(true)
-      for (const id of a._rawListIdsForResolve ?? []) {
-        if (!String(id).startsWith('0x')) expect(inBatch.has(id)).toBe(true)
+      if (a._unresolvedValue) {
+        expect(inBatch.has(a._unresolvedValue)).toBe(true)
+        expect(filledBy(a._unresolvedValue, p, a.schema)).toBe(true)
       }
+      ;(a._rawListIdsForResolve ?? []).forEach((id: string, k: number) => {
+        if (String(id).startsWith('0x')) return
+        expect(inBatch.has(id)).toBe(true)
+        expect(filledBy(id, p, a.schema, k)).toBe(true)
+      })
     }
   }
-  // Requests are attested in order: a link (propertiesToUpdate) never targets an earlier request
-  // (the contract reverts with PublishTargetAlreadyAttested; the direct-to-EAS path refuses it).
+  // Direct EAS attests requests in order: a link (propertiesToUpdate) never targets an earlier
+  // request (that route refuses it).
   payload.forEach((p, i) => {
     for (const u of p.propertiesToUpdate ?? []) {
       expect(indexOf(payload, u.publishLocalId)).toBeGreaterThanOrEqual(i)
@@ -237,6 +255,7 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(elementsOf(payload, a.seedLocalId)).toEqual([1, 2])
     const list = payload.find((p) => p.localId === root.seedLocalId).listOfAttestations.find((x: any) => x._propertyName === 'nodes')
     expect(list._rawListIdsForResolve).toEqual([publishedUid, a.seedLocalId, a.seedLocalId])
+    expectNoDanglingLocalRefs(payload)
   }, 90000)
 
   it('a cycle (A ↔ B) is walked once; the back reference is left for a later publish', async () => {

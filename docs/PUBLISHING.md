@@ -47,11 +47,17 @@ When using the publish package with `ConnectButton` and its publish flow:
    account that is not deployed yet is refused rather than sent down this path: deploy it first,
    then publish.
 
-   Requests are attested in order, so a link (`propertiesToUpdate`) must target its own request or
-   a later one: the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`,
-   and the direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
-   `PUBLISH_PREFLIGHT_FAILED`) before sending any attestation. `getPublishPayload` orders requests
-   referenced-first, so its payloads never do this.
+   The publish contract takes the whole payload in one transaction. It creates every Seed and
+   Version first, then writes each new Seed uid into the properties that reference it
+   (`propertiesToUpdate`: a relation, or one element of a list), then attests the properties.
+   Before sending, `encodeMultiPublish` puts a placeholder in each of those slots and refuses a
+   payload the contract would revert on, or one that still attests a draft's local id that no
+   reference fills.
+
+   Direct EAS attests requests in order, so a link must target its own request or a later one; it
+   refuses a payload that doesn't (`ManagedAccountPublishError`, `PUBLISH_PREFLIGHT_FAILED`) before
+   sending any attestation. `getPublishPayload` orders requests referenced-first, so its payloads
+   never do this.
 
 4. **Local recording.** Each request records its own seed, version and property attestation uids
    (`updateVersionUid`, `applyPropertyAttestationUidsFromPublish`). A request names the version row
