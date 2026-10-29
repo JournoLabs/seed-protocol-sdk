@@ -6,6 +6,10 @@ All notable changes to this package are documented in this file.
 
 - `useItem` re-renders when the item's `seedUid`, `latestVersionUid`, `latestVersionLocalId`, `lastVersionPublishedAt`, `attestationCreatedAt`, `revokedAt` or `publisher` changes while it stays idle (sync, another tab, a publish recorded late, unpublish). It re-rendered only on busy, idle and error transitions, so the component kept showing the draft's uids until something else rendered it.
 
+- `useGlobalServiceStatus()` types `status` as `ClientManagerState | 'stopped'` and `internalStatus` as `ClientManagerState | 'ready' | 'stopped'`. Since 0.7.12 both were `string`, so a `switch` on them lost its exhaustiveness check.
+- `useCreateModelProperty().create` rejects with `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`) while the database isn't open. It rejected with `No stored schema has the name or schema file id "<id>"`, which read as a typo.
+- `useCreateItem` compares arrays and plain objects in a call's values and options by contents when deciding whether a call repeats one in flight. A double click on a create whose values held an array or object built in the click handler created two items. A `File`, `Blob` or other object still has to be the same object.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, `useItems`, `useItem`, `useItemProperty` and `useCreateItem` were missing (TS2305) and named re-exports were typed `any`.
