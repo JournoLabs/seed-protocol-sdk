@@ -106,7 +106,8 @@ mock.module('../../../helpers/chainClient', () => ({
 mock.module('../helpers/receiptAttestationMs', () => ({
   attestationMsFromReceipt: async () => 1_700_000_000_000,
 }))
-mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem: async () => {} }))
+const ensureEasSchemasForItem = mock(async () => {})
+mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem }))
 mock.module('../helpers/verifyArweaveTransactionsExist', () => ({
   verifyArweaveTransactionsExist: async () => {},
 }))
@@ -263,5 +264,34 @@ describe('createAttestations: related items published in the same transaction', 
       throw new Error('payload failed')
     })
     expect(result).toEqual({ outcome: 'failed', unloads: 1 })
+  })
+})
+
+describe('createAttestations: EAS schemas', () => {
+  test('does not look up EAS schemas again: the checking state already ensured them', async () => {
+    ensureEasSchemasForItem.mockClear()
+    const item = {
+      seedLocalId: 'postLocal02',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const actor = createActor(createAttestations, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item,
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    await toPromise(actor)
+    expect(ensureEasSchemasForItem).not.toHaveBeenCalled()
   })
 })

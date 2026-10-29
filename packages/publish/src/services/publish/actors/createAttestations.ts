@@ -19,7 +19,6 @@ import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import type { PublishWallet } from '~/helpers/seedSigner'
 import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
-import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
@@ -170,8 +169,6 @@ async function executeCreateAttestations(
     })
     let activeWallet: PublishWallet = resolvePublishWallet(context)
     let routeToExecutorModule = false
-
-    await ensureEasSchemasForItem(item, activeWallet, { managedAddress: address })
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {

@@ -14,7 +14,6 @@ import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
 import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
-import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { getPublishConfig } from '~/config'
@@ -193,8 +192,6 @@ async function executeCreateAttestationsDirectToEas(
 
     const publishWallet = resolvePublishWallet(context)
     const txSender = publishWallet.txSender
-
-    await ensureEasSchemasForItem(item, publishWallet, { managedAddress: address })
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
