@@ -6,7 +6,6 @@ import type {
   SeedConstructorOptions,
 } from '@/types'
 import { isEqual } from 'lodash-es'
-import { normalizeAddressConfig } from '@/helpers/addresses'
 import debug                      from 'debug'
 import { createActor, waitFor }   from 'xstate'
 import { clientManagerMachine }   from '@/client/clientManagerMachine'
@@ -107,7 +106,7 @@ let lastInitConfig: SeedConstructorOptions['config'] | undefined
 export const INIT_CONFIG_CONFLICT_MESSAGE =
   'client.init was already called with a different config. The SDK keeps the config it was ' +
   'initialised with: pass the same config, or call client.stop() before initialising with a new one. ' +
-  'To change addresses, use client.setAddresses() (or call init again with the same config and new addresses).'
+  'To change addresses, use client.setAddresses().'
 
 const ensureInitialized = () => {
   const snapshot = clientManager.getSnapshot()
@@ -318,17 +317,14 @@ const clientInstance = {
   },
   /**
    * Initialise the SDK. Calls made while an init is running share it. Once initialised, a
-   * call with the same config resolves at once and replaces the stored addresses with any
-   * different non-empty `addresses`; an empty set (`[]`, the value hosts pass before a wallet
-   * connects) keeps them, so remounting a gate doesn't drop a connected wallet. Clear them with
-   * `setAddresses([])`. A call with a different config throws INIT_CONFIG_CONFLICT_MESSAGE
-   * (call stop() first).
+   * call with the same config resolves at once and leaves the stored addresses as they are:
+   * only the first init applies `addresses`, and `setAddresses` changes them after that. A call
+   * with a different config throws INIT_CONFIG_CONFLICT_MESSAGE (call stop() first).
    */
   init: async (options: SeedConstructorOptions): Promise<void> => {
     if (activeInitConfig !== undefined && !isEqual(activeInitConfig, options?.config)) {
       throw new Error(INIT_CONFIG_CONFLICT_MESSAGE)
     }
-    const isRepeat = activeInitConfig !== undefined
     activeInitConfig = options?.config
     lastInitConfig = options?.config
     try {
@@ -336,14 +332,6 @@ const clientInstance = {
     } catch (error) {
       activeInitConfig = undefined
       throw error
-    }
-    if (isRepeat && options?.addresses !== undefined) {
-      const wanted = normalizeAddressConfig(options.addresses)
-      if (wanted.owned.length === 0 && wanted.watched.length === 0) return
-      const current = { owned: await getOwnedAddressesFromDb(), watched: await getWatchedAddressesFromDb() }
-      if (!isEqual(wanted, current)) {
-        await clientInstance.setAddresses(wanted)
-      }
     }
   },
   setAddresses: async (addresses: AddressConfiguration) => {
