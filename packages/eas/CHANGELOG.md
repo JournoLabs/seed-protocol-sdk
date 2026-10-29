@@ -11,7 +11,7 @@ All notable changes to this package are documented in this file.
 
 - **Breaking:** `normalizeBytes32Hex` returns `''` for a value that isn't 64 hex digits (with or without `0x`). It left-padded short values and turned non-hex characters into `0`, so `collectPublishedBatch({ seedUid: '0xabc' })` built a batch for a padded UID. Decoded BigNumber values (`{ hex }`) are padded by the new `bytes32FromNumberHex`.
 - **Breaking:** `toSnakeCase` is removed. It kept the old rule (`HTMLPage` → `htmlpage`); use `easName`.
-- A caller's abort signal keeps the 30 s request timeout where `AbortSignal.any` or `AbortSignal.timeout` don't exist (Safari before 17.4, Node before 20.3). The timeout dropped when a caller passed a signal, and didn't apply at all without `AbortSignal.timeout`.
+- A caller's abort signal keeps the 30 s request timeout where `AbortSignal.any` or `AbortSignal.timeout` don't exist (Safari before 17.4, Node before 20.3). The timeout dropped when a caller passed a signal, and didn't apply at all without `AbortSignal.timeout`. A timed-out request now rejects with a `TimeoutError` whose message is `EAS indexer request timed out after <ms> ms`; it had the runtime's generic timeout message.
 - `fetchEasModelSchemas` logs its lookup under `DEBUG=seedEas:timing`, like the other api helpers.
 - `engines` declares Node 20.18.1 or later: `@seedprotocol/eas/node` uses `process.getBuiltinModule` (Node 20.16) and undici 7 (20.18.1).
 - `getSeedsBySchemaName(schemaName, limit, skip, { attesters })` adds an `attester: { in: [...] }` condition with each address checksummed. With no address in the list, it returns `[]` without a request.

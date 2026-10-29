@@ -15,7 +15,7 @@ yarn add @seedprotocol/sdk
 bun add @seedprotocol/sdk
 ```
 
-All `@seedprotocol/*` packages are released together, at one version, and depend on each other at that exact version. Install and upgrade them together (`npm install @seedprotocol/sdk@<version> @seedprotocol/react@<version>`); a mismatched pair installs a second copy of the package they share, which splits its module state.
+All `@seedprotocol/*` packages are released together, at one version, and depend on each other at that exact version. Install and upgrade them together (`npm install @seedprotocol/sdk@<version> @seedprotocol/react@<version>`); with a mismatched pair, npm refuses to install `@seedprotocol/react` or `@seedprotocol/publish` (`ERESOLVE`, since they take the SDK as an exact peer), and packages that depend on the SDK, such as `@seedprotocol/query`, install a second copy of it, which splits its module state.
 
 ## Prerequisites
 
