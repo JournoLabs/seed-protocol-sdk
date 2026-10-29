@@ -1,7 +1,6 @@
 import type { Account } from 'thirdweb/wallets'
 import { PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS } from '@seedprotocol/eas'
 import type { PublishWallet } from './seedSigner'
-import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
 import { ensureExecutorModuleInstalled, type EnsureExecutorModuleResult } from './ensureExecutorModule'
@@ -17,6 +16,7 @@ import {
 } from '../services/publishAuthorization'
 import { getClient, getManagedAccountWallet } from './thirdweb'
 import { getPublishThirdwebChain } from './thirdwebChain'
+import { connectManagedAccountWallet } from './thirdwebAutomationSessionKey'
 
 export type EnrollPublishAutomationParams = {
   managedAddress: string
@@ -30,8 +30,8 @@ export type EnrollPublishAutomationParams = {
    */
   expiresAt?: number
   /**
-   * User-controlled ManagedAccount wallet used to add the session key and attest the sidecar.
-   * When omitted, uses the connected managed in-app wallet.
+   * Wallet that signs the session-key grant (its signer must be an admin EOA of the account) and
+   * attests the sidecar. When omitted, uses the connected managed in-app wallet.
    */
   userWallet?: PublishWallet
 }
@@ -67,8 +67,7 @@ async function resolveUserWallet(
   managedAddress: string,
   userWallet?: PublishWallet,
 ): Promise<PublishWallet> {
-  if (userWallet) return userWallet
-  return fromThirdwebAccount(await connectManagedAccount(managedAddress), { kind: 'smart' })
+  return userWallet ?? connectManagedAccountWallet(managedAddress)
 }
 
 async function assertExecutorModuleInstalled(managedAddress: string): Promise<void> {
@@ -123,13 +122,14 @@ export async function enrollPublishAutomation(
       : Math.floor(Date.now() / 1000) + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS
 
   await assertExecutorModuleInstalled(managedAddress)
+  const userWallet = await resolveUserWallet(managedAddress, params.userWallet)
   await ensureAutomationSessionKey({
     managedAddress,
     sessionKeyAddress,
     expiresAt,
+    admin: userWallet,
   })
 
-  const userWallet = await resolveUserWallet(managedAddress, params.userWallet)
   const authorization = await attestPublishAuthorization({
     wallet: userWallet,
     identity: managedAddress,
@@ -157,6 +157,7 @@ export async function revokePublishAutomation(
   await removeAutomationSessionKey({
     managedAddress,
     sessionKeyAddress,
+    admin: userWallet,
   })
 
   await revokePublishAuthorization({

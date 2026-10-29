@@ -90,6 +90,11 @@ export {
   isPublishWallet,
 } from './helpers/seedSigner'
 export {
+  ensureAutomationSessionKey,
+  removeAutomationSessionKey,
+  isAutomationSessionActive,
+} from './helpers/ensureAutomationSessionKey'
+export {
   fromEip1193Provider,
   fromWindowEthereum,
 } from './helpers/adapters/eip1193'

@@ -204,10 +204,14 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - `ensurePublishAuthorizationSchema`, `attestPublishAuthorization`, `revokePublishAuthorization`
 - `assessPublishAuthorizationLive`
 - `assertExecutorModuleReadyForAccount` (check an account before offering enrollment), `simulateCallFromAccount`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` (take `admin: PublishWallet`; see below), `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
+
+`admin.signer` signs the session-key grant and must be an admin EOA of the ManagedAccount; a signer that isn't fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent. `admin.txSender` sends it. The account applies a grant an admin signed whoever sends it, so the admin EOA can send it and pay the gas, or a relayer can. An undeployed account takes the grant only from a sender that is the account, whose first UserOp deploys it.
 
 ### `@seedprotocol/publish/thirdweb`
 
-- `approvedTargetsForAutomationPublish`, `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
+- `approvedTargetsForAutomationPublish`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` with `admin` optional: it defaults to the connected managed in-app wallet, which signs with its admin EOA and sends a sponsored UserOp from the account
 - `enrollPublishAutomation`, `revokePublishAutomation`
 - `assertStorageBoundToIdentity`
 - `buildAutomationSessionKeyPermissions`, `hashAutomationSessionKeyPermissions`
