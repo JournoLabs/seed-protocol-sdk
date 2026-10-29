@@ -29,7 +29,7 @@ const FILE_SCHEMA = 'Test Schema Property Definition File'
 const CODE_SCHEMA = 'Test Schema Property Definition Code'
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: FILE_SCHEMA, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

@@ -16,7 +16,7 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 const uid = (c: string) => `0x${c.repeat(64)}`
 
 const schemaFile = (schemaName: string, models: Record<string, { id: string; properties: Record<string, { id: string; type: string }> }>) => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

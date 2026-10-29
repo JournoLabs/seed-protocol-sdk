@@ -10,7 +10,7 @@ import { Schema } from '@/Schema/Schema'
 import { SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const schemaNamed = (name: string) => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   metadata: { name, createdAt: '2026-10-28T00:00:00.000Z', updatedAt: '2026-10-28T00:00:00.000Z' },
   models: {

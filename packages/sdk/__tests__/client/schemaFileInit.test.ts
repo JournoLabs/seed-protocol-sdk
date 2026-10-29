@@ -181,7 +181,7 @@ testDescribe('schemaFile init', () => {
       fs.writeFileSync(
         path.join(process.cwd(), 'nameless-schema.json'),
         JSON.stringify({
-          $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+          $schema: 'https://seedprotocol.io/schemas/data-model/v1',
           version: 1,
           metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
           models: { Note: { properties: { title: { type: 'Text' } } } },

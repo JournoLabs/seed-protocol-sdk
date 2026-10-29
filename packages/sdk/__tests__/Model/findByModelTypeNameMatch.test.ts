@@ -13,7 +13,7 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 const testDescribe = typeof window === 'undefined' ? describe.sequential : describe.skip
 
 const schema = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'find-by-model-type-name-match',
   metadata: { name: 'Find By Model Type NameMatch', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

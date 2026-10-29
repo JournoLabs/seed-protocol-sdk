@@ -33,7 +33,7 @@ import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema data
 const testSchema1: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-1',
   metadata: {
@@ -61,7 +61,7 @@ const testSchema1: SchemaFileFormat = {
 }
 
 const testSchema2: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-2',
   metadata: {
@@ -86,7 +86,7 @@ const testSchema2: SchemaFileFormat = {
 
 // Empty schema with no models for integration test
 const emptyTestSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'empty-test-schema',
   metadata: {
@@ -1041,7 +1041,7 @@ describe(
       // Create a new schema that doesn't exist yet
       const newSchemaName = 'LiveQuery Test Schema'
       const newTestSchema: SchemaFileFormat = {
-        $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+        $schema: 'https://seedprotocol.io/schemas/data-model/v1',
         version: 1,
         id: 'livequery-test-schema',
         metadata: {

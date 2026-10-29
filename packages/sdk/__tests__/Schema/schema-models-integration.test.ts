@@ -294,7 +294,7 @@ testDescribe('Schema Models Integration Tests', () => {
   describe('syncSchemaFromSource idempotency', () => {
     const testSchemaName = 'Test Schema Idempotency'
     const testSchema: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       metadata: {
         name: testSchemaName,
@@ -349,7 +349,7 @@ testDescribe('Schema Models Integration Tests', () => {
       modelNames: string[],
       version = 1,
     ): SchemaFileFormat => ({
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       id: schemaId,
       version,
       metadata: {

@@ -885,7 +885,7 @@ export class Schema {
     
     const currentSchema: SchemaFileFormat = {
       id: context.id,
-      $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: context.$schema || 'https://seedprotocol.io/schemas/data-model/v1',
       version: context.version || 1,
       metadata: context.metadata || {
         name: this.schemaName,
@@ -1178,7 +1178,7 @@ export class Schema {
       // Model instances are the source of truth for model data
       const modelsFromInstances = await this._buildModelsFromInstances()
       const currentSchema: SchemaFileFormat = {
-        $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
+        $schema: context.$schema || 'https://seedprotocol.io/schemas/data-model/v1',
         version: context.version || 1,
         id: finalSchemaFileId,
         metadata: currentMetadata,

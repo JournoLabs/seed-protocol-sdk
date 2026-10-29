@@ -44,7 +44,7 @@ import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schemaApply')
 
-export const SCHEMA_FILE_FORMAT = 'https://seedprotocol.org/schemas/data-model/v1'
+export const SCHEMA_FILE_FORMAT = 'https://seedprotocol.io/schemas/data-model/v1'
 
 type Db = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
 
@@ -87,9 +87,14 @@ const stableStringify = (value: unknown): string =>
       : v,
   )
 
-/** Hash of a schema file's content. The metadata timestamps don't count. */
-export const schemaContentHash = (file: SchemaFileFormat): Promise<string> =>
-  getContentHash(stableStringify({ ...file, metadata: { name: file.metadata.name } }))
+/**
+ * Hash of a schema file's content. The metadata timestamps and `$schema` don't count, so a file
+ * stored with the old `https://seedprotocol.org/...` format URL matches the same file today.
+ */
+export const schemaContentHash = (file: SchemaFileFormat): Promise<string> => {
+  const { $schema: _format, ...content } = file
+  return getContentHash(stableStringify({ ...content, metadata: { name: file.metadata.name } }))
+}
 
 /**
  * The id a schema, model or property gets when its file has none and no stored version of the

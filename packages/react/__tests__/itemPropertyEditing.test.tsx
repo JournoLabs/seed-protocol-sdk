@@ -24,7 +24,7 @@ const MINE = '0x' + '5'.repeat(40)
 const OTHER = '0x' + '6'.repeat(40)
 
 const schemaFile: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-property-editing',
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

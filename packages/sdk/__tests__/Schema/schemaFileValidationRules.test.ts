@@ -11,7 +11,7 @@ import { waitForItemIdle, waitForModelPropertyIdle, waitForModelSettled } from '
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.skip
 
 const schemaFile = (id: string, name: string, properties: Record<string, unknown>) => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id,
   metadata: { name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
