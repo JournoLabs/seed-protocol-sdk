@@ -6,7 +6,7 @@ import { getPropertySchema, ModelProperty } from '@seedprotocol/sdk'
 import { useIsClientReady } from "./client"
 import { Subscription } from "xstate"
 import { useLiveQuery } from "./liveQuery"
-import { BaseDb } from '@seedprotocol/sdk'
+import { BaseDb, ClientNotInitializedError } from '@seedprotocol/sdk'
 import { properties as propertiesTable, schemas as schemasTable } from '@seedprotocol/sdk'
 import { eq, or } from "drizzle-orm"
 import { Model } from '@seedprotocol/sdk'
@@ -41,11 +41,12 @@ type UseModelPropertiesResult = {
 /**
  * The stored schema a schemaId names, by schema name or schema file id; undefined when none does.
  * A "name-version" id isn't cut down to a name: `blog-2` resolving to `blog` added properties to
- * the wrong schema when `blog-2` was a typo or not stored yet.
+ * the wrong schema when `blog-2` was a typo or not stored yet. Throws `ClientNotInitializedError`
+ * while the database isn't open, which would otherwise read as a schema id no schema has.
  */
 async function resolveSchemaName(schemaId: string): Promise<string | undefined> {
   const db = BaseDb.getAppDb()
-  if (!db) return undefined
+  if (!db) throw new ClientNotInitializedError()
   const rows = await db
     .select({ name: schemasTable.name })
     .from(schemasTable)

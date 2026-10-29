@@ -169,6 +169,32 @@ describe('item and query hooks', () => {
     expect(second).toBe(first)
   })
 
+  it('useCreateItem treats a repeat whose values are arrays or objects built per call as the same create', async () => {
+    const name = 'Create Guard Json Schema'
+    const file = schemaFile(name, {
+      GuardJsonNote: {
+        id: 'guard-json-note-model-id',
+        properties: { meta: { id: 'guard-json-note-meta-id', type: 'Json' } },
+      },
+    })
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useCreateItem(), { wrapper })
+
+    // A click handler builds new values on each click.
+    const click = () =>
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['a', 'b'], n: 1 } })
+    const [first, second] = await Promise.all([click(), click()])
+    expect(first).toBeDefined()
+    expect(second).toBe(first)
+
+    const [a, b] = await Promise.all([
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['a'] } }),
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['b'] } }),
+    ])
+    expect(b?.seedLocalId).not.toBe(a?.seedLocalId)
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+  })
+
   it('useCreateItem runs a different create while one runs, instead of handing back the first item', async () => {
     const name = 'Create Distinct Schema'
     const file = schemaFile(name, {

@@ -556,11 +556,39 @@ export type UseCreateItemReturn = {
   resetError: () => void
 }
 
-/** Same keys, each value the same (Object.is): a repeated call, not a new item. */
-const shallowEqual = (a: Record<string, unknown> | undefined, b: Record<string, unknown> | undefined): boolean => {
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Arrays and plain objects compare by contents, so values a click handler builds on each click
+ * still match; anything else (a File, a Blob, a class instance) must be the same object.
+ */
+const sameValue = (a: unknown, b: unknown, depth = 0): boolean => {
+  if (Object.is(a, b)) return true
+  // Past this depth (or a cycle) the values count as different, which only costs a second create.
+  if (depth > 20) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((value, i) => sameValue(value, b[i], depth + 1))
+  }
+  if (isPlainObject(a) && isPlainObject(b)) return sameRecord(a, b, depth + 1)
+  return false
+}
+
+/** Same keys, each value the same (`sameValue`): a repeated call, not a new item. */
+const sameRecord = (
+  a: Record<string, unknown> | undefined,
+  b: Record<string, unknown> | undefined,
+  depth = 0,
+): boolean => {
   const aKeys = Object.keys(a ?? {})
   const bKeys = Object.keys(b ?? {})
-  return aKeys.length === bKeys.length && aKeys.every((key) => Object.is(a?.[key], b?.[key]))
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every((key) => Object.hasOwn(b ?? {}, key) && sameValue(a?.[key], b?.[key], depth))
+  )
 }
 
 type CreateCall = {
@@ -588,8 +616,8 @@ export const useCreateItem = (): UseCreateItemReturn => {
       const repeated = inFlightRef.current.find(
         (call) =>
           call.modelName === modelName &&
-          shallowEqual(call.itemData, itemData) &&
-          shallowEqual(call.options as Record<string, unknown> | undefined, options as Record<string, unknown> | undefined),
+          sameRecord(call.itemData, itemData) &&
+          sameRecord(call.options as Record<string, unknown> | undefined, options as Record<string, unknown> | undefined),
       )
       if (repeated) {
         logger('[useCreateItem] [createItem] the same create is running, returning it')
