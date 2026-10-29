@@ -1,7 +1,6 @@
 import {
   getPublishGraph,
   INTERNAL_DATA_TYPES,
-  ModelPropertyDataTypes,
   normalizeDataType,
   getEasSchemaUidForExactDefinition,
   setSchemaUidForSchemaDefinition,
@@ -9,8 +8,9 @@ import {
   listRelationEasPropertyName,
   easName,
   easPropertyNameForPublish,
+  publishRemovesValue,
 } from '@seedprotocol/sdk'
-import type { IItem, PublishGraphNode } from '@seedprotocol/sdk'
+import type { IItem, PublishGraphNode, PublishGraphProperty } from '@seedprotocol/sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { getSchemaRecord, registerSchema } from '~/helpers/schemaRegistry'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
@@ -41,23 +41,29 @@ export function resetEnsuredBaseSchemas(): void {
 }
 
 
+const STORAGE_MODEL_NAMES = new Set(['Image', 'File', 'Html'])
+
+/** Whether this publish may upload a file for `node`, which it attests as the node's storage transaction. */
+function nodeMayUpload(node: PublishGraphNode): boolean {
+  return (
+    node.kind === 'storageSeed' ||
+    node.kind === 'embeddedImage' ||
+    STORAGE_MODEL_NAMES.has(node.modelName) ||
+    node.properties.some((p) => p.kind === 'itemStorage' && hasValue(p))
+  )
+}
+
+const hasValue = (property: PublishGraphProperty): boolean =>
+  property.row?.propertyValue != null && property.row.propertyValue !== ''
+
 /**
- * Model names a node's seed and refs attest under: its own model, its relation and list refs, and
- * the storage models (File, Html, else Image) of its storage-seed properties.
+ * Whether this publish can attest `property`: it has a value, or its empty value removes a live
+ * attestation (ADR 0021). An empty property that was never attested attests nothing, so its schema
+ * isn't needed. A deferred property is left out of this publish.
  */
-function getModelNamesForNode(node: PublishGraphNode): Set<string> {
-  const modelNames = new Set<string>([node.modelName])
-  for (const { kind, definition } of node.properties) {
-    const dataType = normalizeDataType(definition.dataType)
-    if ((kind === 'relation' || kind === 'list' || (kind === 'storageSeed' && dataType === ModelPropertyDataTypes.Relation)) && definition.ref) {
-      modelNames.add(definition.ref)
-    }
-    if (kind !== 'storageSeed') continue
-    if (dataType === ModelPropertyDataTypes.File) modelNames.add('File')
-    else if (dataType === ModelPropertyDataTypes.Html) modelNames.add('Html')
-    else modelNames.add('Image')
-  }
-  return modelNames
+async function publishMayAttest(node: PublishGraphNode, property: PublishGraphProperty): Promise<boolean> {
+  if (property.deferred) return false
+  return hasValue(property) || (await publishRemovesValue(node, property))
 }
 
 async function sendAndWait(txSender: SeedTxSender, tx: Parameters<SeedTxSender['sendTransaction']>[0]) {
@@ -132,8 +138,10 @@ async function resolveBlockSchemaRegistration(
 }
 
 /**
- * Ensures EAS schemas exist for each property and each model of every seed a publish of the item
- * attests (the item and the drafts published with it, see the SDK's getPublishGraph).
+ * Ensures EAS schemas exist for every seed a publish of the item attests (the item and the drafts
+ * published with it, see the SDK's getPublishGraph): its model, the properties the publish can
+ * attest (those with a value, or an empty value that removes a live attestation), and the storage
+ * transaction of a seed that uploads a file.
  * If a schema is not found on-chain or in the indexer, registers it via SchemaRegistry
  * and creates a name attestation (Schema #1) so EASSCAN displays it.
  * Automation session keys cannot register; a missing schema throws before any UserOp.
@@ -169,38 +177,32 @@ async function ensureEasSchemasForNode(
   registered: { schemaUids: Set<string>; modelSchemaUids: Set<string> },
 ): Promise<void> {
   // The storage transaction slot has its own schema below; ItemStorage files are not attested
-  const allProperties = node.properties.filter((p) => p.kind !== 'storageTransaction' && p.kind !== 'itemStorage')
+  const allProperties: PublishGraphProperty[] = []
+  for (const property of node.properties) {
+    if (property.kind === 'storageTransaction' || property.kind === 'itemStorage') continue
+    if (await publishMayAttest(node, property)) allProperties.push(property)
+  }
 
   const registeredSchemaUids = registered.schemaUids
-  const modelNames = getModelNamesForNode(node)
   const registeredModelSchemaUids = registered.modelSchemaUids
 
-  for (const modelName of modelNames) {
-    const schemaDef = `bytes32 ${easName(modelName)}`
-    const schemaUid = SchemaRegistry.getSchemaUID(
-      schemaDef,
-      RESOLVER_ADDRESS as `0x${string}`,
-      REVOCABLE,
-    )
-
-    const onChainRecord = await getSchemaRecord(schemaUid)
-    if (onChainRecord) {
-      setSchemaUidForModel({ modelName, schemaUid })
-      continue
-    }
-
-    if (registeredModelSchemaUids.has(schemaUid)) {
-      setSchemaUidForModel({ modelName, schemaUid })
-      continue
-    }
-
-    throwIfAutomationCannotRegister(blockSchemaRegistration, schemaDef)
+  // Only the node's own model: a draft it refers to is a node of its own, and a published one is
+  // attested by uid under the referring property's schema.
+  const { modelName } = node
+  const modelSchemaDef = `bytes32 ${easName(modelName)}`
+  const modelSchemaUid = SchemaRegistry.getSchemaUID(
+    modelSchemaDef,
+    RESOLVER_ADDRESS as `0x${string}`,
+    REVOCABLE,
+  )
+  if (!registeredModelSchemaUids.has(modelSchemaUid) && !(await getSchemaRecord(modelSchemaUid))) {
+    throwIfAutomationCannotRegister(blockSchemaRegistration, modelSchemaDef)
 
     try {
       await sendAndWait(
         sender,
         registerSchema({
-          schema: schemaDef,
+          schema: modelSchemaDef,
           resolverAddress: RESOLVER_ADDRESS,
           revocable: REVOCABLE,
         }),
@@ -215,7 +217,7 @@ async function ensureEasSchemasForNode(
       await sendAndWait(
         sender,
         prepareNameSchemaAttestation({
-          schemaUid,
+          schemaUid: modelSchemaUid,
           schemaName: easName(modelName),
         }),
       )
@@ -225,9 +227,9 @@ async function ensureEasSchemasForNode(
       )
     }
 
-    registeredModelSchemaUids.add(schemaUid)
-    setSchemaUidForModel({ modelName, schemaUid })
+    registeredModelSchemaUids.add(modelSchemaUid)
   }
+  setSchemaUidForModel({ modelName, schemaUid: modelSchemaUid })
 
   const storageSchemaDef = 'string storage_transaction_id'
   const storageSchemaUid = SchemaRegistry.getSchemaUID(
@@ -238,10 +240,7 @@ async function ensureEasSchemasForNode(
   const storageOnChain = await getSchemaRecord(storageSchemaUid)
   if (storageOnChain) {
     setSchemaUidForSchemaDefinition({ text: storageSchemaDef, schemaUid: storageSchemaUid })
-  } else if (
-    !registeredSchemaUids.has(storageSchemaUid) &&
-    (modelNames.has('Image') || modelNames.has('File') || modelNames.has('Html'))
-  ) {
+  } else if (!registeredSchemaUids.has(storageSchemaUid) && nodeMayUpload(node)) {
     throwIfAutomationCannotRegister(blockSchemaRegistration, storageSchemaDef)
     try {
       await sendAndWait(

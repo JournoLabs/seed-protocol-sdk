@@ -135,11 +135,16 @@ describe.sequential('a property saved after publish registered its schema', () =
 
   it('records the registered schema uid on the new row, and retracts it', async () => {
     const { ensureEasSchemasForItem } = await import('./ensureEasSchemas')
-    // PROPERTY has no value, so no row, when the item is published: its schema is registered anyway.
+    // PROPERTY has no value, so no row, when the item is published. Another item's publish
+    // registers its schema.
     const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'Brief', label: 'first' } as any)
     await waitForPropertyInstances(item as any)
+    const other = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'Brief', label: 'other', [PROPERTY]: 'set' } as any)
+    await waitForPropertyInstances(other as any)
 
     await ensureEasSchemasForItem(item as never, txSender)
+    expect(onChain.has(schemaUidOf(DEFINITION))).toBe(false)
+    await ensureEasSchemasForItem(other as never, txSender)
     expect(onChain.has(schemaUidOf(DEFINITION))).toBe(true)
     await recordPublish(item)
 
