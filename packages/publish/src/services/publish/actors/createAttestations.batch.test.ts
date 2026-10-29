@@ -86,6 +86,11 @@ mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
+  // The real one writes both in one transaction; here it hands each to its mock
+  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
+    if (version) await updateVersionUid(version)
+    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  },
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))

@@ -1,4 +1,4 @@
-import { applyPropertyAttestationUidsFromPublish, Item, updateVersionUid } from '@seedprotocol/sdk'
+import { Item, recordPublishRequest } from '@seedprotocol/sdk'
 import debug from 'debug'
 import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
@@ -24,10 +24,10 @@ const nonZero = (uid: string | undefined): string | undefined => (isZero(uid) ? 
 /**
  * Records locally what one multiPublish transaction attested, for every request in it (the item
  * being published and the related items published with it), each matched to its own events:
- * - the Version attestation it created (updateVersionUid). A request that carried a version uid (a
- *   patch publish) created none: the executor's SeedPublished still reports that existing version,
- *   which must not be recorded as a new one.
- * - its property attestation uids, on that version (applyPropertyAttestationUidsFromPublish).
+ * - the Version attestation it created, and its property attestation uids on that version, in one
+ *   transaction (recordPublishRequest). A request that carried a version uid (a patch publish)
+ *   created none: the executor's SeedPublished still reports that existing version, which must not
+ *   be recorded as a new one.
  * - the Seed attestation it created, for related items (the item being published, `rootSeedLocalId`,
  *   is left to the caller: createAttestations assigns it to the publishing item and persists it).
  *
@@ -56,19 +56,6 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
   })
   const attMs = await attestationMsFromReceipt(receipt)
 
-  for (let i = 0; i < requests.length; i++) {
-    const req = requests[i]!
-    const versionUid = attributed[i]!.versionUid
-    if (!req.localId || !isZero(req.versionUid) || isZero(versionUid)) continue
-    await updateVersionUid({
-      seedLocalId: req.localId,
-      versionUid: toHex32(versionUid),
-      ...(req.versionLocalId ? { versionLocalId: req.versionLocalId } : {}),
-      publisher: publisherAddress,
-      attestationCreatedAt: attMs,
-    })
-  }
-
   // The seed uid of every seed a relation/list slot of these requests can name by local id: those
   // created by earlier transactions of this publish, and those of this transaction (not yet
   // recorded on their seed rows, which happens below).
@@ -79,20 +66,35 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
     if (req.localId && seedUid) resolvedSeedUids[req.localId] = seedUid
   }
 
-  // Each request's property uids, against the version it attested under: its own version uid (a
-  // patch publish), or the version this transaction created for it. Relation and list values are
-  // recorded as the seed uids they attested.
+  // Each request's version uid and property uids, in one transaction so a reader never sees the
+  // version without its properties. The properties are recorded against the version they attested
+  // under: the request's own version uid (a patch publish), or the version this transaction created
+  // for it. Relation and list values are recorded as the seed uids they attested.
   for (let i = 0; i < requests.length; i++) {
     const req = requests[i]!
     const { propertyPairs, versionUid } = attributed[i]!
-    if (!req.localId || !propertyPairs.length) continue
-    await applyPropertyAttestationUidsFromPublish({
-      seedLocalId: req.localId,
-      attestationCreatedAtMs: attMs ?? null,
-      versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
-      pairs: propertyPairs,
-      resolvedSeedUids,
-      publisher: publisherAddress,
+    if (!req.localId) continue
+    const createdVersion = isZero(req.versionUid) && !isZero(versionUid)
+    await recordPublishRequest({
+      ...(createdVersion && {
+        version: {
+          seedLocalId: req.localId,
+          versionUid: toHex32(versionUid),
+          ...(req.versionLocalId ? { versionLocalId: req.versionLocalId } : {}),
+          publisher: publisherAddress,
+          attestationCreatedAt: attMs,
+        },
+      }),
+      ...(propertyPairs.length > 0 && {
+        properties: {
+          seedLocalId: req.localId,
+          attestationCreatedAtMs: attMs ?? null,
+          versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
+          pairs: propertyPairs,
+          resolvedSeedUids,
+          publisher: publisherAddress,
+        },
+      }),
     })
   }
 

@@ -101,8 +101,10 @@ Control this with **`publishMode`** when building payloads or starting publish.
 
 Use **`getPublishPendingDiff`** from `@seedprotocol/sdk` with `{ seedLocalId }` / `{ seedUid }` or an **`Item`**. It returns:
 
-- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists, and a **`change`**: `'set'`, `'removed'` or `'retracted'`. An empty value with nothing on chain to remove is not listed. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
+- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists, and a **`change`**: `'set'`, `'removed'` or `'retracted'`. An empty value with nothing on chain to remove is not listed, and neither is a value equal to the last published one: relations compare by the seed they name (a local id equals the seed's uid), lists member by member in order. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
 - **`lastPublishedVersionUid`** / **`lastVersionPublishedAt`** — From the local `versions` table when available.
+
+An edit back to the published value leaves no draft: when the outbox applies it, the property's drafts are deleted and its attested row is current again, so publish leaves it out too ([ADR 0019](./adr/0019-item-writes-through-an-outbox.md)). The comparison is with the latest attested value, so after sync has stored a newer value, going back to the old one is still an edit. Publish records a version uid and its property uids in one transaction, before it reports success, so a read never sees the version published while its properties are not.
 
 Use this to show “what will publish” or badges before calling publish.
 

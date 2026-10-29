@@ -1,7 +1,8 @@
 # 0019. Item edits go through a durable outbox that the leader tab drains
 
 - **Status:** Accepted; amended 2026-10-22 (the setter appends at once; see Assignment, Assignment
-  order and Storage values) and 2026-10-27 (the setter never throws; see Assignment)
+  order and Storage values), 2026-10-27 (the setter never throws; see Assignment) and 2026-10-29
+  (an edit back to the attested value leaves no draft; see that section)
 - **Date:** 2026-10-18
 - **Scope:** `@seedprotocol/sdk` (Item, ItemProperty, `db/write`, `BaseDb`, EAS sync, migrations),
   `@seedprotocol/react` (property hooks), `@seedprotocol/publish` (payload, uid stamping)
@@ -96,6 +97,19 @@ edit, or that ran the sync; other tabs see the conflict when they load the prope
 record no conflicts. For whole-value sets this replay is
 the same as "local wins"; a field-level merge (lists, rich text) needs finer ops and is not part
 of this decision.
+
+**An edit back to the attested value leaves no draft** (amended 2026-10-29). When a `set` op
+applies and its value equals the property's latest attested row (`propertyValuesEqual`: a Relation,
+Image, File, Html or Json value by the seed it names, so a local id equals that seed's uid, and a
+List member by member in order), the applier deletes the property's drafts instead of writing one.
+The attested row is the current row again, so the pending diff, the cost estimate and publish leave
+the property out, and nothing marks a draft as published. The comparison is with the latest
+attested row, not the op's base row: once sync has written a newer value, going back to the old one
+is an edit and wins under the rule above. A clear, a revoked attested row, and a row above it that
+a publish in progress holds (a placeholder uid) keep the usual write. The setter still appends the
+op: the comparison reads the stored rows, which the applier reads in its transaction. Drafts
+written before this amendment that equal the attested value stay, and the next publish attests
+them.
 
 **Reads.** A property's value is its newest pending op if it has one, else the stored row. The
 metadata liveQuery's `hasPendingPropertyWrite` check becomes this rule. SDK read helpers that

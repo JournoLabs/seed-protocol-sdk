@@ -19,6 +19,7 @@ import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/sto
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
+import { propertyValuesEqual } from '@/helpers/propertyValuesEqual'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
@@ -605,6 +606,44 @@ async function prepareItemStorageValue(op: OutboxOp, value: ItemStorageValueOp):
   return { versionLocalId: head?.localId ?? undefined, versionUid: head?.uid ?? undefined }
 }
 
+/**
+ * A `set` that puts a property back to its latest attested value leaves no draft: the property's
+ * drafts are deleted, so the attested row is its current row again and the property isn't an
+ * unpublished edit (pending diff, cost estimate, publish). The value is compared with the latest
+ * attested row, not with the row the edit was made against: once sync has written a newer value,
+ * going back to the old one is still an edit, and wins as one (ADR 0019). Returns the attested
+ * row, or undefined when the op writes a row as usual.
+ */
+async function restoreAttestedRow(
+  op: Pick<OutboxOp, 'seedLocalId' | 'propertyName'>,
+  value: SetPropertyValueOp,
+  tx: ReturnType<typeof BaseDb.getAppDb>,
+): Promise<SetPropertyValueResult | undefined> {
+  if (!op.propertyName || value.clear || value.newValue == null || value.newValue.trim() === '') return undefined
+  const property = await matchMetadataProperty(
+    {
+      propertyName: op.propertyName,
+      seedLocalId: op.seedLocalId,
+      modelName: value.modelName,
+      dataType: value.dataType,
+      refValueType: value.refValueType,
+    },
+    tx,
+  )
+  const ofProperty = and(eq(metadata.seedLocalId, op.seedLocalId), metadataRowsOfProperty(property))
+  const rows = ((await tx.select().from(metadata).where(ofProperty)) as MetadataType[]).sort(
+    compareMetadataRowsLatestFirst,
+  )
+  const attestedAt = rows.findIndex((row) => isValidEasAttestationUid(row.uid))
+  const attested = rows[attestedAt]
+  if (!attested?.localId || attested.revokedAt != null) return undefined
+  // Only drafts above it: a row a publish in progress holds (a placeholder uid) stays the value
+  if (rows.slice(0, attestedAt).some((row) => row.uid != null || row.derivedFromUid != null)) return undefined
+  if (!(await propertyValuesEqual(value, value.newValue, attested.propertyValue, tx))) return undefined
+  await tx.delete(metadata).where(and(ofProperty, isNull(metadata.uid), isNull(metadata.derivedFromUid)))
+  return { localId: attested.localId, uid: attested.uid, schemaUid: attested.schemaUid ?? '' }
+}
+
 let registered = false
 
 /** Registers the item appliers and starts draining. Safe to call more than once. */
@@ -631,6 +670,11 @@ export function startItemOutbox(): void {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         // Before the write, which makes the edit the newest row
         const conflict = await findSetConflict(op, value, tx)
+        const restored = await restoreAttestedRow(op, value, tx)
+        if (restored) {
+          await recordPropertyEdit(op, conflict, tx)
+          return restored
+        }
         const { clear, propertyRecordSchema: _definition, ...props } = value
         const result = await updateItemPropertyValue(
           {

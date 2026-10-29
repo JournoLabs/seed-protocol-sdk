@@ -17,6 +17,11 @@ const updateVersionUid = mock(async (_: unknown) => {})
 mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish,
   updateVersionUid,
+  // The real one writes both in one transaction; here it hands each to its mock
+  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
+    if (version) await updateVersionUid(version)
+    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  },
   // Related seeds are not recorded here (no item found): this file is about properties and versions.
   Item: { find: async () => undefined },
 }))

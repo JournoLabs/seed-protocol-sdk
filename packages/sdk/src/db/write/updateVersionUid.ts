@@ -7,7 +7,9 @@ import { normalizePublisher } from '@/helpers/addresses'
 import { latestVersionOrder } from '@/db/read/subqueries/latestVersion'
 import { mergeVersionRowInto, otherVersionRowsWithUid } from '@/db/write/mergeChainRows'
 
-type UpdateVersionUidProps = {
+type Tx = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
+
+export type UpdateVersionUidProps = {
   seedLocalId: string
   versionUid: string
   /**
@@ -29,14 +31,12 @@ type UpdateVersionUidProps = {
  * target first, since versions.uid is unique.
  * `publisher` is the address that attested. The draft row taking the uid gets it, replacing the
  * publisher it was stamped with (only a guess at who would publish); a sealed row is never changed.
+ * With `db` (a transaction), it writes there instead of in a transaction of its own.
  */
-export const updateVersionUid = async ({
-  seedLocalId,
-  versionUid,
-  versionLocalId,
-  publisher,
-  attestationCreatedAt,
-}: UpdateVersionUidProps): Promise<void> => {
+export const updateVersionUid = async (
+  { seedLocalId, versionUid, versionLocalId, publisher, attestationCreatedAt }: UpdateVersionUidProps,
+  { db }: { db?: Tx } = {},
+): Promise<void> => {
   if (!seedLocalId || !versionUid) {
     return
   }
@@ -44,7 +44,7 @@ export const updateVersionUid = async ({
   if (!BaseDb.getAppDb()) return
   const normalizedPublisher = normalizePublisher(publisher)
 
-  await BaseDb.transaction(async (tx) => {
+  const write = async (tx: Tx) => {
     const rows = await tx
       .select({
         localId: versions.localId,
@@ -104,5 +104,7 @@ export const updateVersionUid = async ({
         ...(attestationCreatedAt != null && { attestationCreatedAt }),
       })
       .where(eq(versions.localId, toUpdate.localId))
-  })
+  }
+  if (db) await write(db)
+  else await BaseDb.transaction(write)
 }

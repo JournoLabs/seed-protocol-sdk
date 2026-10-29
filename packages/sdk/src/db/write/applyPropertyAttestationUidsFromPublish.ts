@@ -28,6 +28,17 @@ export type PropertyAttestationApplyPair = {
   value?: string | null
 }
 
+export type ApplyPropertyAttestationUidsParams = {
+  seedLocalId: string
+  attestationCreatedAtMs: number | null
+  pairs: PropertyAttestationApplyPair[]
+  versionUid?: string | null
+  /** Seed uid, by local id, of the seeds this publish has created so far. */
+  resolvedSeedUids?: Record<string, string> | null
+  /** The address that attested. */
+  publisher?: string | null
+}
+
 /**
  * After property attestations succeed, records each one on the metadata row whose value it
  * attested (`metadataLocalId`, which the payload read), so getPublishPendingDiff and later
@@ -50,20 +61,16 @@ export type PropertyAttestationApplyPair = {
  * encodes, the uid (Relation) or a JSON array of uids in slot order (List). Each uid comes from
  * `resolvedSeedUids` (seeds this publish created, not recorded on their seed rows yet), else the
  * seed's recorded live uid.
+ *
+ * With `db` (a transaction), it reads and writes there.
  */
-export async function applyPropertyAttestationUidsFromPublish(params: {
-  seedLocalId: string
-  attestationCreatedAtMs: number | null
-  pairs: PropertyAttestationApplyPair[]
-  versionUid?: string | null
-  /** Seed uid, by local id, of the seeds this publish has created so far. */
-  resolvedSeedUids?: Record<string, string> | null
-  /** The address that attested. */
-  publisher?: string | null
-}): Promise<void> {
+export async function applyPropertyAttestationUidsFromPublish(
+  params: ApplyPropertyAttestationUidsParams,
+  { db }: { db?: AppDb } = {},
+): Promise<void> {
   const { seedLocalId, attestationCreatedAtMs, pairs, versionUid, resolvedSeedUids } = params
   const publisher = normalizePublisher(params.publisher ?? undefined)
-  const appDb = BaseDb.getAppDb()
+  const appDb = db ?? BaseDb.getAppDb()
   if (!appDb || !seedLocalId || pairs.length === 0) return
 
   const rows = await appDb.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
