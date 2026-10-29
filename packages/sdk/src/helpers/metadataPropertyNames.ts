@@ -3,6 +3,41 @@ import { easName } from '@seedprotocol/eas'
 import { normalizeDataType } from './property/index'
 import { INTERNAL_DATA_TYPES, PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP } from './constants'
 
+/**
+ * Words ethers' ABI parser reserves (ethers 6 `abi/fragments.js`). EAS parses schema strings with
+ * it, so a model or property whose EAS name is one of these can't be registered or encoded.
+ */
+const ABI_KEYWORDS = new Set(
+  (
+    'constructor error event fallback function receive struct calldata memory storage payable indexed ' +
+    'tuple returns constant external internal private public pure view override'
+  ).split(' '),
+)
+
+/** Why a model or property can't publish under `name` (its EAS form), or undefined when it can. */
+export function abiKeywordProblem(kind: 'Model' | 'Property', name: string, easForm: string): string | undefined {
+  if (!ABI_KEYWORDS.has(easForm)) return undefined
+  return `${kind} "${name}" publishes as "${easForm}", which EAS schemas can't use (a reserved Solidity ABI word). Rename it.`
+}
+
+/** Throws {@link abiKeywordProblem} for a model name. */
+export function assertModelNameCanPublish(modelName: string): void {
+  const problem = abiKeywordProblem('Model', modelName, easName(modelName))
+  if (problem) throw new Error(problem)
+}
+
+/** Throws {@link abiKeywordProblem} for a property, named as {@link easPropertyNameForPublish} names it. */
+export function assertPropertyNameCanPublish(
+  propertyName: string,
+  propertyDef?: (PropertySchemaEntry & { name?: string; refValueType?: string | null }) | null,
+): void {
+  // A List of relations always publishes with its `<Model>Ids` suffix, ref model known or not.
+  if (normalizeDataType(propertyDef?.dataType) === 'List' && normalizeDataType(propertyDef?.refValueType ?? undefined) === 'Relation') return
+  const easForm = easPropertyNameForPublish(propertyName, { ...propertyDef, refValueType: propertyDef?.refValueType ?? undefined })
+  const problem = abiKeywordProblem('Property', propertyName, easForm)
+  if (problem) throw new Error(problem)
+}
+
 /** Minimal property def shape for List-of-relation storage name resolution */
 export type PropertySchemaEntry = {
   dataType?: string

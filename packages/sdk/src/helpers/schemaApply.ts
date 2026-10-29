@@ -39,7 +39,7 @@ import type { JsonImportSchema, SchemaFileFormat, SchemaFileInput } from '@/type
 import type { ModelDefinitions, ModelClassType } from '@/types'
 import { and, count, desc, eq, inArray } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
+import { abiKeywordProblem, easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schemaApply')
@@ -186,10 +186,15 @@ function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
   const warnings: string[] = []
   const known = Object.values(ModelPropertyDataTypes).join(', ')
   for (const [modelName, model] of Object.entries(file.models ?? {})) {
+    const modelProblem = abiKeywordProblem('Model', modelName, easName(modelName))
+    if (modelProblem) errors.push(`${modelName}: ${modelProblem}`)
     for (const [propName, prop] of Object.entries(model?.properties ?? {})) {
       const raw = (prop ?? {}) as SchemaFilePropertyFields
       const def = normalizePropertyRecordSchema(raw)
       const at = `${modelName}.${propName}`
+      const easForm = easPropertyNameForPublish(propName, { ...def, name: propName } as any)
+      const nameProblem = abiKeywordProblem('Property', propName, easForm)
+      if (nameProblem) errors.push(`${at}: ${nameProblem}`)
       const rawType = raw.dataType ?? raw.type
       if (rawType && !isKnownDataType(rawType)) {
         errors.push(`${at}: unknown type "${rawType}". Expected one of: ${known}`)
