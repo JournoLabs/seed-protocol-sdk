@@ -59,6 +59,13 @@ export type ItemPublishOptions = {
    * @seedprotocol/publish `SeedSigner`. Defaults to the publish wallet's EOA.
    */
   dataItemSigner?: { readonly address: string; signMessage(...args: never[]): Promise<string> }
+  /**
+   * The user agreed to this publish's upload size. @seedprotocol/publish refuses a publish over
+   * its confirm size (default 25 MiB) without it.
+   */
+  confirmUpload?: boolean
+  /** Most this publish may upload, in bytes. @seedprotocol/publish defaults to 100 MiB. */
+  maxUploadBytes?: number
   [option: string]: unknown
 }
 

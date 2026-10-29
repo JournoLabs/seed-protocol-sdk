@@ -62,6 +62,8 @@ export type PublishCostEstimate = {
     arUsd: number
     fetchedAt: number
   }
+  /** Upload size, time and memory, and whether the publish limits refuse it or need a confirm. */
+  upload: import('./uploadEstimate').UploadEstimate
   work: PublishWorkSummary
   estimatedAt: number
 }

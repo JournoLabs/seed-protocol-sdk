@@ -104,6 +104,12 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         htmlArweaveRefs: options?.htmlArweaveRefs ?? publishCfg.htmlArweaveRefs ?? 'gateway',
         onPublished: options?.onPublished ?? publishCfg.onPublished,
         authorizePublish: options?.authorizePublish ?? publishCfg.authorizePublish,
+        uploadLimits: {
+          maxUploadBytes: options?.maxUploadBytes ?? publishCfg.maxUploadBytes,
+          confirmUploadAboveBytes: publishCfg.confirmUploadAboveBytes,
+          uplinkBitsPerSecond: publishCfg.uplinkBitsPerSecond,
+        },
+        confirmUpload: options?.confirmUpload === true,
       },
     })
 

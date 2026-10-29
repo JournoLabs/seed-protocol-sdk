@@ -8,6 +8,7 @@ import { resolvePublishPayment } from '~/payment'
 import { heuristicPublishGas } from './gasHeuristics'
 import { getCachedMarketRates, type MarketRates } from './marketRates'
 import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummary } from './types'
+import { estimateUpload, type UploadLimits } from './uploadEstimate'
 
 const WINSTON_PER_AR = 1e12
 const WEI_PER_ETH = 1e18
@@ -33,6 +34,8 @@ type PublishCostFlags = {
   uploadTags?: TransactionTag[]
   /** The publish chain is a testnet. */
   testnet?: boolean
+  /** PublishConfig's upload limits, for `upload`. */
+  uploadLimits?: UploadLimits
 }
 
 /** Who pays, from the same resolution the publish flow uses ({@link resolvePublishPayment}). */
@@ -55,6 +58,11 @@ function readPublishFlags(): PublishCostFlags & {
       turbo: payment.storage.turbo,
       uploadTags: config.arweaveUploadTags,
       testnet,
+      uploadLimits: {
+        maxUploadBytes: config.maxUploadBytes,
+        confirmUploadAboveBytes: config.confirmUploadAboveBytes,
+        uplinkBitsPerSecond: config.uplinkBitsPerSecond,
+      },
     }
   } catch {
     return { evmUserPays: true, arweaveUserPays: false, uploadTo: 'upload-api', testnet }
@@ -133,6 +141,7 @@ export function combinePublishCostEstimate(
       uploadTo,
       freeBytes,
     },
+    estimateUpload(work, flags?.uploadLimits),
   )
 }
 
@@ -150,7 +159,7 @@ export function repricePublishCostEstimate(
     testnet: estimate.evm.testnet,
     uploadTo: estimate.arweave.uploadTo,
     freeBytes: estimate.arweave.freeBytes,
-  })
+  }, estimate.upload)
 }
 
 function priceEstimate(
@@ -165,6 +174,7 @@ function priceEstimate(
     uploadTo: 'upload-api' | 'turbo'
     freeBytes: number
   },
+  upload: PublishCostEstimate['upload'],
 ): PublishCostEstimate {
   const { evmUserPays, arweaveUserPays, testnet } = flags
   const evmWei = gas * rates.gasPriceWei
@@ -201,6 +211,7 @@ function priceEstimate(
       arUsd: rates.arUsd,
       fetchedAt: rates.fetchedAt,
     },
+    upload,
     work,
     estimatedAt: Date.now(),
   }

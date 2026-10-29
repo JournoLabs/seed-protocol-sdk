@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test'
 import type { IItem } from '@seedprotocol/sdk'
 import { itemPublishFingerprint, watchPublishCost } from './watchPublishCost'
 import type { PublishCostEstimate } from './types'
+import { estimateUpload } from './uploadEstimate'
 
 // Lets the mocked estimate/reprice promises settle. Timers are fake, so time only moves via advance().
 async function flush(): Promise<void> {
@@ -29,6 +30,7 @@ function makeEstimate(totalUsd: number): PublishCostEstimate {
       userPays: true,
     },
     prices: { ethUsd: 1, arUsd: 1, fetchedAt: Date.now() },
+    upload: estimateUpload({ uploadCount: 0, uploadBytes: 0 }),
     work: {
       publishMode: 'patch',
       seedCount: 1,

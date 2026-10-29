@@ -4,7 +4,7 @@ import type { CreatePublishOptions } from '../config'
 import { PublishManager } from '../services/publishManager'
 import { PublishMachineStates } from './constants'
 import { ensureWalletThenPublish } from './ensureWalletThenPublish'
-import { PublishRetractionError } from '../errors'
+import { PublishRetractionError, UploadNeedsConfirmError, UploadTooLargeError } from '../errors'
 
 /**
  * States where attestation failed but the actor stays alive waiting for a `retry`
@@ -56,6 +56,11 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
       if (value === PublishMachineStates.SUCCESS) {
         finish()
       } else if (value === PublishMachineStates.FAILURE) {
+        // Passed through as-is, so the app can check instanceof and show the estimate they carry
+        if (cause instanceof UploadTooLargeError || cause instanceof UploadNeedsConfirmError) {
+          finish(cause)
+          return
+        }
         const step = snapshot.context?.errorStep ? ` at ${snapshot.context.errorStep}` : ''
         finish(new Error(`Publish of ${seedLocalId} failed${step}: ${detail ?? 'unknown error'}`, { cause }))
       } else if (value === 'retractionFailureRecoverable') {

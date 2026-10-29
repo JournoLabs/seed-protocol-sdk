@@ -8,7 +8,7 @@ import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import {
   clearHtmlEmbeddedImageCoPublishRows,
@@ -295,7 +295,7 @@ testDescribe('Html-embedded images of related draft items', () => {
     const error = await getPublishPayload(article as any, []).catch((e) => e)
     expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
     expect(error.unpublishedRelatedItems).toEqual(expected)
-    expect(await getUnpublishedRelatedItems(article as any)).toEqual(expected)
+    expect((await summarizePublishUploads(article as any)).unpublishedRelatedItems).toEqual(expected)
     expect((await summarizePublishWork(article as any)).unpublishedRelatedItems).toEqual(expected)
 
     await clearHtmlEmbeddedImageCoPublishRows(note.seedLocalId)

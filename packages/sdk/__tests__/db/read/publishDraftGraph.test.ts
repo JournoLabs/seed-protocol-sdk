@@ -7,7 +7,7 @@ import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { getPublishGraph, type PublishGraph } from '@/db/read/publishGraph'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -262,7 +262,7 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(attestedNames(payload, a.seedLocalId)).toEqual(['label'])
     expectNoDanglingLocalRefs(payload)
 
-    expect(await getUnpublishedRelatedItems(root as any)).toEqual([])
+    expect((await summarizePublishUploads(root as any)).unpublishedRelatedItems).toEqual([])
     const summary = await summarizePublishWork(root as any)
     expect(summary.unpublishedRelatedItems).toEqual([])
     expect(summary.attestationCount).toBe(totalAttestations(payload))
@@ -298,7 +298,7 @@ testDescribe('publish carries the full graph of related drafts', () => {
     const error = await getPublishPayload(root as any, []).catch((e) => e)
     expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
     expect(error.unpublishedRelatedItems).toEqual(expected)
-    expect(await getUnpublishedRelatedItems(root as any)).toEqual(expected)
+    expect((await summarizePublishUploads(root as any)).unpublishedRelatedItems).toEqual(expected)
     expect((await summarizePublishWork(root as any)).unpublishedRelatedItems).toEqual(expected)
   }, 90000)
 })
