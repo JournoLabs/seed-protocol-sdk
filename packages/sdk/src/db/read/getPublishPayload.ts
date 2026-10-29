@@ -75,7 +75,8 @@ type PublishPayload = {
   versionSchemaUid: string
   versionUid: string
   listOfAttestations: Attestation[]
-  propertiesToUpdate: { publishLocalId: string; propertySchemaUid: string }[]
+  /** The properties this request's seed uid fills; a list's name the element (referenceListElements). */
+  propertiesToUpdate: { publishLocalId: string; propertySchemaUid: string; listElement?: boolean; elementIndex?: number }[]
 }
 
 type MultiPublishPayload = PublishPayload[]
@@ -491,6 +492,27 @@ async function buildRequest(node: PublishGraphNode, ctx: BuildContext): Promise<
 }
 
 /**
+ * A reference into a list names the element it fills: one per position where the list attestation
+ * holds the source's local id, so a draft listed twice fills both. Positions are those of the
+ * encoded array, which skips empty members.
+ */
+function referenceListElements(payload: MultiPublishPayload): void {
+  const byLocalId = new Map(payload.map((p) => [p.localId, p]))
+  for (const source of payload) {
+    source.propertiesToUpdate = source.propertiesToUpdate.flatMap((u) => {
+      const members = byLocalId
+        .get(u.publishLocalId)
+        ?.listOfAttestations.find((a) => a.schema.toLowerCase() === u.propertySchemaUid.toLowerCase())
+        ?._rawListIdsForResolve
+      if (!members) return [u]
+      return members.flatMap((id, elementIndex) =>
+        id.trim() === source.localId ? [{ ...u, listElement: true, elementIndex }] : [],
+      )
+    })
+  }
+}
+
+/**
  * Embedded image rows must still name an Html value of their owner, with a schema to attest under.
  * No propertiesToUpdate: the Html refers to the image by its Arweave URL (the data URI is
  * rewritten to it before the Html is uploaded), not by seed uid.
@@ -535,6 +557,7 @@ export const getPublishPayload = async (
 
   let multiPublishPayload: MultiPublishPayload = []
   for (const node of graph.nodes) multiPublishPayload.push(await buildRequest(node, ctx))
+  referenceListElements(multiPublishPayload)
   await checkEmbeddedImages(ctx)
 
   // A request whose seed fills another request's property (propertiesToUpdate) publishes first, and a

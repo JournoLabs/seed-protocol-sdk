@@ -111,6 +111,10 @@ const attestedNames = (payload: any[], localId: string) =>
 const linksOf = (payload: any[], localId: string) =>
   payload.find((p) => p.localId === localId).propertiesToUpdate.map((u: any) => u.publishLocalId)
 
+/** The list element each of a request's references fills (undefined for a single relation). */
+const elementsOf = (payload: any[], localId: string) =>
+  payload.find((p) => p.localId === localId).propertiesToUpdate.map((u: any) => (u.listElement ? u.elementIndex : undefined))
+
 const indexOf = (payload: any[], localId: string) => payload.findIndex((p) => p.localId === localId)
 
 /** No attestation encodes the local id of a seed that this publish doesn't create. */
@@ -201,6 +205,10 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(payload.map((p) => p.localId).filter((id) => [a1, b1, a2, b2, root].some((i) => i.seedLocalId === id))).toEqual(
       [b1, a1, b2, a2, root].map((i) => i.seedLocalId),
     )
+    // Each list member fills its own element; a single relation fills the whole property.
+    expect(elementsOf(payload, a1.seedLocalId)).toEqual([0])
+    expect(elementsOf(payload, a2.seedLocalId)).toEqual([1])
+    expect(elementsOf(payload, b1.seedLocalId)).toEqual([undefined])
     expectNoDanglingLocalRefs(payload)
 
     const b2HtmlSeed = (b2.allProperties.body!.getService().getSnapshot() as any).context.propertyValue
@@ -211,6 +219,24 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(draftsOf(graph)).toEqual([b1, a1, b2, a2].map((i) => i.seedLocalId))
     // root, A1, B1, A2, B2 and B2's Html seed
     expect((await summarizePublishWork(root as any)).newSeedCount).toBe(6)
+  }, 90000)
+
+  it('a draft listed twice after a published member fills both of its elements', async () => {
+    const published = await node('published')
+    const publishedUid = await markPublished(published)
+    const a = await node('A')
+    const root = await createItem({
+      modelName: 'DraftGraphRoot',
+      title: 'repeats',
+      nodes: [published.seedLocalId, a.seedLocalId, a.seedLocalId],
+    })
+
+    const payload = (await getPublishPayload(root as any, [])) as any[]
+    expect(payload.map((p) => p.localId)).not.toContain(published.seedLocalId)
+    expect(linksOf(payload, a.seedLocalId)).toEqual([root.seedLocalId, root.seedLocalId])
+    expect(elementsOf(payload, a.seedLocalId)).toEqual([1, 2])
+    const list = payload.find((p) => p.localId === root.seedLocalId).listOfAttestations.find((x: any) => x._propertyName === 'nodes')
+    expect(list._rawListIdsForResolve).toEqual([publishedUid, a.seedLocalId, a.seedLocalId])
   }, 90000)
 
   it('a cycle (A ↔ B) is walked once; the back reference is left for a later publish', async () => {
