@@ -230,7 +230,7 @@ describe('buildAssembleOptionsKey changelog fingerprint', () => {
     expect(
       buildAssembleOptionsKey({
         include: 'changelog',
-        relations: 'urls',
+        relations: 'expand',
         hydrateStorage: false,
         changelog: {
           granularity: 'property',
@@ -238,6 +238,6 @@ describe('buildAssembleOptionsKey changelog fingerprint', () => {
           limit: 50,
         },
       }),
-    ).toBe('e4-h0-i2-gp-s1700000000-l50')
+    ).toBe('e3-h0-i2-gp-s1700000000-l50')
   })
 })

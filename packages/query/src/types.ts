@@ -20,12 +20,11 @@ export type QuerySourceMode = 'local' | 'remote' | 'auto'
 
 /**
  * How relation properties are returned. `'expand'`: Html/File relations become Arweave URLs and
- * other related seeds nested objects. `'urls'`: storage relations become URLs, the rest stay seed
- * UIDs. `'uids'`: every relation stays a seed UID, and related seeds aren't fetched at all (no
- * related seed, version or property requests). In every mode a relation comes back under its
+ * other related seeds nested objects. `'uids'`: every relation stays a seed UID, and related seeds
+ * aren't fetched at all (no related seed, version or property requests). In every mode a relation comes back under its
  * schema key (`author`, `authors`), not its EAS name (`author_id`, `author_identity_ids`).
  */
-export type RelationsMode = 'expand' | 'urls' | 'uids'
+export type RelationsMode = 'expand' | 'uids'
 
 export type AssembleOptions = {
   /** Default `'expand'`. */
