@@ -386,9 +386,10 @@ export {
 } from './helpers/arweaveContentTags'
 export {
   summarizePublishWork,
-  getUnpublishedRelatedItems,
+  summarizePublishUploads,
   estimateDataUriByteLength,
   type PublishWorkSummary,
+  type PublishUploadSummary,
   type SummarizePublishWorkOptions,
 } from './db/read/summarizePublishWork'
 

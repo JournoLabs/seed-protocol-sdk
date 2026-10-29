@@ -283,6 +283,32 @@ describe('repricePublishCostEstimate', () => {
   })
 })
 
+describe('upload estimate', () => {
+  test('applies the publish config limits', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      maxUploadBytes: 500_000,
+      confirmUploadAboveBytes: 100_000,
+      uplinkBitsPerSecond: 8_000_000,
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.upload).toMatchObject({
+      uploadBytes: 1_000_000,
+      maxUploadBytes: 500_000,
+      confirmUploadAboveBytes: 100_000,
+      uploadSeconds: 1,
+      tooLarge: true,
+      requiresConfirm: true,
+    })
+  })
+
+  test('repricing keeps the upload estimate', () => {
+    const first = combinePublishCostEstimate(work, rates, { uploadLimits: { maxUploadBytes: 10 } })
+    expect(repricePublishCostEstimate(first, { ...rates, arUsd: 20 }).upload).toEqual(first.upload)
+  })
+})
+
 describe('testnet gas', () => {
   test('is worth $0, not mainnet ETH-USD', () => {
     // 10 gwei, so mainnet gas is worth more than a rounded cent.

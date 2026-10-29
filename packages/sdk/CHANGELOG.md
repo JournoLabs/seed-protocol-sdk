@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `getUnpublishedRelatedItems` is removed. New `summarizePublishUploads(item, { publishMode })` returns its `unpublishedRelatedItems` together with `uploadCount`, `uploadBytes` and `uploadSizes`, from one read of the publish graph and file sizes only. Publish's `checking` step uses it for the upload size limits.
+- `ItemPublishOptions` documents `confirmUpload` and `maxUploadBytes` (see the @seedprotocol/publish changelog).
+
 ## 0.7.13 (2026-10-29)
 
 - New `client.resetLocalData({ otherTabsTimeoutMs, filesDir })` (browser) deletes the database and every file under `filesDir` from OPFS and resolves with `{ deleted, failed }`: an entry it can't remove (a file another tab holds open) is listed in `failed` with the browser's error, and the rest are still removed. It stops the client from any state, including after a failed init, posts `close-db` to the other tabs of the database, waits up to `otherTabsTimeoutMs` (default 10 000) for them to close it, and unmounts the file system, so `init` works again without a reload and starts empty. An `init` during the reset waits for it. Each coordinating tab now holds the Web Lock `seed:open:<db>` in shared mode while its database is open; the reset takes it exclusively. A tab that hears `close-db` stops its client and unmounts its file system; it doesn't reload. The client snapshot's new `context.stopReason` (`ClientStopReason`: `'stop' | 'reset'`) says why a stopped client stopped. localStorage is left alone (see `clearInAppPublishSession` in @seedprotocol/publish). In Node, `resetLocalData` throws.

@@ -8,15 +8,16 @@ import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import {
   assertLocalDbChain,
-  getUnpublishedRelatedItems,
   isItemOwned,
   RelatedItemUnpublishedError,
+  summarizePublishUploads,
   validateItemForPublish,
 } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
-import { ManagedAccountPublishError } from '../../../errors'
+import { ManagedAccountPublishError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
+import { estimateUpload } from '../../publishCost/uploadEstimate'
 
 const activePublishProcesses = new Set<string>()
 
@@ -75,7 +76,7 @@ function deployerFor(publisherAddress: string): (() => Promise<void>) | undefine
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
   ({ sendBack, input: { context } }) => {
-    const { item, account, wallet, publishMode, address } = context
+    const { item, account, wallet, publishMode, address, uploadLimits, confirmUpload } = context
 
     const _check = async () => {
       const owned = await isItemOwned(item)
@@ -99,17 +100,29 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         // RPC chain id and contract deployments; cached after the first success.
         await verifyPublishChain()
 
-        // References to unpublished (revoked) items fail the publish before schemas are
-        // registered or anything is uploaded; validateItemForPublish below reports the same.
-        const unpublishedRelatedItems = await getUnpublishedRelatedItems(item, {
-          publishMode: publishMode ?? 'patch',
-        })
+        // References to unpublished (revoked) items and the upload size limits fail the publish
+        // before schemas are registered or any file is read; validateItemForPublish below
+        // reports the references too.
+        const uploads = await summarizePublishUploads(item, { publishMode: publishMode ?? 'patch' })
+        const { unpublishedRelatedItems } = uploads
         if (unpublishedRelatedItems.length > 0) {
           activePublishProcesses.delete(item.seedLocalId)
           sendBack({
             type: 'validationFailed',
             errors: new RelatedItemUnpublishedError(unpublishedRelatedItems).validationErrors,
           })
+          return
+        }
+
+        const upload = estimateUpload(uploads, uploadLimits)
+        const uploadRefusal = upload.tooLarge
+          ? new UploadTooLargeError(upload)
+          : upload.requiresConfirm && !confirmUpload
+            ? new UploadNeedsConfirmError(upload)
+            : null
+        if (uploadRefusal) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'checkingFailed', error: uploadRefusal })
           return
         }
 

@@ -242,6 +242,18 @@ export interface PublishConfig {
    * send a token to the upload API with the publish's requests. See {@link AuthorizePublish}.
    */
   authorizePublish?: import('./authorization').AuthorizePublish
+  /**
+   * Most a publish may upload, summed over its files, in bytes. Default 100 MiB; `Infinity` turns
+   * the limit off. A larger publish fails with `UploadTooLargeError` before reading any file.
+   */
+  maxUploadBytes?: number
+  /**
+   * Above this many upload bytes (default 25 MiB; `Infinity` never asks) a publish fails with
+   * `UploadNeedsConfirmError` unless it is given `confirmUpload: true`.
+   */
+  confirmUploadAboveBytes?: number
+  /** Uplink speed used for upload time estimates. Default 5 Mbit/s. */
+  uplinkBitsPerSecond?: number
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
@@ -276,6 +288,13 @@ export interface CreatePublishOptions {
   onPublished?: import('./services/publishedBy').OnPublishedCallback
   /** Overrides {@link PublishConfig.authorizePublish} for this publish. */
   authorizePublish?: import('./authorization').AuthorizePublish
+  /** Overrides {@link PublishConfig.maxUploadBytes} for this publish. */
+  maxUploadBytes?: number
+  /**
+   * The user agreed to this publish's upload size: skips `UploadNeedsConfirmError`. It
+   * doesn't lift `maxUploadBytes`.
+   */
+  confirmUpload?: boolean
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **Breaking:** a publish whose uploads add up to more than 25 MiB fails with the new `UploadNeedsConfirmError` unless it is given `confirmUpload: true`, and one over 100 MiB fails with the new `UploadTooLargeError`. Both are thrown in the `checking` step from file sizes, before EAS schemas are registered or any file is read, and `item.publish()` rejects with them as they are. A browser publish holds about 7 copies of its upload bytes in memory and a 1 GB publish failed reading from OPFS, so a large publish froze the page or failed late. New `PublishConfig` options `maxUploadBytes`, `confirmUploadAboveBytes` and `uplinkBitsPerSecond`, and `CreatePublishOptions` `maxUploadBytes` and `confirmUpload`; `Infinity` turns a limit off. Each error carries an `estimate` (`UploadEstimate`).
+- `estimatePublishCost` returns `upload`: `uploadBytes`, `uploadCount`, `largestUploadBytes`, `uploadSeconds` at `uplinkBitsPerSecond` (default 5 Mbit/s), `memory` (`peakBytes`, `deviceMemoryBytes` from `navigator.deviceMemory`, `risk`), the limits, and `tooLarge` / `requiresConfirm`. New `estimateUpload(work, limits)` computes it from a work summary; `DEFAULT_MAX_UPLOAD_BYTES`, `DEFAULT_CONFIRM_UPLOAD_ABOVE_BYTES`, `DEFAULT_UPLINK_BITS_PER_SECOND` and `PUBLISH_MEMORY_MULTIPLIER` are exported.
+
 ## 0.7.13 (2026-10-29)
 
 - Creating attestations no longer checks EAS schemas a second time. `createAttestations` and `createAttestationsDirectToEas` called `ensureEasSchemasForItem` again after the `checking` state had run it for the same item and wallet. Every run passes `checking` first, and a restored run was persisted past it.

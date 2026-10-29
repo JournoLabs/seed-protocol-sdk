@@ -28,7 +28,7 @@ mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
   isItemOwned: async () => true,
   validateItemForPublish: async () => ({ isValid: true, errors: [] }),
-  getUnpublishedRelatedItems: async () => [],
+  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [] }),
   RelatedItemUnpublishedError,
 }))
 mock.module('~/helpers/chainClient', () => ({

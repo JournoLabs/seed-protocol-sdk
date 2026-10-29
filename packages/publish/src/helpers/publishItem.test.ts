@@ -69,6 +69,16 @@ describe('waitForPublishActor', () => {
     await expect(done).rejects.toThrow('Publish of seed-1 failed at uploadingViaBundler: upload refused')
   })
 
+  test('rejects with the upload size errors themselves, so the app can read their estimate', async () => {
+    const { UploadNeedsConfirmError } = await import('../errors')
+    const { estimateUpload } = await import('../services/publishCost/uploadEstimate')
+    const error = new UploadNeedsConfirmError(estimateUpload({ uploadCount: 1, uploadBytes: 30 * 2 ** 20 }))
+    const actor = fakePublishActor('failure', { error, errorStep: 'checking' })
+    const done = waitForPublishActor(actor, 'seed-1')
+    actor.send({ type: 'finish' })
+    await expect(done).rejects.toBe(error)
+  })
+
   test('rejects, pointing at retryAttestations, when attestation waits for a retry', async () => {
     const actor = fakePublishActor('attestationFailureRecoverable', { error: { message: 'nonce too low' } }, false)
     const done = waitForPublishActor(actor, 'seed-1')

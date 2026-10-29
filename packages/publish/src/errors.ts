@@ -190,3 +190,44 @@ export class PublishRetractionError extends Error {
     this.name = 'PublishRetractionError'
   }
 }
+
+function formatMiB(bytes: number): string {
+  return `${(bytes / 2 ** 20).toFixed(1)} MiB`
+}
+
+/**
+ * A publish's uploads add up to more than `maxUploadBytes` (PublishConfig or CreatePublishOptions,
+ * default 100 MiB). Thrown in the checking step, before any file is read or anything is sent.
+ */
+export class UploadTooLargeError extends Error {
+  readonly code = 'UPLOAD_TOO_LARGE'
+  readonly uploadBytes: number
+  readonly maxUploadBytes: number
+
+  constructor(readonly estimate: import('./services/publishCost/uploadEstimate').UploadEstimate) {
+    super(
+      `This publish uploads ${formatMiB(estimate.uploadBytes)}, over the ${formatMiB(estimate.maxUploadBytes)} limit. ` +
+        'Raise maxUploadBytes in the publish config or options to allow it.',
+    )
+    this.name = 'UploadTooLargeError'
+    this.uploadBytes = estimate.uploadBytes
+    this.maxUploadBytes = estimate.maxUploadBytes
+  }
+}
+
+/**
+ * A publish's uploads are over `confirmUploadAboveBytes` (default 25 MiB), or would use more than
+ * a quarter of the device's memory, and the publish wasn't given `confirmUpload: true`. Show the
+ * user `estimate` and publish again with `confirmUpload: true` if they agree.
+ */
+export class UploadNeedsConfirmError extends Error {
+  readonly code = 'UPLOAD_NEEDS_CONFIRM'
+
+  constructor(readonly estimate: import('./services/publishCost/uploadEstimate').UploadEstimate) {
+    super(
+      `This publish uploads ${formatMiB(estimate.uploadBytes)} (about ${estimate.uploadSeconds} s at ` +
+        `${estimate.uplinkBitsPerSecond / 1e6} Mbit/s). Publish again with confirmUpload: true to go ahead.`,
+    )
+    this.name = 'UploadNeedsConfirmError'
+  }
+}
