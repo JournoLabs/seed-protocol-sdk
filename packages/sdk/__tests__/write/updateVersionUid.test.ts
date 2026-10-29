@@ -34,9 +34,9 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
     await teardownTestEnvironment()
   })
 
-  it('updateVersionUid does not overwrite existing publisher (immutability)', async () => {
+  it('updateVersionUid gives the draft version the attester as publisher', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
-      title: 'Version publisher immutability test',
+      title: 'Version publisher test',
       count: 1,
     })
     const seedLocalId = item.seedLocalId!
@@ -50,23 +50,20 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
     const versionLocalId = versionRows[versionRows.length - 1]?.localId
     expect(versionLocalId).toBeTruthy()
 
-    const originalPublisher = '0xOriginalVersionPublisher1234567890abcdef'
+    // Stamped with the EOA while a draft; attested by the smart account.
     await db
       .update(versions)
-      .set({ publisher: originalPublisher })
+      .set({ publisher: '0x' + '1'.repeat(40) })
       .where(eq(versions.localId, versionLocalId!))
 
-    await updateVersionUid({
-      seedLocalId,
-      versionUid: TEST_VERSION_UID,
-      publisher: '0xDifferentVersionPublisher1234567890abcdef12',
-    })
+    const smartAccount = '0x' + '2'.repeat(40)
+    await updateVersionUid({ seedLocalId, versionUid: TEST_VERSION_UID, publisher: smartAccount })
 
     const [row] = await db
       .select({ publisher: versions.publisher })
       .from(versions)
       .where(eq(versions.localId, versionLocalId!))
-    expect(row?.publisher).toBe(originalPublisher)
+    expect(row?.publisher).toBe(smartAccount)
   })
 
   it('ignores a version uid the seed already has (patch publish via the modular executor)', async () => {

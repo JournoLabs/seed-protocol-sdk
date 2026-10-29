@@ -453,6 +453,7 @@ async function executeCreateAttestationsDirectToEas(
           attestationCreatedAtMs: lastAttestationMs ?? null,
           versionUid: newVersionUid !== ZERO_BYTES32 ? newVersionUid : null,
           resolvedSeedUids: { ...resolvedUids },
+          publisher: address,
           pairs: attested.map((a, j) => ({
             schemaUid: a.schemaUid,
             attestationUid: a.uid,

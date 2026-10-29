@@ -27,7 +27,8 @@ type UpdateVersionUidProps = {
  * has is ignored. A version row
  * another writer inserted for the same uid (a sync that ran during the publish) is merged into the
  * target first, since versions.uid is unique.
- * Publisher is immutable once set: we never overwrite an existing publisher.
+ * `publisher` is the address that attested. The draft row taking the uid gets it, replacing the
+ * publisher it was stamped with (only a guess at who would publish); a sealed row is never changed.
  */
 export const updateVersionUid = async ({
   seedLocalId,
@@ -45,7 +46,12 @@ export const updateVersionUid = async ({
 
   await BaseDb.transaction(async (tx) => {
     const rows = await tx
-      .select({ localId: versions.localId, uid: versions.uid, publisher: versions.publisher })
+      .select({
+        localId: versions.localId,
+        uid: versions.uid,
+        publisher: versions.publisher,
+        attestationRaw: versions.attestationRaw,
+      })
       .from(versions)
       .where(eq(versions.seedLocalId, seedLocalId))
       .orderBy(latestVersionOrder())
@@ -88,8 +94,7 @@ export const updateVersionUid = async ({
       await mergeVersionRowInto(tx, duplicate, toUpdate.localId)
     }
 
-    const shouldSetPublisher =
-      normalizedPublisher != null && (toUpdate.publisher == null || toUpdate.publisher === '')
+    const shouldSetPublisher = normalizedPublisher != null && !toUpdate.attestationRaw
 
     await tx
       .update(versions)

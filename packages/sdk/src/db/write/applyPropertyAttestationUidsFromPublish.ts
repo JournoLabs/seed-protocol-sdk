@@ -7,6 +7,7 @@ import {
   type MetadataProperty,
 } from '@/db/read/metadataProperty'
 import { generateId } from '@/helpers'
+import { normalizePublisher } from '@/helpers/addresses'
 import { normalizeDataType } from '@/helpers/property/index'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
@@ -40,7 +41,9 @@ export type PropertyAttestationApplyPair = {
  *   without a sync.
  * - A pair with no row (a property with no row yet, e.g. a storage transaction slot) gets a new
  *   row when it names its property and carries its value.
- * Rows keep or get the published version's local id when `versionUid` has a version row.
+ * Rows keep or get the published version's local id when `versionUid` has a version row. Every row
+ * recorded takes `publisher`, the address that attested, in place of the one the draft was stamped
+ * with.
  *
  * Relations and lists of relations are recorded as attested, the way an EAS sync of the
  * attestation stores them: a value naming seeds by local id gets the seed uids the attestation
@@ -55,8 +58,11 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
   versionUid?: string | null
   /** Seed uid, by local id, of the seeds this publish has created so far. */
   resolvedSeedUids?: Record<string, string> | null
+  /** The address that attested. */
+  publisher?: string | null
 }): Promise<void> {
   const { seedLocalId, attestationCreatedAtMs, pairs, versionUid, resolvedSeedUids } = params
+  const publisher = normalizePublisher(params.publisher ?? undefined)
   const appDb = BaseDb.getAppDb()
   if (!appDb || !seedLocalId || pairs.length === 0) return
 
@@ -121,6 +127,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
         ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
         ...(validVersion && { versionUid: validVersion }),
         ...(versionLocalId && { versionLocalId }),
+        ...(publisher && { publisher }),
       }
       await appDb.update(metadata).set(update).where(eq(metadata.localId, target.localId))
       Object.assign(target, update)
@@ -160,6 +167,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
       attestationRaw: null,
       revokedAt: null,
       derivedFromUid: null,
+      ...(publisher && { publisher }),
       // Stamped here: the spread copies the source row's times.
       createdAt: now,
       updatedAt: now,
