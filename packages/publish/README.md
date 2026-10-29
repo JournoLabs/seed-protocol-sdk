@@ -123,6 +123,8 @@ function App() {
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
+The in-app wallet session lives in localStorage under `seedProtocol:inAppPublish:`, mirrored to thirdweb's `walletToken-<clientId>` key. `clearInAppPublishSession()` from `@seedprotocol/publish/thirdweb` removes those keys and the Disconnect flag `disconnectPublishWallet()` sets, and clears the registered publish wallet, so the user signs in again. Call it beside the SDK's `client.resetLocalData()` when "start fresh" should also sign the user out. It leaves thirdweb's other keys and a wallet already connected in thirdweb's React state; disconnect that wallet as well.
+
 ### Who pays
 
 A publish costs EVM gas (attestations, schema registration) and Arweave storage. Who pays follows

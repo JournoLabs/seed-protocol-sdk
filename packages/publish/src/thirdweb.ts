@@ -24,6 +24,7 @@ export {
   getSharedPublishInAppWalletStorage,
   disconnectPublishWallet,
   markPublishWalletConnected,
+  clearInAppPublishSession,
   useActiveSmartWalletContract,
   useLocalWalletAccount,
 } from './helpers/thirdweb'
