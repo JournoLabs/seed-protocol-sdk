@@ -227,7 +227,13 @@ export async function serveTunnel(options: ServeTunnelOptions): Promise<ServeTun
           403,
           `Gateway Hyper: this operator's allowlist doesn't include this client (address ${verdict.host ?? 'unknown'}).`,
         )
-        writeTunnelResponse(socket, { status: refusal.status, headers: refusal.headers }, refusal.body)
+        // `connection: close` tells the client not to send another request on this stream; the
+        // stream's end can reach it after it has.
+        writeTunnelResponse(
+          socket,
+          { status: refusal.status, headers: { ...refusal.headers, connection: 'close' } },
+          refusal.body,
+        )
           .then(() => socket.end())
           .catch(() => socket.destroy())
         return

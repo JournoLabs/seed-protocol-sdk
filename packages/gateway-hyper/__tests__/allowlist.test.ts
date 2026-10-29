@@ -123,8 +123,12 @@ describe('serveTunnel allowlist over HyperDHT', () => {
     await testnet.destroy()
   })
 
-  /** Serve with `allowlist`, send one GET as `client`, and report what happened. */
-  async function tryRequest(allowlist: AllowlistOptions, client: { publicKey: Buffer; secretKey: Buffer }) {
+  /** Serve with `allowlist`, send `count` GETs one after another as `client`, and report what happened. */
+  async function tryRequest(
+    allowlist: AllowlistOptions,
+    client: { publicKey: Buffer; secretKey: Buffer },
+    count = 1,
+  ) {
     const keyFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gw-hyper-allow-')), 'op.json')
     const operator = await serveTunnel({
       upstream: upstreamUrl,
@@ -140,9 +144,13 @@ describe('serveTunnel allowlist over HyperDHT', () => {
       requestTimeoutMs: 5000,
     })
     const before = requests
+    const statuses: number[] = []
     try {
-      const res = await session.forwardHttp({ method: 'GET', path: '/', headers: {} }, Buffer.alloc(0))
-      return { ok: true as const, status: res.meta.status, upstreamHit: requests > before }
+      for (let i = 0; i < count; i++) {
+        const res = await session.forwardHttp({ method: 'GET', path: '/', headers: {} }, Buffer.alloc(0))
+        statuses.push(res.meta.status)
+      }
+      return { ok: true as const, status: statuses[0], statuses, upstreamHit: requests > before }
     } catch (err) {
       return { ok: false as const, error: err as Error, upstreamHit: requests > before }
     } finally {
@@ -172,6 +180,15 @@ describe('serveTunnel allowlist over HyperDHT', () => {
       unlisted,
     )
     expect(result).toMatchObject({ ok: true, status: 403, upstreamHit: false })
+  }, 30_000)
+
+  it('answers 403 to each of several requests in a row from a refused address', async () => {
+    const result = await tryRequest(
+      { keys: [listed.publicKey.toString('hex')], ips: ['198.51.100.0/24'] },
+      unlisted,
+      3,
+    )
+    expect(result).toMatchObject({ ok: true, statuses: [403, 403, 403], upstreamHit: false })
   }, 30_000)
 
   it('lets a listed key in when its address is not listed', async () => {

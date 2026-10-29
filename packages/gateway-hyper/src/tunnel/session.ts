@@ -211,12 +211,16 @@ export function createTunnelPool(
   const waiting: PoolWaiter[] = []
   let closed = false
 
+  // A stream the operator ended (after a 403, say) can't carry another response.
+  const isLive = (socket: Duplex | null): socket is Duplex =>
+    socket !== null && !socket.destroyed && !socket.readableEnded
+
   const addSlot = (): PoolSlot => {
     const slot: PoolSlot = { run: null as never, socket: null, busy: false }
     // The slot runs one request at a time, so there is never a second open in progress.
     slot.run = createTunnelQueue(async () => {
       if (closed) throw closedError()
-      if (slot.socket && !slot.socket.destroyed) return slot.socket
+      if (isLive(slot.socket)) return slot.socket
       const socket = await openStream()
       if (closed) {
         socket.destroy()
@@ -233,7 +237,7 @@ export function createTunnelPool(
     const idle = slots.filter((slot) => !slot.busy)
     // An idle slot whose stream died reopens it, same as a new slot would.
     const slot =
-      idle.find((s) => s.socket !== null && !s.socket.destroyed) ??
+      idle.find((s) => isLive(s.socket)) ??
       idle[0] ??
       (slots.length < maxStreams ? addSlot() : undefined)
     if (!slot) return null
@@ -295,6 +299,13 @@ export function createTunnelPool(
   }
 }
 
+/** Whether the operator sent `connection: close`. Upstream `connection` headers never reach the client. */
+function closesStream(meta: TunnelResponseMeta): boolean {
+  return Object.entries(meta.headers).some(
+    ([key, value]) => key.toLowerCase() === 'connection' && /(^|,)\s*close\s*(,|$)/i.test(String(value)),
+  )
+}
+
 /**
  * Dial the operator HyperDHT key and expose a request/response forwarder.
  *
@@ -338,6 +349,9 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
       // the frame reader sees errors through its own listener.
       socket.on('error', (err: Error) => fail(err))
       socket.once('close', () => fail(new Error('Tunnel connection closed before it opened')))
+      // The operator ends a stream after answering a request it refused; the pool opens a new
+      // one for the next request.
+      socket.once('end', () => socket.destroy())
       socket.once('open', onReady)
       socket.once('connect', onReady)
     })
@@ -355,7 +369,10 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
   ): Promise<{ meta: TunnelResponseMeta; body: Buffer }> => {
     return runOnTunnel(async (socket) => {
       await writeTunnelRequest(socket, meta, body)
-      return readTunnelResponse(socket)
+      const response = await readTunnelResponse(socket)
+      // The operator is ending this stream, so the next request opens a new one.
+      if (closesStream(response.meta)) socket.destroy()
+      return response
     }, opts)
   }
 

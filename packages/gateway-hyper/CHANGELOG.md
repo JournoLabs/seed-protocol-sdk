@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A client refused by address gets the 403 for every request. It used to send its next request on the stream the operator had closed and get `502 Gateway Hyper tunnel error: Unexpected end of stream`, so sequential requests alternated between 403 and 502. The operator's 403 now carries `connection: close`, and the client opens a new stream for the next request when it sees that header or the stream has ended. The operator and the client both need this release: an older client ignores the header, and a client of an older operator still gets a 502 whenever the stream's end reaches it after its next request has gone out.
+
 ## 0.7.12 (2026-10-27)
 
 - The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
