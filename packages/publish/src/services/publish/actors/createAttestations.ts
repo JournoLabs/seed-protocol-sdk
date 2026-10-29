@@ -176,12 +176,14 @@ async function executeCreateAttestations(
 
     await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
 
+    // The contract creates every seed before it attests any property, so a relation back to an item
+    // this publish creates is filled now rather than left for a later publish.
     const requestData = await (
       item.getPublishPayload as (
         uploads: typeof uploadDataWithTxIds,
-        opts?: { publishMode?: 'patch' | 'new_version' },
+        opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
       ) => ReturnType<typeof item.getPublishPayload>
-    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch' })
+    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
 
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
 

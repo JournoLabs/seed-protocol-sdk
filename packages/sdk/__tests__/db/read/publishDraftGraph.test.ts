@@ -122,7 +122,7 @@ const indexOf = (payload: any[], localId: string) => payload.findIndex((p) => p.
  * does create is filled by a reference from that seed's request (encodeMultiPublish refuses one
  * that isn't).
  */
-const expectNoDanglingLocalRefs = (payload: any[]) => {
+const expectNoDanglingLocalRefs = (payload: any[], { linksBackward = false } = {}) => {
   const inBatch = new Set(payload.map((p) => p.localId))
   const filledBy = (source: string, target: any, schema: string, elementIndex?: number) =>
     payload
@@ -147,7 +147,8 @@ const expectNoDanglingLocalRefs = (payload: any[]) => {
     }
   }
   // Direct EAS attests requests in order: a link (propertiesToUpdate) never targets an earlier
-  // request (that route refuses it).
+  // request (that route refuses it). With linked back references (the contract) one may.
+  if (linksBackward) return
   payload.forEach((p, i) => {
     for (const u of p.propertiesToUpdate ?? []) {
       expect(indexOf(payload, u.publishLocalId)).toBeGreaterThanOrEqual(i)
@@ -281,6 +282,35 @@ testDescribe('publish carries the full graph of related drafts', () => {
     const summary = await summarizePublishWork(root as any)
     expect(summary.newSeedCount).toBe(3)
     expect(summary.attestationCount).toBe(totalAttestations(payload))
+  }, 90000)
+
+  it('with linked back references, both sides of a cycle (A ↔ B) are attested and filled', async () => {
+    const b = await node('linked cycle B')
+    const a = await node('linked cycle A', { next: b.seedLocalId })
+    await setValue(b, 'next', a.seedLocalId)
+    const root = await createItem({ modelName: 'DraftGraphRoot', title: 'linked cycle', first: a.seedLocalId })
+
+    const payload = (await getPublishPayload(root as any, [], { backReferences: 'link' })) as any[]
+    expect(payload.map((p) => p.localId).sort()).toEqual([b.seedLocalId, a.seedLocalId, root.seedLocalId].sort())
+    expect(attestedNames(payload, a.seedLocalId)).toEqual(['label', 'next'])
+    expect(attestedNames(payload, b.seedLocalId)).toEqual(['label', 'next'])
+    expect(linksOf(payload, a.seedLocalId).sort()).toEqual([root.seedLocalId, b.seedLocalId].sort())
+    expect(linksOf(payload, b.seedLocalId)).toEqual([a.seedLocalId])
+    expectNoDanglingLocalRefs(payload, { linksBackward: true })
+
+    const graph = await getPublishGraph(root as any, { backReferences: 'link' })
+    expect(graph.nodes.some((n) => n.properties.some((p) => p.deferred))).toBe(false)
+  }, 90000)
+
+  it('with linked back references, a draft referring back to the root fills it in this publish', async () => {
+    const a = await node('linked back to root')
+    const root = await createItem({ modelName: 'DraftGraphRoot', title: 'linked root cycle', first: a.seedLocalId })
+    await setValue(a, 'next', root.seedLocalId)
+
+    const payload = (await getPublishPayload(root as any, [], { backReferences: 'link' })) as any[]
+    expect(attestedNames(payload, a.seedLocalId)).toEqual(['label', 'next'])
+    expect(linksOf(payload, root.seedLocalId)).toEqual([a.seedLocalId])
+    expectNoDanglingLocalRefs(payload, { linksBackward: true })
   }, 90000)
 
   it('a draft referring back to the draft being published leaves that reference for later', async () => {

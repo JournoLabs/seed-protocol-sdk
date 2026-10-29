@@ -25,7 +25,7 @@ export interface IItem<_T extends ModelValues<ModelSchema>> {
   ): Promise<any>
   getPublishPayload(
     uploadedTransactions: any[],
-    options?: { publishMode?: 'patch' | 'new_version' },
+    options?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
   ): Promise<any>
   persistSeedUid(publisher?: string, attestationCreatedAtMs?: number): Promise<void>
   unload(): void

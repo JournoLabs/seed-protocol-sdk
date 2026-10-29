@@ -37,15 +37,21 @@ import {
   type PublishGraph,
   type PublishGraphNode,
   type PublishGraphProperty,
+  type PublishBackReferences,
   type PublishMode,
 } from '@/db/read/publishGraph'
 
 export { PublishValidationFailedError, type PublishValidationError }
-export type { PublishMode }
+export type { PublishBackReferences, PublishMode }
 
 export type GetPublishPayloadOptions = {
   /** `patch` (default): new property attestations on the current Version. `new_version`: new Version attestation + attest all properties. */
   publishMode?: PublishMode
+  /**
+   * `defer` (default): a relation back to an item this publish is still creating is left for a later
+   * publish, as direct EAS needs. `link`: it is filled in this publish, as the publish contract can.
+   */
+  backReferences?: PublishBackReferences
 }
 
 type Attestation = Omit<AttestationRequest, 'data'> & {
@@ -543,7 +549,7 @@ export const getPublishPayload = async (
   options?: GetPublishPayloadOptions,
 ): Promise<MultiPublishPayload> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const graph = await getPublishGraph(item, { publishMode })
+  const graph = await getPublishGraph(item, { publishMode, backReferences: options?.backReferences })
   const ctx: BuildContext = { graph, errors: [], uploadedTransactions }
 
   if (publishMode === 'new_version' && !graph.root.seedUid) {

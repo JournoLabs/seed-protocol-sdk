@@ -169,7 +169,7 @@ describe('createAttestations: a draft relation', () => {
       seedLocalId: POST,
       seedUid: undefined as string | undefined,
       getPublishUploads: async () => [],
-      getPublishPayload: async () => requests(),
+      getPublishPayload: mock(async (_uploads: unknown, _options: unknown) => requests()),
       persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
     }
     const actor = createActor(createAttestations, {
@@ -188,6 +188,8 @@ describe('createAttestations: a draft relation', () => {
     actor.start()
     await toPromise(actor)
 
+    // A relation back to an item this publish creates is filled now, not deferred.
+    expect(item.getPublishPayload.mock.calls[0]![1]).toEqual({ publishMode: 'patch', backReferences: 'link' })
     expect(sendTransaction).toHaveBeenCalledTimes(1)
     const { args } = decodeFunctionData({ abi: multiPublishAbi, data: sendTransaction.mock.calls[0]![0].data })
     const [sentIdentity, sentPost] = args[0]
