@@ -648,8 +648,10 @@ export async function assembleSeedRecords(
     await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
-  if (relations !== 'uids') resolveRelationPropertiesToUrls(ctx)
-  if (relations === 'expand') expandRelationProperties(ctx)
+  if (relations === 'expand') {
+    resolveRelationPropertiesToUrls(ctx)
+    expandRelationProperties(ctx)
+  }
 
   const records = toSeedRecords(ctx, request.schemaName)
 
