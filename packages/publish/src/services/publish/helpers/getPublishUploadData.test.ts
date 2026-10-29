@@ -49,7 +49,7 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
   it('walks every related draft: through lists, relations of drafts, and cycles', async () => {
     const schemaName = 'Test Schema publishUploadDataGraph'
     const schema = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

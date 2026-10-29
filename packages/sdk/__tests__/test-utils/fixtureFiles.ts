@@ -5,7 +5,7 @@
 // These files are copied from __tests__/__fixtures__ at build time
 
 export const fixture_schema_with_ids_json = `{
-  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "$schema": "https://seedprotocol.io/schemas/data-model/v1",
   "version": 1,
   "id": "TEST_SCHEMA_WITH_IDS",
   "metadata": {
@@ -65,7 +65,7 @@ export const fixture_schema_with_ids_json = `{
 }`
 
 export const fixture_schema_without_ids_json = `{
-  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "$schema": "https://seedprotocol.io/schemas/data-model/v1",
   "version": 1,
   "metadata": {
     "name": "Test Schema Without IDs",
@@ -112,7 +112,7 @@ export const fixture_schema_without_ids_json = `{
 }`
 
 export const fixture_schema_partial_ids_json = `{
-  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "$schema": "https://seedprotocol.io/schemas/data-model/v1",
   "version": 1,
   "id": "TEST_SCHEMA_PARTIAL",
   "metadata": {

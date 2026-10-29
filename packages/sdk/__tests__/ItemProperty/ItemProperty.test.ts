@@ -53,7 +53,7 @@ async function waitForPropertyDef(property: { propertyDef?: unknown }) {
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {

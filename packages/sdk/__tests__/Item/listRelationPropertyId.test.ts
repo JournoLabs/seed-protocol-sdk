@@ -20,7 +20,7 @@ const SCHEMA_NAME = 'List relation property id'
 
 function schema(): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

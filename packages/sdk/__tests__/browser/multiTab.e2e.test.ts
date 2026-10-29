@@ -166,7 +166,7 @@ describe('two tabs of one app', () => {
     const id = () => Math.random().toString(16).slice(2, 12)
     const now = new Date().toISOString()
     const file = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: id(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },

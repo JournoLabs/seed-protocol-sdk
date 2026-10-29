@@ -30,7 +30,7 @@ const MODEL = 'LockPost'
 const HTML_SCHEMA = { dataType: 'Text', storageType: 'ItemStorage', localStorageDir: '/html', filenameSuffix: '.html' }
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

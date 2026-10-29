@@ -45,7 +45,7 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     const schemaName = 'Test Schema Save File Imported'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },
@@ -82,7 +82,7 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     const schemaName = 'Test Schema Save File Name Match'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       nameMatch: 'normalized',
@@ -118,7 +118,7 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     const schemaName = 'Test Schema Save File Name Match Reload'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },
@@ -171,7 +171,7 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     const now = new Date().toISOString()
     const titleId = generateId()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },
@@ -241,7 +241,7 @@ testDescribe('Schema.lastSaveError', () => {
     const schemaName = 'Test Schema Last Save Error'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },

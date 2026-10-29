@@ -33,7 +33,7 @@ import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-properties',
   metadata: {
@@ -79,7 +79,7 @@ const testSchemaWithProperties: SchemaFileFormat = {
 
 // Empty schema with no models for integration test
 const emptyTestSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'empty-test-schema-props',
   metadata: {
@@ -569,7 +569,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should automatically update when properties change (liveQuery integration)', async () => {
       // Create an empty schema for this test
       const emptySchema: SchemaFileFormat = {
-        $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+        $schema: 'https://seedprotocol.io/schemas/data-model/v1',
         version: 1,
         id: 'livequery-test-schema-props',
         metadata: {

@@ -28,7 +28,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => <SeedProvider>{
 function schemaFile(name: string, models: SchemaFileFormat['models']): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: `${name.replace(/\W/g, '-')}-id`,
     metadata: { name, createdAt: now, updatedAt: now },

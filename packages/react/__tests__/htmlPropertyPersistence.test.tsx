@@ -21,7 +21,7 @@ import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTes
 import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 const testSchemaHtmlPersistence: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-html-persistence',
   metadata: {
