@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `SeedProvider` and `SeedClientGate` apply a change to their `addresses` (`initConfig.addresses` for the gate) with `client.setAddresses` instead of running `client.init` again, which now leaves the stored addresses alone. Passing `[]` after a disconnect clears them. A remount runs init again and doesn't change them, so a gate remounted with `addresses: []` keeps the connected wallet's addresses. Leaving the prop out keeps the stored ones. A failed `setAddresses` is logged.
+
 ## 0.7.13 (2026-10-29)
 
 - `useGlobalServiceStatus()` returns `stopReason`: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client, `'stop'` for `client.stop()` or `client.unload()`, undefined while the client isn't stopped.

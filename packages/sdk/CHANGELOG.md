@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - Schema files the SDK writes use `$schema: 'https://seedprotocol.io/schemas/data-model/v1'` (was `https://seedprotocol.org/...`, a domain the project doesn't own). Files with the old URL still load, and `$schema` no longer counts toward a schema's content hash, so a stored file with the old URL matches the same schema today instead of failing with "already exists with different content". Each schema is re-applied once after upgrading, because the hashes stored in the database change.
 - Listing a directory in the browser (`Schema.load`, `listCompleteSchemaFiles`, `fs.promises.readdir`) skips a file another context removed between the listing and its stat. The removal surfaced as `TypeError: Cannot set property message of ... which has only a getter`: OPFS's `NotFoundError` reached ZenFS unconverted, and ZenFS failed to append to its read-only message. The OPFS mount's `stat` now fails with `ENOENT` for a removed file and `EIO` for other OPFS errors.
+- **Breaking:** `client.init` called again leaves the stored addresses alone, whatever `addresses` it is given; change them with `client.setAddresses`. In 0.7.13 a repeat init with the same config replaced them with a different non-empty set and kept them for an empty one, so whether a remount changed the addresses depended on what the host passed. `SeedProvider` and `SeedClientGate` call `setAddresses` when their `addresses` change. The init config conflict message no longer suggests init for new addresses.
 
 ## 0.7.13 (2026-10-29)
 

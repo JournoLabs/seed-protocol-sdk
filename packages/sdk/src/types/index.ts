@@ -121,8 +121,8 @@ export interface SeedConstructorOptions {
    * Addresses to save at init. Leave it out to keep the addresses already stored (the
    * SDK warns once when it does). Pass `[]` (or `{ owned: [] }`) to clear them, e.g.
    * before a wallet connects. In a second tab, `[]` keeps the first tab's addresses
-   * (docs/MULTI_TAB.md). Calling init again with only different addresses applies them
-   * like `client.setAddresses`.
+   * (docs/MULTI_TAB.md). Only the first init applies them: calling init again leaves
+   * the stored addresses alone, so change them with `client.setAddresses`.
    */
   readonly addresses?: AddressConfiguration
   /**

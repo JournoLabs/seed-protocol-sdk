@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
-import { SeedProvider, useIsClientReady } from '@seedprotocol/react'
+import { SeedClientGate, SeedProvider, useIsClientReady } from '@seedprotocol/react'
 import type { SeedConfig } from '@seedprotocol/sdk'
 
 // No filesDir or endpoints: client.init fills them in.
@@ -50,6 +50,68 @@ describe('SeedProvider config', () => {
 
     expect(initSpy).toHaveBeenCalledTimes(1)
     expect(initSpy).toHaveBeenCalledWith({ config, addresses: [] })
+  })
+
+  it('applies a later addresses change with setAddresses, not another init', async () => {
+    const sdk = await import('@seedprotocol/sdk')
+    const initSpy = vi.spyOn(sdk.client, 'init').mockResolvedValue(undefined as never)
+    const setSpy = vi.spyOn(sdk.client, 'setAddresses').mockResolvedValue(undefined)
+    const owned = { owned: ['0x' + 'a'.repeat(40)] }
+
+    const { rerender, unmount } = render(
+      <SeedProvider config={config} addresses={[]}>
+        <div />
+      </SeedProvider>,
+      { container },
+    )
+    rerender(
+      <SeedProvider config={config} addresses={owned}>
+        <div />
+      </SeedProvider>,
+    )
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(owned))
+    rerender(
+      <SeedProvider config={config} addresses={[]}>
+        <div />
+      </SeedProvider>,
+    )
+    await waitFor(() => expect(setSpy).toHaveBeenLastCalledWith([]))
+    expect(initSpy).toHaveBeenCalledTimes(1)
+
+    // A remount runs init again, which leaves the stored addresses alone: no setAddresses
+    unmount()
+    const remounted = document.createElement('div')
+    document.body.appendChild(remounted)
+    render(
+      <SeedProvider config={config} addresses={[]}>
+        <div />
+      </SeedProvider>,
+      { container: remounted },
+    )
+    await waitFor(() => expect(initSpy).toHaveBeenCalledTimes(2))
+    expect(setSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('SeedClientGate applies a later addresses change with setAddresses, not another init', async () => {
+    const sdk = await import('@seedprotocol/sdk')
+    const initSpy = vi.spyOn(sdk.client, 'init').mockResolvedValue(undefined as never)
+    const setSpy = vi.spyOn(sdk.client, 'setAddresses').mockResolvedValue(undefined)
+    const owned = { owned: ['0x' + 'b'.repeat(40)] }
+
+    const { rerender } = render(
+      <SeedClientGate initConfig={{ config, addresses: [] }}>
+        <div />
+      </SeedClientGate>,
+      { container },
+    )
+    rerender(
+      <SeedClientGate initConfig={{ config, addresses: owned }}>
+        <div />
+      </SeedClientGate>,
+    )
+
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(owned))
+    expect(initSpy).toHaveBeenCalledTimes(1)
   })
 
   it('does not start the client without config', async () => {

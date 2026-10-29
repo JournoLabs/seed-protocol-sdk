@@ -2,6 +2,7 @@ import React, { useEffect, useRef, type ReactNode } from 'react'
 import { client } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SeedConfig, SchemaFileInput } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
+import { useAddressesProp } from './useAddressesProp'
 
 /** Schema input: path string or schema object. Merged into config.schema at init. */
 type SchemaInput = string | SchemaFileInput
@@ -23,7 +24,11 @@ function DefaultLoading() {
 }
 
 export type SeedClientGateProps = {
-  /** Seed client init options (config + addresses). Required. */
+  /**
+   * Seed client init options (config + addresses). Required. When `addresses` later holds
+   * different addresses the gate calls `client.setAddresses` with them; a remount runs init again,
+   * which leaves the stored addresses alone.
+   */
   initConfig: SeedConstructorOptions
   /** Optional canonical schema. When provided, merged into config.schema and loaded at init (no separate import). */
   schema?: SchemaInput
@@ -83,7 +88,9 @@ export function SeedClientGate({
   initConfigRef.current = initConfig
   const schemaRef = useRef(schema)
   schemaRef.current = schema
-  const initConfigKey = valueKey(initConfig)
+  const initRef = useRef<Promise<void> | undefined>(undefined)
+  // Addresses are left out: a repeat init ignores them, and useAddressesProp applies a change
+  const initConfigKey = valueKey({ ...initConfig, addresses: undefined })
   const schemaKey = valueKey(schema)
 
   useEffect(() => {
@@ -98,7 +105,8 @@ export function SeedClientGate({
           } as SeedConfig,
         }
       : initConfig
-    client.init(effectiveConfig).catch((err: unknown) => {
+    initRef.current = client.init(effectiveConfig)
+    initRef.current.catch((err: unknown) => {
       if (onInitErrorRef.current) {
         onInitErrorRef.current(err)
       } else {
@@ -106,6 +114,7 @@ export function SeedClientGate({
       }
     })
   }, [initConfigKey, schemaKey])
+  useAddressesProp(initConfig.addresses, initRef, 'SeedClientGate')
 
   const loadingContent = loadingComponent ?? <DefaultLoading />
 
