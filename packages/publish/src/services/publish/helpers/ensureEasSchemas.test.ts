@@ -73,13 +73,14 @@ const registerSchema = mock(() => ({
   data: '0xregister' as `0x${string}`,
 }))
 
-/** The publish graph of the item: one node, the Post, with the harness's properties. */
+/** The publish graph of the item: one node, the Post, with the harness's properties, each with a value. */
 function publishGraph() {
   const properties = (list: Array<{ propertyName: string; propertyDef: object }>, kind: string) =>
-    list.map((p) => ({ key: p.propertyName, definition: p.propertyDef, kind }))
+    list.map((p) => ({ key: p.propertyName, definition: p.propertyDef, kind, row: { propertyValue: 'value' } }))
   return {
     nodes: [
       {
+        kind: 'root',
         modelName: 'Post',
         properties: [
           ...properties(harness.basicProperties, 'basic'),
@@ -103,6 +104,7 @@ mock.module('@seedprotocol/sdk', () => ({
   ModelPropertyDataTypes: { File: 'File', Html: 'Html', Image: 'Image', Text: 'Text' },
   normalizeDataType,
   getPublishGraph: async () => publishGraph(),
+  publishRemovesValue: async () => false,
   getEasSchemaUidForExactDefinition: async () => undefined,
   setSchemaUidForSchemaDefinition: () => {},
   setSchemaUidForModel: () => {},

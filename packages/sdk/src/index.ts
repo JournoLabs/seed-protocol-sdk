@@ -343,6 +343,7 @@ export { getPropertySchema } from './helpers/property'
 export type { HtmlEmbeddedDataUriPolicy } from './helpers/property'
 
 export {
+  publishRemovesValue,
   resolvePublishPayloadValues,
   validateItemForPublish,
   PublishValidationFailedError,

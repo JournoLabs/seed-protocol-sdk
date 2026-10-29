@@ -222,6 +222,28 @@ const booleanFromRow = (value: string): boolean | string =>
   value === 'true' || value === '1' ? true : value === 'false' || value === '0' ? false : value
 
 /**
+ * Whether publishing `property` of `node` with an empty value attests a removal. 0 and false are
+ * values (ADR 0010). An empty value publishes only as a removal of a value attested before
+ * (ADR 0021); a retraction attests nothing (publish revokes instead).
+ */
+export async function publishRemovesValue(
+  node: Pick<PublishGraphNode, 'seedLocalId' | 'seedUid' | 'modelName'>,
+  property: Pick<PublishGraphProperty, 'key' | 'definition'>,
+): Promise<boolean> {
+  const { key, definition } = property
+  const clear = await getPropertyClear({
+    seedLocalId: node.seedLocalId,
+    seedUid: node.seedUid,
+    propertyId: definition._dbId,
+    modelName: node.modelName,
+    propertyName: key,
+    dataType: definition.dataType,
+    refValueType: definition.refValueType,
+  })
+  return !!clear && !clear.retract
+}
+
+/**
  * The attestation of one property of `node`, or undefined when the publish leaves it out (no
  * value, already attested in patch mode, deferred, invalid: the last reports an error).
  */
@@ -247,21 +269,10 @@ async function attestProperty(
   if (isStorageTransaction && !uploaded) return undefined
   let value: unknown = uploaded ? uploaded.txId : row?.propertyValue
 
-  // 0 and false are values (ADR 0010). An empty value publishes only as a removal of a value
-  // attested before (ADR 0021); a retraction attests nothing (publish revokes instead).
   let isRemoval = false
   if (value == null || value === '') {
     if (property.uid && !forceFullSnapshot) return undefined
-    const clear = await getPropertyClear({
-      seedLocalId: node.seedLocalId,
-      seedUid: node.seedUid,
-      propertyId: definition._dbId,
-      modelName: node.modelName,
-      propertyName: key,
-      dataType: definition.dataType,
-      refValueType: definition.refValueType,
-    })
-    if (!clear || clear.retract) return undefined
+    if (!(await publishRemovesValue(node, property))) return undefined
     isRemoval = true
   }
   // Patch mode skips properties that already have an EAS uid, except a storage transaction this
