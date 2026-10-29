@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `getSeedAttestations(seedUids, { source, pins })`: each seed's record with the property attestations it is assembled from, as attested (`easName`, `easType`, `value`, `isRelation`, attestation and schema uids, attester, time). A `SeedRecord` keeps neither the EAS type nor the EAS name, which RDF export needs. It reads the same seeds, versions and pins as `getSeeds`, assembles with `relations: 'uids'` and no storage hydration, and doesn't use the query cache.
+
 ## 0.7.13 (2026-10-29)
 
 - **Breaking:** `relations: 'urls'` is removed, and `RelationsMode` is `'expand' | 'uids'`. It resolved Html/File relations to URLs like `'expand'` but left other related seeds as UIDs, and it fetched the same related seeds, so it saved no requests. Use `'expand'`, or `'uids'` to skip fetching related seeds. The item cache codes for `'expand'` (`e3`) and `'uids'` (`e5`) are unchanged.

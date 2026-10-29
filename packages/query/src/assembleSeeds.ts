@@ -69,6 +69,8 @@ type AssembleContext = {
    * relations into, even when it has the requested schema.
    */
   requestedSeedUids: Set<string>
+  /** The property attestations each seed's record is assembled from: its head Version's canonical ones. */
+  headPropertiesBySeedUid: Map<string, AttestationLike[]>
 }
 
 function createAssembleContext(): AssembleContext {
@@ -82,6 +84,7 @@ function createAssembleContext(): AssembleContext {
     latestVersionUidsBySeedUid: new Map(),
     droppedSeedUids: new Set(),
     requestedSeedUids: new Set(),
+    headPropertiesBySeedUid: new Map(),
   }
 }
 
@@ -347,6 +350,14 @@ async function processSeeds(
     return asOf === undefined || property.timeCreated <= asOf
   })
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
+
+  for (const property of itemProperties) {
+    const seedUid = ctx.versionUidToSeedUid.get(property.refUID)
+    if (!seedUid) continue
+    const head = ctx.headPropertiesBySeedUid.get(seedUid) ?? []
+    head.push(property)
+    ctx.headPropertiesBySeedUid.set(seedUid, head)
+  }
 
   for (let i = 0; i < itemProperties.length; i++) {
     await processItemProperty(ctx, itemProperties[i] as AttestationLike)
@@ -622,7 +633,12 @@ export async function assembleSeedRecords(
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
   request: AssembleRequest = {},
-): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
+): Promise<{
+  records: SeedRecord[]
+  dependencies: Map<string, SeedDependencies>
+  /** By seedUid: the property attestations each record was assembled from. */
+  properties: Map<string, AttestationLike[]>
+}> {
   const relations = relationsModeOf(options)
   const hydrateStorage = options?.hydrateStorage !== false
 
@@ -668,7 +684,10 @@ export async function assembleSeedRecords(
   const dependencies = new Map(
     records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid, withRelated)]),
   )
-  return { records, dependencies }
+  const properties = new Map(
+    records.map((record) => [record.seedUid, ctx.headPropertiesBySeedUid.get(record.seedUid) ?? []]),
+  )
+  return { records, dependencies, properties }
 }
 
 /**

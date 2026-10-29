@@ -6,7 +6,7 @@
  * Usage: node scripts/build-packages.js [package-dir...]
  *
  * Packages build from each other's dist, so the order matters: bundler-core before vite and
- * next, archive, eas, arweave and query before vite and sdk, and sdk before react, publish and
+ * next, archive, eas, arweave and query before vite, sdk and rdf, and sdk before react, publish and
  * mapping. Callers wrap this in
  * with-monorepo-build-lock.js (directly or through build-with-tests.js) so a concurrent
  * build cannot delete a dist mid-build.
@@ -26,6 +26,7 @@ const BUILD_ORDER = [
   'eas',
   'arweave',
   'query',
+  'rdf',
   'feed',
   'feed-hyper',
   'gateway-hyper',
