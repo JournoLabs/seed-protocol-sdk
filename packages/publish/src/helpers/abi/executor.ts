@@ -33,7 +33,7 @@ export const executorEventsAbi = [
 /**
  * SeedProtocolExecutor (ERC-7579 executor module) calls and errors.
  * `multiPublish` takes the same `PublishRequestData` as the ManagedAccount extension (selector
- * 0x2a29fadc), so it shares `multiPublishAbi`'s entry.
+ * 0xa1263421), so it shares `multiPublishAbi`'s entry.
  */
 export const executorModuleAbi = [
   multiPublishAbi[0],
