@@ -22,6 +22,8 @@ type UseItemPropertyReturn = {
   property: IItemProperty | undefined
   isLoading: boolean
   error: Error | null
+  /** The property's `valueStatus`; re-renders when it changes (an Image, File or Html file found or missing). */
+  valueStatus: IItemProperty['valueStatus'] | undefined
 }
 
 /** Query key for one item property: `useItemProperty`'s query. */
@@ -169,6 +171,7 @@ export function useItemProperty(
     let lastRenderValue: unknown = initialContext?.renderValue
     let lastPropertyValue: unknown = initialContext?.propertyValue
     let lastConflict: unknown = initialContext?.conflict
+    let lastMissingFile: unknown = initialContext?.missingFile
     let wasIdle = false
     let lastVersionAt = 0
     let trailing: ReturnType<typeof setTimeout> | undefined
@@ -177,15 +180,18 @@ export function useItemProperty(
       const ctx = snapshot?.context ?? {}
       // A value change re-renders at once: a controlled input bound to property.value that
       // skipped a render was reset to the old value, and the next keystroke built on it.
-      // So does a conflict arriving or clearing (sync, another tab), which comes on an idle snapshot.
+      // So does a conflict arriving or clearing (sync, another tab), which comes on an idle snapshot,
+      // and a file the value names being found or missed (valueStatus).
       if (
         !Object.is(ctx.renderValue, lastRenderValue) ||
         !Object.is(ctx.propertyValue, lastPropertyValue) ||
-        !Object.is(ctx.conflict ?? null, lastConflict ?? null)
+        !Object.is(ctx.conflict ?? null, lastConflict ?? null) ||
+        !Object.is(ctx.missingFile ?? null, lastMissingFile ?? null)
       ) {
         lastRenderValue = ctx.renderValue
         lastPropertyValue = ctx.propertyValue
         lastConflict = ctx.conflict
+        lastMissingFile = ctx.missingFile
         wasIdle = snapshot.value === 'idle' && ctx._status === 'ready'
         lastVersionAt = Date.now()
         clearTimeout(trailing)
@@ -231,6 +237,7 @@ export function useItemProperty(
     property,
     isLoading: !!lookupMode && query.isPending,
     error: query.error as Error | null,
+    valueStatus: property?.valueStatus,
   }
 }
 

@@ -25,6 +25,10 @@ export interface IItemProperty<_PropertyType = any> {
   readonly alias: string | undefined;
   readonly refResolvedValue: string | undefined;
   value: any;
+  /** Image, File and Html: whether `value` holds the file's content. See ItemProperty.valueStatus. */
+  readonly valueStatus: 'resolved' | 'fetching' | 'missing';
+  /** While `valueStatus` is `'missing'`: the file looked for. Else null. */
+  readonly missingFile: { path?: string } | null;
   readonly published: boolean;
   readonly saveValidationErrors: import('@/Schema/validation').ValidationError[];
 

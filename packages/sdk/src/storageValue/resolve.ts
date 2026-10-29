@@ -92,6 +92,21 @@ export async function resolveStorageRef(kind: StoredValueKind, row: StorageRef):
   return out
 }
 
+/**
+ * What a row's display lookup missed, as ItemProperty's `missingFile`: null when resolveStorageDisplay
+ * found the file or the row names none (a cleared property), else the path it looked for.
+ */
+export function missingFileOf(
+  kind: StoredValueKind,
+  row: { propertyValue?: unknown; refResolvedValue?: string | null },
+  display: { ref: StorageRef; renderValue?: string },
+): { path?: string } | null {
+  if (display.renderValue !== undefined) return null
+  if (row.propertyValue == null && !row.refResolvedValue) return null
+  const name = display.ref.refResolvedValue
+  return name ? { path: BaseFileManager.getFilesPath(storageSubdir(kind, display.ref.localStorageDir), name) } : {}
+}
+
 export type StorageDisplayOptions = {
   /**
    * Fetch a file that isn't on disk: download an Image or File by its transaction id, read an Html
