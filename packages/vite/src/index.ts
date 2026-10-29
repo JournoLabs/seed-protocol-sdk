@@ -148,14 +148,14 @@ function applyIsolationHeaderMiddleware(
   })
 }
 
+const KNOWN_OPTIONS = new Set(['fsModules', 'debug', 'includeNodePolyfills', 'isolationHeaders'])
+
 /**
  * The Vite settings a browser app using @seedprotocol/sdk needs: cross-origin isolation headers
  * on the dev and preview servers, ES module workers, in-order dev pre-bundles, and, for SDK
  * packages installed outside the app root, deduplication and dev-server file access. Node polyfills and `fs` aliases are
  * opt-in.
  */
-const KNOWN_OPTIONS = new Set(['fsModules', 'debug', 'includeNodePolyfills', 'isolationHeaders'])
-
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   for (const key of Object.keys(options)) {
     if (KNOWN_OPTIONS.has(key)) continue
