@@ -1,231 +1,129 @@
 /**
- * BaseArweaveClient against the real Arweave network: live gateways, so results depend on them
- * (a slow gateway answers 504). Skipped unless SEED_LIVE_NETWORK_TESTS=1, and Node only.
- * ArweaveClient.test.ts covers the same methods against a mocked network.
+ * Smoke test of BaseArweaveClient against public gateways: arweave.net, zigza.xyz and
+ * vilenarios.com. Skipped unless SEED_LIVE_NETWORK_TESTS=1, and Node only. The client's behaviour
+ * is covered without the network by ArweaveClient.arlocal.test.ts (a local node) and
+ * ArweaveClient.test.ts (a mocked client); this file checks that real gateways still serve what
+ * the client asks for.
+ *
+ * The client runs against the first gateway that answers `/info`; status checks fall back across
+ * all three. A test fails only when none of them serves the known transaction.
  *
  *   SEED_LIVE_NETWORK_TESTS=1 bunx vitest run --project NodeJS packages/sdk/__tests__/helpers/ArweaveClient/ArweaveClient.live.test.ts
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { setPreferredArweaveReadBaseUrls, BaseArweaveClient } from '@seedprotocol/arweave'
-
-// Import the node ArweaveClient to set up the platform class
-// This import sets up BaseArweaveClient.PlatformClass automatically
+import {
+  BaseArweaveClient,
+  invalidateReadGatewayCache,
+  setPreferredArweaveReadBaseUrls,
+} from '@seedprotocol/arweave'
 import '@seedprotocol/arweave/node'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 
-// Known stable transaction IDs from Arweave mainnet for integration testing
-// These are permanent, immutable transactions that should always exist
+/** Public gateways this test reads from, in order. */
+export const LIVE_GATEWAYS = ['arweave.net', 'zigza.xyz', 'vilenarios.com'] as const
 
-// ArDrive logo - a well-known, stable transaction
+// ArDrive logo, a permanent mainnet transaction
 // https://viewblock.io/arweave/tx/bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 const KNOWN_TX_ID = 'bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U'
+const MISSING_TX_ID = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
-// A simple text file for testing data retrieval
-// This is a small, well-known transaction
-const KNOWN_TEXT_TX_ID = 'Sgmwx-GEq9-k8J_V7VPiX09j_1RTHF-VsQaOMxS7v-4'
+const PROBE_TIMEOUT_MS = 8000
+const NETWORK_TIMEOUT = 45000
 
 const runLive = typeof window === 'undefined' && process.env.SEED_LIVE_NETWORK_TESTS === '1'
 
-describe.skipIf(!runLive)('ArweaveClient against live gateways', () => {
-  // Increase timeout for network requests
-  const NETWORK_TIMEOUT = 30000
+type Probe = { host: string; info: number | string; knownTx: number | string }
 
-  // With SEED_GATEWAY_HYPER_KEY set (a CI secret), status checks ask our Hyper gateway first and
-  // the public gateways after it. Without it, or if the tunnel can't connect, they use the public
-  // gateways only. Data, tag and URL tests stay on arweave.net either way.
+const probe = async (url: string): Promise<number | string> => {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    await response.body?.cancel().catch(() => {})
+    return response.status
+  } catch (error) {
+    return error instanceof Error ? error.name : String(error)
+  }
+}
+
+describe.skipIf(!runLive)('ArweaveClient against public gateways', () => {
+  const probes: Probe[] = []
+  let gateway: string | undefined
+  // Read in beforeAll: the browser project collects this file, and has no process.
+  let previousReadGateways: string | undefined
+
+  // With SEED_GATEWAY_HYPER_KEY set, status checks ask our Hyper gateway first.
   let hyperTunnel: { baseUrl: string; close: () => Promise<void> } | undefined
 
   beforeAll(async () => {
-    // Ensure we're using the default Arweave host
-    BaseArweaveClient.setHost('arweave.net')
+    previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
+    for (const host of LIVE_GATEWAYS) {
+      probes.push({
+        host,
+        info: await probe(`https://${host}/info`),
+        knownTx: await probe(`https://${host}/raw/${KNOWN_TX_ID}`),
+      })
+    }
+    console.info('[ArweaveClient live] gateway probes:', probes)
+    gateway = probes.find((p) => p.info === 200 && p.knownTx === 200)?.host
+    if (!gateway) return
+
+    process.env.ARWEAVE_READ_GATEWAYS = LIVE_GATEWAYS.join(',')
+    BaseArweaveClient.setHost(`https://${gateway}`)
+    BaseArweaveClient.resetReadGatewaySelectionStateForTests()
+    invalidateReadGatewayCache()
 
     const key = process.env.SEED_GATEWAY_HYPER_KEY?.trim()
     if (!key) return
     try {
       const { connectTunnel } = await import('@seedprotocol/gateway-hyper')
-      hyperTunnel = await connectTunnel({ key, host: '127.0.0.1', port: 0, connectTimeoutMs: 20000 })
+      const tunnel = await connectTunnel({ key, host: '127.0.0.1', port: 0, connectTimeoutMs: 20000 })
+      hyperTunnel = tunnel
       // The tunnel dials the operator on its first request; only use it once that request works.
-      const info = await fetch(`${hyperTunnel.baseUrl}/info`, { signal: AbortSignal.timeout(25000) })
+      const info = await fetch(`${tunnel.baseUrl}/info`, { signal: AbortSignal.timeout(25000) })
       if (!info.ok) throw new Error(`GET /info through the tunnel returned ${info.status}`)
-      setPreferredArweaveReadBaseUrls([hyperTunnel.baseUrl])
+      setPreferredArweaveReadBaseUrls([tunnel.baseUrl])
     } catch (error) {
       console.warn('[ArweaveClient live] Hyper gateway unavailable, using public gateways:', error)
       await hyperTunnel?.close().catch(() => {})
       hyperTunnel = undefined
     }
-  }, NETWORK_TIMEOUT)
+  }, 4 * LIVE_GATEWAYS.length * PROBE_TIMEOUT_MS)
 
   afterAll(async () => {
     setPreferredArweaveReadBaseUrls([])
+    if (previousReadGateways === undefined) delete process.env.ARWEAVE_READ_GATEWAYS
+    else process.env.ARWEAVE_READ_GATEWAYS = previousReadGateways
+    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
+    invalidateReadGatewayCache()
     await hyperTunnel?.close()
   })
 
-  describe('getTransactionStatus()', () => {
-    it('returns 200 when transaction is available on gateway', async () => {
-      const status = await BaseArweaveClient.getTransactionStatus(KNOWN_TX_ID)
-      
-      expect(status.status).toBe(200)
-      expect(status.confirmed).toBeNull()
-    }, NETWORK_TIMEOUT)
-
-    it('handles well-formed tx id that is not on the gateway', async () => {
-      const status = await BaseArweaveClient.getTransactionStatus(
-        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-      )
-      expect(status.confirmed).toBeNull()
-      expect(typeof status.status).toBe('number')
-    }, NETWORK_TIMEOUT)
+  it('finds a gateway that serves the known transaction', () => {
+    expect(gateway, `no gateway served ${KNOWN_TX_ID}: ${JSON.stringify(probes)}`).toBeDefined()
   })
 
-  describe('getTransactionData()', () => {
-    it('fetches data for known transaction', async () => {
-      let data: unknown
-      try {
-        data = await BaseArweaveClient.getTransactionData(KNOWN_TX_ID)
-      } catch (error) {
-        // Mainnet can be slow or unreachable; arweave-js may throw after chunk/gateway fallback
-        expect(String((error as Error)?.message ?? error)).toMatch(/not found|timeout|fetch|data/i)
-        return
-      }
-      const len =
-        typeof data === 'string'
-          ? data.length
-          : data instanceof ArrayBuffer
-            ? data.byteLength
-            : ArrayBuffer.isView(data)
-              ? data.byteLength
-              : 0
-      expect(len).toBeGreaterThan(0)
-    }, NETWORK_TIMEOUT)
+  it('reports the known transaction as present and an unknown one as absent', async () => {
+    expect(await BaseArweaveClient.getTransactionStatus(KNOWN_TX_ID)).toEqual({ status: 200, confirmed: null })
+    const missing = await BaseArweaveClient.getTransactionStatus(MISSING_TX_ID)
+    expect(missing.status).not.toBe(200)
+  }, NETWORK_TIMEOUT)
 
-    it('returns string when string option is true', async () => {
-      // Try to get data as string
-      // Note: This may fail for binary data like images
-      try {
-        const data = await BaseArweaveClient.getTransactionData(KNOWN_TX_ID, { string: true })
-        expect(typeof data === 'string' || data instanceof Uint8Array).toBe(true)
-      } catch (error) {
-        // Binary data may not decode as string cleanly, which is acceptable
-        expect(error).toBeDefined()
-      }
-    }, NETWORK_TIMEOUT)
+  it('reads the known transaction and its tags', async () => {
+    const data = await BaseArweaveClient.getTransactionData(KNOWN_TX_ID)
+    expect(typeof data === 'string' ? data.length : data.byteLength).toBeGreaterThan(0)
+    const tags = await BaseArweaveClient.getTransactionTags(KNOWN_TX_ID)
+    expect(tags.some((t) => t.name === 'Content-Type')).toBe(true)
+  }, NETWORK_TIMEOUT)
 
-    it('throws error for non-existent transaction', async () => {
-      await expect(
-        BaseArweaveClient.getTransactionData('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-      ).rejects.toThrow()
-    }, NETWORK_TIMEOUT)
-  })
+  it('downloads the known transaction', async () => {
+    const [result] = await BaseArweaveClient.downloadFiles({ transactionIds: [KNOWN_TX_ID] })
+    expect(result).toMatchObject({ transactionId: KNOWN_TX_ID, success: true })
+    expect(result!.data!.length).toBeGreaterThan(0)
+  }, NETWORK_TIMEOUT)
 
-  describe('getTransactionTags()', () => {
-    it('fetches tags for known transaction', async () => {
-      const tags = await BaseArweaveClient.getTransactionTags(KNOWN_TX_ID)
-      
-      expect(Array.isArray(tags)).toBe(true)
-      // Most Arweave transactions have at least some tags
-      // But we can't guarantee which ones, so just verify the structure
-      if (tags.length > 0) {
-        expect(tags[0]).toHaveProperty('name')
-        expect(tags[0]).toHaveProperty('value')
-      }
-    }, NETWORK_TIMEOUT)
-
-    it('returns empty array gracefully for transaction without tags', async () => {
-      // Even if the transaction doesn't exist, should return empty array
-      const tags = await BaseArweaveClient.getTransactionTags('nonexistent-tx')
-      
-      expect(Array.isArray(tags)).toBe(true)
-    }, NETWORK_TIMEOUT)
-  })
-
-  describe('createTransaction()', () => {
-    it('creates unsigned transaction with string data', async () => {
-      const testData = 'Test data for integration test'
-      
-      const tx = await BaseArweaveClient.createTransaction(testData)
-      
-      // Transaction should have an ID (though it's not signed/submitted yet)
-      expect(tx).toBeDefined()
-      expect(tx.data).toBeDefined()
-    }, NETWORK_TIMEOUT)
-
-    it('creates unsigned transaction with Uint8Array data', async () => {
-      const testData = new Uint8Array([1, 2, 3, 4, 5])
-      
-      const tx = await BaseArweaveClient.createTransaction(testData)
-      
-      expect(tx).toBeDefined()
-      expect(tx.data).toBeDefined()
-    }, NETWORK_TIMEOUT)
-
-    it('adds tags to transaction', async () => {
-      const tx = await BaseArweaveClient.createTransaction('test data', {
-        tags: [
-          { name: 'Content-Type', value: 'text/plain' },
-          { name: 'App-Name', value: 'SeedProtocol-Test' },
-        ],
-      })
-      
-      expect(tx).toBeDefined()
-      // The transaction should have the addTag method available
-      expect(typeof tx.addTag).toBe('function')
-    }, NETWORK_TIMEOUT)
-  })
-
-  describe('URL Construction', () => {
-    it('getRawUrl constructs correct URL', () => {
-      const url = BaseArweaveClient.getRawUrl(KNOWN_TX_ID)
-      expect(url).toBe(`https://arweave.net/raw/${KNOWN_TX_ID}`)
-    })
-
-    it('getStatusUrl constructs correct URL', () => {
-      const url = BaseArweaveClient.getStatusUrl(KNOWN_TX_ID)
-      expect(url).toBe(`https://arweave.net/${KNOWN_TX_ID}`)
-    })
-
-    it('getEndpoint returns correct GraphQL endpoint', () => {
-      const endpoint = BaseArweaveClient.getEndpoint()
-      expect(endpoint).toBe('https://arweave.net/graphql')
-    })
-  })
-
-  describe('downloadFiles()', () => {
-    it('downloads single file successfully', async () => {
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: [KNOWN_TX_ID],
-      })
-      
-      expect(results).toHaveLength(1)
-      expect(results[0].transactionId).toBe(KNOWN_TX_ID)
-      expect(results[0].success).toBe(true)
-      expect(results[0].data).toBeInstanceOf(Uint8Array)
-      expect((results[0].data as Uint8Array).length).toBeGreaterThan(0)
-    }, NETWORK_TIMEOUT)
-
-    it('handles mix of valid and invalid transactions', async () => {
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: [KNOWN_TX_ID, 'invalid-tx-id-that-does-not-exist'],
-      })
-      
-      expect(results).toHaveLength(2)
-      
-      // First should succeed
-      const validResult = results.find(r => r.transactionId === KNOWN_TX_ID)
-      expect(validResult?.success).toBe(true)
-      
-      // Second should fail
-      const invalidResult = results.find(r => r.transactionId === 'invalid-tx-id-that-does-not-exist')
-      expect(invalidResult?.success).toBe(false)
-    }, NETWORK_TIMEOUT)
-
-    it('respects excluded transactions', async () => {
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: [KNOWN_TX_ID],
-        excludedTransactions: new Set([KNOWN_TX_ID]),
-      })
-      
-      // Should skip the excluded transaction
-      expect(results).toHaveLength(0)
-    }, NETWORK_TIMEOUT)
-  })
+  it('prices a new transaction with the gateway', async () => {
+    const tx = await BaseArweaveClient.createTransaction('Seed Protocol live smoke test')
+    expect(Number(tx.reward)).toBeGreaterThan(0)
+    expect(tx.last_tx).toBeTruthy()
+  }, NETWORK_TIMEOUT)
 })
