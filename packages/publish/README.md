@@ -26,7 +26,7 @@ Peer dependencies: `@seedprotocol/sdk` and `@seedprotocol/react` (the same versi
 
 From Node, a domain-locked client id returns 401. Set `thirdwebSecretKey` (server only) so Thirdweb RPC and the bundler authenticate, and either pass a public `rpcUrl` or pass `thirdwebClientId` together with that secret (`x-secret-key` is attached to viem reads). A secret key alone does not build the viem RPC URL. Call `await PublishManager.ready()` before `createPublish`; that promise is the spawned actor, not the finished publish. eas-sdk’s ESM build named-imports CommonJS `lodash`. Load it with `node --import @seedprotocol/sdk/node-eas-lodash`, which redirects that import to `lodash-es`.
 
-Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`.
+Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`. [docs/PUBLISH_WALLETS.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_WALLETS.md) covers wallet adapters, bundlers and paymasters.
 
 ### Recipe 1: EIP-1193 + EOA (no Thirdweb)
 
@@ -94,7 +94,7 @@ const { wallets } = useWallets()
 await connect(await fromPrivyWallet(wallets[0]))
 ```
 
-Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
+Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }` and register a `dataItemSigner`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
 
 ### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
 
@@ -122,7 +122,7 @@ const txSender = await createManagedAccountTxSender({
 await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, admin: { signer: owner.signer, txSender } })
 ```
 
-Register `{ signer: owner.signer, txSender, kind: 'modular' }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.
+Register `{ signer: owner.signer, txSender, kind: 'modular', publisherAddress: txSender.address }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.
 
 ### Recipe 3: Thirdweb ConnectButton (batteries-included)
 
