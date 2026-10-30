@@ -2,9 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
-## 0.8.0 (2026-10-30)
+## Unreleased
 
 - New `fetchArweaveRawBytesAcrossGateways(transactionId, options)`: `fetchArweaveRawTextAcrossGateways` without the decoding, for callers that need the transaction's exact bytes.
+
+## 0.8.0 (2026-10-30)
+
 - `probeGateway(url, signal)` from JavaScript throws a `TypeError` naming `{ signal }`. The signal was ignored, so the caller lost its abort and waited out the 5 s timeout.
 - `ArweaveTransaction` is the arweave package's `Transaction`, and `createTransaction` (on `BaseArweaveClient`, `IArweaveClient` and the default client) returns `Promise<ArweaveTransaction>`. Both were `any`, so code that read a property `Transaction` doesn't have now fails to type-check. Nothing changed at runtime.
 
