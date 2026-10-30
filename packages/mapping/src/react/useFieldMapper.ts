@@ -6,7 +6,6 @@ import {
   isDeriveKeepOnClear,
   withPreservedExtras,
 } from '../edgeMapping'
-import { lookupEntriesFromMapping } from '../relationLookup'
 import type {
   DeriveSpec,
   FieldMapping,
@@ -540,7 +539,6 @@ export function useFieldMapper({
     (rowId: string) => {
       const current = mappingsRef.current
       if (rowKey === 'property') {
-        const prev = current.find((m) => m.propertyName === rowId)
         commitMappings(current.filter((m) => m.propertyName !== rowId))
         setExtraPropertyNames((prevSet) => {
           if (!prevSet.has(rowId)) return prevSet
