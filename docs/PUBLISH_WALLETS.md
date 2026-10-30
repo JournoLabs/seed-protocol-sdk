@@ -66,6 +66,8 @@ await setPublishWallet({
 
 `useSeedWallet().connect` and `ensureWalletThenPublish` apply the EIP-7702 sender to whatever wallet is connected.
 
+The EIP-7702 sender needs one signature a plain wallet connection can't give. An EOA's first UserOp carries an authorization delegating it to the Simple7702 account, signed by `SeedSigner.signAuthorization`. `fromEthersWallet` and local viem accounts implement that. Browser wallets don't expose it over EIP-1193, so for those adapters pass the wallet vendor's call as the `signAuthorization` option. Without one, the first send from an undelegated EOA throws before reaching the bundler. Later sends don't need it.
+
 With `useModularExecutor`, publish uses a registered wallet that sends as its `publisherAddress` with a different signer. Any other wallet goes to the Thirdweb in-app flow, which needs the `thirdweb` peer.
 
 ## ManagedAccount without Thirdweb

@@ -96,7 +96,7 @@ await connect(await fromPrivyWallet(wallets[0]))
 
 Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }` and register a `dataItemSigner`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
 
-### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
+### Recipe 2: permissionless EIP-7702 (gasless, no Thirdweb)
 
 ```tsx
 initPublish({
@@ -109,7 +109,7 @@ initPublish({
 })
 ```
 
-`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. `paymasterUrl` is asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`. Fees come from the bundler's `pimlico_getUserOperationGasPrice` when it answers that method, and from the chain's estimate otherwise.
+`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. The first UserOp from an EOA carries an EIP-7702 authorization, which the signer's `signAuthorization` signs. Browser wallets don't expose that over EIP-1193, so a plain `connect(provider)` works only for an EOA already delegated to the Simple7702 account; otherwise pass the wallet vendor's call as the `signAuthorization` option of the adapter. `paymasterUrl` is asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`. Fees come from the bundler's `pimlico_getUserOperationGasPrice` when it answers that method, and from the chain's estimate otherwise.
 
 To send as a Seed ManagedAccount without Thirdweb, build its sender with `createManagedAccountTxSender`. It sends UserOps through any EntryPoint v0.6 bundler, sponsored by an ERC-7677 paymaster unless `sponsored: false`, and raises the bundler's `callGasLimit` estimate by `CALL_GAS_HEADROOM_BPS` (1.2x) before the paymaster signs. Without `managedAddress` it uses the account the signer administers through the factory, and its first UserOp deploys it. A session key the account granted can sign too; pass `managedAddress` then.
 
