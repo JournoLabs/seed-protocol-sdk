@@ -91,7 +91,7 @@ function session(initial: FieldMapping[] = []) {
         sourceId,
         propertyName,
       )
-      mappings = result.mappings
+      mappings = result
     },
   }
 }
@@ -212,7 +212,7 @@ describe('derive / assemble persist', () => {
       'rss-link',
       'html',
     )
-    expect(html.mappings).toEqual([
+    expect(html).toEqual([
       {
         sourceId: 'rss-link',
         propertyName: 'html',

@@ -67,27 +67,6 @@ describe('relationLookup', () => {
     expect(lookupRefsFromEntries([{ value: 'Mira Chen', refs: ['  '] }], 'Mira Chen')).toBeUndefined()
   })
 
-  it('prefers edge entries over deprecated document lookups', () => {
-    const mapping = {
-      sourceId: 'author',
-      propertyName: 'authors',
-      resolve: 'lookup' as const,
-      lookup: { entries: [{ value: 'Mira Chen', refs: ['edge_ref'] }] },
-    }
-    expect(
-      resolveLookup(mapping, 'Mira Chen', {
-        authors: { 'Mira Chen': 'doc_ref' },
-      }).refs,
-    ).toEqual(['edge_ref'])
-    expect(
-      resolveLookup(
-        { sourceId: 'author', propertyName: 'authors', resolve: 'lookup' },
-        'Mira Chen',
-        { authors: { 'Mira Chen': 'doc_ref' } },
-      ).refs,
-    ).toEqual(['doc_ref'])
-  })
-
   it('omits lookup when entries are cleared', () => {
     const edge = withLookupEntries(
       {

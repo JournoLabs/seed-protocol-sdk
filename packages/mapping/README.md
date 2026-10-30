@@ -190,9 +190,6 @@ source holds across a feed's items, for an editor that assigns them all.
 third argument and a property that stays a lookup keeps its entries; `useFieldMapper` does. Moving a
 lookup to another source (`withPreservedExtras`) keeps its entries too.
 
-`MappingDocument.lookups` / `applyMappingAsync({ lookups })` remain a read-only
-fallback for 0.6.0 documents. Prefer `FieldMapping.lookup.entries`.
-
 `classifyUrl({ url, contentType? })` is a pure MIME/extension classifier
 (`html` | `image` | `audio` | `video` | `unknown`). Enclosure nodes expose
 `meta.url`, `meta.contentType`, and `meta.class` (not a stringified object).
@@ -286,9 +283,9 @@ const mapper = useFieldMapper({
 ```
 
 Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`.
-Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without
-`renderLookup`, `onLookupsChange` still enables the package uid-text fallback.
-`lookups` / `onLookupsChange` are deprecated — persist `lookup.entries` on the edge.
+Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without it the
+package's uid text editor is shown; `slots.lookups: false` hides it. Entries are stored in
+`lookup.entries` on the edge.
 
 Row and JSON previews match sync `applyMapping` output. Lookup hits appear in the
 bag; extract/file/derive/assemble stay under `_pendingResolve`. JSON sits behind a disclosure.

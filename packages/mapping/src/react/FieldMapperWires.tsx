@@ -11,7 +11,6 @@ import {
 } from '../resolvedSources'
 import type {
   FieldMapping,
-  MappingLookups,
   SourceNode,
   TargetProperty,
 } from '../types'
@@ -69,8 +68,6 @@ export type FieldMapperWiresProps = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   mapper: UseFieldMapperResult
-  lookups?: MappingLookups
-  onLookupsChange?: (lookups: MappingLookups) => void
   renderLookup?: (row: FieldMapperLookupRow) => React.ReactNode
   /** @deprecated Prefer CSS map tokens. */
   connectionColors?: string[]
@@ -84,7 +81,6 @@ export function FieldMapperWires({
   targets,
   mappings,
   mapper,
-  onLookupsChange,
   renderLookup,
   connectionColors,
   slots,
@@ -408,7 +404,7 @@ export function FieldMapperWires({
               })}
             </div>
           ))}
-      {slots.lookups === 'section' && !renderLookup && onLookupsChange && (
+      {slots.lookups === 'section' && !renderLookup && (
         <LookupEditor
           mode="section"
           mappings={mappings}

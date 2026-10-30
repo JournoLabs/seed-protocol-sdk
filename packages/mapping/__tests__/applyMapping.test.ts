@@ -254,35 +254,6 @@ describe('applyMappingAsync', () => {
     expect(result.properties.authors).toEqual(['identity-uid-1'])
   })
 
-  it('falls back to deprecated document lookups', async () => {
-    const authorSources: SourceNode[] = [
-      {
-        id: 'rss-author',
-        label: 'author',
-        kind: 'rssField',
-        value: '  Jane Doe  ',
-      },
-    ]
-    const result = await applyMappingAsync(
-      authorSources,
-      [
-        {
-          sourceId: 'rss-author',
-          propertyName: 'authors',
-          resolve: 'lookup',
-        },
-      ],
-      [authorsTarget],
-      {
-        lookups: {
-          authors: { 'Jane Doe': 'identity-uid-1' },
-        },
-      },
-    )
-    expect(result.errors).toEqual([])
-    expect(result.properties.authors).toEqual(['identity-uid-1'])
-  })
-
   it('does not call host resolve on lookup miss', async () => {
     const authorSources: SourceNode[] = [
       {

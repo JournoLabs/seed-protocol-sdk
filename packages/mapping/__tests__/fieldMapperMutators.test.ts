@@ -58,14 +58,14 @@ function propertyModeSession() {
         sourceId,
         propertyName,
       )
-      let edge = result.mappings.find((m) => m.propertyName === propertyName)!
+      let edge = result.find((m) => m.propertyName === propertyName)!
       if (!edge.resolve) {
         const source = sources.find((s) => s.id === sourceId)
         const target = targets.find((t) => t.name === propertyName)
         const required = computeRequiredResolve(source, target)
         if (required) edge = { ...edge, resolve: required }
       }
-      onChange(upsertPropertyMapping(result.mappings, edge))
+      onChange(upsertPropertyMapping(result, edge))
     },
     setTransform(propertyName: string, resolve: FieldMapping['resolve'] | null) {
       const prev = mappings.find((m) => m.propertyName === propertyName)
@@ -161,12 +161,12 @@ describe('removeMappingsForSourceId', () => {
       mappings,
       'rss-link@extract',
     )
-    expect(byResolve.mappings).toEqual([
+    expect(byResolve).toEqual([
       { sourceId: 'rss-link', propertyName: 'importUrl' },
     ])
 
     const byOrigin = removeMappingsForSourceId(mappings, 'rss-link')
-    expect(byOrigin.mappings).toEqual([])
+    expect(byOrigin).toEqual([])
   })
 })
 

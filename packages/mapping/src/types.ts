@@ -111,24 +111,11 @@ export type FieldMapping = {
   assemble?: AssembleSpec
 }
 
-/**
- * Per-property string → seed uid (or uid list) dictionary for `resolve: 'lookup'`.
- * Keys are trimmed source values.
- *
- * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback only.
- */
-export type MappingLookups = Record<string, Record<string, string | string[]>>
-
 /** Persistable mapping authored in the UI (or programmatically). */
 export type MappingDocument = {
   version: 1
   sourceKind: 'markdown' | 'rss' | 'xml'
   mappings: FieldMapping[]
-  /**
-   * Optional relation value maps keyed by property name.
-   * @deprecated Prefer `FieldMapping.lookup.entries` on each lookup edge.
-   */
-  lookups?: MappingLookups
 }
 
 /** Result of applying mappings: property name → coerced value. */

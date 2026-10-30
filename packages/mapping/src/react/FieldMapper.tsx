@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, type ReactNode } from 'react'
 import type {
   FieldMapping,
-  MappingLookups,
   SourceNode,
   TargetProperty,
 } from '../types'
@@ -78,19 +77,6 @@ export type FieldMapperProps = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   onChange: (mappings: FieldMapping[]) => void
-  /**
-   * String → seed uid dictionaries for `resolve: 'lookup'` edges.
-   * Host should persist alongside `MappingDocument.lookups`.
-   */
-  /**
-   * @deprecated Prefer `FieldMapping.lookup.entries` + `renderLookup`.
-   * Still accepted as a read fallback for preview / LookupEditor.
-   */
-  lookups?: MappingLookups
-  /**
-   * @deprecated Prefer `renderLookup`. Enables the package uid editor fallback.
-   */
-  onLookupsChange?: (lookups: MappingLookups) => void
   /** Override default autoMap heuristics. */
   onAutoMap?: () => FieldMapping[]
   className?: string
@@ -164,8 +150,6 @@ export function FieldMapper({
   targets,
   mappings,
   onChange,
-  lookups = {},
-  onLookupsChange,
   onAutoMap,
   className,
   theme = 'default',
@@ -187,8 +171,6 @@ export function FieldMapper({
     targets,
     mappings,
     onChange,
-    lookups,
-    onLookupsChange,
     rowKey: layout === 'rows' ? rowKey : 'property',
     onAutoMap,
   })
@@ -240,8 +222,6 @@ export function FieldMapper({
           targets={targets}
           mappings={mappings}
           mapper={mapper}
-          lookups={lookups}
-          onLookupsChange={onLookupsChange}
           renderLookup={renderLookup}
           connectionColors={connectionColors}
           slots={resolvedSlots}
@@ -254,8 +234,6 @@ export function FieldMapper({
           targets={targets}
           mappings={mappings}
           mapper={mapper}
-          lookups={lookups}
-          onLookupsChange={onLookupsChange}
           slots={resolvedSlots}
           classNames={classNames}
           ui={ui}
@@ -271,8 +249,6 @@ export function FieldMapper({
           mappings={mappings}
           mapper={mapper}
           defaultRows={defaultRows}
-          lookups={lookups}
-          onLookupsChange={onLookupsChange}
           slots={resolvedSlots}
           classNames={classNames}
           ui={ui}

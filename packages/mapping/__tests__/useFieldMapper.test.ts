@@ -80,21 +80,20 @@ describe('connectSourceToProperty', () => {
       'rss-author',
       'author',
     )
-    expect(first.mappings).toEqual([
+    expect(first).toEqual([
       { sourceId: 'rss-author', propertyName: 'author', resolve: 'lookup' },
     ])
 
     const second = connectSourceToProperty(
-      first.mappings,
+      first,
       sources,
       targets,
       'rss-title',
       'author',
     )
-    expect(second.mappings).toEqual([
+    expect(second).toEqual([
       { sourceId: 'rss-title', propertyName: 'author', resolve: 'lookup' },
     ])
-    expect(second.clearedLookupProps).toEqual([])
   })
 
   it('normalizes @extract source ids', () => {
@@ -105,7 +104,7 @@ describe('connectSourceToProperty', () => {
       'rss-link@extract',
       'html',
     )
-    expect(result.mappings).toEqual([
+    expect(result).toEqual([
       { sourceId: 'rss-link', propertyName: 'html', resolve: 'extract' },
     ])
   })
@@ -145,25 +144,6 @@ describe('buildPropertyModeRows', () => {
     const html = rows.find((r) => r.id === 'html')!
     expect(html.requiredResolve).toBe('extract')
     expect(html.state).toBe('needsResolve')
-  })
-
-  it('shows lookup table hits in preview when lookups provided', () => {
-    const rows = buildPropertyModeRows({
-      targets,
-      sources,
-      mappings: [
-        {
-          sourceId: 'rss-author',
-          propertyName: 'author',
-          resolve: 'lookup',
-        },
-      ],
-      lookups: { author: { Ada: 'seed:identity/ada' } },
-    })
-    const author = rows.find((r) => r.id === 'author')!
-    expect(author.preview).toBe('seed:identity/ada')
-    expect(author.sampleValue).toBe('Ada')
-    expect(author.state).toBe('mapped')
   })
 
   it('shows edge lookup hits and needsLookup when unassigned', () => {
@@ -215,8 +195,12 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     expect(
       previewForEdge(empty, 'lookup', {
         target: targets[3],
-        lookups: { author: { author: 'uid-1' } },
-        propertyName: 'author',
+        mapping: {
+          sourceId: 'fm-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'author', refs: ['uid-1'] }] },
+        },
       }),
     ).toMatch(/‹lookup ref/)
   })
@@ -233,8 +217,12 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     expect(
       previewForEdge(sources[2], 'lookup', {
         target: targets[3],
-        lookups: { author: { Ada: 'uid-1' } },
-        propertyName: 'author',
+        mapping: {
+          sourceId: 'rss-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'Ada', refs: ['uid-1'] }] },
+        },
       }),
     ).toBe('uid-1')
   })
