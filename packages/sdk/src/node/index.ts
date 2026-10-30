@@ -36,6 +36,7 @@ export {
   exportArchive,
   type ArchiveExportErrorCode,
   type ArchiveOmission,
+  type ArchiveSeedRef,
   type ExportArchiveOptions,
   type ExportArchiveResult,
 } from '../archive/exportArchive'

@@ -8,7 +8,7 @@ import { currentPropertyRow, type CurrentPropertyRow } from '@/db/read/currentPr
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { metadataPropertyNameForms, readModelMetadataProperties } from '@/db/read/metadataProperty'
-import { resolveModelRecord, resolveModelRecordByNameOrType } from '@/db/read/resolveModelRecord'
+import { resolveModelRecord, resolveModelRecordByNameOrType, type ResolvedModelRecord } from '@/db/read/resolveModelRecord'
 import {
   findRelatedSeedRow,
   isLivePublishedSeed,
@@ -194,9 +194,7 @@ export function refsOf(value: string | null | undefined, kind: PublishPropertyKi
   return ref ? [ref] : []
 }
 
-type SeedModel = { id: number; name: string }
-
-async function modelOfSeed(seed: FoundSeedRow, modelNameHint?: string): Promise<SeedModel | undefined> {
+export async function modelOfSeed(seed: FoundSeedRow, modelNameHint?: string): Promise<ResolvedModelRecord | undefined> {
   if (seed.modelFileId) {
     const model = await resolveModelRecord(undefined, { modelFileId: seed.modelFileId })
     if (model) return model

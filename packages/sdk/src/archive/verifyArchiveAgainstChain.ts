@@ -1,5 +1,5 @@
 import { readBagInfo, verifyArchive, type ArchiveCheck, type ArchiveVerification, type Bag } from '@seedprotocol/archive'
-import { ArchiveExportError, exportArchive, type ExportableItem } from './exportArchive'
+import { ArchiveExportError, exportArchive, type ArchiveSeedRef, type ExportableItem } from './exportArchive'
 
 export type ArchiveChainVerification = ArchiveVerification & {
   /** The bag against the one this device builds for the item from EAS. */
@@ -12,12 +12,15 @@ const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index])
 
 /**
- * Checks `bag` against its own manifests and against a fresh reproducible export of `item`, so the
- * hash it's compared with comes from EAS and not from the bag. `rebuilt` is `not_checked` when the
- * bag wasn't built to be reproduced, is for another seed or an older Version (only the current
- * Version can be rebuilt), or the export is refused; `detail` says which.
+ * Checks `bag` against its own manifests and against a fresh reproducible export of `item` at the
+ * time the bag covers, so the hash it's compared with comes from EAS and not from the bag. `rebuilt`
+ * is `not_checked` when the bag wasn't built to be reproduced, is for another seed, or the export is
+ * refused; `detail` says which.
  */
-export async function verifyArchiveAgainstChain(bag: Bag, item: ExportableItem): Promise<ArchiveChainVerification> {
+export async function verifyArchiveAgainstChain(
+  bag: Bag,
+  item: ExportableItem | ArchiveSeedRef,
+): Promise<ArchiveChainVerification> {
   const own = verifyArchive(bag)
   const notChecked = (detail: string): ArchiveChainVerification => ({
     ...own,
@@ -28,9 +31,12 @@ export async function verifyArchiveAgainstChain(bag: Bag, item: ExportableItem):
   const info = readBagInfo(bag)
   if (!info.has('Seed-Bag-Format')) return notChecked('The bag is not a reproducible bag')
 
+  const asOf = Date.parse(info.get('Seed-Bag-As-Of') ?? '') / 1000
+  if (!Number.isSafeInteger(asOf)) return notChecked('The bag does not say what time it covers')
+
   let rebuilt: Bag
   try {
-    ;({ bag: rebuilt } = await exportArchive(item, { reproducible: true }))
+    ;({ bag: rebuilt } = await exportArchive(item, { reproducible: true, asOf }))
   } catch (error) {
     if (error instanceof ArchiveExportError) return notChecked(`Export refused (${error.code}): ${error.message}`)
     throw error

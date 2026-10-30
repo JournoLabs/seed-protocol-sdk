@@ -12,32 +12,43 @@ import {
   type PremisEvent,
   type PremisFile,
 } from '@seedprotocol/archive'
-import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@seedprotocol/arweave'
 import {
-  getCanonicalItemPropertiesFromEas,
+  fetchArweaveRawBytesAcrossGateways,
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+} from '@seedprotocol/arweave'
+import {
   getEasAttestationExplorerUrl,
   getEasChainDeployment,
   getEasReadChainId,
-  getItemVersionsFromEas,
-  getSeedsByUidsFromEas,
+  isEasEmptyValue,
+  isUnfilledReference,
   isValidEasAttestationUid,
   type Attestation,
 } from '@seedprotocol/eas'
+import { parseEasPropertyMetadata } from '@seedprotocol/query'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { getMetadata } from '@/db/read/getMetadata'
-import { getPublishGraph, refsOf, type PublishGraphProperty } from '@/db/read/publishGraph'
+import { nameMatchLevels } from '@/db/read/nameMatchLevels'
+import { getPublishGraph, modelOfSeed, publishPropertyKind, refsOf, type PublishGraphProperty, type PublishPropertyKind } from '@/db/read/publishGraph'
 import { resolveItemStorageChildFile } from '@/db/read/getPublishUploads'
+import { resolveModelRecordByNameOrType } from '@/db/read/resolveModelRecord'
 import { findRelatedSeedRow, isLivePublishedSeed, isUnpublishedSeed } from '@/db/read/resolveRelatedSeedRef'
+import { resolveSyncedPropertyName } from '@/events/item/syncDbWithEas'
+import { decodeCompositeUpload, isCompositeUpload } from '@/helpers/compositeUpload'
+import { syncedPropertyValue } from '@/helpers/easValueTypes'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { findEmbeddedImageFilePath, SEED_PROPERTY_REF_PREFIX } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getExtensionForMimeType, resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { normalizeDataType } from '@/helpers/property'
+import { getPropertyDefinitions, type PropertyDefinition } from '@/helpers/propertyDefinition'
 import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { versions } from '@/seedSchema'
-import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind } from '@/storageValue/resolve'
+import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind, type StoredValueKind } from '@/storageValue/resolve'
+import { readSeedAtTime, type SeedAtTime } from './seedAtTime'
 
 /**
  * Exports a published item as a BagIt bag (RFC 8493) that an archive can ingest without Seed
@@ -46,15 +57,25 @@ import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind } from
  */
 
 export type ExportArchiveOptions = {
-  /** Download Images, Files and Html bodies that aren't on this device. Default true. */
+  /**
+   * Download Images, Files and Html bodies that aren't on this device. Default true. A reproducible
+   * bag always reads them by transaction id, so `false` is refused with `reproducible`.
+   */
   fetch?: boolean
   /**
-   * Build the bag every client gets for this Version: times and the attester come from EAS, the
-   * bag is dated with the Version's attestation, and nothing local to this device goes in. Needs
-   * the EAS indexer, and refuses a copy that is behind the chain, a bag that would leave anything
-   * out, and `sourceOrganization` or `baggingDate`. Default false.
+   * Build the bag every client gets for this state of the seed, whatever this device holds: values,
+   * times and the attester come from EAS, file bytes from their Arweave transactions, and nothing
+   * local goes in. Needs the EAS indexer and a read gateway, and refuses a device that has attested
+   * something EAS doesn't report yet, a bag that would leave anything out, and
+   * `sourceOrganization` or `baggingDate`. Default false.
    */
   reproducible?: boolean
+  /**
+   * Reproducible only: the seed as it was at this time (unix seconds), so a later patch, Version or
+   * revocation doesn't change the bag. Default: the last attestation or revocation on the newest
+   * live Version's properties.
+   */
+  asOf?: number
   /** bag-info.txt Source-Organization, e.g. the publication. Left out when not given. */
   sourceOrganization?: string
   /** Bagging-Date and the time of the bag's own PREMIS events. Defaults to now. */
@@ -69,7 +90,7 @@ export type ExportArchiveResult = { bag: Bag; omitted: ArchiveOmission[] }
 export type ArchiveExportErrorCode =
   | 'not_published'
   | 'unpublished_changes'
-  /** reproducible: this device's copy is behind what EAS has for the seed. */
+  /** reproducible: EAS doesn't report the seed, or everything this device has attested for it, yet. */
   | 'not_synced'
   /** reproducible: the EAS indexer couldn't be read. */
   | 'chain_unavailable'
@@ -105,6 +126,12 @@ export type ExportableItem = {
   getService?: () => { getSnapshot: () => { context: { schemaName?: string } } }
 }
 
+/**
+ * A seed named by its uid, for a reproducible bag on a device that holds no rows for it. Only the
+ * schema has to be loaded.
+ */
+export type ArchiveSeedRef = { seedUid: string; modelName: string; schemaName?: string }
+
 /** A property value as data/item.json records it. */
 type ItemJsonProperty = {
   dataType: string
@@ -118,13 +145,36 @@ type ItemJsonProperty = {
 
 type Stamp = { iso: string; clock: ArchiveClockSource }
 
-/** What EAS has for the seed: its attestation, its Versions, and the current Version's properties. */
-type ChainRecord = {
-  seed: Attestation
-  /** The seed attester's Versions, oldest first, revoked ones included. */
-  versions: Attestation[]
-  /** Newest property attestation per property schema on the current Version. */
-  properties: Attestation[]
+/** A property's value and file, from this device's rows or from EAS. */
+type ArchiveProperty = {
+  key: string
+  definition: PropertyDefinition
+  kind: PublishPropertyKind
+  value?: string | null
+  attestationUid?: string
+  /** The attestation time this device recorded; local bags only. */
+  recordedMs?: number | null
+  refSeedType?: string | null
+}
+
+type ArchiveFile = { bytes?: Uint8Array; fileName?: string; arweaveTransactionId?: string }
+
+/** Where one export reads from: the two differ in nothing but this. */
+type ArchiveSource = {
+  seedUid: string
+  versionUid: string
+  versionMs?: number | null
+  modelName: string
+  attester?: string
+  properties: ArchiveProperty[]
+  /** Reproducible bags only. */
+  chain?: SeedAtTime
+  /** The ItemStorage file; `missing` when it should exist and couldn't be read. */
+  readItemStorage: (property: ArchiveProperty) => Promise<ArchiveFile | 'missing' | undefined>
+  readStorageSeed: (property: ArchiveProperty, kind: StoredValueKind) => Promise<ArchiveFile>
+  /** An image the Html names by transaction id and no property holds. */
+  readEmbeddedImage: (txId: string) => Promise<ArchiveFile | undefined>
+  history: (chainId: number) => Promise<PremisEvent[]>
 }
 
 const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
@@ -188,77 +238,8 @@ async function attestedRef(ref: string): Promise<string> {
   return isLivePublishedSeed(seed) || isUnpublishedSeed(seed) ? seed.seedUid : ref
 }
 
-/**
- * Reads the seed's record from EAS and checks this device holds the same state: the newest live
- * Version is the one being exported, and every property attestation that holds a current value
- * on it is the one this device has.
- */
-async function readChainRecord(
-  seedUid: string,
-  versionUid: string,
-  localPropertyUids: Set<string>,
-): Promise<ChainRecord> {
-  let seed: Attestation | undefined
-  let allVersions: Attestation[]
-  let properties: Attestation[]
-  try {
-    ;[seed] = await getSeedsByUidsFromEas({ uids: [seedUid], excludeRevoked: false })
-    allVersions = await getItemVersionsFromEas({ seedUids: [seedUid], excludeRevoked: false })
-    properties = await getCanonicalItemPropertiesFromEas({ versionUids: [versionUid], excludeRevoked: true })
-  } catch (error) {
-    throw new ArchiveExportError('chain_unavailable', `Couldn't read seed ${seedUid} from EAS`, { cause: error })
-  }
-  if (!seed || !sameUid(seed.id, seedUid)) {
-    throw new ArchiveExportError('not_synced', `EAS has no seed attestation ${seedUid}`)
-  }
-  const versionsOfSeed = allVersions
-    .filter((v) => sameUid(v.attester, seed!.attester))
-    .sort((a, b) => a.timeCreated - b.timeCreated || a.id.localeCompare(b.id))
-  const newestLive = versionsOfSeed.filter((v) => !v.revoked).at(-1)
-  if (!newestLive || !sameUid(newestLive.id, versionUid)) {
-    throw new ArchiveExportError(
-      'not_synced',
-      `The newest live Version on EAS is ${newestLive?.id ?? 'none'}, not ${versionUid}; sync the seed first`,
-    )
-  }
-  const missing = properties.filter((p) => !localPropertyUids.has(p.id.toLowerCase())).map((p) => p.id)
-  if (missing.length > 0) {
-    throw new ArchiveExportError(
-      'not_synced',
-      `Property attestations ${missing.join(', ')} on Version ${versionUid} aren't on this device; sync the seed first`,
-    )
-  }
-  return { seed, versions: versionsOfSeed, properties }
-}
-
-/**
- * Builds the bag for `item`'s current published state:
- *
- * - `data/index.html` (or `data/<property>.html` when the model has several Html properties): the
- *   Html with references to files in the bag rewritten to relative paths.
- * - `data/source/<property>.html`: each Html exactly as published.
- * - `data/assets/<sha256>.<ext>`: Images, Files and images the Html references.
- * - `data/item.json`: every property's value, attestation uid and Arweave transaction.
- * - `metadata/dc.xml` and `metadata/premis.xml`.
- *
- * Every time in the bag says whose clock it came from ({@link ArchiveClockSource}). With
- * `reproducible`, every client with the same Version synced and the same schema gets the same
- * bytes, so the same tagmanifest hash.
- *
- * Throws {@link ArchiveExportError} `not_published` for an item without a live published version,
- * and `unpublished_changes` when a property holds a saved value that isn't published yet.
- * A file that can't be read or downloaded is left out and reported in `omitted`, not thrown,
- * except with `reproducible`.
- */
-export async function exportArchive(item: ExportableItem, options: ExportArchiveOptions = {}): Promise<ExportArchiveResult> {
-  const fetch = options.fetch ?? true
-  const reproducible = options.reproducible ?? false
-  if (reproducible && (options.sourceOrganization !== undefined || options.baggingDate !== undefined)) {
-    throw new ArchiveExportError(
-      'invalid_options',
-      'A reproducible bag takes no sourceOrganization or baggingDate: they would differ between clients',
-    )
-  }
+/** The bag's source on this device: its rows and files, refused while it holds unpublished edits. */
+async function localSource(item: ExportableItem, fetch: boolean): Promise<ArchiveSource> {
   const graph = await getPublishGraph(item)
   const root = graph.root
   const seedRow = await findSeedRow({ localId: root.seedLocalId })
@@ -275,10 +256,234 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     )
   }
 
-  const localPropertyUids = new Set(
-    root.properties.map(propertyUid).filter((uid): uid is string => !!uid).map((uid) => uid.toLowerCase()),
+  const graphProperty = new Map(root.properties.map((p) => [p.key, p]))
+  return {
+    seedUid,
+    versionUid: version.uid,
+    versionMs: version.attestationCreatedAt,
+    modelName: root.modelName,
+    attester: seedRow?.publisher ?? undefined,
+    properties: root.properties.map((property) => ({
+      key: property.key,
+      definition: property.definition,
+      kind: property.kind,
+      value: property.row?.propertyValue,
+      attestationUid: propertyUid(property),
+      recordedMs: property.row?.attestationCreatedAt,
+      refSeedType: property.row?.refSeedType,
+    })),
+    readItemStorage: async (property) => {
+      const { filePath } = await resolveItemStorageChildFile(root, graphProperty.get(property.key)!)
+      if (filePath) return { bytes: await readBytes(filePath), fileName: filePath }
+      return hasValue(property.value) ? 'missing' : undefined
+    },
+    readStorageSeed: async (property, kind) => {
+      const row = graphProperty.get(property.key)!.row!
+      const arweaveTransactionId = await storageSeedTransactionId(
+        resolveSeedIdsFromRefString(normalizeRelationPropertyValue(row.propertyValue) ?? ''),
+      )
+      // The bag keeps each Html exactly as published
+      const display = await resolveStorageDisplay(kind, row, { fetch, rehostLinks: false })
+      if (display.filePath) {
+        return { bytes: await readBytes(display.filePath), fileName: display.filePath, arweaveTransactionId }
+      }
+      const text = kind === 'html' ? display.renderValue : undefined
+      return { bytes: text === undefined ? undefined : new TextEncoder().encode(text), arweaveTransactionId }
+    },
+    readEmbeddedImage: async (txId) => {
+      const imageRow = await getMetadata({ storageTransactionId: txId })
+      let filePath = imageRow?.seedLocalId ? await findEmbeddedImageFilePath(imageRow.seedLocalId) : undefined
+      if (!filePath) {
+        const display = await resolveStorageDisplay('image', { refResolvedValue: txId, localStorageDir: '/images' }, { fetch })
+        filePath = display.filePath
+      }
+      return filePath ? { bytes: await readBytes(filePath), fileName: filePath, arweaveTransactionId: txId } : undefined
+    },
+    history: (chainId) =>
+      localHistoryEvents(root.seedLocalId, seedUid, root.properties, version, seedRow?.publisher ?? undefined, chainId),
+  }
+}
+
+const readSeedFromChain = async (seedUid: string, asOf?: number): Promise<SeedAtTime | undefined> => {
+  try {
+    return await readSeedAtTime(seedUid, asOf)
+  } catch (error) {
+    throw new ArchiveExportError('chain_unavailable', `Couldn't read seed ${seedUid} from EAS`, { cause: error })
+  }
+}
+
+/** A property attestation's value as a synced row holds it; undefined when it doesn't decode. */
+function attestedValue(
+  metadata: { type?: string; value?: unknown },
+  dataType: string | undefined,
+  isRelation: boolean,
+  retracted: boolean,
+): string | null | undefined {
+  const value = Array.isArray(metadata.value) ? metadata.value.filter((v) => !isUnfilledReference(v)) : metadata.value
+  if (retracted || isEasEmptyValue(metadata.type, value)) return null
+  if (isRelation && !Array.isArray(value) && isUnfilledReference(value)) return undefined
+  const decoded = syncedPropertyValue(dataType, metadata.type, value)
+  if (decoded === undefined || decoded === null) return decoded
+  return typeof decoded === 'string' ? decoded : JSON.stringify(decoded)
+}
+
+/** The Arweave transaction a storage seed held at `asOf`. */
+async function chainStorageTransaction(seedUid: string, asOf: number): Promise<string | undefined> {
+  const state = await readSeedFromChain(seedUid, asOf)
+  for (const attestation of state?.properties ?? []) {
+    const parsed = parseEasPropertyMetadata(attestation.decodedDataJson)
+    if (!parsed.ok || attestation.revoked) continue
+    const { name, value } = parsed.metadata
+    const isSlot = name === 'storage_transaction_id' || name === 'transaction_id'
+    if (isSlot && typeof value === 'string' && ARWEAVE_TX_ID.test(value)) return value
+  }
+  return undefined
+}
+
+/**
+ * Refuses when this device has attested something EAS doesn't report: the indexer is behind, and
+ * the bag would be of an older state without saying so.
+ */
+async function assertChainHasLocalState(item: ExportableItem, state: SeedAtTime): Promise<void> {
+  const { root } = await getPublishGraph(item)
+  const local = await getLatestPublishedVersionRow(root.seedLocalId)
+  if (local && !state.versions.some((v) => sameUid(v.id, local.uid))) {
+    throw new ArchiveExportError('not_synced', `EAS doesn't report Version ${local.uid} yet`)
+  }
+  const reported = new Set(state.allProperties.map((p) => p.id.toLowerCase()))
+  const missing = root.properties
+    .filter((p) => sameUid(p.row?.versionUid, state.version!.id))
+    .map(propertyUid)
+    .filter((uid): uid is string => isValidEasAttestationUid(uid) && !reported.has(uid!.toLowerCase()))
+  if (missing.length > 0) {
+    throw new ArchiveExportError('not_synced', `EAS doesn't report property attestations ${missing.join(', ')} yet`)
+  }
+}
+
+/** The bag's source on EAS and Arweave. Uses this device for nothing but the schema. */
+async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number | undefined): Promise<ArchiveSource> {
+  const localItem = 'seedLocalId' in item && item.seedLocalId ? (item as ExportableItem) : undefined
+  const seedRow = localItem ? await findSeedRow({ localId: localItem.seedLocalId }) : undefined
+  const seedUid = localItem ? seedRow?.uid : (item as ArchiveSeedRef).seedUid
+  if (!seedUid || !isValidEasAttestationUid(seedUid)) {
+    throw new ArchiveExportError('not_published', `${item.modelName} ${localItem?.seedLocalId ?? seedUid} has no seed attestation`)
+  }
+  const model = seedRow
+    ? await modelOfSeed(seedRow, item.modelName)
+    : await resolveModelRecordByNameOrType(item.modelName, { schemaName: (item as ArchiveSeedRef).schemaName })
+  if (!model) throw new ArchiveExportError('invalid_options', `Model ${item.modelName} isn't loaded; load its schema first`)
+
+  const state = await readSeedFromChain(seedUid, asOf)
+  if (!state) throw new ArchiveExportError('not_synced', `EAS has no seed attestation ${seedUid}`)
+  const version = state.version
+  const seedRevoked = state.seed.revoked && (asOf === undefined || state.seed.revocationTime <= asOf)
+  if (!version || seedRevoked) {
+    throw new ArchiveExportError('not_published', `${model.name} ${seedUid} has no live Version${asOf ? ` at ${asOf}` : ''}`)
+  }
+  if (localItem && asOf === undefined) await assertChainHasLocalState(localItem, state)
+
+  const definitions = await getPropertyDefinitions(model.id)
+  const levels = await nameMatchLevels()
+  const schema = Object.fromEntries(
+    [...definitions].map(([key, def]) => [key, { ...def, nameMatch: levels.property(model.name, key, model.schemaFileId ?? undefined) }]),
   )
-  const chainRecord = reproducible ? await readChainRecord(seedUid, version.uid, localPropertyUids) : undefined
+  const attested = new Map<string, { attestation: Attestation; value: string | null }>()
+  let storageTransaction: { attestation: Attestation; id: string } | undefined
+  // Oldest first: where two schemas stand for one property, the newer one holds it.
+  for (const attestation of [...state.properties].sort((a, b) => a.timeCreated - b.timeCreated)) {
+    const parsed = parseEasPropertyMetadata(attestation.decodedDataJson)
+    if (!parsed.ok || !parsed.metadata.name) continue
+    const { name, value: raw, type } = parsed.metadata
+    if (name === 'storage_transaction_id' && typeof raw === 'string') storageTransaction = { attestation, id: raw }
+    const resolved = resolveSyncedPropertyName(name, raw, schema, type)
+    const key = resolved?.key ?? resolved?.propertyName
+    if (!resolved || !key || !definitions.has(key)) continue
+    const value = attestedValue(parsed.metadata, resolved.dataType, resolved.isRelation, attestation.revoked)
+    if (value !== undefined) attested.set(key, { attestation, value })
+  }
+
+  const downloads = new Map<string, Promise<Uint8Array | undefined>>()
+  const readTransaction = (txId: string): Promise<Uint8Array | undefined> => {
+    const download = downloads.get(txId) ?? fetchArweaveRawBytesAcrossGateways(txId)
+    downloads.set(txId, download)
+    return download
+  }
+
+  return {
+    seedUid,
+    versionUid: version.id,
+    modelName: model.name,
+    attester: state.seed.attester,
+    chain: state,
+    properties: [...definitions].map(([key, definition]) => {
+      const kind = publishPropertyKind(key, definition)
+      const held = kind === 'itemStorage' ? storageTransaction?.attestation : attested.get(key)?.attestation
+      return { key, definition, kind, value: attested.get(key)?.value, attestationUid: held?.id }
+    }),
+    readItemStorage: async (property) => {
+      if (!storageTransaction || storageTransaction.attestation.revoked) return undefined
+      const bytes = await readTransaction(storageTransaction.id)
+      if (!bytes) return 'missing'
+      if (!isCompositeUpload(bytes)) return { bytes }
+      const child = decodeCompositeUpload(bytes)?.find((c) => c.name === property.key)
+      return child ? { bytes: child.bytes } : undefined
+    },
+    readStorageSeed: async (property) => {
+      const uid = normalizeRelationPropertyValue(property.value)
+      const arweaveTransactionId = uid ? await chainStorageTransaction(uid, state.asOf) : undefined
+      return { bytes: arweaveTransactionId ? await readTransaction(arweaveTransactionId) : undefined, arweaveTransactionId }
+    },
+    readEmbeddedImage: async (txId) => {
+      const bytes = await readTransaction(txId)
+      return bytes ? { bytes, arweaveTransactionId: txId } : undefined
+    },
+    history: async (chainId) => chainHistoryEvents(state, chainId),
+  }
+}
+
+/**
+ * Builds the bag for `item`'s published state:
+ *
+ * - `data/index.html` (or `data/<property>.html` when the model has several Html properties): the
+ *   Html with references to files in the bag rewritten to relative paths.
+ * - `data/source/<property>.html`: each Html exactly as published, byte for byte.
+ * - `data/assets/<sha256>.<ext>`: Images, Files and images the Html references.
+ * - `data/item.json`: every property's value, attestation uid and Arweave transaction.
+ * - `metadata/dc.xml` and `metadata/premis.xml`.
+ *
+ * Every time in the bag says whose clock it came from ({@link ArchiveClockSource}). With
+ * `reproducible`, the bag is a function of EAS, Arweave and the schema (ADR 0028), so every client
+ * gets the same bytes and the same tagmanifest hash, and `item` can be an {@link ArchiveSeedRef}.
+ *
+ * Throws {@link ArchiveExportError} `not_published` for an item without a live published version,
+ * and, except with `reproducible`, `unpublished_changes` when a property holds a saved value that
+ * isn't published yet. A file that can't be read or downloaded is left out and reported in
+ * `omitted`, not thrown, except with `reproducible`.
+ */
+export async function exportArchive(
+  item: ExportableItem | ArchiveSeedRef,
+  options: ExportArchiveOptions = {},
+): Promise<ExportArchiveResult> {
+  const fetch = options.fetch ?? true
+  const reproducible = options.reproducible ?? false
+  const { asOf } = options
+  if (reproducible && (options.sourceOrganization !== undefined || options.baggingDate !== undefined || !fetch)) {
+    throw new ArchiveExportError(
+      'invalid_options',
+      'A reproducible bag takes no sourceOrganization or baggingDate, which would differ between clients, and reads its files from Arweave, so it refuses fetch: false',
+    )
+  }
+  if (asOf !== undefined && (!reproducible || !Number.isSafeInteger(asOf) || asOf <= 0)) {
+    throw new ArchiveExportError('invalid_options', 'asOf is unix seconds, and needs reproducible: rows only hold the latest state')
+  }
+  if (!reproducible && !('seedLocalId' in item && item.seedLocalId)) {
+    throw new ArchiveExportError('invalid_options', 'A seed named by uid can only be exported with reproducible')
+  }
+  const source = reproducible
+    ? await chainSource(item, asOf)
+    : await localSource(item as ExportableItem, fetch)
+  const { seedUid, versionUid, modelName, attester, chain: chainRecord } = source
+
   const chainTimeByUid = new Map<string, number>(
     chainRecord
       ? [chainRecord.seed, ...chainRecord.versions, ...chainRecord.properties].map((a) => [a.id.toLowerCase(), a.timeCreated])
@@ -294,29 +499,28 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     return iso ? { iso, clock: 'local-record' } : undefined
   }
 
-  const versionStamp = stampOf(version.uid, version.attestationCreatedAt)
+  const versionStamp = stampOf(versionUid, source.versionMs)
   const bagStamp: Stamp = chainRecord
-    ? versionStamp!
+    ? { iso: isoFromSeconds(chainRecord.asOf), clock: 'chain-block' }
     : { iso: (options.baggingDate ?? new Date()).toISOString(), clock: 'export-device' }
 
   const chainId = getEasReadChainId()
   const chain = getEasChainDeployment(chainId)
   const explorerUrl = (uid: string) => (chain ? getEasAttestationExplorerUrl(chain, uid) : undefined)
-  const schemaName = item.getService?.().getSnapshot().context.schemaName
-  const attester = chainRecord?.seed.attester ?? seedRow?.publisher ?? undefined
+  const schemaName = 'seedLocalId' in item ? item.getService?.().getSnapshot().context.schemaName : item.schemaName
 
   const omitted: ArchiveOmission[] = []
   const payload: BagFile[] = []
   const fileInfo = new Map<string, { mimeType: string; arweaveTransactionId?: string }>()
   const assetPathByTx = new Map<string, string>()
   const assetPathByProperty = new Map<string, string>()
-  const htmlSources: { key: string; text: string; arweaveTransactionId?: string }[] = []
+  const htmlSources: { key: string; bytes: Uint8Array; text: string; arweaveTransactionId?: string }[] = []
   const properties: Record<string, ItemJsonProperty> = {}
 
   // A file's local name differs between clients (downloads are named after the transaction id), so
-  // a reproducible bag types a file by its bytes alone.
-  const mimeTypeOf = (filePath: string, bytes: Uint8Array): string =>
-    resolveUploadMimeType(reproducible ? { bytes } : { fileName: filePath, bytes }) ?? 'application/octet-stream'
+  // a reproducible bag has none, and types a file by its bytes alone.
+  const mimeTypeOf = ({ bytes, fileName }: ArchiveFile & { bytes: Uint8Array }): string =>
+    resolveUploadMimeType(fileName ? { fileName, bytes } : { bytes }) ?? 'application/octet-stream'
 
   const addAsset = (bytes: Uint8Array, mimeType: string, arweaveTransactionId?: string): string => {
     const ext = getExtensionForMimeType(mimeType)
@@ -329,11 +533,10 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     return path
   }
 
-  for (const property of root.properties) {
-    const { key, definition: def, kind, row } = property
+  for (const property of source.properties) {
+    const { key, definition: def, kind, value, attestationUid } = property
     const dataType = normalizeDataType(def.dataType) ?? String(def.dataType)
-    const attestationUid = propertyUid(property)
-    const stamp = stampOf(attestationUid, row?.attestationCreatedAt)
+    const stamp = stampOf(attestationUid, property.recordedMs)
     const entry: ItemJsonProperty = {
       dataType,
       attestationUid,
@@ -343,12 +546,12 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     properties[key] = entry
 
     if (kind === 'basic' || kind === 'storageTransaction') {
-      entry.value = row?.propertyValue ?? null
+      entry.value = value ?? null
       continue
     }
     if (kind === 'relation' || kind === 'list') {
-      // From the row: the publish graph doesn't walk the refs of a property that's already attested.
-      const refs = await Promise.all(refsOf(row?.propertyValue, kind).map(attestedRef))
+      // From the value: the publish graph doesn't walk the refs of a property that's already attested.
+      const refs = await Promise.all(refsOf(value, kind).map(attestedRef))
       entry.value = kind === 'list' ? refs : (refs[0] ?? null)
       if (refs.some((ref) => !isPublishedSeedRef(ref))) {
         omitted.push({ property: key, reason: 'it refers to a seed that has no attestation uid' })
@@ -357,50 +560,38 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     }
 
     if (kind === 'itemStorage') {
-      const { filePath } = await resolveItemStorageChildFile(root, property)
-      if (!filePath) {
-        if (row && hasValue(row.propertyValue)) omitted.push({ property: key, reason: 'its file is not on this device' })
-        continue
-      }
-      const bytes = await readBytes(filePath)
+      const file = await source.readItemStorage(property)
+      if (file === 'missing') omitted.push({ property: key, reason: 'its file is not on this device' })
+      if (!file || file === 'missing' || !file.bytes) continue
       if (dataType === 'Html') {
-        htmlSources.push({ key, text: new TextDecoder().decode(bytes) })
+        htmlSources.push({ key, bytes: file.bytes, text: new TextDecoder().decode(file.bytes) })
       } else {
-        entry.file = addAsset(bytes, mimeTypeOf(filePath, bytes))
+        entry.file = addAsset(file.bytes, mimeTypeOf({ ...file, bytes: file.bytes }))
         assetPathByProperty.set(key, entry.file)
       }
       continue
     }
 
-    // storageSeed: the value is a storage seed whose own row records the Arweave transaction.
-    if (!row || !hasValue(row.propertyValue)) continue
-    const storageKind = storedValueKind(def, row)
+    // storageSeed: the value is a storage seed whose own attestations record the Arweave transaction.
+    if (!hasValue(value)) continue
+    const storageKind = storedValueKind(def, property)
     if (!storageKind || storageKind === 'itemStorage') {
       omitted.push({ property: key, reason: `${dataType} storage seeds are not exported yet` })
       continue
     }
-    const arweaveTransactionId = await storageSeedTransactionId(
-      resolveSeedIdsFromRefString(normalizeRelationPropertyValue(row.propertyValue) ?? ''),
-    )
+    const file = await source.readStorageSeed(property, storageKind)
+    const { bytes, arweaveTransactionId } = file
     if (arweaveTransactionId) entry.arweaveTransactionId = arweaveTransactionId
-    // The bag keeps each Html exactly as published
-    const display = await resolveStorageDisplay(storageKind, row, { fetch, rehostLinks: false })
-
+    if (!bytes) {
+      const what = storageKind === 'html' ? 'Html' : 'file'
+      omitted.push({ property: key, reason: `its ${what} could not be read or downloaded` })
+      continue
+    }
     if (storageKind === 'html') {
-      const text = display.filePath ? await BaseFileManager.readFileAsString(display.filePath) : display.renderValue
-      if (text === undefined) {
-        omitted.push({ property: key, reason: 'its Html could not be read or downloaded' })
-        continue
-      }
-      htmlSources.push({ key, text, arweaveTransactionId })
+      htmlSources.push({ key, bytes, text: new TextDecoder().decode(bytes), arweaveTransactionId })
       continue
     }
-    if (!display.filePath) {
-      omitted.push({ property: key, reason: 'its file could not be read or downloaded' })
-      continue
-    }
-    const bytes = await readBytes(display.filePath)
-    entry.file = addAsset(bytes, mimeTypeOf(display.filePath, bytes), arweaveTransactionId)
+    entry.file = addAsset(bytes, mimeTypeOf({ ...file, bytes }), arweaveTransactionId)
     assetPathByProperty.set(key, entry.file)
   }
 
@@ -408,15 +599,8 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   const embeddedAssetPath = async (txId: string): Promise<string | undefined> => {
     const known = assetPathByTx.get(txId)
     if (known) return known
-    const imageRow = await getMetadata({ storageTransactionId: txId })
-    let filePath = imageRow?.seedLocalId ? await findEmbeddedImageFilePath(imageRow.seedLocalId) : undefined
-    if (!filePath) {
-      const display = await resolveStorageDisplay('image', { refResolvedValue: txId, localStorageDir: '/images' }, { fetch })
-      filePath = display.filePath
-    }
-    if (!filePath) return undefined
-    const bytes = await readBytes(filePath)
-    return addAsset(bytes, mimeTypeOf(filePath, bytes), txId)
+    const file = await source.readEmbeddedImage(txId)
+    return file?.bytes ? addAsset(file.bytes, mimeTypeOf({ ...file, bytes: file.bytes }), txId) : undefined
   }
 
   const encoder = new TextEncoder()
@@ -447,7 +631,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     payload.push({ path: viewPath, bytes: encoder.encode(rewritten) })
     fileInfo.set(viewPath, { mimeType: 'text/html' })
     const sourcePath = `source/${html.key}.html`
-    payload.push({ path: sourcePath, bytes: encoder.encode(html.text) })
+    payload.push({ path: sourcePath, bytes: html.bytes })
     fileInfo.set(sourcePath, { mimeType: 'text/html', arweaveTransactionId: html.arweaveTransactionId })
     properties[html.key]!.file = sourcePath
   }
@@ -461,12 +645,13 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
 
   const itemJson = {
     seedUid,
-    versionUid: version.uid,
+    versionUid,
     schemaName,
-    modelName: root.modelName,
+    modelName,
     chain: { id: chainId, name: chain?.name },
     attester,
     reproducible,
+    ...(chainRecord ? { asOf: isoFromSeconds(chainRecord.asOf) } : {}),
     properties: Object.fromEntries(Object.entries(properties).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     omitted,
   }
@@ -488,16 +673,14 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     source: doc?.url,
   })
 
-  const history = chainRecord
-    ? chainHistoryEvents(chainRecord, version.uid, chainId)
-    : await localHistoryEvents(root.seedLocalId, seedUid, root.properties, version, attester, chainId)
+  const history = await source.history(chainId)
   const premis = premisXml({
     objects: [
       {
         kind: 'intellectualEntity',
         identifiers: [
           { type: 'Seed Protocol seed UID', value: seedUid },
-          { type: 'Seed Protocol version UID', value: version.uid },
+          { type: 'Seed Protocol version UID', value: versionUid },
         ],
       },
       ...payload.map((file): PremisFile => {
@@ -528,13 +711,13 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   if (options.sourceOrganization) info.push(['Source-Organization', options.sourceOrganization])
   info.push(['External-Identifier', seedUid])
   if (doc?.name) info.push(['External-Description', doc.name])
-  info.push(['Seed-Uid', seedUid], ['Seed-Version-Uid', version.uid], ['Seed-Model', root.modelName])
+  info.push(['Seed-Uid', seedUid], ['Seed-Version-Uid', versionUid], ['Seed-Model', modelName])
   if (schemaName) info.push(['Seed-Schema', schemaName])
   info.push(['EAS-Chain-Id', String(chainId)])
   if (chain?.name) info.push(['EAS-Chain-Name', chain.name])
   if (attester) info.push(['EAS-Attester', attester])
   info.push(['Seed-Bag-Times', reproducible ? 'chain-block' : 'local-record'])
-  if (reproducible) info.push(['Seed-Bag-Format', REPRODUCIBLE_BAG_FORMAT])
+  if (reproducible) info.push(['Seed-Bag-Format', REPRODUCIBLE_BAG_FORMAT], ['Seed-Bag-As-Of', bagStamp.iso])
 
   const bag = createBag({
     payload,
@@ -544,7 +727,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       {
         path: 'VERIFY.txt',
         bytes: encoder.encode(
-          verifyInstructions({ seedUid, versionUid: version.uid, explorerUrl: explorerUrl(version.uid), reproducible }),
+          verifyInstructions({ seedUid, versionUid, explorerUrl: explorerUrl(versionUid), reproducible }),
         ),
       },
     ],
@@ -559,17 +742,18 @@ const historyAgents = (attester: string | undefined) =>
   attester ? [{ type: 'EVM address', value: attester, role: 'attester' }] : []
 
 /**
- * The seed's history as EAS has it: its first Version as creation, later Versions and the property
- * attestations made after the current Version that hold its current values (patches) as
- * modifications. Times are block times. It stops at the current Version and leaves revocations out:
- * a revocation comes later than the record it's about, and would change the bytes of a bag whose
- * hash may already be anchored. EAS is where a reader checks one.
+ * The seed's history as EAS has it at the bag's time: its first Version as creation, later Versions
+ * and the property attestations made after the current Version that hold its values then (patches)
+ * as modifications. Times are block times. It stops at the current Version and leaves revocations
+ * out: a revocation comes later than the record it's about, and would change the bytes of a bag
+ * whose hash may already be anchored. EAS is where a reader checks one.
  */
-function chainHistoryEvents(record: ChainRecord, currentVersionUid: string, chainId: number): PremisEvent[] {
+function chainHistoryEvents(record: SeedAtTime, chainId: number): PremisEvent[] {
   const agents = historyAgents(record.seed.attester)
   const objects = [{ type: 'Seed Protocol seed UID', value: record.seed.id }]
   const time = `Time: ${describeClock('chain-block', chainId)}.`
-  const currentIndex = record.versions.findIndex((v) => sameUid(v.id, currentVersionUid))
+  const current = record.version
+  const currentIndex = record.versions.findIndex((v) => sameUid(v.id, current?.id))
   const events: PremisEvent[] = record.versions.slice(0, currentIndex + 1).map((v, index) => ({
     identifier: { type: 'EAS attestation UID', value: v.id },
     type: index === 0 ? 'creation' : 'modification',
@@ -579,7 +763,6 @@ function chainHistoryEvents(record: ChainRecord, currentVersionUid: string, chai
     agents,
     objects,
   }))
-  const current = record.versions[currentIndex]
   for (const property of record.properties) {
     if (!current || property.timeCreated <= current.timeCreated) continue
     events.push({
@@ -659,7 +842,7 @@ const bagEvents = (stamp: Stamp, seedUid: string, chainId: number, reproducible:
   const agents = [{ type: 'software', value: '@seedprotocol/sdk', role: 'executing program' }]
   const objects = [{ type: 'Seed Protocol seed UID', value: seedUid }]
   const time = reproducible
-    ? `Dated with the Version's attestation so every client builds the same bag; time: ${describeClock(stamp.clock, chainId)}.`
+    ? `Dated with the time the bag covers so every client builds the same bag; time: ${describeClock(stamp.clock, chainId)}.`
     : `Time: ${describeClock(stamp.clock, chainId)}.`
   return [
     {

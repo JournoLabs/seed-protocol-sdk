@@ -141,6 +141,8 @@ const isRelationPropertyName = (propertyNameSnake: string): boolean =>
   propertyNameSnake !== 'storage_provider_transaction_id'
 
 type SyncedPropertyName = {
+  /** The matched local property's schema key; undefined when no local property matched. */
+  key?: string
   /** metadata.property_name for the row. */
   propertyName: string
   isRelation: boolean
@@ -166,7 +168,7 @@ const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
  * relations), so related seeds are still followed for discovery. Undefined: the name matches
  * several local properties equally well, and the attestation is skipped.
  */
-const resolveSyncedPropertyName = (
+export const resolveSyncedPropertyName = (
   easPropertyName: string,
   value: unknown,
   modelSchema: Record<string, any> | undefined,
@@ -209,12 +211,12 @@ const resolveSyncedPropertyName = (
       const propertyName = metadataStorageName(key, def)
       const definitionId = typeof def?.id === 'string' && def.id ? def.id : undefined
       if (isListRelation) {
-        return { propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
+        return { key, propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
       }
       if (isSingleRef) {
-        return { propertyName, isRelation: true, isList: false, definitionId }
+        return { key, propertyName, isRelation: true, isList: false, definitionId }
       }
-      return { propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
+      return { key, propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
     }
     // A name one of the model's properties would match at a looser level than its nameMatch
     // allows is that property's, refused (ADR 0009): don't store it under a name of its own.

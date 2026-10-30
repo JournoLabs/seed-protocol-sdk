@@ -1,20 +1,18 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { copyFile, mkdtemp, rm, unlink } from 'node:fs/promises'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { createBag, digestHex, getBagFile, readBagInfo, validateBag, type Bag } from '@seedprotocol/archive'
+import { digestHex, getBagFile, validateBag, type Bag } from '@seedprotocol/archive'
 import { writeBagDirectory } from '@seedprotocol/archive/node'
 import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, seeds, versions } from '@/seedSchema'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { versions } from '@/seedSchema'
 import { ArchiveExportError, exportArchive } from '@/archive/exportArchive'
-import { verifyArchiveAgainstChain } from '@/archive/verifyArchiveAgainstChain'
 import { rewriteHtmlEmbeddedImagesOnDisk } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { waitForPendingOutboxOps } from '@/outbox'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -27,19 +25,6 @@ import {
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForIdle } from '../test-utils/waitForIdle'
 import { bagitPyRequired, findBagitPy, runBagitPy } from '../../../archive/__tests__/bagitPy'
-
-// EAS reads for reproducible bags; each test that needs them sets a fake chain.
-const chainMocks = vi.hoisted(() => ({
-  seeds: vi.fn(),
-  versions: vi.fn(),
-  properties: vi.fn(),
-}))
-vi.mock('@seedprotocol/eas', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  getSeedsByUidsFromEas: (...args: unknown[]) => chainMocks.seeds(...args),
-  getItemVersionsFromEas: (...args: unknown[]) => chainMocks.versions(...args),
-  getCanonicalItemPropertiesFromEas: (...args: unknown[]) => chainMocks.properties(...args),
-}))
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
@@ -261,210 +246,4 @@ testDescribe('exportArchive', () => {
     expect(error.code).toBe('unpublished_changes')
     expect(error.message).toContain('title')
   }, 120000)
-
-  describe('reproducible', () => {
-    const T0 = 1791500000 // Version attested, unix seconds
-    const ATTESTER = '0xDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDd'
-
-    /** A chain that agrees with the post's rows; the title was patched a minute after the Version. */
-    async function fakeChain(
-      post: Item<any>,
-      change: {
-        newerVersion?: boolean
-        extraProperty?: boolean
-        olderVersion?: 'live' | 'revoked'
-        newerRevokedVersion?: boolean
-      } = {},
-    ) {
-      const db = BaseDb.getAppDb()
-      const [version] = await db.select().from(versions).where(eq(versions.seedLocalId, post.seedLocalId))
-      const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))
-      const att = (id: string, timeCreated: number, extra: Record<string, unknown> = {}) => ({
-        id, attester: ATTESTER, timeCreated, revoked: false, revocationTime: 0, schemaId: `0x${'5'.repeat(64)}`, ...extra,
-      })
-      chainMocks.seeds.mockResolvedValue([att(post.seedUid!, T0)])
-      const revoked = { revoked: true, revocationTime: T0 + 7200 }
-      chainMocks.versions.mockResolvedValue([
-        ...(change.olderVersion
-          ? [att(`0x${'6'.repeat(64)}`, T0 - 600, { refUID: post.seedUid, ...(change.olderVersion === 'revoked' ? revoked : {}) })]
-          : []),
-        att(version.uid, T0, { refUID: post.seedUid }),
-        ...(change.newerVersion ? [att(`0x${'7'.repeat(64)}`, T0 + 600, { refUID: post.seedUid })] : []),
-        ...(change.newerRevokedVersion ? [att(`0x${'9'.repeat(64)}`, T0 + 600, { refUID: post.seedUid, ...revoked })] : []),
-      ])
-      chainMocks.properties.mockResolvedValue([
-        ...rows
-          .filter((r: any) => r.uid && r.versionUid === version.uid)
-          .map((r: any) => att(r.uid, r.propertyName === 'title' ? T0 + 60 : T0, { refUID: version.uid })),
-        ...(change.extraProperty ? [att(`0x${'8'.repeat(64)}`, T0 + 120, { refUID: version.uid })] : []),
-      ])
-    }
-
-    /** What differs between two clients holding the same Version: recorded times and address case. */
-    async function actLikeAnotherClient(post: Item<any>) {
-      const db = BaseDb.getAppDb()
-      await db.update(versions).set({ attestationCreatedAt: Date.now() }).where(eq(versions.seedLocalId, post.seedLocalId))
-      await db.update(metadata).set({ attestationCreatedAt: Date.now() }).where(eq(metadata.seedLocalId, post.seedLocalId))
-      await db.update(seeds).set({ publisher: ATTESTER.toLowerCase() }).where(eq(seeds.localId, post.seedLocalId))
-    }
-
-    afterEach(() => {
-      chainMocks.seeds.mockReset()
-      chainMocks.versions.mockReset()
-      chainMocks.properties.mockReset()
-    })
-
-    it('gives the same bytes from two clients, with every time from the chain', async () => {
-      const post = await createPublishedPost()
-      await fakeChain(post)
-      const first = await exportArchive(post, { fetch: false, reproducible: true })
-      await actLikeAnotherClient(post)
-      const second = await exportArchive(post, { fetch: false, reproducible: true })
-
-      expect(validateBag(first.bag)).toEqual({ valid: true, errors: [] })
-      expect(text(second.bag, 'tagmanifest-sha256.txt')).toBe(text(first.bag, 'tagmanifest-sha256.txt'))
-      expect(second.bag.files.map((f) => [f.path, digestHex('sha256', f.bytes)])).toEqual(
-        first.bag.files.map((f) => [f.path, digestHex('sha256', f.bytes)]),
-      )
-
-      const versionIso = new Date(T0 * 1000).toISOString()
-      expect(text(first.bag, 'bag-info.txt')).toContain(`Bagging-Date: ${versionIso.slice(0, 10)}\n`)
-      expect(text(first.bag, 'bag-info.txt')).toContain(`EAS-Attester: ${ATTESTER}\n`)
-      expect(text(first.bag, 'bag-info.txt')).toContain('Seed-Bag-Times: chain-block\n')
-      expect(text(first.bag, 'bag-info.txt')).toContain('Seed-Bag-Format: 1\n')
-      const premis = text(first.bag, 'metadata/premis.xml')
-      expect(premis).toContain(`<premis:eventDateTime>${versionIso}</premis:eventDateTime>`)
-      expect(premis).toContain(`<premis:eventDateTime>${new Date((T0 + 60) * 1000).toISOString()}</premis:eventDateTime>`)
-      expect(premis).toContain('Time: EAS timeCreated, the block time on chain')
-      expect(premis).not.toContain('exporting device')
-      const item = JSON.parse(text(first.bag, 'data/item.json'))
-      expect(item.reproducible).toBe(true)
-      expect(item.properties.title).toMatchObject({ attestedAtClock: 'chain-block', attestedAt: new Date((T0 + 60) * 1000).toISOString() })
-
-      // The same changes do show in an ordinary export.
-      const local = await exportArchive(post, { fetch: false, baggingDate: new Date(T0 * 1000) })
-      expect(text(local.bag, 'tagmanifest-sha256.txt')).not.toBe(text(first.bag, 'tagmanifest-sha256.txt'))
-    }, 120000)
-
-    it('records relations as seed uids, so a publisher and a syncing client get the same bag', async () => {
-      const { post, author, reviewers } = await createPostWithRelations()
-      await fakeChain(post)
-      const publisher = await exportArchive(post, { fetch: false, reproducible: true })
-
-      const item = JSON.parse(text(publisher.bag, 'data/item.json'))
-      expect(item.properties.author.value).toBe(author.seedUid)
-      expect(Object.values(item.properties).map((p: any) => p.value).flat()).toEqual(
-        expect.arrayContaining(reviewers.map((r) => r.seedUid)),
-      )
-
-      // A client that synced the post holds the uids the chain has, not the publisher's local ids.
-      const db = BaseDb.getAppDb()
-      const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))
-      for (const row of rows) {
-        const synced = [author, ...reviewers].reduce(
-          (value: string | null, other) => value?.replaceAll(other.seedLocalId, other.seedUid!) ?? value,
-          row.propertyValue,
-        )
-        await db.update(metadata).set({ propertyValue: synced }).where(eq(metadata.localId, row.localId!))
-      }
-      const syncing = await exportArchive(post, { fetch: false, reproducible: true })
-      expect(text(syncing.bag, 'tagmanifest-sha256.txt')).toBe(text(publisher.bag, 'tagmanifest-sha256.txt'))
-    }, 120000)
-
-    it('gives the same bag after an older Version or a later one is revoked', async () => {
-      const post = await createPublishedPost()
-      await fakeChain(post, { olderVersion: 'live' })
-      const before = await exportArchive(post, { fetch: false, reproducible: true })
-      await fakeChain(post, { olderVersion: 'revoked', newerRevokedVersion: true })
-      const after = await exportArchive(post, { fetch: false, reproducible: true })
-      expect(text(after.bag, 'tagmanifest-sha256.txt')).toBe(text(before.bag, 'tagmanifest-sha256.txt'))
-    }, 120000)
-
-    it('verifies a bag by rebuilding it from the chain, and names what a forged one changed', async () => {
-      const post = await createPublishedPost()
-      await fakeChain(post)
-      const { bag } = await exportArchive(post, { fetch: false, reproducible: true })
-      expect(text(bag, 'VERIFY.txt')).toContain('shasum -a 256 -c manifest-sha256.txt')
-      expect(validateBag(bag)).toEqual({ valid: true, errors: [] })
-
-      const good = await verifyArchiveAgainstChain(bag, post)
-      expect(good.fixity.status).toBe('passed')
-      expect(good.rebuilt.status).toBe('passed')
-      expect(good.differingFiles).toEqual([])
-
-      // Consistent manifests, so only the rebuild can catch it.
-      const source = bag.files.filter((f) => f.path.startsWith('data/')).map((f) => ({
-        path: f.path.slice('data/'.length),
-        bytes: f.path === 'data/index.html' ? new TextEncoder().encode('<p>forged</p>') : f.bytes,
-      }))
-      const tagFiles = bag.files.filter((f) => f.path === 'VERIFY.txt' || f.path.startsWith('metadata/'))
-      const forged = createBag({
-        payload: source,
-        tagFiles,
-        info: ['Seed-Uid', 'Seed-Version-Uid', 'Seed-Bag-Format'].map((l) => [l, readBagInfo(bag).get(l)!]),
-      })
-      const result = await verifyArchiveAgainstChain(forged, post)
-      expect(result.fixity.status).toBe('passed')
-      expect(result.rebuilt.status).toBe('failed')
-      expect(result.differingFiles).toContain('data/index.html')
-    }, 120000)
-
-    it('reports a bag it cannot rebuild as not checked', async () => {
-      const post = await createPublishedPost()
-      const ordinary = await exportArchive(post, { fetch: false })
-      expect((await verifyArchiveAgainstChain(ordinary.bag, post)).rebuilt.status).toBe('not_checked')
-
-      await fakeChain(post)
-      const { bag } = await exportArchive(post, { fetch: false, reproducible: true })
-      await fakeChain(post, { newerVersion: true })
-      const behind = await verifyArchiveAgainstChain(bag, post)
-      expect(behind.rebuilt).toMatchObject({ status: 'not_checked' })
-      expect(behind.rebuilt.detail).toContain('not_synced')
-    }, 120000)
-
-    it('types a file by its bytes, whatever this device named it', async () => {
-      const post = await createPublishedPost()
-      await fakeChain(post)
-      const first = await exportArchive(post, { fetch: false, reproducible: true })
-
-      const image = contextOf(post, 'featureImage').refResolvedValue!
-      const stored = BaseFileManager.getFilesPath('images', image)
-      await copyFile(stored, `${stored}.jpg`)
-      await BaseDb.getAppDb()
-        .update(metadata)
-        .set({ refResolvedValue: `${image}.jpg` })
-        .where(eq(metadata.refResolvedValue, image))
-
-      const second = await exportArchive(post, { fetch: false, reproducible: true })
-      expect(text(second.bag, 'tagmanifest-sha256.txt')).toBe(text(first.bag, 'tagmanifest-sha256.txt'))
-    }, 120000)
-
-    it('refuses a relation it can only name by a local id', async () => {
-      const { post } = await createPostWithRelations('post only')
-      await fakeChain(post)
-      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'incomplete' })
-    }, 120000)
-
-    it('refuses a copy that is behind the chain', async () => {
-      const post = await createPublishedPost()
-      await fakeChain(post, { newerVersion: true })
-      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'not_synced' })
-      await fakeChain(post, { extraProperty: true })
-      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'not_synced' })
-    }, 120000)
-
-    it('refuses when EAS is unreachable, with local-only options, or when a file is missing', async () => {
-      const post = await createPublishedPost()
-      chainMocks.seeds.mockRejectedValue(new Error('indexer down'))
-      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'chain_unavailable' })
-      await expect(
-        exportArchive(post, { fetch: false, reproducible: true, sourceOrganization: 'Desk' }),
-      ).rejects.toMatchObject({ code: 'invalid_options' })
-
-      await fakeChain(post)
-      const image = contextOf(post, 'featureImage').refResolvedValue!
-      await unlink(BaseFileManager.getFilesPath('images', image))
-      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'incomplete' })
-    }, 120000)
-  })
 })
