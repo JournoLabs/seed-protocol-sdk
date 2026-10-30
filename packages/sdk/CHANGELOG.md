@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `exportArchive` returns `arweaveTransactions`: with `reproducible`, each bag path whose bytes a published transaction already holds, for `buildPathManifest`.
 - `exportArchive` takes `reproducible`: every client with the same schema gets the same bytes and the same tagmanifest hash for a seed at one time. Values, times and the attester come from EAS and file bytes from their Arweave transactions, with no rows read, so `item` can be `{ seedUid, modelName, schemaName }` on a device that holds nothing for the seed. `asOf` (unix seconds) pins the time: a later patch, Version, retraction or revocation doesn't change that bag. It throws `not_synced`, `chain_unavailable`, `incomplete` or `invalid_options` instead of writing a bag another client couldn't reproduce. Files are typed by their bytes, and bag-info.txt carries `Seed-Bag-Format` and `Seed-Bag-As-Of`. Every time in a bag, reproducible or not, now says whose clock it came from (`chain-block`, `local-record`, `export-device`), in PREMIS event details, `item.json` and `bag-info.txt`.
 - New `verifyArchiveAgainstChain(bag, item)` checks a bag against a fresh reproducible export of the item at the time the bag covers, on top of `verifyArchive`'s checks. Every bag from `exportArchive` now carries `VERIFY.txt`.
 - `exportArchive` writes each Html to `data/source/` byte for byte. It decoded and encoded the text again, which dropped a BOM and replaced invalid UTF-8.
