@@ -111,6 +111,8 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
 mock.module('../../../helpers/resolvePublishWallet', () => ({
   resolvePublishWallet: () => ({ txSender: { address: PUBLISHER, sendTransaction } }),
 }))
+const assertMultiPublishRouted = mock(async (_target: string, _opts: { executorModule: boolean }) => {})
+mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted }))
 mock.module('../../../helpers/publishGas', () => ({ publishGasLimit: async () => 1_234_567n }))
 mock.module('../../arweaveL1Finalize/enqueue', () => ({
   enqueueArweaveL1FinalizeJobsFromPublishContext: async () => {},
@@ -191,6 +193,7 @@ describe('createAttestations: a draft relation', () => {
 
     // A relation back to an item this publish creates is filled now, not deferred.
     expect(item.getPublishPayload.mock.calls[0]![1]).toEqual({ publishMode: 'patch', backReferences: 'link' })
+    expect(assertMultiPublishRouted.mock.calls).toEqual([[PUBLISHER, { executorModule: false }]])
     expect(sendTransaction).toHaveBeenCalledTimes(1)
     expect((sendTransaction.mock.calls[0]![0] as { gas?: bigint }).gas).toBe(1_234_567n)
     const { args } = decodeFunctionData({ abi: multiPublishAbi, data: sendTransaction.mock.calls[0]![0].data })

@@ -105,6 +105,7 @@ export {
   waitForPublishReceipt,
   isContractDeployed,
 } from './helpers/chainClient'
+export { MULTI_PUBLISH_SELECTOR, assertMultiPublishRouted } from './helpers/multiPublishRoute'
 export {
   encodeMultiPublish,
   encodeSetEas,

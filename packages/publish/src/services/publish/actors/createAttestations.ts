@@ -15,6 +15,7 @@ import {
 } from '~/helpers/executorModuleReadiness'
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { publishGasLimit } from '~/helpers/publishGas'
+import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import type { PublishWallet } from '~/helpers/seedSigner'
@@ -253,6 +254,8 @@ async function executeCreateAttestations(
         ? encodeExecutorMultiPublish(to, requests)
         : encodeMultiPublish(to, requests)
       const from = routeToExecutorModule ? address : activeWallet.txSender.address
+      // Contracts of another version answer with a Router revert; name the mismatch instead.
+      await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
       await simulateCallFromAccount(
         routeToExecutorModule
           ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
