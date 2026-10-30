@@ -85,7 +85,15 @@ export type ExportArchiveOptions = {
 /** Something the item has that the bag doesn't carry, and why. Also listed in data/item.json. */
 export type ArchiveOmission = { property: string; reason: string }
 
-export type ExportArchiveResult = { bag: Bag; omitted: ArchiveOmission[] }
+export type ExportArchiveResult = {
+  bag: Bag
+  omitted: ArchiveOmission[]
+  /**
+   * With `reproducible`: bag path to the Arweave transaction that already holds exactly those bytes.
+   * A path manifest points at these; the bag's other files need an upload.
+   */
+  arweaveTransactions: Record<string, string>
+}
 
 export type ArchiveExportErrorCode =
   | 'not_published'
@@ -735,7 +743,14 @@ export async function exportArchive(
     baggingDate: new Date(bagStamp.iso),
     softwareAgent: SOFTWARE_AGENT,
   })
-  return { bag, omitted }
+  const arweaveTransactions = chainRecord
+    ? Object.fromEntries(
+        [...fileInfo].flatMap(([path, { arweaveTransactionId }]) =>
+          arweaveTransactionId ? [[`data/${path}`, arweaveTransactionId]] : [],
+        ),
+      )
+    : {}
+  return { bag, omitted, arweaveTransactions }
 }
 
 const historyAgents = (attester: string | undefined) =>

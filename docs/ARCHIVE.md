@@ -139,6 +139,31 @@ yet, so this rebuild is the SDK's only hash source. The anchor attestation is de
 
 Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
 
+## A bag on Arweave
+
+A reproducible export returns `arweaveTransactions`: each bag path whose bytes a published
+transaction already holds. Upload the bag's other files, then build the manifest and upload it with
+`PATH_MANIFEST_CONTENT_TYPE`:
+
+```ts
+import { buildPathManifest, parsePathManifest, readBagFromManifest, verifyArchive } from '@seedprotocol/archive'
+
+const { bag, arweaveTransactions } = await exportArchive(post, { reproducible: true })
+const { bytes } = buildPathManifest(bag, { ...arweaveTransactions, ...uploaded })
+
+// Later, from the manifest alone
+const copy = await readBagFromManifest(parsePathManifest(manifestBytes), fetchTransaction)
+verifyArchive(copy, { expectedTagmanifestSha256 })
+```
+
+The manifest is `arweave/paths` 0.2.0 with every bag file at its bag path and `data/index.html` as
+its index. A gateway serves the index at the manifest's root, so `assets/<file>` is listed as well,
+for the page's relative links; `readBagFromManifest` leaves those paths out of the bag. A bag with
+several Html properties has no index, and its pages work at `data/<property>.html`.
+
+The manifest says where files are, and doesn't vouch for them. Only the check against an outside
+hash does.
+
 ## What an attestation proves
 
 A Seed attestation shows that its attester published these bytes no later than the block time of

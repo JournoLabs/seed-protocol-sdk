@@ -21,6 +21,13 @@ export {
   type VerifyArchiveOptions,
   type VerifyInstructions,
 } from './verifyArchive'
+export {
+  PATH_MANIFEST_CONTENT_TYPE,
+  buildPathManifest,
+  parsePathManifest,
+  readBagFromManifest,
+  type PathManifest,
+} from './pathManifest'
 export { BAG_ALGORITHMS, digestHex, type BagAlgorithm } from './bytes'
 export { ArchiveError, type ArchiveErrorCode } from './errors'
 export { findHtmlUrls, rewriteHtmlAttributes, rewriteHtmlUrls } from './html'

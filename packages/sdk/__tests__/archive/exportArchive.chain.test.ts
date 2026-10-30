@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { digestHex, getBagFile, validateBag, type Bag } from '@seedprotocol/archive'
+import {
+  buildPathManifest,
+  digestHex,
+  getBagFile,
+  parsePathManifest,
+  readBagFromManifest,
+  validateBag,
+  verifyArchive,
+  type Bag,
+} from '@seedprotocol/archive'
 import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
 import { ARCHIVE_ANCHOR_SCHEMA_UID } from '@seedprotocol/eas'
 import { Item } from '@/Item/Item'
@@ -319,6 +328,27 @@ testDescribe('exportArchive from the chain', () => {
     fakeEas.properties.push(property(VERSION, 'title', 'string', 'Forged', T0 + 100, { attester: OTHER }))
     fakeEas.versions.push(attestation(uid('22'), POST, T0 + 100, { attester: OTHER }))
     expect(hash(await exported())).toBe(hash(before))
+  }, 120000)
+
+  it('rebuilds from a path manifest that points at the published files, with only the rest uploaded', async () => {
+    const { bag, arweaveTransactions } = await exportArchive(REF, { reproducible: true })
+    const asset = (bytes: Uint8Array) => `data/assets/${digestHex('sha256', bytes)}.png`
+    expect(arweaveTransactions).toEqual({
+      'data/source/body.html': HTML_TX,
+      [asset(PNG)]: IMAGE_TX,
+      [asset(EMBEDDED_PNG)]: EMBEDDED_TX,
+    })
+
+    const uploads = bag.files.filter((f) => !arweaveTransactions[f.path])
+    expect(uploads.map((f) => f.path)).toContain('data/index.html')
+    const uploaded = Object.fromEntries(uploads.map((f, i) => [f.path, tx(`chainexportupload${i}`)]))
+    for (const file of uploads) gateway.set(uploaded[file.path]!, file.bytes)
+
+    const { bytes } = buildPathManifest(bag, { ...arweaveTransactions, ...uploaded })
+    const rebuilt = await readBagFromManifest(parsePathManifest(bytes), async (id) => gateway.get(id))
+    expect(validateBag(rebuilt)).toEqual({ valid: true, errors: [] })
+    const expected = verifyArchive(bag).tagmanifestSha256!
+    expect(verifyArchive(rebuilt, { expectedTagmanifestSha256: expected }).anchor.status).toBe('passed')
   }, 120000)
 
   it('gives the same bag with an anchor on the Version', async () => {
