@@ -19,6 +19,7 @@ import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1F
 import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
+import { assertPublishFits } from '~/helpers/publishSize'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import {
   prepareEasAttest,
@@ -269,6 +270,9 @@ async function executeCreateAttestationsDirectToEas(
         address,
       )
     }
+
+    // Each request's properties go in one transaction, and its seed and version in their own.
+    for (const request of normalizedRequests) assertPublishFits(address, [request], { newPairs: false })
 
     const byLocalId = new Map(normalizedRequests.map((r) => [r.localId, r]))
     const placeholderData = {

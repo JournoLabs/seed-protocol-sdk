@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- **Breaking:** a publish fails with `PUBLISH_TOO_LARGE` before anything is sent, with no RPC call, when its calldata is over 120,000 bytes or its data alone needs more than the new `maxPublishGas` config (default 16,000,000 gas). The message names the three largest requests. The direct-to-EAS route checks each request's transaction the same way. A gas estimate over `maxPublishGas` fails the same way; the limit used to be the block's.
+- When a publish's gas estimate can't be made, it is sent with its size-based estimate plus 30% if that is above the 5,000,000 fallback, capped at `maxPublishGas`.
+- The message for a UserOp that failed with no revert reason names the size limits.
 - **Breaking:** `ensureAutomationSessionKey` requires `expiresAt`, and refuses a time that has passed. There is no ten-year default.
 - **Breaking:** `enrollPublishAutomation` defaults to a 90-day key and `PublishAuthorization`, down from 365 days. Enroll again before the end to renew.
 - **Breaking:** `enrollPublishAutomation` fails with the new `AUTOMATION_ACCOUNT_FUNDED` code, before sending anything, when the account's balance plus EntryPoint deposit is above the new `maxAutomationExposureWei` config (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose. An automation publish over the limit logs a warning and goes ahead.
