@@ -108,7 +108,17 @@ export {
 export {
   fromEip1193Provider,
   fromWindowEthereum,
+  type FromEip1193Options,
 } from './helpers/adapters/eip1193'
+export {
+  fromViemWalletClient,
+  type FromViemWalletClientOptions,
+} from './helpers/adapters/viemWalletClient'
+export {
+  fromPrivyWallet,
+  type FromPrivyWalletOptions,
+  type PrivyEthereumWalletLike,
+} from './helpers/adapters/privy'
 export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
 export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
 export {

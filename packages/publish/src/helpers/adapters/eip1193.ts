@@ -4,19 +4,17 @@ import {
   type Address,
   type Chain,
   type EIP1193Provider,
-  type Hex,
 } from 'viem'
-import {
-  brandSigner,
-  brandTxSender,
-  type PublishWallet,
-} from '../seedSigner'
+import type { PublishWallet, PublishWalletKind } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
+import { fromViemWalletClient } from './viemWalletClient'
 
 export type FromEip1193Options = {
   chain?: Chain
   /** If omitted, uses the first account from eth_requestAccounts / eth_accounts. */
   address?: Address
+  /** As for `fromViemWalletClient`. Defaults to `'eoa'`. */
+  kind?: PublishWalletKind
 }
 
 /**
@@ -42,40 +40,7 @@ export async function fromEip1193Provider(
     chain,
     transport: custom(provider),
   })
-
-  const signer = brandSigner({
-    address,
-    signMessage: async ({ message }) => {
-      return walletClient.signMessage({
-        account: address!,
-        message:
-          typeof message === 'string'
-            ? message
-            : { raw: message.raw as Hex | Uint8Array },
-      })
-    },
-    signTypedData: async (args) =>
-      walletClient.signTypedData({ ...args, account: address! } as Parameters<
-        typeof walletClient.signTypedData
-      >[0]),
-  })
-
-  const txSender = brandTxSender({
-    address,
-    sendTransaction: async (tx) => {
-      const hash = await walletClient.sendTransaction({
-        account: address!,
-        chain,
-        to: tx.to,
-        data: tx.data,
-        value: tx.value,
-        gas: tx.gas,
-      })
-      return { transactionHash: hash }
-    },
-  })
-
-  return { signer, txSender, kind: 'eoa' }
+  return fromViemWalletClient(walletClient, { chain, kind: options.kind })
 }
 
 /** Convenience: wrap window.ethereum when present. */

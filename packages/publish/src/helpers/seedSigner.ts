@@ -36,7 +36,7 @@ export interface SeedSigner {
 export function requireSignTypedData(signer: SeedSigner): NonNullable<SeedSigner['signTypedData']> {
   if (typeof signer.signTypedData !== 'function') {
     throw new Error(
-      `@seedprotocol/publish: signer ${signer.address} has no signTypedData, which ManagedAccount session keys and smart-account UserOps need. fromEthersWallet, fromEip1193Provider and fromThirdwebAccount provide it.`,
+      `@seedprotocol/publish: signer ${signer.address} has no signTypedData, which ManagedAccount session keys and smart-account UserOps need. fromEthersWallet, fromEip1193Provider, fromViemWalletClient, fromPrivyWallet and fromThirdwebAccount provide it.`,
     )
   }
   return signer.signTypedData.bind(signer)

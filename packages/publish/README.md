@@ -76,6 +76,26 @@ function App() {
 // if (result.outcome === 'already_publishing') ...          // this item is publishing already
 ```
 
+With wagmi (and RainbowKit, ConnectKit or Reown AppKit on top of it), pass the connected `WalletClient` through `fromViemWalletClient`. With Privy, pass a wallet from `useWallets()` to `fromPrivyWallet`, which switches it to the publish chain first. Neither adds a dependency: the Privy adapter takes any object with Privy's `address`, `chainId`, `switchChain` and `getEthereumProvider`.
+
+```tsx
+import { fromViemWalletClient, fromPrivyWallet, useSeedWallet } from '@seedprotocol/publish'
+import { useWalletClient } from 'wagmi'
+import { useWallets } from '@privy-io/react-auth'
+
+const { connect } = useSeedWallet()
+
+// wagmi
+const { data: walletClient } = useWalletClient()
+if (walletClient) await connect(fromViemWalletClient(walletClient))
+
+// Privy (embedded or external wallet)
+const { wallets } = useWallets()
+await connect(await fromPrivyWallet(wallets[0]))
+```
+
+Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
+
 ### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
 
 ```tsx
