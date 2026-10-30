@@ -261,7 +261,7 @@ export async function attestDomainOwnership(
     throw new Error('@seedprotocol/publish: attestDomainOwnership failed — no receipt')
   }
   const { easContractAddress } = getPublishConfig()
-  const uid = getAttestationUidFromReceipt(receipt, easContractAddress)
+  const uid = getAttestationUidFromReceipt(receipt, easContractAddress, sender.address)
   if (!uid || !isValidEasAttestationUid(uid)) {
     throw new Error(
       '@seedprotocol/publish: attestDomainOwnership failed — could not parse attestation UID',

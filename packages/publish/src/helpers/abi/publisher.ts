@@ -91,27 +91,3 @@ export const publisherReadWriteAbi = [
     outputs: [{ type: 'bool' }],
   },
 ] as const
-
-/** Extension / ManagedAccount publisher events. */
-export const publisherEventsAbi = [
-  {
-    type: 'event',
-    name: 'CreatedAttestation',
-    inputs: [
-      {
-        name: 'result',
-        type: 'tuple',
-        indexed: false,
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'SeedPublished',
-    inputs: [{ name: 'returnedDataFromEAS', type: 'bytes', indexed: false }],
-  },
-] as const

@@ -12,8 +12,8 @@ import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
-import { explainUserOpError } from '~/helpers/describeRevert'
 import { ManagedAccountPublishError } from '~/errors'
+import { explainUserOpError } from '~/helpers/describeRevert'
 import { publishGasLimit } from '~/helpers/publishGas'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
@@ -25,7 +25,6 @@ import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransact
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
-import { listCreatedAttestationPairsFromReceipt } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import { normalizePublishRequest } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
@@ -51,7 +50,8 @@ type PublishRoutingInput = {
 
 type PublishRouting = {
   txTargetAddress: string
-  contractAddressForEvents: string
+  /** The account EAS records as attester: the one the extension runs in or the executor acts for. */
+  attesterAddress: string
 }
 
 function isExecutorModuleAddress(value: string | undefined): value is string {
@@ -79,17 +79,17 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
       }
       return {
         txTargetAddress: module,
-        contractAddressForEvents: module,
+        attesterAddress: managedAddress,
       }
     }
     return {
       txTargetAddress: managedAddress,
-      contractAddressForEvents: module || managedAddress,
+      attesterAddress: managedAddress,
     }
   }
   return {
     txTargetAddress: publisherAddress,
-    contractAddressForEvents: publisherAddress,
+    attesterAddress: publisherAddress,
   }
 }
 
@@ -306,19 +306,14 @@ async function executeCreateAttestations(
       throw new Error('Failed to send transaction')
     }
 
-    const batchExtraUids: string[] = []
-    for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
-      if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
-    }
     // Every request in the transaction (the item and the related items published with it)
     // records its own seed, version and property uids.
-    const { requests: effectiveRequests } = await recordMultiPublishReceipt({
+    const { requests: effectiveRequests, attributed } = await recordMultiPublishReceipt({
       receipt,
       requests: payloadForContract,
       rootSeedLocalId: item.seedLocalId,
-      useModularExecutor,
-      contractAddressForEvents: routing.contractAddressForEvents,
       publisherAddress: address,
+      attester: routing.attesterAddress,
     })
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)
@@ -349,6 +344,7 @@ async function executeCreateAttestations(
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
     const rootForBatch =
       effectiveRequests.find((r) => r?.localId === item.seedLocalId) ?? effectiveRequests[0]
+    const batchExtraUids = attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid))
     for (const r of effectiveRequests) {
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))

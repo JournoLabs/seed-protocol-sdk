@@ -38,21 +38,19 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
   /** The normalized requests, in the order they were sent. */
   requests: R[]
   rootSeedLocalId: string | undefined
-  useModularExecutor: boolean
-  contractAddressForEvents: string
   publisherAddress: string
+  /** The account that attested. Other accounts' `Attested` events in the receipt are not this publish. */
+  attester: string
   /** Seed uids (by local id) created by earlier transactions of the same publish (sequential). */
   resolvedSeedUids?: Record<string, string>
 }): Promise<{ requests: R[]; attributed: RequestAttestations[] }> {
-  const { receipt, requests, rootSeedLocalId, useModularExecutor, contractAddressForEvents, publisherAddress } =
-    params
+  const { receipt, requests, rootSeedLocalId, publisherAddress, attester } = params
   const { easContractAddress } = getPublishConfig()
   const attributed = attributeMultiPublishReceipt({
     receipt,
     requests,
-    useModularExecutor,
     easContractAddress,
-    contractAddressForEvents,
+    attester,
   })
   const attMs = await attestationMsFromReceipt(receipt)
 

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
-import { encodeAbiParameters, encodeEventTopics } from 'viem'
-import { publisherEventsAbi } from '../../../helpers/abi/publisher'
+import { encodeAbiParameters, encodeEventTopics, zeroAddress } from 'viem'
+import { easAbi } from '../../../helpers/abi/eas'
 
 /**
  * createAttestations, one-transaction path: an Image published together with the Post that shows
@@ -31,37 +31,25 @@ const POST_SEED = h('d')
 const POST_VERSION = h('e')
 const POST_TITLE = h('f')
 
-const created = (schemaUid: `0x${string}`, attestationUid: `0x${string}`) => ({
-  address: PUBLISHER,
-  topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'CreatedAttestation' }),
-  data: encodeAbiParameters(
-    [
-      {
-        type: 'tuple',
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-    [{ schemaUid, attestationUid }],
-  ),
-})
-const seedPublished = (uids: `0x${string}`[]) => ({
-  address: PUBLISHER,
-  topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'SeedPublished' }),
-  data: encodeAbiParameters([{ type: 'bytes' }], [encodeAbiParameters([{ type: 'bytes32[]' }], [uids])]),
+const attested = (schemaUID: `0x${string}`, uid: `0x${string}`) => ({
+  address: EAS,
+  topics: encodeEventTopics({
+    abi: easAbi,
+    eventName: 'Attested',
+    args: { recipient: zeroAddress, attester: PUBLISHER, schemaUID },
+  }),
+  data: encodeAbiParameters([{ type: 'bytes32' }], [uid]),
 })
 
 /** As SeedProtocolExtensionBase.multiPublish emits them for [Image, Post]. */
 const RECEIPT = {
   logs: [
-    created(SCHEMA_IMAGE_SEED, IMAGE_SEED),
-    created(SCHEMA_VERSION, IMAGE_VERSION),
-    seedPublished([IMAGE_SRC]),
-    created(SCHEMA_POST_SEED, POST_SEED),
-    created(SCHEMA_VERSION, POST_VERSION),
-    seedPublished([POST_TITLE]),
+    attested(SCHEMA_IMAGE_SEED, IMAGE_SEED),
+    attested(SCHEMA_VERSION, IMAGE_VERSION),
+    attested(SCHEMA_POST_SEED, POST_SEED),
+    attested(SCHEMA_VERSION, POST_VERSION),
+    attested(SCHEMA_IMAGE_SRC, IMAGE_SRC),
+    attested(SCHEMA_POST_TITLE, POST_TITLE),
   ],
 }
 

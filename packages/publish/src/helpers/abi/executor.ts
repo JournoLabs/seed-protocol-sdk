@@ -1,36 +1,6 @@
 import { multiPublishAbi } from './publisher'
 
 /**
- * Modular executor module events (0x043462…).
- * CreatedAttestation matches publisher; SeedPublished uses typed bytes32 args.
- */
-export const executorEventsAbi = [
-  {
-    type: 'event',
-    name: 'CreatedAttestation',
-    inputs: [
-      {
-        name: 'result',
-        type: 'tuple',
-        indexed: false,
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'SeedPublished',
-    inputs: [
-      { name: 'seedUid', type: 'bytes32', indexed: false },
-      { name: 'versionUid', type: 'bytes32', indexed: false },
-    ],
-  },
-] as const
-
-/**
  * SeedProtocolExecutor (ERC-7579 executor module) calls and errors.
  * `multiPublish` takes the same `PublishRequestData` as the ManagedAccount extension (selector
  * 0xa1263421), so it shares `multiPublishAbi`'s entry.

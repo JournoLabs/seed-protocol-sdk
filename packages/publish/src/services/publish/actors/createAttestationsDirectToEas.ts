@@ -339,7 +339,7 @@ async function executeCreateAttestationsDirectToEas(
         if (!receipt) throw new Error('Failed to create Seed attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
-        const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
+        const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
         if (!seedUidFromReceipt || seedUidFromReceipt === ZERO_BYTES32) {
           throw new Error('Failed to get Seed UID from attestation receipt')
         }
@@ -373,7 +373,7 @@ async function executeCreateAttestationsDirectToEas(
         if (!receipt) throw new Error('Failed to create Version attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
-        const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
+        const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
         if (!versionUidFromReceipt || versionUidFromReceipt === ZERO_BYTES32) {
           throw new Error('Failed to get Version UID from attestation receipt')
         }
@@ -434,7 +434,7 @@ async function executeCreateAttestationsDirectToEas(
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         logger('created property attestations for request', i)
         const { easContractAddress } = getPublishConfig()
-        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress)
+        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress, txSender.address)
         for (const a of attested) {
           if (a.uid) batchExtraUids.push(a.uid)
         }

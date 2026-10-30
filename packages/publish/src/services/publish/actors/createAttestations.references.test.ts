@@ -3,9 +3,11 @@ import {
   decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
+  zeroAddress,
   stringToHex,
 } from 'viem'
-import { multiPublishAbi, publisherEventsAbi } from '../../../helpers/abi/publisher'
+import { easAbi } from '../../../helpers/abi/eas'
+import { multiPublishAbi } from '../../../helpers/abi/publisher'
 
 /**
  * createAttestations with a draft relation: a Post whose author is an Identity published with it.
@@ -38,37 +40,25 @@ const POST_AUTHOR = h('f')
 const IDENTITY = 'identLocal01'
 const POST = 'postLocal001'
 
-const created = (schemaUid: `0x${string}`, attestationUid: `0x${string}`) => ({
-  address: PUBLISHER,
-  topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'CreatedAttestation' }),
-  data: encodeAbiParameters(
-    [
-      {
-        type: 'tuple',
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-    [{ schemaUid, attestationUid }],
-  ),
-})
-const seedPublished = (uids: `0x${string}`[]) => ({
-  address: PUBLISHER,
-  topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'SeedPublished' }),
-  data: encodeAbiParameters([{ type: 'bytes' }], [encodeAbiParameters([{ type: 'bytes32[]' }], [uids])]),
+const attested = (schemaUID: `0x${string}`, uid: `0x${string}`) => ({
+  address: EAS,
+  topics: encodeEventTopics({
+    abi: easAbi,
+    eventName: 'Attested',
+    args: { recipient: zeroAddress, attester: PUBLISHER, schemaUID },
+  }),
+  data: encodeAbiParameters([{ type: 'bytes32' }], [uid]),
 })
 
 /** As the extension emits them for [Identity, Post]: every seed and version, then each request's properties. */
 const RECEIPT = {
   logs: [
-    created(SCHEMA_IDENTITY_SEED, IDENTITY_SEED),
-    created(SCHEMA_VERSION, IDENTITY_VERSION),
-    created(SCHEMA_POST_SEED, POST_SEED),
-    created(SCHEMA_VERSION, POST_VERSION),
-    seedPublished([IDENTITY_NAME]),
-    seedPublished([POST_AUTHOR]),
+    attested(SCHEMA_IDENTITY_SEED, IDENTITY_SEED),
+    attested(SCHEMA_VERSION, IDENTITY_VERSION),
+    attested(SCHEMA_POST_SEED, POST_SEED),
+    attested(SCHEMA_VERSION, POST_VERSION),
+    attested(SCHEMA_IDENTITY_NAME, IDENTITY_NAME),
+    attested(SCHEMA_POST_AUTHOR, POST_AUTHOR),
   ],
 }
 

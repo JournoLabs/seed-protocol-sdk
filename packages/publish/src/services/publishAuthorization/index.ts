@@ -234,7 +234,7 @@ export async function attestPublishAuthorization(
     throw new Error('@seedprotocol/publish: attestPublishAuthorization failed — no receipt')
   }
   const { easContractAddress } = getPublishConfig()
-  const uid = getAttestationUidFromReceipt(receipt, easContractAddress)
+  const uid = getAttestationUidFromReceipt(receipt, easContractAddress, sender.address)
   if (!uid || !isValidEasAttestationUid(uid)) {
     throw new Error(
       '@seedprotocol/publish: attestPublishAuthorization failed — could not parse attestation UID',

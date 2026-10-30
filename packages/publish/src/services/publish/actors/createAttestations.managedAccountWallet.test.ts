@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics } from 'viem'
-import { multiPublishAbi, publisherEventsAbi } from '../../../helpers/abi/publisher'
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, zeroAddress } from 'viem'
+import { easAbi } from '../../../helpers/abi/eas'
+import { multiPublishAbi } from '../../../helpers/abi/publisher'
 
 /**
  * createAttestations with `useModularExecutor` and a publish wallet that sends as the ManagedAccount
@@ -21,12 +22,13 @@ const h = (c: string) => `0x${c.repeat(64)}` as `0x${string}`
 const RECEIPT = {
   logs: [
     {
-      address: MANAGED,
-      topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'CreatedAttestation' }),
-      data: encodeAbiParameters(
-        [{ type: 'tuple', components: [{ name: 'schemaUid', type: 'bytes32' }, { name: 'attestationUid', type: 'bytes32' }] }],
-        [{ schemaUid: h('2'), attestationUid: h('d') }],
-      ),
+      address: EAS,
+      topics: encodeEventTopics({
+        abi: easAbi,
+        eventName: 'Attested',
+        args: { recipient: zeroAddress, attester: MANAGED, schemaUID: h('2') },
+      }),
+      data: encodeAbiParameters([{ type: 'bytes32' }], [h('d')]),
     },
   ],
 }
