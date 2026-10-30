@@ -1,8 +1,7 @@
 import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
+import { isRelationProperty } from './listRelationKey.js'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
 import type { AttestationLike, SeedRecord } from './types.js'
-
-const STORAGE_ID_NAMES = new Set(['storage_transaction_id', 'storage_provider_transaction_id'])
 
 /** One property attestation of a seed's head Version, as attested: EAS field name, type and value. */
 export type SeedPropertyAttestation = {
@@ -29,13 +28,6 @@ export type SeedAttestations = {
   /** Assembled with `relations: 'uids'` and no storage hydration. */
   readonly record: SeedRecord
   readonly properties: readonly SeedPropertyAttestation[]
-}
-
-/** True when assembly reads `easName` as a relation (seed uid, or list of them). */
-function isRelationProperty(easName: string, easType: string | undefined): boolean {
-  if (STORAGE_ID_NAMES.has(easName)) return false
-  if (easType === 'bytes32' || easType === 'bytes32[]') return true
-  return easName.endsWith('_id') || easName.endsWith('_ids')
 }
 
 function valueOf(easType: string | undefined, raw: unknown): SeedPropertyAttestation['value'] | undefined {

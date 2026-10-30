@@ -55,6 +55,7 @@ once; if it fails again, it's a real failure. [docs/TESTING.md](docs/TESTING.md)
   snapshot, its journal entry and `drizzleFiles.ts`. If main takes your number first, delete your
   migration, merge main and generate it again. `scripts/check-migrations.js` fails on a shared
   number, a gap or a stale `drizzleFiles.ts`.
+- `thirdweb` is an optional peer of `@seedprotocol/publish`. Thirdweb code goes behind `@seedprotocol/publish/thirdweb`, or in a dynamic import that runs only on a Thirdweb path; `scripts/check-publish-core-no-thirdweb.js` fails when `packages/publish/src/index.ts` reaches it statically.
 - Write a dynamic import as `const { x } = await import('...')` inside an async function, never
   `import('...').then((n) => n.x)`: `scripts/check-dist-fragile-dynamic-imports.js` fails on it.
 - Unused files, exports and dependencies fail `scripts/check-knip.js` once they exceed

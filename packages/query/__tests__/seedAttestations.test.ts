@@ -44,6 +44,7 @@ const properties = [
   property(V2, 'bool', 'featured', true, 204),
   property(V2, 'uint256', 'published_at', { type: 'BigNumber', hex: '0x10' }, 205),
   property(V2, 'bytes32', 'author_identity_id', AUTHOR, 206),
+  property(V2, 'string', 'external_id', 'ext-42', 207),
 ]
 
 beforeAll(() =>
@@ -70,11 +71,14 @@ describe('getSeedAttestations', () => {
     expect(entry.record.versionUid).toBe(V2)
     expect(entry.record.data.title).toBe('Second')
     const props = byName(entry)
-    expect(Object.keys(props).sort()).toEqual(['author_identity_id', 'featured', 'published_at', 'title'])
+    expect(Object.keys(props).sort()).toEqual(['author_identity_id', 'external_id', 'featured', 'published_at', 'title'])
     expect(props.title).toMatchObject({ easType: 'string', value: 'Second', isRelation: false })
     expect(props.featured).toMatchObject({ easType: 'bool', value: true })
     expect(props.published_at).toMatchObject({ easType: 'uint256', value: '16' })
     expect(props.author_identity_id).toMatchObject({ easType: 'bytes32', value: AUTHOR, isRelation: true })
+    // Only bytes32 properties are relations, whatever the name
+    expect(props.external_id).toMatchObject({ easType: 'string', value: 'ext-42', isRelation: false })
+    expect(entry.record.data.external_id).toBe('ext-42')
   })
 
   it('reads a pinned version', async () => {

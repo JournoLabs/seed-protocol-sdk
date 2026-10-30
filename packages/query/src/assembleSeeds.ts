@@ -9,9 +9,8 @@ import {
 } from '@seedprotocol/eas'
 import { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 import {
-  publicListRelationPropertyKey,
+  isRelationProperty,
   relationPropertyKey,
-  stripListRelationStorageAliasesForPublicKey,
   tryCoerceJsonStringArray,
 } from './listRelationKey.js'
 import { enrichImageSeedClone } from './imageRelationEnrichment.js'
@@ -32,19 +31,6 @@ import {
 } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
-
-const RESERVED_KEYS = new Set([
-  'seedUid',
-  'SeedUid',
-  'timeCreated',
-  'attester',
-  'Attester',
-  'storage_transaction_id',
-  'storage_provider_transaction_id',
-  'storageTransactionId',
-  'storageProviderTransactionId',
-  'versionUid',
-])
 
 const toCamelCase = (str: string): string => {
   return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
@@ -68,6 +54,8 @@ type AssembleContext = {
   requestedSeedUids: Set<string>
   /** The property attestations each seed's record is assembled from: its head Version's canonical ones. */
   headPropertiesBySeedUid: Map<string, AttestationLike[]>
+  /** The keys (snake and camel) each seed's relation properties were stored under; only these expand. */
+  relationKeysBySeedUid: Map<string, Set<string>>
 }
 
 function createAssembleContext(): AssembleContext {
@@ -82,6 +70,7 @@ function createAssembleContext(): AssembleContext {
     droppedSeedUids: new Set(),
     requestedSeedUids: new Set(),
     headPropertiesBySeedUid: new Map(),
+    relationKeysBySeedUid: new Map(),
   }
 }
 
@@ -171,20 +160,12 @@ async function processItemProperty(
   if (easType) setSchemaUidForSchemaDefinition({ text: `${easType} ${propertyNameSnake}`, schemaUid: property.schemaId })
   // A removed property (ADR 0021): absent from the seed, and a zero uid is no related seed
   if (isEasEmptyValue(easType, metadata.value)) return
-  const isBytes32Relation =
-    (easType === 'bytes32' || easType === 'bytes32[]') &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-  const isNamingConventionRelation =
-    !isBytes32Relation &&
-    (propertyNameSnake.endsWith('_id') || propertyNameSnake.endsWith('_ids')) &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-
-  if (isBytes32Relation || isNamingConventionRelation) {
+  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
+  if (isRelationProperty(propertyNameSnake, easType)) {
     isRelation = true
     isList = Array.isArray(metadata.value)
-    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
+    const modelName = seedUidForProperty && ctx.seedUidToModelType.get(seedUidForProperty)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList, modelName || undefined)
     // A reference slot the publisher's multiPublish never filled names no seed: a relation holding
     // one is absent, and a list keeps its other members.
     if (Array.isArray(metadata.value)) {
@@ -206,7 +187,6 @@ async function processItemProperty(
     propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
-  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
   if (!seedUidForProperty) {
     return
   }
@@ -218,6 +198,11 @@ async function processItemProperty(
     existingItem[propertyNameCamel] = propertyValue
   }
   ctx.assembledItems.set(seedUidForProperty, existingItem)
+  if (isRelation) {
+    const relationKeys = ctx.relationKeysBySeedUid.get(seedUidForProperty) ?? new Set<string>()
+    relationKeys.add(propertyNameSnake).add(propertyNameCamel)
+    ctx.relationKeysBySeedUid.set(seedUidForProperty, relationKeys)
+  }
 }
 
 /** Pins that name a version or a time, by lowercase seed UID. */
@@ -364,11 +349,14 @@ async function processSeeds(
   }
 }
 
+/** The seed's relation keys still on its item, already under their schema keys (processItemProperty). */
+function relationKeysOf(ctx: AssembleContext, seedUid: string, item: Record<string, unknown>): string[] {
+  return [...(ctx.relationKeysBySeedUid.get(seedUid) ?? [])].filter((k) => k in item)
+}
+
 function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
-  for (const [, item] of requestedItems(ctx)) {
-    const keysToProcess = Object.keys(item).filter(
-      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
-    )
+  for (const [seedUid, item] of requestedItems(ctx)) {
+    const keysToProcess = relationKeysOf(ctx, seedUid, item)
 
     for (const key of keysToProcess) {
       let value = item[key]
@@ -422,15 +410,8 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
           }
         }
         if (resolved) {
-          const outputKey = publicListRelationPropertyKey(key)
-          item[outputKey] = urls
-          setListElementStorageModels(item, outputKey, models)
-          stripListRelationStorageAliasesForPublicKey(item, outputKey)
-          if (outputKey !== key) {
-            delete item[key]
-            const camelKey = toCamelCase(key)
-            if (camelKey !== key) delete item[camelKey]
-          }
+          item[key] = urls
+          setListElementStorageModels(item, key, models)
         }
       } else if (typeof value === 'string') {
         if (isUnfilledReference(value)) continue
@@ -445,19 +426,8 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
           | undefined
         if (txId && typeof txId === 'string' && txId.trim()) {
           try {
-            const outputKey = key.endsWith('_id') ? key.replace(/_id$/, '') : key
-            item[outputKey] = getArweaveUrlForTransaction(txId)
-            const relatedModel = ctx.seedUidToModelType.get(value) ?? 'unknown'
-            setFieldStorageModel(item, outputKey, relatedModel)
-            const camelOut = toCamelCase(outputKey)
-            if (camelOut !== outputKey) {
-              setFieldStorageModel(item, camelOut, relatedModel)
-            }
-            if (outputKey !== key) {
-              delete item[key]
-              const camelKey = toCamelCase(key)
-              if (camelKey !== key) delete item[camelKey]
-            }
+            item[key] = getArweaveUrlForTransaction(txId)
+            setFieldStorageModel(item, key, ctx.seedUidToModelType.get(value) ?? 'unknown')
           } catch {
             // keep original on error
           }
@@ -468,10 +438,8 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
 }
 
 function expandRelationProperties(ctx: AssembleContext): void {
-  for (const [, item] of requestedItems(ctx)) {
-    const keysToProcess = Object.keys(item).filter(
-      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
-    )
+  for (const [seedUid, item] of requestedItems(ctx)) {
+    const keysToProcess = relationKeysOf(ctx, seedUid, item)
 
     for (const key of keysToProcess) {
       let value = item[key]
@@ -522,18 +490,7 @@ function expandRelationProperties(ctx: AssembleContext): void {
       }
 
       if (didExpand) {
-        const outputKey = isList
-          ? publicListRelationPropertyKey(key)
-          : key.endsWith('_id')
-            ? key.replace(/_id$/, '')
-            : key
-        item[outputKey] = isList ? expanded : expanded[0]
-        stripListRelationStorageAliasesForPublicKey(item, outputKey)
-        if (outputKey !== key) {
-          delete item[key]
-          const camelKey = toCamelCase(key)
-          if (camelKey !== key) delete item[camelKey]
-        }
+        item[key] = isList ? expanded : expanded[0]
       }
     }
   }

@@ -60,17 +60,31 @@ const { authorization } = await enrollPublishAutomation({
   sessionKeyAddress: automationWallet.address,
   appAddress: optionalAppLabelAddress,
   expiresAt: Math.floor(Date.now() / 1000) + 90 * 24 * 3600, // optional
-  // userWallet: fromThirdwebAccount(managedAccount) // or omit to use connected managed in-app wallet
 })
 
 // Persist authorization.uid for later revokePublishAutomation
+```
+
+Without Thirdweb, import `enrollPublishAutomation` from `@seedprotocol/publish` and pass the wallets the `/thirdweb` version takes from the connected in-app wallet. `userWallet` sends as the ManagedAccount and its signer is an admin EOA; enroll refuses one that sends from any other address before it sends anything. `admin` is that admin EOA sending from itself, and is needed only when the executor isn't installed yet.
+
+```ts
+import { createManagedAccountTxSender, enrollPublishAutomation, fromEthersWallet } from '@seedprotocol/publish'
+
+const owner = fromEthersWallet(ownerEthersWallet) // admin EOA of the ManagedAccount
+const txSender = await createManagedAccountTxSender({ signer: owner.signer, bundlerUrl, paymasterUrl })
+await enrollPublishAutomation({
+  managedAddress: txSender.address,
+  sessionKeyAddress: automationWallet.address,
+  userWallet: { signer: owner.signer, txSender, kind: 'modular' },
+  admin: owner,
+})
 ```
 
 Steps performed:
 
 1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found.
 2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain. After a fresh install this uses the EAS from the install receipt rather than re-reading, since a load-balanced RPC can serve the read from a node that hasn't seen the install yet.
-3. `addSessionKey` with module-only `approvedTargets`.
+3. Grant the session key (`setPermissionsForSigner`, signed by `userWallet`'s admin EOA) with module-only `approvedTargets`.
 4. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 
 ## Server / Node
@@ -204,18 +218,23 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - `ensurePublishAuthorizationSchema`, `attestPublishAuthorization`, `revokePublishAuthorization`
 - `assessPublishAuthorizationLive`
 - `assertExecutorModuleReadyForAccount` (check an account before offering enrollment), `simulateCallFromAccount`
+- `enrollPublishAutomation`, `revokePublishAutomation` (take `userWallet`, and `admin` when the executor needs installing; see [Enroll](#enroll)), `ensureExecutorModuleInstalled(account, getAdmin, config)`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` (take `admin: PublishWallet`; see below), `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
+
+`admin.signer` signs the session-key grant and must be an admin EOA of the ManagedAccount; a signer that isn't fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent. `admin.txSender` sends it. The account applies a grant an admin signed whoever sends it, so the admin EOA can send it and pay the gas, or a relayer can. An undeployed account takes the grant only from a sender that is the account, whose first UserOp deploys it.
 
 ### `@seedprotocol/publish/thirdweb`
 
-- `approvedTargetsForAutomationPublish`, `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
-- `enrollPublishAutomation`, `revokePublishAutomation`
+- `approvedTargetsForAutomationPublish`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` with `admin` optional: it defaults to the connected managed in-app wallet, which signs with its admin EOA and sends a sponsored UserOp from the account
+- `enrollPublishAutomation`, `revokePublishAutomation` with `userWallet` defaulting to the connected managed in-app wallet and `admin` to its in-app admin EOA; `ensureExecutorModuleInstalled` with `getAdmin` defaulting to that admin EOA
 - `assertStorageBoundToIdentity`
 - `buildAutomationSessionKeyPermissions`, `hashAutomationSessionKeyPermissions`
 
 ## Integrator checklist
 
 - [ ] Generate per-user (or per-app) session keys; never reuse Seed Protocol keys
-- [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected
+- [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected, or pass it as `userWallet`
 - [ ] Store `authorization.uid` + session key securely; rotate by revoke + re-enroll
 - [ ] Set grant `expiresAt` when appropriate
 - [ ] Handle `AUTOMATION_UNSUPPORTED_ACCOUNT` from enroll (Router accounts without the executor extension) and `AUTOMATION_PREFLIGHT_FAILED` from publish

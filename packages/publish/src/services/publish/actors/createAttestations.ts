@@ -7,7 +7,6 @@ import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
-import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
 import { encodeExecutorMultiPublish, encodeMultiPublish } from '~/helpers/contracts'
 import {
   assertExecutorModuleReadyForAccount,
@@ -18,7 +17,7 @@ import { publishGasLimit } from '~/helpers/publishGas'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
-import type { PublishWallet } from '~/helpers/seedSigner'
+import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
 import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
@@ -222,7 +221,18 @@ async function executeCreateAttestations(
         routeToExecutorModule = true
         // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
         await assertExecutorModuleReadyForAccount(address)
+      } else if (sendsAsManagedAccount(activeWallet, address)) {
+        // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
+        // publishes as it is: no Thirdweb in-app wallet to connect.
+        routing = resolvePublishRouting({
+          useModularExecutor,
+          publisherAddress: address,
+          modularAccountModuleContract,
+          managedAddress: address,
+        })
+        await ensureManagedAccountEasConfigured(address, activeWallet)
       } else {
+        const { runModularExecutorPublishPrep } = await import('~/helpers/ensureManagedAccountReady')
         const prep = await runModularExecutorPublishPrep()
         if (!prep.ok) {
           throw prep.error

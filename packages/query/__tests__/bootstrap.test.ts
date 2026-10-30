@@ -61,6 +61,26 @@ describe.each(['browser', 'node'] as const)('initializeQueryPlatform (%s entry)'
     expect(eas.BaseQueryClient.getQueryClient()).toBeDefined()
     expect(arweave.BaseArweaveClient.getHost()).toBe(arweave.DEFAULT_ARWEAVE_HOST)
   })
+
+  it('keeps the models it was given until set again or torn down', async () => {
+    const loaded = await load(entry)
+    registerHostClients(loaded)
+    const key = () => loaded.query.buildAssembleOptionsKey()
+    const plain = key()
+    await loaded.query.initializeQueryPlatform({
+      models: { Post: { properties: { coAuthors: { type: 'List', ref: 'Identity' } } } },
+    })
+    const withModels = key()
+    expect(withModels).not.toBe(plain)
+    // Every query call initializes with only its source; the models stay
+    await loaded.query.initializeQueryPlatform({ source: 'remote' })
+    expect(key()).toBe(withModels)
+    await loaded.query.initializeQueryPlatform({ models: null })
+    expect(key()).toBe(plain)
+    await loaded.query.initializeQueryPlatform({ models: { Post: { properties: { coAuthors: { type: 'List', ref: 'Identity' } } } } })
+    await loaded.query.teardownQueryPlatform()
+    expect(key()).toBe(plain)
+  })
 })
 
 describe('Arweave client when none is registered', () => {
@@ -154,4 +174,5 @@ describe('a second copy of eas / arweave', () => {
     registerHostClients(loaded)
     await expect(loaded.query.initializeQueryPlatform()).resolves.toBeUndefined()
   })
+
 })

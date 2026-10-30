@@ -39,6 +39,10 @@ export function fromThirdwebAccount(
       const sig = await account.signMessage({ message })
       return sig as Hex
     },
+    signTypedData: async (args) => {
+      const sig = await account.signTypedData(args as Parameters<Account['signTypedData']>[0])
+      return sig as Hex
+    },
   })
   const txSender = brandTxSender({
     address,

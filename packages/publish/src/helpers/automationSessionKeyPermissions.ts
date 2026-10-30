@@ -7,7 +7,7 @@ export const PUBLISH_AUTOMATION_SCOPES = 'publish,revoke' as const
 export type AutomationSessionKeyPermissions = {
   approvedTargets: `0x${string}`[]
   nativeTokenLimitPerTransaction: number
-  /** Unix seconds; omit for Thirdweb default long window. */
+  /** Unix seconds; omit for a key that ends ten years after the grant. */
   expiresAt?: number
 }
 
@@ -41,23 +41,4 @@ export function hashAutomationSessionKeyPermissions(
   const expiresAt = permissions.expiresAt ?? 0
   const material = `${targets}|${limit}|${expiresAt}|${scopes.trim()}`
   return keccak256(toUtf8Bytes(material)) as `0x${string}`
-}
-
-/** Shape passed to Thirdweb `addSessionKey` / `shouldUpdateSessionKey`. */
-export function toThirdwebSessionKeyPermissions(permissions: AutomationSessionKeyPermissions): {
-  approvedTargets: `0x${string}`[]
-  nativeTokenLimitPerTransaction: number
-  permissionEndTimestamp?: Date
-} {
-  const base = {
-    approvedTargets: permissions.approvedTargets,
-    nativeTokenLimitPerTransaction: permissions.nativeTokenLimitPerTransaction,
-  }
-  if (permissions.expiresAt != null && permissions.expiresAt > 0) {
-    return {
-      ...base,
-      permissionEndTimestamp: new Date(permissions.expiresAt * 1000),
-    }
-  }
-  return base
 }

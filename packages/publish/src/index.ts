@@ -90,10 +90,41 @@ export {
   isPublishWallet,
 } from './helpers/seedSigner'
 export {
+  enrollPublishAutomation,
+  revokePublishAutomation,
+  type EnrollPublishAutomationParams,
+  type EnrollPublishAutomationResult,
+  type RevokePublishAutomationParams,
+} from './helpers/enrollPublishAutomation'
+export {
+  ensureExecutorModuleInstalled,
+  type EnsureExecutorModuleResult,
+} from './helpers/ensureExecutorModule'
+export {
+  ensureAutomationSessionKey,
+  removeAutomationSessionKey,
+  isAutomationSessionActive,
+} from './helpers/ensureAutomationSessionKey'
+export {
   fromEip1193Provider,
   fromWindowEthereum,
+  type FromEip1193Options,
 } from './helpers/adapters/eip1193'
+export {
+  fromViemWalletClient,
+  type FromViemWalletClientOptions,
+} from './helpers/adapters/viemWalletClient'
+export {
+  fromPrivyWallet,
+  type FromPrivyWalletOptions,
+  type PrivyEthereumWalletLike,
+} from './helpers/adapters/privy'
 export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
+export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
+export {
+  createManagedAccountTxSender,
+  type CreateManagedAccountTxSenderOptions,
+} from './helpers/adapters/managedAccountTxSender'
 export {
   setPublishWallet,
   getPublishWallet,

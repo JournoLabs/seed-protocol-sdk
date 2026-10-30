@@ -62,7 +62,7 @@ export class CacheManager {
    * When each collection read (by refresh-lock key) was last checked, and the ETag it produced.
    * In memory only: the window is for a warm process serving many reads.
    */
-  private collectionChecks = new Map<string, { at: number; etag: string }>()
+  private collectionChecks = new Map<string, { at: number; etag: string; listed: number }>()
   private stats: QueryCacheStats = {
     hits: 0,
     misses: 0,
@@ -220,9 +220,12 @@ export class CacheManager {
     await this.persistent?.clearItem(seedUid, optionsKey)
   }
 
-  /** Records that the collection read under `key` was checked just now and produced `etag`. */
-  markCollectionChecked(key: string, etag: string): void {
-    this.collectionChecks.set(key, { at: Date.now(), etag })
+  /**
+   * Records that the collection read under `key` was checked just now and produced `etag` from
+   * `listed` listed Seeds.
+   */
+  markCollectionChecked(key: string, etag: string, listed: number): void {
+    this.collectionChecks.set(key, { at: Date.now(), etag, listed })
   }
 
   /**
@@ -234,11 +237,11 @@ export class CacheManager {
     schemaName: string,
     optionsKey: string,
     maxAge: number,
-  ): Promise<CachedCollectionData | null> {
+  ): Promise<{ collection: CachedCollectionData; listed: number } | null> {
     const check = this.collectionChecks.get(key)
     if (!check || Date.now() - check.at >= maxAge * 1000) return null
     const cached = await this.getCollection(schemaName, optionsKey)
-    return cached?.etag === check.etag ? cached : null
+    return cached?.etag === check.etag ? { collection: cached, listed: check.listed } : null
   }
 
   /** Every options variant of the schema's collection. */

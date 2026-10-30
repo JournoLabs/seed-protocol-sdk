@@ -76,6 +76,26 @@ function App() {
 // if (result.outcome === 'already_publishing') ...          // this item is publishing already
 ```
 
+With wagmi (and RainbowKit, ConnectKit or Reown AppKit on top of it), pass the connected `WalletClient` through `fromViemWalletClient`. With Privy, pass a wallet from `useWallets()` to `fromPrivyWallet`, which switches it to the publish chain first. Neither adds a dependency: the Privy adapter takes any object with Privy's `address`, `chainId`, `switchChain` and `getEthereumProvider`.
+
+```tsx
+import { fromViemWalletClient, fromPrivyWallet, useSeedWallet } from '@seedprotocol/publish'
+import { useWalletClient } from 'wagmi'
+import { useWallets } from '@privy-io/react-auth'
+
+const { connect } = useSeedWallet()
+
+// wagmi
+const { data: walletClient } = useWalletClient()
+if (walletClient) await connect(fromViemWalletClient(walletClient))
+
+// Privy (embedded or external wallet)
+const { wallets } = useWallets()
+await connect(await fromPrivyWallet(wallets[0]))
+```
+
+Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
+
 ### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
 
 ```tsx
@@ -89,7 +109,20 @@ initPublish({
 })
 ```
 
-`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. ModularCore / ManagedAccount session-key flows remain Thirdweb-only.
+`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. `paymasterUrl` is asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`. Fees come from the bundler's `pimlico_getUserOperationGasPrice` when it answers that method, and from the chain's estimate otherwise.
+
+To send as a Seed ManagedAccount without Thirdweb, build its sender with `createManagedAccountTxSender`. It sends UserOps through any EntryPoint v0.6 bundler, sponsored by an ERC-7677 paymaster unless `sponsored: false`, and raises the bundler's `callGasLimit` estimate by `CALL_GAS_HEADROOM_BPS` (1.2x) before the paymaster signs. Without `managedAddress` it uses the account the signer administers through the factory, and its first UserOp deploys it. A session key the account granted can sign too; pass `managedAddress` then.
+
+```ts
+const txSender = await createManagedAccountTxSender({
+  signer: owner.signer, // admin EOA or session key
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  paymasterUrl: import.meta.env.VITE_PAYMASTER_URL,
+})
+await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, admin: { signer: owner.signer, txSender } })
+```
+
+Register `{ signer: owner.signer, txSender, kind: 'modular' }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.
 
 ### Recipe 3: Thirdweb ConnectButton (batteries-included)
 
@@ -319,7 +352,7 @@ await deletePublishProcessById(runId) // numeric row id from `records`
 
 Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md).
 
-APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
+APIs live on `@seedprotocol/publish` (sidecar attest/revoke, and `enrollPublishAutomation`, `revokePublishAutomation` and the session-key helpers taking wallets) and `@seedprotocol/publish/thirdweb` (the same with wallets defaulting to the connected in-app wallet, and `assertStorageBoundToIdentity`).
 
 ### Modular executor (`useModularExecutor`)
 
@@ -335,7 +368,7 @@ With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 **Executor.** `runModularExecutorPublishPrep()` ensures the ManagedAccount is deployed and, when `modularAccountModuleContract` is set, tries to install the Seed executor: `installSeedExecutor()` from the admin EOA on Router accounts with the `SeedExecutorRouterExtension`; other accounts are skipped. Interactive publishing doesn't use the executor, so a failed install (for example, `modularAccountModuleContract` naming a different executor than the one the account's extension pins) only logs a warning. `enrollPublishAutomation` requires the install and fails with `EXECUTOR_MODULE_NOT_INSTALLED`. To catch a stale `modularAccountModuleContract` at startup, compare it with `readFactorySeedExecutor()`.
 
-**Session keys** may only target the executor (`approvedTargetsForAutomationPublish`). `ensureManagedSignerSessionKey` and `defaultApprovedTargetsForModularPublish` are deprecated: interactive publishing needs no session key, and both now grant the executor only, never the account (which would allow any self-call) or EAS.
+**Session keys** may only target the executor (`approvedTargetsForAutomationPublish`), never the account (which would allow any self-call) or EAS. Interactive publishing needs no session key. `ensureAutomationSessionKey` and `removeAutomationSessionKey` take an `admin` `PublishWallet`: its signer, an admin EOA of the account, signs the grant, and its sender sends it. The account accepts the grant from any sender, so the admin EOA can send it and pay the gas itself. The `/thirdweb` versions default `admin` to the connected managed in-app wallet.
 
 **Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
 

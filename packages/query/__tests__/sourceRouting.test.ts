@@ -303,7 +303,9 @@ describe('query source local / remote / auto', () => {
     expect(await getSeed('0xunpublished', { source: 'local' })).toBeNull()
     expect(await getSeed('0xunpublished', { source: 'local', include: 'changelog' })).toBeNull()
     expect(await getSeeds(['0xunpublished'], { source: 'local' })).toEqual(new Map())
-    expect((await queryBySchema('post', { source: 'local' })).items).toEqual([])
+    // Listed, then left out: the page is empty, but `listed` says the listing hasn't ended.
+    expect(await queryBySchema('post', { source: 'local', limit: 1 })).toMatchObject({ items: [], listed: 1 })
+    expect(await queryBySchema('post', { source: 'local', limit: 1, skip: 1 })).toMatchObject({ items: [], listed: 0 })
   })
 
   it('source auto reads remote when the local seed has no Versions', async () => {
