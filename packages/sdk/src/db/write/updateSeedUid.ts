@@ -5,7 +5,9 @@ import { normalizePublisher } from '@/helpers/addresses'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
 import { mergeSeedRowInto, otherSeedRowsWithUid } from '@/db/write/mergeChainRows'
 
-type UpdateSeedUidProps = {
+type Tx = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
+
+export type UpdateSeedUidProps = {
   seedLocalId: string
   seedUid: string
   publisher?: string
@@ -20,19 +22,18 @@ type UpdateSeedUidProps = {
  * row's publisher is never changed. A seed row
  * another writer inserted for the same uid (a sync that ran while this was published) is merged
  * into this one first, since seeds.uid is unique.
+ * With `db` (a transaction), it writes there instead of in a transaction of its own.
  */
-export const updateSeedUid = async ({
-  seedLocalId,
-  seedUid,
-  publisher,
-  attestationCreatedAt,
-}: UpdateSeedUidProps): Promise<void> => {
+export const updateSeedUid = async (
+  { seedLocalId, seedUid, publisher, attestationCreatedAt }: UpdateSeedUidProps,
+  { db }: { db?: Tx } = {},
+): Promise<void> => {
   if (!seedLocalId || !seedUid) {
     return
   }
 
   const normalizedPublisher = normalizePublisher(publisher)
-  await BaseDb.transaction(async (tx) => {
+  const write = async (tx: Tx) => {
     const [row] = await tx
       .select({ uid: seeds.uid, publisher: seeds.publisher, attestationRaw: seeds.attestationRaw })
       .from(seeds)
@@ -76,5 +77,7 @@ export const updateSeedUid = async ({
           and(eq(metadata.seedLocalId, seedLocalId), isNotNull(metadata.uid), isNull(metadata.seedUid)),
         )
     }
-  })
+  }
+  if (db) await write(db)
+  else await BaseDb.transaction(write)
 }

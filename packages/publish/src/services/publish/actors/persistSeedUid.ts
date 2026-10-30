@@ -4,7 +4,7 @@ const logger = debug('seedProtocol:services:publish:actors:persistSeedUid')
 
 const ZERO_BYTES32 = '0x' + '0'.repeat(64)
 
-/** Timeout for persistSeedUid. Attestations are already on-chain; DB write is best-effort. */
+/** Timeout for persistSeedUid. The seed row already holds the uid; see persistSeedUidSafely. */
 const PERSIST_SEED_UID_TIMEOUT_MS = 15_000
 
 export type RequestWithSeedUid = { seedUid?: string; localId?: string }
@@ -30,9 +30,9 @@ export function persistSeedUidFromPublishResult(
 }
 
 /**
- * Wraps item.persistSeedUid with timeout and error handling. Attestations are already
- * on-chain; if this fails or times out, we log and continue. Prevents the publish
- * flow from hanging when DB write is slow or fails.
+ * Brings the loaded item up to date (item.persistSeedUid) after recordPublishRequests has written
+ * its seed uid, with a timeout. The row is what later publishes read, so a failure here is logged
+ * and the publish continues. Never the only record of a seed uid: this swallows failures.
  */
 export async function persistSeedUidSafely(
   item: {
@@ -52,8 +52,7 @@ export async function persistSeedUidSafely(
   try {
     await Promise.race([persist.call(item, address, attestationCreatedAtMs), timeout])
   } catch (err) {
-    logger('persistSeedUid failed (attestations already on-chain):', err)
-    // Don't throw - attestations are confirmed; DB write is best-effort
+    logger('persistSeedUid failed (the seed row already holds the uid):', err)
   } finally {
     clearTimeout(timer)
   }

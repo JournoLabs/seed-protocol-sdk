@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- A `multiPublish` that landed and failed to record locally is no longer sent again. Its seed, version and property uids are written in one database transaction, so a failure leaves none of them, and the publish keeps the transaction hash. The new `AttestationRecordError` reports the failure, and `retryAttestations` records from the receipt without sending. A failure partway used to leave property uids recorded without their seed uid, and Retry then attested a second Seed.
+- A publish fails when a seed uid can't be written, on both paths. It used to log the failure and reach `success`, and the next Publish from a fresh load attested a second Seed.
+
 ## 0.8.0 (2026-10-30)
 
 - A publish run created with no wallet takes the registered wallet in `checking`, as the attestation steps do, so a wallet registered after the run starts gets the EAS schema check. `checking` used to skip the check and the attestation steps failed with "Wallet session is missing". With no wallet at all, `checking` fails with the new `PublishWalletMissingError` (code `PUBLISH_WALLET_MISSING`) before anything is uploaded.

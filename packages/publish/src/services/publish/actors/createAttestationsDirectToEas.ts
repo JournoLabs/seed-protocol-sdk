@@ -4,6 +4,7 @@ import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import {
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
+  recordPublishRequests,
   resolvePublishPayloadValues,
   type IItem,
 } from '@seedprotocol/sdk'
@@ -308,6 +309,9 @@ async function executeCreateAttestationsDirectToEas(
       persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
     }
     const persistCreatedSeed = async (seedLocalId: string, seedUid: string, attestationMs: number) => {
+      await recordPublishRequests([
+        { seed: { seedLocalId, seedUid, publisher: address, attestationCreatedAt: attestationMs } },
+      ])
       if (seedLocalId === item.seedLocalId) {
         itemWithPersist.seedUid = seedUid
         await persistSeedUidSafely(itemWithPersist, address, attestationMs)
