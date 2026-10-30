@@ -9,6 +9,7 @@ import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUn
  */
 const ADDRESS = '0x' + 'e'.repeat(40)
 const schemaRegistrations: string[] = []
+const schemaWallets: unknown[] = []
 
 mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
@@ -24,15 +25,17 @@ mock.module('../../revoke/revokeAttestations', () => ({
   },
 }))
 mock.module('../helpers/ensureEasSchemas', () => ({
-  ensureEasSchemasForItem: async (item: { seedLocalId: string }) => {
+  ensureEasSchemasForItem: async (item: { seedLocalId: string }, wallet: unknown) => {
     schemaRegistrations.push(item.seedLocalId)
+    schemaWallets.push(wallet)
   },
 }))
 mock.module('~/helpers/chainClient', () => ({
   getAccountCodeKind: async () => 'contract',
   readUntil: async <T,>(read: () => Promise<T>) => read(),
 }))
-mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => null }))
+let registeredWallet: unknown = null
+mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => registeredWallet }))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => false }))
 mock.module('~/config', () => ({ getPublishConfig: () => ({ useModularExecutor: false, useDirectEas: false }) }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
@@ -75,6 +78,28 @@ describe('checking order', () => {
     schemaRegistrations.length = 0
     const verdict = await runChecking({ item: { seedLocalId: 'no-address' }, wallet, address: '', publishMode: 'patch' })
     expect(verdict.type).toBe('validationFailed')
+    expect(schemaRegistrations).toEqual([])
+  }, TEST_TIMEOUT_MS)
+
+  test('a run with no wallet checks schemas with the registered wallet', async () => {
+    schemaRegistrations.length = 0
+    schemaWallets.length = 0
+    registeredWallet = wallet
+    try {
+      const verdict = await runChecking({ item: { seedLocalId: 'registered-later' }, address: ADDRESS, publishMode: 'patch' })
+      expect(verdict.type).toBe('skipArweave')
+      expect(schemaRegistrations).toEqual(['registered-later'])
+      expect(schemaWallets).toEqual([wallet])
+    } finally {
+      registeredWallet = null
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('a run with no wallet and none registered is refused', async () => {
+    schemaRegistrations.length = 0
+    const verdict = await runChecking({ item: { seedLocalId: 'no-wallet' }, address: ADDRESS, publishMode: 'patch' })
+    expect(verdict.type).toBe('checkingFailed')
+    expect(verdict.error).toMatchObject({ code: 'PUBLISH_WALLET_MISSING' })
     expect(schemaRegistrations).toEqual([])
   }, TEST_TIMEOUT_MS)
 })

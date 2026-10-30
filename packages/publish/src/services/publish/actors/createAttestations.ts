@@ -114,7 +114,7 @@ async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
 ): Promise<CreateAttestationsResult> {
-    const { address, account, wallet } = context
+    const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
@@ -123,10 +123,6 @@ async function executeCreateAttestations(
 
     if (!address || typeof address !== 'string' || !address.trim()) {
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
-    }
-
-    if (!wallet && !account) {
-      throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
     if (!useModularExecutor && !(await isContractDeployed(address))) {
