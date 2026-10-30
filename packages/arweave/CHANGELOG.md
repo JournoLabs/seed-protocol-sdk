@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `fetchArweaveRawBytesAcrossGateways(transactionId, options)`: `fetchArweaveRawTextAcrossGateways` without the decoding, for callers that need the transaction's exact bytes.
+
 ## 0.8.0 (2026-10-30)
 
 - `probeGateway(url, signal)` from JavaScript throws a `TypeError` naming `{ signal }`. The signal was ignored, so the caller lost its abort and waited out the 5 s timeout.

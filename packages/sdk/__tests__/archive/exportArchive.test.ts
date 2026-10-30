@@ -46,6 +46,14 @@ const schemaFile = () => ({
         title: { id: generateId(), type: 'Text' },
         featureImage: { id: generateId(), type: 'Image' },
         html: { id: generateId(), type: 'Html' },
+        author: { id: generateId(), type: 'Relation', model: 'ArchivedAuthor' },
+        reviewerIds: { id: generateId(), type: 'List', refValueType: 'Relation', ref: 'ArchivedAuthor' },
+      },
+    },
+    ArchivedAuthor: {
+      id: generateId(),
+      properties: {
+        name: { id: generateId(), type: 'Text' },
       },
     },
   },
@@ -108,6 +116,28 @@ async function createPublishedPost(): Promise<Item<any>> {
   return post
 }
 
+const createAuthor = async (name: string): Promise<Item<any>> => {
+  const author = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'ArchivedAuthor', name } as any)
+  await waitForIdle(author, 'Item', 15000)
+  return author
+}
+
+/** A post with a Relation and a List of authors, as the publishing device stores them: by local id. */
+async function createPostWithRelations(published: 'all' | 'post only' = 'all') {
+  const [author, firstReviewer, secondReviewer] = await Promise.all(['Ann', 'Bo', 'Cy'].map(createAuthor))
+  const post = await Item.create({
+    schemaName: SCHEMA_NAME,
+    modelName: 'ArchivedPost',
+    title: 'A post with authors',
+    author: author!.seedLocalId,
+    reviewerIds: [firstReviewer!.seedLocalId, secondReviewer!.seedLocalId],
+  } as any)
+  await waitForIdle(post, 'Item', 15000)
+  await waitForPendingOutboxOps()
+  await markPublished(post, published === 'all' ? [author!, firstReviewer!, secondReviewer!] : [])
+  return { post, author: author!, reviewers: [firstReviewer!, secondReviewer!] }
+}
+
 testDescribe('exportArchive', () => {
   const dirs: string[] = []
 
@@ -120,7 +150,7 @@ testDescribe('exportArchive', () => {
     })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['ArchivedPost', 'Image', 'File', 'Html'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['ArchivedPost', 'ArchivedAuthor', 'Image', 'File', 'Html'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -166,10 +196,13 @@ testDescribe('exportArchive', () => {
     expect(dc).toContain('<dc:date>2026-10-08</dc:date>')
     const premis = text(bag, 'metadata/premis.xml')
     expect(premis).toContain('<premis:eventDateTime>2026-10-08T21:00:00.000Z</premis:eventDateTime>')
-    expect(premis).toContain(`<premis:originalName>${imageUrl}</premis:originalName>`)
+    expect(premis).toContain(`<premis:originalName>ar://${IMAGE_TX}</premis:originalName>`)
+    expect(premis).toContain('Time: attestation time recorded on the exporting device')
+    expect(item.properties.title.attestedAtClock).toBe('local-record')
     const info = text(bag, 'bag-info.txt')
     expect(info).toContain('Source-Organization: Test Desk\n')
     expect(info).toContain(`Seed-Uid: ${post.seedUid}\n`)
+    expect(info).toContain('Seed-Bag-Times: local-record\n')
 
     const bagitPy = findBagitPy()
     if (bagitPy || bagitPyRequired()) {
@@ -180,6 +213,17 @@ testDescribe('exportArchive', () => {
       const result = runBagitPy(bagitPy!, path.join(dir, 'bag'))
       expect(result.output).toContain('is valid')
     }
+  }, 120000)
+
+  it('keeps a published relation and lists one it has no uid for', async () => {
+    const { post, author } = await createPostWithRelations()
+    const { bag, omitted } = await exportArchive(post, { fetch: false })
+    expect(JSON.parse(text(bag, 'data/item.json')).properties.author.value).toBe(author.seedUid)
+    expect(omitted).toEqual([])
+
+    const { post: draftRelations } = await createPostWithRelations('post only')
+    const { omitted: unnamed } = await exportArchive(draftRelations, { fetch: false })
+    expect(unnamed.map((o) => o.property).sort()).toEqual(['author', 'reviewerIds'])
   }, 120000)
 
   it('refuses an item that was never published', async () => {

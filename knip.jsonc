@@ -11,8 +11,8 @@
     // and each table's row types sit beside it.
     "packages/sdk/src/seedSchema/*.ts": ["exports", "types"]
   },
-  // System binary, called by archive's metadata test when installed.
-  "ignoreBinaries": ["xmllint"],
+  // System binaries, called by archive's metadata and verifyArchive tests when installed.
+  "ignoreBinaries": ["shasum", "xmllint"],
   "workspaces": {
     ".": {
       "entry": ["scripts/**/*.{js,ts,mjs}", "vite.config.js"],

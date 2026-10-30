@@ -26,6 +26,7 @@ manifest-sha256.txt           payload checksums
 manifest-sha512.txt
 metadata/dc.xml               Dublin Core (oai_dc)
 metadata/premis.xml           PREMIS 3.0 objects, events and agents
+VERIFY.txt                    the commands to check the bag by hand
 tagmanifest-sha256.txt        checksums of every file above
 tagmanifest-sha512.txt
 data/index.html               the Html, with references to bagged files made relative
@@ -50,23 +51,118 @@ description, each `p-author` a creator, `dt-published` the date and `u-url` the 
 guessed from property names. Without an h-entry the Dublin Core record has the identifiers, type
 and the Version's date only.
 
-**PREMIS events** come from the local version history: the first live Version is the creation
-event, each later Version and each property attested again on the current Version (a patch) is a
-modification, and the bag adds a message digest calculation and an information package creation
-event. Attestations without a recorded time are left out, since a PREMIS event needs one. The
-attester is an agent identified by its EVM address, with no agent type: an address doesn't say
-whether it is a person or an organization.
+**PREMIS events** come from the version history: the first live Version is the creation event,
+each later Version and each property attestation that holds a current value and was made after
+the current Version (a patch) is a modification, and the bag adds a message digest calculation and
+an information package creation event. Attestations without a time are left out, since a PREMIS
+event needs one. The attester is an agent identified by its EVM address, with no agent type: an
+address doesn't say whether it is a person or an organization.
+
+**Every time says whose clock it came from**, in each PREMIS event's detail, in `data/item.json`
+(`attestedAtClock` next to each `attestedAt`) and in bag-info.txt's `Seed-Bag-Times`:
+
+- `chain-block`: the attestation's `timeCreated` as EAS reports it, which is the block time on the
+  attesting chain.
+- `local-record`: the attestation time stored on the exporting device. For data synced from EAS
+  that is the block time. For an attestation the device published itself, it is the block time
+  when publish could read it, and otherwise the device's own clock; the database doesn't record
+  which.
+- `export-device`: the exporting device's clock, used for the bag's own events in an ordinary
+  export.
+
+## Reproducible bags
+
+`exportArchive(item, { reproducible: true })` builds the bag every client gets for a seed at one
+time: the same bytes, so the same `tagmanifest-sha256.txt` hash, from any device with the same
+schema loaded. This is the bag to anchor, sign or publish. It reads EAS and Arweave and no rows, so
+a device that holds nothing for the seed can name it instead:
+
+```ts
+const { bag } = await exportArchive(
+  { seedUid, modelName: 'Post', schemaName: 'blog' },
+  { reproducible: true, asOf: 1791500000 },
+)
+```
+
+- `asOf` (unix seconds) is the time the bag covers, recorded as `asOf` in `data/item.json` and
+  `Seed-Bag-As-Of` in bag-info.txt. The bag holds the newest Version live then and the property
+  values current then, so a later patch, Version, retraction or revocation doesn't change it. Without
+  `asOf` it covers the latest state: the time of the last attestation or revocation on the
+  properties of the newest live Version.
+- A property's value follows sync's rule at that time: its newest live attestation, and no value
+  when all of them were revoked (a retraction).
+- Only the seed attester's Versions and the Version attester's properties count, since anyone can
+  attest with any `refUID`.
+- Every time comes from EAS (`chain-block`), and so does the attester's address. The bag is dated
+  with `asOf`, not the export time.
+- Files are read from their Arweave transactions, because a local copy can differ from what was
+  uploaded. `data/source/` holds those bytes unchanged. `fetch: false` is refused.
+- Nothing local to the exporting device goes in: `sourceOrganization` and `baggingDate` are
+  refused, unpublished edits are ignored, PREMIS names files on Arweave as `ar://<tx>` rather than
+  by the configured gateway, and every list is in a fixed order.
+- History stops at the current Version and leaves revocations out. Check a Version's revocation
+  status on EAS, not in the bag.
+- A file's type comes from its bytes. A type the bytes don't show is recorded as
+  `application/octet-stream`.
+- bag-info.txt's `Seed-Bag-Format` names the rules the bag was built under (see
+  [ADR 0028](adr/0028-reproducible-bag-format.md)).
+- Without `asOf`, `not_synced` means EAS doesn't yet report a Version or property attestation this
+  device has made, so retry once the indexer catches up. It also means EAS has no such seed.
+- A bag that would leave something out is refused (`incomplete`) rather than written with an
+  omission another client might not have. That includes a file no gateway served.
+
+An ordinary export reads local rows only, works offline (with `fetch: false`), and can differ from
+device to device.
+
+## Verifying a bag
+
+`verifyArchive(bag, { expectedTagmanifestSha256 })` from `@seedprotocol/archive` needs no Seed code
+or network. `fixity` checks the bag against its own manifests. `anchor` compares the SHA-256 of
+`tagmanifest-sha256.txt` with a hash from outside the bag, and stays `not_checked` without one.
+Each check is reported on its own, because anyone who changes a file can rewrite the manifests too:
+`fixity` alone says the bag is intact, and not that it's the bag you expect.
+
+`verifyArchiveAgainstChain(bag, item)` from `@seedprotocol/sdk` adds `rebuilt`: it makes a
+reproducible export of the item at the bag's `Seed-Bag-As-Of` and compares the two bags, listing
+what differs in `differingFiles`. `item` can be `{ seedUid, modelName, schemaName }`.
+
+```ts
+import { verifyArchiveAgainstChain } from '@seedprotocol/sdk'
+
+const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag, post)
+```
+
+`rebuilt` is `not_checked`, with the reason in `detail`, for an ordinary export, a bag of another
+seed, a bag in another `Seed-Bag-Format`, or an export that refuses. EAS doesn't record a bag's hash
+yet, so this rebuild is the SDK's only hash source.
+
+Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
+
+## What an attestation proves
+
+A Seed attestation shows that its attester published these bytes no later than the block time of
+the attestation. It does not show who wrote the content, that it was true, or that the attester
+is the person or organization a reader assumes. Where the bytes are a copy of someone else's page,
+the attestation doesn't show that they were fetched from that page or when the page served them;
+only a capture's own provenance record makes that claim, at the capture provider's clock. A bag's
+checksums show that its files haven't changed since the bag was made, and say nothing about the
+files before that.
 
 ## When export refuses or leaves something out
 
 `exportArchive` throws `ArchiveExportError` with:
 
 - `not_published` when the item has no live published Version (never published, or unpublished).
-- `unpublished_changes` when a property holds a saved value that isn't published yet. Publish
-  first: the bag is the published record, and mixing in local edits would make it something no
-  attestation backs.
+- `unpublished_changes`, in an ordinary export, when a property holds a saved value that isn't
+  published yet. Publish first: the bag is the published record, and mixing in local edits would
+  make it something no attestation backs.
+- With `reproducible`: `not_synced` and `incomplete` as above, and `chain_unavailable` when the EAS
+  indexer can't be read.
+- `invalid_options` for `sourceOrganization`, `baggingDate` or `fetch: false` with `reproducible`,
+  `asOf` or a seed named by uid without it, an `asOf` that isn't whole seconds, or a model that
+  isn't loaded.
 
-A file that can't be read or downloaded doesn't fail the export. It is listed in `omitted` (and
+A file that can't be read or downloaded doesn't fail an ordinary export. It is listed in `omitted` (and
 in `data/item.json`) with the reason, and the bag is still valid for what it holds. An Html
 reference to an Arweave transaction that isn't in the bag stays as its gateway URL and is listed
 the same way. By default export downloads files that aren't on this device; pass `fetch: false`
