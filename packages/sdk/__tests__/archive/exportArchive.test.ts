@@ -330,6 +330,7 @@ testDescribe('exportArchive', () => {
       expect(text(first.bag, 'bag-info.txt')).toContain(`Bagging-Date: ${versionIso.slice(0, 10)}\n`)
       expect(text(first.bag, 'bag-info.txt')).toContain(`EAS-Attester: ${ATTESTER}\n`)
       expect(text(first.bag, 'bag-info.txt')).toContain('Seed-Bag-Times: chain-block\n')
+      expect(text(first.bag, 'bag-info.txt')).toContain('Seed-Bag-Format: 1\n')
       const premis = text(first.bag, 'metadata/premis.xml')
       expect(premis).toContain(`<premis:eventDateTime>${versionIso}</premis:eventDateTime>`)
       expect(premis).toContain(`<premis:eventDateTime>${new Date((T0 + 60) * 1000).toISOString()}</premis:eventDateTime>`)

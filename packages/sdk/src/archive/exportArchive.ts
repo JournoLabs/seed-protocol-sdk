@@ -128,6 +128,8 @@ type ChainRecord = {
 
 const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
 const SOFTWARE_AGENT = '@seedprotocol/sdk exportArchive (https://github.com/JournoLabs/seed-protocol-sdk)'
+/** Raise it when a change would alter a reproducible bag's bytes (ADR 0028). */
+const REPRODUCIBLE_BAG_FORMAT = '1'
 
 const isoFromMs = (ms: number | null | undefined): string | undefined =>
   typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : undefined
@@ -531,6 +533,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   if (chain?.name) info.push(['EAS-Chain-Name', chain.name])
   if (attester) info.push(['EAS-Attester', attester])
   info.push(['Seed-Bag-Times', reproducible ? 'chain-block' : 'local-record'])
+  if (reproducible) info.push(['Seed-Bag-Format', REPRODUCIBLE_BAG_FORMAT])
 
   const bag = createBag({
     payload,

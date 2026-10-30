@@ -80,6 +80,12 @@ synced and reads it with the same schema. This is the bag to anchor, sign or pub
 - Nothing local to the exporting device goes in: `sourceOrganization` and `baggingDate` are
   refused, PREMIS names files on Arweave as `ar://<tx>` rather than by the configured gateway, and
   every list is in a fixed order.
+- History stops at the current Version and leaves revocations out, so revoking an older or a later
+  Version doesn't change the bag. Check a Version's revocation status on EAS, not in the bag.
+- A file's type comes from its bytes, because its local name differs between devices. A type the
+  bytes don't show is recorded as `application/octet-stream`.
+- bag-info.txt's `Seed-Bag-Format` names the rules the bag was built under (see
+  [ADR 0028](adr/0028-reproducible-bag-format.md)).
 - It reads the seed, its Versions and the current Version's property attestations from the EAS
   indexer, and refuses (`not_synced`) when the device's copy is behind: EAS has a newer live
   Version, or a property attestation on this Version that the device hasn't synced.
