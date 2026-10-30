@@ -1,6 +1,7 @@
 import { resolveModelRecord, type ResolvedModelRecord } from '@/db/read/resolveModelRecord'
 import { relatedModelNameFromDef } from '@/db/read/resolveRelatedSeedRef'
 import { publishPropertyKind, type PublishGraphProperty } from '@/db/read/publishGraph'
+import { UnknownModelError } from '@/Item/errors'
 import { getPropertyDefinitions, type PropertyDefinition } from '@/helpers/propertyDefinition'
 
 /** One model as a publish attests it, read from its definitions: what an EAS schema check needs without a seed. */
@@ -32,7 +33,7 @@ async function refModel(definition: PropertyDefinition, schemaName: string | und
  * each model, the storage models (Image, File, Html) its storage-seed properties reach, and with
  * `followRefs` the models its relation and list properties name. Each model appears once.
  *
- * Throws for a name with no model (in `schemaName`, when given), and AmbiguousModelError for a
+ * Throws UnknownModelError for a name with no model (in `schemaName`, when given), and AmbiguousModelError for a
  * name two schemas define when no `schemaName` is given. A ref whose model isn't loaded is skipped.
  */
 export async function getPublishModels(
@@ -43,7 +44,7 @@ export async function getPublishModels(
   const queue: ResolvedModelRecord[] = []
   for (const name of modelNames) {
     const model = await resolveModelRecord(name, { schemaName, strict: !!schemaName })
-    if (!model) throw new Error(`No model named ${name}${schemaName ? ` in schema ${schemaName}` : ''}`)
+    if (!model) throw new UnknownModelError(name, schemaName)
     queue.push(model)
   }
 

@@ -14,3 +14,14 @@ export class ClientNotInitializedError extends Error {
     Object.setPrototypeOf(this, ClientNotInitializedError.prototype)
   }
 }
+
+/** Thrown by `client.resetLocalData()` outside a browser. Match on `code` (decision D36). */
+export class ResetLocalDataBrowserOnlyError extends Error {
+  readonly code = 'RESET_LOCAL_DATA_BROWSER_ONLY' as const
+
+  constructor() {
+    super('client.resetLocalData() runs in the browser only; in Node, stop the client and delete filesDir.')
+    this.name = 'ResetLocalDataBrowserOnlyError'
+    Object.setPrototypeOf(this, ResetLocalDataBrowserOnlyError.prototype)
+  }
+}

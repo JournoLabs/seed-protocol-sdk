@@ -27,8 +27,10 @@ import {
   isEntityTornDown,
   releaseEntity,
   runEntityLoad,
+  teardownEntity,
   waitForEntityReady,
 } from '@/helpers/entity/entityLifecycle'
+import { assertModelNameCanPublish, assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
 import { loadModel } from './loadModel'
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
@@ -129,6 +131,19 @@ const TRACKED_PROPERTIES = [
   'modelName',
   'schemaName',
 ] as const
+
+/** Throws when a new model, or a property passed to create it, has a name that can't publish. */
+function assertNewModelCanPublish(modelName: string, properties?: { [propertyName: string]: any }): void {
+  assertModelNameCanPublish(modelName)
+  for (const [name, definition] of Object.entries(properties ?? {})) {
+    assertPropertyNameCanPublish(name, {
+      dataType: definition?.dataType ?? definition?.type,
+      refValueType: definition?.refValueType,
+      ref: definition?.ref ?? definition?.refModelName,
+      name,
+    })
+  }
+}
 
 export class Model {
   /**
@@ -416,6 +431,17 @@ export class Model {
     }
     const resolvedId = id ?? generateId()
 
+    // A runtime create refuses a name that can't publish before there's an instance to leave behind.
+    // Schema files are checked when they load (a model with an id).
+    if (!id) {
+      try {
+        assertNewModelCanPublish(uniqueModelName, options?.properties)
+      } catch (error) {
+        if (!waitForReady) throw error
+        return Promise.reject(error)
+      }
+    }
+
     // The id and the properties to create go in the initial context, so the load sees them
     const initialContext = options?.properties 
       ? { _pendingPropertyDefinitions: JSON.parse(JSON.stringify(options.properties)) } as Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
@@ -530,14 +556,21 @@ export class Model {
         adoptExistingRow,
       })
       if (!hasProperties) {
-        persisted.catch((error) => logger(`Model "${uniqueModelName}" was not written: ${error}`))
+        persisted.catch((error) => {
+          logger(`Model "${uniqueModelName}" was not written: ${error}`)
+          if (!id) teardownEntity(proxiedInstance, Model.cache)
+        })
         return
       }
       await persisted.catch((error) => {
         const reason = error instanceof Error ? error.message : String(error)
         const name = proxiedInstance.getService().getSnapshot().context.modelName
+        // Out of the cache before the rejection reaches the caller; the actor stops once the load settles
+        if (!id) Model.cache.remove(proxiedInstance)
         throw new Error(`Model "${name}" could not create its properties: ${reason}`)
       })
+    }).then(() => {
+      if (!id && entityStatus(proxiedInstance) === 'error') teardownEntity(proxiedInstance, Model.cache)
     })
 
     if (!waitForReady) return proxiedInstance

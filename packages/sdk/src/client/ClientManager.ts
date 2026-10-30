@@ -12,7 +12,7 @@ import { clientManagerMachine }   from '@/client/clientManagerMachine'
 // import { BaseDb }                 from '@/db/Db/BaseDb'
 // import { appState }               from '@/seedSchema'
 // import { eq }                     from 'drizzle-orm'
-import { ClientNotInitializedError } from '@/client/errors'
+import { ClientNotInitializedError, ResetLocalDataBrowserOnlyError } from '@/client/errors'
 import { ClientManagerState } from '@/client/constants'
 import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
@@ -198,7 +198,7 @@ onTabMessage((message) => {
 
 const resetLocalData = async (options: ResetLocalDataOptions = {}): Promise<ResetLocalDataResult> => {
   if (!isBrowser()) {
-    throw new Error('client.resetLocalData() runs in the browser only; in Node, stop the client and delete filesDir.')
+    throw new ResetLocalDataBrowserOnlyError()
   }
   const filesDir =
     options.filesDir ||

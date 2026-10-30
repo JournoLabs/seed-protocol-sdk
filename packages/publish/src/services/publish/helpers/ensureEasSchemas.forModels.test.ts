@@ -190,6 +190,6 @@ describe.sequential('ensureEasSchemasForModels', () => {
   it('throws for a model the schema does not define', async () => {
     await expect(
       ensureEasSchemasForModels(['Nope'], wallet, { schemaName: SCHEMA_NAME, dryRun: true }),
-    ).rejects.toThrow(`No model named Nope in schema ${SCHEMA_NAME}`)
+    ).rejects.toMatchObject({ name: 'UnknownModelError', modelName: 'Nope', schemaName: SCHEMA_NAME })
   })
 })
