@@ -190,6 +190,9 @@ export default defineConfig({
             'feed/**',
             // Node-only: writes bags to disk and runs bagit.py; runs in NodeJS
             'archive/**',
+            // Starts a local Arweave node (arlocal, SQLite); Node only
+            'helpers/ArweaveClient/ArweaveClient.arlocal.test.ts',
+            'integration/ArweaveFlows.test.ts',
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],

@@ -2,8 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
+- A publish run created with no wallet takes the registered wallet in `checking`, as the attestation steps do, so a wallet registered after the run starts gets the EAS schema check. `checking` used to skip the check and the attestation steps failed with "Wallet session is missing". With no wallet at all, `checking` fails with the new `PublishWalletMissingError` (code `PUBLISH_WALLET_MISSING`) before anything is uploaded.
 - **Breaking:** `ensureAutomationSessionKey` requires `expiresAt`, and refuses a time that has passed. There is no ten-year default.
 - **Breaking:** `enrollPublishAutomation` defaults to a 90-day key and `PublishAuthorization`, down from 365 days. Enroll again before the end to renew.
 - **Breaking:** `enrollPublishAutomation` fails with the new `AUTOMATION_ACCOUNT_FUNDED` code, before sending anything, when the account's balance plus EntryPoint deposit is above the new `maxAutomationExposureWei` config (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose. An automation publish over the limit logs a warning and goes ahead.
@@ -40,6 +41,44 @@ All notable changes to this project will be documented in this file.
 - `enrollPublishAutomation` and `revokePublishAutomation` add and remove the session key with `userWallet` when one is given. They used the connected managed in-app wallet for the key whatever `userWallet` was.
 - **Breaking:** removed `ensureManagedSignerSessionKey`, `defaultApprovedTargetsForModularPublish` and `toThirdwebSessionKeyPermissions` from `@seedprotocol/publish/thirdweb`. The first two were deprecated: interactive publishing needs no session key. Use `ensureAutomationSessionKey` for a server-held key.
 - `SeedSigner` has an optional `signTypedData` (EIP-712, `eth_signTypedData_v4`), implemented by `fromEthersWallet`, `fromEip1193Provider` and `fromThirdwebAccount`. The permissionless EIP-7702 sender forwards its account's `signTypedData` to it; it threw before.
+
+### Commits
+
+#### Breaking
+
+- enroll, revoke and executor install take wallets in core (23cfa735)
+- session-key grants without the Thirdweb SDK (404e413b)
+
+#### Features
+
+- migrate replaced executors and refuse stale session keys (4a869493)
+- viem WalletClient and Privy wallet adapters (6bded987)
+- name a contracts/SDK version mismatch before simulating a publish (6faea8ba)
+- estimate a contract publish's gas instead of a fixed 5,000,000 (a27a608f)
+- decode the three-phase multiPublish's reference errors (1c8bb4e8)
+- sdk: a contract publish attests both sides of a draft cycle (22e657e4)
+- ManagedAccount UserOp sender without the Thirdweb SDK (2f105925)
+- publish the whole graph in one multiPublish transaction (1d1c3188)
+- encode the three-phase multiPublish (0xa1263421) with source-index placeholders (83bc5b73)
+- optional SeedSigner.signTypedData on the built-in adapters (8e885c27)
+- upload size limit, confirm step and upload estimate (68a833f1)
+
+#### Fixes
+
+- check schemas with the registered wallet, refuse a run with none (63a21e02)
+- renew session keys, limit them to the executor, refuse funded accounts at enroll (00c65dd4)
+- drop the stale-executor migration, refuse unfilled placeholders, name PublishValueMismatch (2d39289f)
+- sign the EIP-7702 authorization on an EOA's first UserOp (ae71b8e2)
+- read publish results from the account's Attested events (147bbff1)
+- send the batch's value and drop the replaced-executor uninstall (440d267e)
+- disconnect works before config; ConnectButton waits for it before stopping publishes (089754e3)
+- sdk: typed errors for getPublishModels and Node resetLocalData; export UpdateVersionUidProps (89939f2d)
+- core entry no longer imports thirdweb at load (d1e5c962)
+- sdk: use seedprotocol.io for the schema file $schema URL (ea2d96e3)
+
+#### Other
+
+- wallet guide and ADR 0027 (b144add9)
 
 ## 0.7.13 (2026-10-29)
 

@@ -2,10 +2,20 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
 - **Breaking:** `PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS` is 90 days, down from 365.
 - New `isUnfilledReference(value)`: whether a relation value is a reference slot the publish contract never filled, a non-zero `bytes32` below 2^32. The three-phase `multiPublish` fills a slot holding `bytes32(sourceIndex + 1)` with that request's seed uid; a client that leaves the slot out of its references attests the number.
+
+### Commits
+
+#### Features
+
+- sdk, query: readers treat an unfilled reference as no related seed (de73cdfc)
+
+#### Fixes
+
+- publish: renew session keys, limit them to the executor, refuse funded accounts at enroll (00c65dd4)
 
 ## 0.7.13 (2026-10-29)
 

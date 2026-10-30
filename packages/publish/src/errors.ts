@@ -234,3 +234,17 @@ export class UploadNeedsConfirmError extends Error {
     this.name = 'UploadNeedsConfirmError'
   }
 }
+
+/**
+ * A publish has no wallet: none on the run and none registered. Thrown in the checking step, before
+ * anything is uploaded or sent. Connect one (useSeedWallet().connect, or setPublishWallet) and
+ * publish again.
+ */
+export class PublishWalletMissingError extends Error {
+  readonly code = 'PUBLISH_WALLET_MISSING'
+
+  constructor() {
+    super('No publish wallet is connected. Connect one (useSeedWallet().connect, or setPublishWallet) before publishing.')
+    this.name = 'PublishWalletMissingError'
+  }
+}

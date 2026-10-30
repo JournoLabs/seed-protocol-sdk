@@ -2,9 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
 - Atom: a present `null` in an item's `updated` or `links` keeps the default (the pubDate, or the item's link). `{ updated: null }` gave an entry with no `<updated>`, which RFC 4287 requires.
+
+### Commits
+
+#### Fixes
+
+- Atom null fields keep defaults; lookup keeps split; probeGateway refuses a bare signal; changelog wording (624605e5)
 
 ## 0.7.13 (2026-10-29)
 

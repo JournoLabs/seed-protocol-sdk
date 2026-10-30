@@ -1,10 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
 - **Breaking (types):** `FieldMapperLookupRow.onSplitChange`, added in 0.7.13, is a required member, so code that builds its own lookup rows must supply it. Rows the package passes to `renderLookup` always have it.
 - **Breaking:** the document lookup table is removed: `MappingDocument.lookups`, `MappingLookups`, `lookupRefFromTable`, the `lookups` option of `applyMapping`, `applyMappingAsync` and `resolveLookup`, and `lookups` / `onLookupsChange` on `FieldMapper` and `useFieldMapper`. Lookups read `lookup.entries` on the edge. Without `renderLookup`, the package's uid text editor now always shows on lookup rows; `slots.lookups: false` hides it. It needed `onLookupsChange`.
 - `applyResolveToEdge(edge, 'lookup')` keeps `split`, so `useFieldMapper().setTransform(rowId, 'lookup')` on a lookup edge no longer clears it.
+
+### Commits
+
+#### Breaking
+
+- remove the document lookup table (1401770c)
+
+#### Fixes
+
+- Atom null fields keep defaults; lookup keeps split; probeGateway refuses a bare signal; changelog wording (624605e5)
 
 ## 0.7.13 (2026-10-29)
 

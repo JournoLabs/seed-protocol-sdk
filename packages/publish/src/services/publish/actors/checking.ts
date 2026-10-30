@@ -16,7 +16,7 @@ import {
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
-import { ManagedAccountPublishError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
+import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
 import { estimateUpload } from '../../publishCost/uploadEstimate'
 
 const activePublishProcesses = new Set<string>()
@@ -147,14 +147,20 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           }
         }
 
-        const publishWallet = wallet ?? account
-        if (publishWallet) {
-          await ensureEasSchemasForItem(
-            item,
-            publishWallet as import('~/helpers/seedSigner').PublishWallet,
-            { managedAddress: typeof address === 'string' ? address : undefined },
-          )
+        // The attestation steps take the registered wallet when the run has none, so the schema
+        // check does too. With no wallet at all, nothing can attest: stop before any upload.
+        const publishWallet = (wallet ?? account ?? getPublishWallet()) as
+          | import('~/helpers/seedSigner').PublishWallet
+          | null
+          | undefined
+        if (!publishWallet) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'checkingFailed', error: new PublishWalletMissingError() })
+          return
         }
+        await ensureEasSchemasForItem(item, publishWallet, {
+          managedAddress: typeof address === 'string' ? address : undefined,
+        })
 
         let attestationStrategy: 'multiPublish' | 'directEas'
         try {
@@ -187,9 +193,6 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         if (!(await validate())) return
 
         if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
-          const publishWallet = (wallet ?? account) as
-            | Partial<import('~/helpers/seedSigner').PublishWallet>
-            | undefined
           const { directEasProblem } = await import('../helpers/undeployedSmartAccount')
           let problem = directEasProblem(address.trim(), publishWallet)
           // An undeployed smart account: deploy it (one transaction), then publish through it.

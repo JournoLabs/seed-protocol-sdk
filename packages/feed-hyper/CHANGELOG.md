@@ -1,5 +1,9 @@
 # Changelog — @seedprotocol/feed-hyper
 
+## 0.8.0 (2026-10-30)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.13 (2026-10-29)
 
 - `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. It was `>=20`.
