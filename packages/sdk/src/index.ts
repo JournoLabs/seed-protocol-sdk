@@ -22,7 +22,7 @@ export { BaseDb } from './db/Db/BaseDb'
 export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './browser/db/changeFeed'
 export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'
 export { createNewItem } from './db/write/createNewItem'
-export { updateVersionUid } from './db/write/updateVersionUid'
+export { updateVersionUid, type UpdateVersionUidProps } from './db/write/updateVersionUid'
 export { recordPublishRequest } from './db/write/recordPublishRequest'
 export {
   applyPropertyAttestationUidsFromPublish,
@@ -95,7 +95,7 @@ export { checkBrowserSupport, type BrowserFeature, type BrowserSupport } from '.
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
-export { ClientNotInitializedError } from './client/errors'
+export { ClientNotInitializedError, ResetLocalDataBrowserOnlyError } from './client/errors'
 export {
   MODEL_AMBIGUOUS_EVENT,
   type ModelAmbiguousEventPayload,
