@@ -133,8 +133,9 @@ const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag,
 ```
 
 `rebuilt` is `not_checked`, with the reason in `detail`, for an ordinary export, a bag of another
-seed, a bag in another `Seed-Bag-Format`, or an export that refuses. EAS doesn't record a bag's hash
-yet, so this rebuild is the SDK's only hash source.
+seed, a bag in another `Seed-Bag-Format`, or an export that refuses. Nothing attests a bag's hash
+yet, so this rebuild is the SDK's only hash source. The anchor attestation is defined in
+[ADR 0029](adr/0029-bag-anchor-attestation.md); the SDK doesn't write or read one yet.
 
 Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { eq } from 'drizzle-orm'
 import { digestHex, getBagFile, validateBag, type Bag } from '@seedprotocol/archive'
 import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
+import { ARCHIVE_ANCHOR_SCHEMA_UID } from '@seedprotocol/eas'
 import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -41,13 +42,23 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     if (fakeEas.down) throw new Error('indexer down')
     return rows
   }
+  const actual = await importOriginal<typeof import('@seedprotocol/eas')>()
+  // Property reads go through the real helper, so its filter is what these tests see.
+  vi.spyOn(actual.BaseQueryClient, 'getQueryClient').mockReturnValue({
+    fetchQuery: ({ queryFn }: { queryFn: () => unknown }) => queryFn(),
+  } as never)
+  vi.spyOn(actual.BaseEasClient, 'getEasClient').mockReturnValue({
+    request: async (_doc: unknown, { where }: { where: { refUID: { in: string[] }; schemaId: { notIn: string[] } } }) => ({
+      itemProperties: reachable(
+        fakeEas.properties.filter((p) => where.refUID.in.includes(p.refUID) && !where.schemaId.notIn.includes(p.schemaId)),
+      ),
+    }),
+  } as never)
   return {
-    ...(await importOriginal<Record<string, unknown>>()),
+    ...actual,
     getSeedsByUidsFromEas: async ({ uids }: { uids: string[] }) => reachable(fakeEas.seeds.filter((s) => uids.includes(s.id))),
     getItemVersionsFromEas: async ({ seedUids }: { seedUids: string[] }) =>
       reachable(fakeEas.versions.filter((v) => seedUids.includes(v.refUID))),
-    getItemPropertiesFromEas: async ({ versionUids }: { versionUids: string[] }) =>
-      reachable(fakeEas.properties.filter((p) => versionUids.includes(p.refUID))),
   }
 })
 
@@ -307,6 +318,12 @@ testDescribe('exportArchive from the chain', () => {
     const before = await exported()
     fakeEas.properties.push(property(VERSION, 'title', 'string', 'Forged', T0 + 100, { attester: OTHER }))
     fakeEas.versions.push(attestation(uid('22'), POST, T0 + 100, { attester: OTHER }))
+    expect(hash(await exported())).toBe(hash(before))
+  }, 120000)
+
+  it('gives the same bag with an anchor on the Version', async () => {
+    const before = await exported()
+    fakeEas.properties.push(attestation(uid('26'), VERSION, T0 + 100, { schemaId: ARCHIVE_ANCHOR_SCHEMA_UID }))
     expect(hash(await exported())).toBe(hash(before))
   }, 120000)
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { GraphQLClient } from 'graphql-request'
 import { getAttestationChangesSince } from '../src/api.js'
+import { ARCHIVE_ANCHOR_SCHEMA_UID } from '../src/constants.js'
 import { BaseEasClient } from '../src/EasClient/BaseEasClient.js'
 import { BaseQueryClient } from '../src/QueryClient/BaseQueryClient.js'
 
@@ -33,9 +34,10 @@ describe('getAttestationChangesSince', () => {
   it('filters by refUID or id, created or revoked after since', async () => {
     await getAttestationChangesSince({ refUIDs: [uid(1)], ids: [uid(2)], since: 500 })
     const changedSince = { OR: [{ timeCreated: { gt: 500 } }, { revocationTime: { gt: 500 } }] }
+    const notAnchor = { schemaId: { notIn: [ARCHIVE_ANCHOR_SCHEMA_UID] } }
     expect(wheres).toEqual([
-      { AND: [{ refUID: { in: [uid(1)] } }, changedSince] },
-      { AND: [{ id: { in: [uid(2)] } }, changedSince] },
+      { AND: [{ refUID: { in: [uid(1)] } }, changedSince, notAnchor] },
+      { AND: [{ id: { in: [uid(2)] } }, changedSince, notAnchor] },
     ])
   })
 

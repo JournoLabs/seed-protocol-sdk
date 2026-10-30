@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `ARCHIVE_ANCHOR_SCHEMA_DEF`, `ARCHIVE_ANCHOR_SCHEMA_UID` and `ARCHIVE_ANCHOR_SCHEMA_NAME`, the schema of a bag anchor (ADR 0029). `getItemPropertiesFromEas`, and so `getCanonicalItemPropertiesFromEas`, sync and Query's remote source, leave anchors out, and `getAttestationChangesSince` doesn't report them.
+
 ## 0.8.0 (2026-10-30)
 
 - **Breaking:** `PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS` is 90 days, down from 365.
