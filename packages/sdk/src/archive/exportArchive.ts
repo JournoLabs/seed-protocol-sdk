@@ -27,12 +27,14 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { getMetadata } from '@/db/read/getMetadata'
-import { getPublishGraph, type PublishGraphProperty } from '@/db/read/publishGraph'
+import { getPublishGraph, refsOf, type PublishGraphProperty } from '@/db/read/publishGraph'
 import { resolveItemStorageChildFile } from '@/db/read/getPublishUploads'
+import { findRelatedSeedRow, isLivePublishedSeed, isUnpublishedSeed } from '@/db/read/resolveRelatedSeedRef'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { findEmbeddedImageFilePath, SEED_PROPERTY_REF_PREFIX } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getExtensionForMimeType, resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { normalizeDataType } from '@/helpers/property'
+import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { versions } from '@/seedSchema'
 import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind } from '@/storageValue/resolve'
 
@@ -171,6 +173,17 @@ const isUnpublishedEdit = (property: PublishGraphProperty): boolean => {
 
 const propertyUid = (property: PublishGraphProperty): string | undefined =>
   property.row?.uid ?? property.row?.derivedFromUid ?? undefined
+
+/**
+ * A relation ref as the chain holds it. The device that published keeps local ids in its rows and a
+ * client that synced holds uids, so a local id becomes its seed's uid, revoked or not: that uid is
+ * what was attested. Stays a local id only when the seed never got one.
+ */
+async function attestedRef(ref: string): Promise<string> {
+  if (isPublishedSeedRef(ref)) return ref
+  const seed = await findRelatedSeedRow(resolveSeedIdsFromRefString(ref))
+  return isLivePublishedSeed(seed) || isUnpublishedSeed(seed) ? seed.seedUid : ref
+}
 
 /**
  * Reads the seed's record from EAS and checks this device holds the same state: the newest live
@@ -326,7 +339,12 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       continue
     }
     if (kind === 'relation' || kind === 'list') {
-      entry.value = kind === 'list' ? property.refs.map((r) => r.ref) : (property.refs[0]?.ref ?? null)
+      // From the row: the publish graph doesn't walk the refs of a property that's already attested.
+      const refs = await Promise.all(refsOf(row?.propertyValue, kind).map(attestedRef))
+      entry.value = kind === 'list' ? refs : (refs[0] ?? null)
+      if (refs.some((ref) => !isPublishedSeedRef(ref))) {
+        omitted.push({ property: key, reason: 'it refers to a seed that has no attestation uid' })
+      }
       continue
     }
 

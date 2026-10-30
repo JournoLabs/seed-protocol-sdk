@@ -183,7 +183,7 @@ export function publishPropertyKind(key: string, def: PropertyDefinition): Publi
 const isEmptyValue = (value: string | null | undefined): boolean => value == null || value.trim() === ''
 
 /** The seed refs a property's stored value names: one (Relation, storage seed) or each list member. */
-function refsOf(value: string | null | undefined, kind: PublishPropertyKind): string[] {
+export function refsOf(value: string | null | undefined, kind: PublishPropertyKind): string[] {
   if (isEmptyValue(value)) return []
   if (kind === 'list') {
     return parseListPropertyValueFromStorage(value!)

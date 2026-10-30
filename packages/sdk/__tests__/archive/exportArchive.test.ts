@@ -60,6 +60,14 @@ const schemaFile = () => ({
         title: { id: generateId(), type: 'Text' },
         featureImage: { id: generateId(), type: 'Image' },
         html: { id: generateId(), type: 'Html' },
+        author: { id: generateId(), type: 'Relation', model: 'ArchivedAuthor' },
+        reviewerIds: { id: generateId(), type: 'List', refValueType: 'Relation', ref: 'ArchivedAuthor' },
+      },
+    },
+    ArchivedAuthor: {
+      id: generateId(),
+      properties: {
+        name: { id: generateId(), type: 'Text' },
       },
     },
   },
@@ -122,6 +130,28 @@ async function createPublishedPost(): Promise<Item<any>> {
   return post
 }
 
+const createAuthor = async (name: string): Promise<Item<any>> => {
+  const author = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'ArchivedAuthor', name } as any)
+  await waitForIdle(author, 'Item', 15000)
+  return author
+}
+
+/** A post with a Relation and a List of authors, as the publishing device stores them: by local id. */
+async function createPostWithRelations(published: 'all' | 'post only' = 'all') {
+  const [author, firstReviewer, secondReviewer] = await Promise.all(['Ann', 'Bo', 'Cy'].map(createAuthor))
+  const post = await Item.create({
+    schemaName: SCHEMA_NAME,
+    modelName: 'ArchivedPost',
+    title: 'A post with authors',
+    author: author!.seedLocalId,
+    reviewerIds: [firstReviewer!.seedLocalId, secondReviewer!.seedLocalId],
+  } as any)
+  await waitForIdle(post, 'Item', 15000)
+  await waitForPendingOutboxOps()
+  await markPublished(post, published === 'all' ? [author!, firstReviewer!, secondReviewer!] : [])
+  return { post, author: author!, reviewers: [firstReviewer!, secondReviewer!] }
+}
+
 testDescribe('exportArchive', () => {
   const dirs: string[] = []
 
@@ -134,7 +164,7 @@ testDescribe('exportArchive', () => {
     })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['ArchivedPost', 'Image', 'File', 'Html'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['ArchivedPost', 'ArchivedAuthor', 'Image', 'File', 'Html'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -197,6 +227,17 @@ testDescribe('exportArchive', () => {
       const result = runBagitPy(bagitPy!, path.join(dir, 'bag'))
       expect(result.output).toContain('is valid')
     }
+  }, 120000)
+
+  it('keeps a published relation and lists one it has no uid for', async () => {
+    const { post, author } = await createPostWithRelations()
+    const { bag, omitted } = await exportArchive(post, { fetch: false })
+    expect(JSON.parse(text(bag, 'data/item.json')).properties.author.value).toBe(author.seedUid)
+    expect(omitted).toEqual([])
+
+    const { post: draftRelations } = await createPostWithRelations('post only')
+    const { omitted: unnamed } = await exportArchive(draftRelations, { fetch: false })
+    expect(unnamed.map((o) => o.property).sort()).toEqual(['author', 'reviewerIds'])
   }, 120000)
 
   it('refuses an item that was never published', async () => {
@@ -288,6 +329,37 @@ testDescribe('exportArchive', () => {
       // The same changes do show in an ordinary export.
       const local = await exportArchive(post, { fetch: false, baggingDate: new Date(T0 * 1000) })
       expect(text(local.bag, 'tagmanifest-sha256.txt')).not.toBe(text(first.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('records relations as seed uids, so a publisher and a syncing client get the same bag', async () => {
+      const { post, author, reviewers } = await createPostWithRelations()
+      await fakeChain(post)
+      const publisher = await exportArchive(post, { fetch: false, reproducible: true })
+
+      const item = JSON.parse(text(publisher.bag, 'data/item.json'))
+      expect(item.properties.author.value).toBe(author.seedUid)
+      expect(Object.values(item.properties).map((p: any) => p.value).flat()).toEqual(
+        expect.arrayContaining(reviewers.map((r) => r.seedUid)),
+      )
+
+      // A client that synced the post holds the uids the chain has, not the publisher's local ids.
+      const db = BaseDb.getAppDb()
+      const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))
+      for (const row of rows) {
+        const synced = [author, ...reviewers].reduce(
+          (value: string | null, other) => value?.replaceAll(other.seedLocalId, other.seedUid!) ?? value,
+          row.propertyValue,
+        )
+        await db.update(metadata).set({ propertyValue: synced }).where(eq(metadata.localId, row.localId!))
+      }
+      const syncing = await exportArchive(post, { fetch: false, reproducible: true })
+      expect(text(syncing.bag, 'tagmanifest-sha256.txt')).toBe(text(publisher.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('refuses a relation it can only name by a local id', async () => {
+      const { post } = await createPostWithRelations('post only')
+      await fakeChain(post)
+      await expect(exportArchive(post, { fetch: false, reproducible: true })).rejects.toMatchObject({ code: 'incomplete' })
     }, 120000)
 
     it('refuses a copy that is behind the chain', async () => {
