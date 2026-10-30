@@ -113,6 +113,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     expect(result.limit).toBe(10)
     expect(result.skip).toBe(0)
     expect(result.items).toHaveLength(1)
+    expect(result.listed).toBe(1)
     const record = result.items[0]!
     expect(record.seedUid).toBe(seedUid)
     expect(record.schemaName).toBe('post')
@@ -507,6 +508,8 @@ describe('queryBySchema / getSeed caching', () => {
       const second = await queryBySchema('post', opts)
       expect(second.items[0]!.data.title).toBe('One')
       expect(second.etag).toBe(first.etag)
+      expect(second.listed).toBe(first.listed)
+      expect(second.listed).toBe(1)
       expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
       expect(mockGetAttestationChangesSince).not.toHaveBeenCalled()
 

@@ -66,6 +66,9 @@ type Assembled = {
   dependencies: Map<string, SeedDependencies>
 }
 
+/** A page's records and how many Seeds the listing returned for it. */
+type ListedAssembled = Assembled & { listed: number }
+
 async function fetchAndAssemble(
   schemaName: string,
   limit: number,
@@ -73,19 +76,20 @@ async function fetchAndAssemble(
   filter: SeedListFilter,
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
-): Promise<Assembled> {
+): Promise<ListedAssembled> {
   const seeds = await dataSource.listSeedsBySchemaName(schemaName, { limit, skip, ...filter })
-  return assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
+  const assembled = await assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
+  return { ...assembled, listed: seeds.length }
 }
 
 /**
  * For `source: 'auto'`: try local first; if empty/miss, fall back to remote.
  */
-async function withAutoFallbackForCollection(
+async function withAutoFallbackForCollection<T extends Assembled>(
   mode: ReturnType<typeof normalizeSourceMode>,
   dataSource: QueryDataSource,
-  run: (ds: QueryDataSource) => Promise<Assembled>,
-): Promise<{ assembled: Assembled; dataSource: QueryDataSource; useQueryCache: boolean }> {
+  run: (ds: QueryDataSource) => Promise<T>,
+): Promise<{ assembled: T; dataSource: QueryDataSource; useQueryCache: boolean }> {
   const assembled = await run(dataSource)
   if (mode !== 'auto' || dataSource.kind !== 'local') {
     return {
@@ -203,7 +207,7 @@ async function refreshCollection(
     items.length === cached.items.length &&
     items.every((item, i) => item === cached.items[i])
   if (cached && unchanged && !checkWindowAged(cached, startedAt)) {
-    return { items, limit, skip: 0, etag: cached.etag }
+    return { items, limit, skip: 0, listed: listed.length, etag: cached.etag }
   }
   if (cached) cache.recordRefresh()
 
@@ -216,7 +220,13 @@ async function refreshCollection(
   })
   await writeThroughAssembled(fresh, optionsKey, startedAt, seenChangeKeys)
   // The cached records (frozen outside production), so a fresh result behaves like a cache hit.
-  return { items: stored ? [...stored.items] : items, limit, skip: 0, etag: stored?.etag }
+  return {
+    items: stored ? [...stored.items] : items,
+    limit,
+    skip: 0,
+    listed: listed.length,
+    etag: stored?.etag,
+  }
 }
 
 /** Hex digits a uid prefix needs, so a stray short value can't list most of a schema. */
@@ -249,7 +259,9 @@ export function normalizeAttesters(attesters: readonly string[]): string[] | nul
 /**
  * The schema's Seeds as SeedRecords. Like `getSeed` and `getSeeds`, a Seed with no
  * Version from its attester, or whose Versions were all revoked, is left out; `limit` and `skip`
- * count listed Seeds, so a page can come back shorter than `limit`.
+ * count listed Seeds, so a page can come back shorter than `limit`, even empty, with more after
+ * it. `listed` is the number of Seeds listed for the page: page on (`skip += limit`) while it
+ * equals `limit`.
  */
 export async function queryBySchema(
   schemaName: string,
@@ -265,17 +277,17 @@ export async function queryBySchema(
   const filter: SeedListFilter = {}
   if (options?.uidPrefix !== undefined) {
     const uidPrefix = normalizeUidPrefix(options.uidPrefix)
-    if (!uidPrefix) return { items: [], limit, skip }
+    if (!uidPrefix) return { items: [], limit, skip, listed: 0 }
     filter.uidPrefix = uidPrefix
   }
   if (options?.attesters !== undefined) {
     const attesters = normalizeAttesters(options.attesters)
-    if (!attesters) return { items: [], limit, skip }
+    if (!attesters) return { items: [], limit, skip, listed: 0 }
     filter.attesters = attesters
   }
   const filtered = filter.uidPrefix !== undefined || filter.attesters !== undefined
 
-  const runAssemble = (ds: QueryDataSource): Promise<Assembled> =>
+  const runAssemble = (ds: QueryDataSource): Promise<ListedAssembled> =>
     fetchAndAssemble(schemaName, limit, skip, filter, options, ds)
 
   // Collection cache only for the remote, skip=0 working set (a filtered listing isn't one)
@@ -291,7 +303,10 @@ export async function queryBySchema(
     return cache.withRefreshLock(lockKey, async () => {
       if (maxAge > 0) {
         const recent = await cache.getCheckedCollection(lockKey, schemaName, optionsKey, maxAge)
-        if (recent) return { items: [...recent.items], limit, skip: 0, etag: recent.etag }
+        if (recent) {
+          const { collection, listed } = recent
+          return { items: [...collection.items], limit, skip: 0, listed, etag: collection.etag }
+        }
       }
       const result = await refreshCollection(
         schemaName,
@@ -300,7 +315,7 @@ export async function queryBySchema(
         optionsKey,
         resolved.dataSource,
       )
-      if (result.etag) cache.markCollectionChecked(lockKey, result.etag)
+      if (result.etag) cache.markCollectionChecked(lockKey, result.etag, result.listed)
       return result
     })
   }
@@ -317,7 +332,7 @@ export async function queryBySchema(
   if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
     await writeThroughAssembled(assembled, optionsKey, startedAt)
   }
-  return { items: assembled.records, limit, skip }
+  return { items: assembled.records, limit, skip, listed: assembled.listed }
 }
 
 /**

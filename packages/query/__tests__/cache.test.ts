@@ -30,19 +30,19 @@ const deps = (seedUid: string) => ({ refUIDs: [seedUid, `v-${seedUid}`], ids: [s
 
 describe('buildAssembleOptionsKey', () => {
   it('defaults expand+hydrate to true', () => {
-    expect(buildAssembleOptionsKey()).toBe('e3-h1')
-    expect(buildAssembleOptionsKey({})).toBe('e3-h1')
+    expect(buildAssembleOptionsKey()).toBe('e6-h1')
+    expect(buildAssembleOptionsKey({})).toBe('e6-h1')
   })
 
   it('encodes false flags', () => {
     expect(
       buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false }),
-    ).toBe('e5-h0')
+    ).toBe('e7-h0')
   })
 
   it('isolates changelog include from default key', () => {
     expect(buildAssembleOptionsKey({ include: 'data+changelog' })).toBe(
-      'e3-h1-i1-gv-s0-l0',
+      'e6-h1-i1-gv-s0-l0',
     )
   })
 })

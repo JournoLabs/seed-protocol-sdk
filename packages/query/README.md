@@ -50,10 +50,16 @@ await initializeQueryPlatform({ arweaveDomain: 'arweave.net' })
 const one = await getSeed('0x...')
 console.log(JSON.stringify(one?.data, null, 2))
 
-const { items, limit, skip, etag } = await queryBySchema('post', {
+const { items, limit, skip, listed, etag } = await queryBySchema('post', {
   limit: 20,
   skip: 0,
 })
+// Every page, to the end
+for (let skip = 0; ; skip += 20) {
+  const page = await queryBySchema('post', { limit: 20, skip })
+  // ...page.items
+  if (page.listed < 20) break
+}
 
 // Seeds whose UID starts with a prefix (e.g. the 8-hex-digit trunc in a URL), newest first
 const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', limit: 16 })
@@ -64,6 +70,8 @@ const { items: owned } = await queryBySchema('publication', {
   limit: 100,
 })
 ```
+
+`limit` and `skip` count listed Seeds. A Seed with no Version from its attester is listed and then left out, so a page can be shorter than `limit`, even empty, with more after it. `listed` is how many Seeds the listing returned for the page: fewer than `limit` means the listing has ended.
 
 `uidPrefix` takes at least 4 hex digits, with or without `0x`, in any case (it is lowercased: EAS matches UIDs case-sensitively); anything else returns no items. It filters like a schema listing (schema name, not revoked, seeds whose versions were all revoked left out) in one EAS request, or a `LIKE` on the local source. It never reads or writes the collection cache; matched items are written through to the item cache. `normalizeUidPrefix` is exported for callers that want the same validation.
 
@@ -86,7 +94,7 @@ Options on every API: `relations` (default `'expand'`), `hydrateStorage` (defaul
 
 `relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'uids'` leaves every relation as a seed UID and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
 
-In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, so whether the key was plural is lost; the key returned is always the plural (`featured_portfolio_clip_ids` comes back as `featureds`).
+A relation is a `bytes32` or `bytes32[]` property (an attestation with no type counts when its name ends in `_id` or `_ids`); a `string external_id` is not one and keeps its name. In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, so whether the key was plural is lost; the key returned is always the plural (`featured_portfolio_clip_ids` comes back as `featureds`).
 
 ## Many seeds (`getSeeds`)
 

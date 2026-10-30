@@ -1,6 +1,6 @@
 import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
-import { relationPropertyKey } from './listRelationKey.js'
+import { isRelationProperty, relationPropertyKey } from './listRelationKey.js'
 import type {
   AttestationLike,
   ChangelogEntry,
@@ -52,19 +52,9 @@ export function decodePropertyAttestation(
   if (!propertyNameSnake) return null
 
   const easType = metadata.type
-  const isBytes32Relation =
-    (easType === 'bytes32' || easType === 'bytes32[]') &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-  const isNamingConventionRelation =
-    !isBytes32Relation &&
-    (propertyNameSnake.endsWith('_id') || propertyNameSnake.endsWith('_ids')) &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-
   let isRelation = false
   let isList = false
-  if (isBytes32Relation || isNamingConventionRelation) {
+  if (isRelationProperty(propertyNameSnake, easType)) {
     isRelation = true
     isList = Array.isArray(metadata.value)
     propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)

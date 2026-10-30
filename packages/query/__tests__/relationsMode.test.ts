@@ -5,6 +5,7 @@ vi.mock('../src/bootstrap.js', () => ({
 }))
 
 import { getSeed, getSeeds, queryBySchema, queryBySchemaForMonth } from '../src/api'
+import { decodePropertyAttestation } from '../src/changelog'
 import { assembleSeeds, assembleSeedsWithDependencies } from '../src/assembleSeeds'
 import { buildAssembleOptionsKey } from '../src/cache/index'
 import { clearLocalQuerySource, registerLocalQuerySource } from '../src/source/index'
@@ -190,9 +191,78 @@ describe('relations modes', () => {
   })
 
   it('gives each mode its own cache key', () => {
-    expect(buildAssembleOptionsKey()).toBe('e3-h1')
-    expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e3-h1')
-    expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e5-h1')
-    expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e5-h0')
+    expect(buildAssembleOptionsKey()).toBe('e6-h1')
+    expect(buildAssembleOptionsKey({ relations: 'expand' })).toBe('e6-h1')
+    expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe('e7-h1')
+    expect(buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false })).toBe('e7-h0')
+  })
+})
+
+describe('which properties are relations', () => {
+  // A string property whose name ends in `_id`, holding a seed UID the source can return.
+  const externalId = prop('0xp8', POST_V, 'external_id', AUTHOR)
+
+  it.each(['expand', 'uids'] as const)(
+    "'%s' keeps a non-bytes32 `_id` property under its own name",
+    async (relations) => {
+      const calls: string[] = []
+      const [record] = await assembleSeeds(
+        'post',
+        [seed(POST, 'post')],
+        { relations, hydrateStorage: false },
+        makeSource(calls, [externalId]),
+      )
+      expect(record!.data).toMatchObject({ external_id: AUTHOR, externalId: AUTHOR })
+      expect(record!.data).not.toHaveProperty('external')
+    },
+  )
+
+  it('leaves a non-bytes32 `_id` value out of the related seeds', async () => {
+    const calls: string[] = []
+    const props = [
+      prop('0xp1', POST_V, 'title', 'Hello'),
+      externalId,
+    ]
+    const source = makeSource(calls)
+    const { dependencies } = await assembleSeedsWithDependencies(
+      'post',
+      [seed(POST, 'post')],
+      { relations: 'expand', hydrateStorage: false },
+      { ...source, getPropertiesForVersionUids: async (uids) => props.filter((p) => uids.includes(p.refUID)) },
+    )
+    expect(dependencies.get(POST)!.ids).toEqual([POST])
+    expect(calls).not.toContain('seeds')
+  })
+
+  it('decodes a non-bytes32 `_id` property under its own name in changelogs', () => {
+    expect(decodePropertyAttestation(externalId)).toMatchObject({
+      propertyName: 'external_id',
+      camelName: 'externalId',
+      value: AUTHOR,
+    })
+    expect(decodePropertyAttestation(prop('0xp9', POST_V, 'author_id', AUTHOR, 'bytes32'))).toMatchObject({
+      propertyName: 'author',
+    })
+  })
+
+  it('falls back to the `_id` name rule when the attestation has no type', () => {
+    const untyped = {
+      ...externalId,
+      decodedDataJson: JSON.stringify([{ value: { name: 'author_id', value: AUTHOR } }]),
+    }
+    expect(decodePropertyAttestation(untyped)).toMatchObject({ propertyName: 'author' })
+  })
+})
+
+describe('unknown relations modes', () => {
+  afterEach(() => clearLocalQuerySource())
+
+  it("throws a TypeError for the removed 'urls' before any request", async () => {
+    const calls: string[] = []
+    registerLocalQuerySource(makeSource(calls))
+    const urls = { source: 'local', relations: 'urls' } as unknown as Parameters<typeof queryBySchema>[1]
+    await expect(queryBySchema('post', urls)).rejects.toThrow(TypeError)
+    await expect(getSeed(POST, urls)).rejects.toThrow("relations must be 'expand' or 'uids'")
+    expect(calls).toEqual([])
   })
 })

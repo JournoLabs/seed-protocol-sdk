@@ -45,9 +45,13 @@ export type AssembleOptions = {
   source?: QuerySourceMode
 }
 
-/** The relations mode `options` ask for. */
+/** The relations mode `options` ask for. Throws a `TypeError` for any other value, such as the removed `'urls'`. */
 export function relationsModeOf(options?: { relations?: RelationsMode }): RelationsMode {
-  return options?.relations ?? 'expand'
+  const relations = options?.relations ?? 'expand'
+  if (relations !== 'expand' && relations !== 'uids') {
+    throw new TypeError(`relations must be 'expand' or 'uids', got ${JSON.stringify(relations)}`)
+  }
+  return relations
 }
 
 export type ChangelogInclude = 'data' | 'data+changelog' | 'changelog'
@@ -145,6 +149,11 @@ export type QueryBySchemaResult = {
   items: SeedRecord[]
   limit: number
   skip: number
+  /**
+   * Seeds the listing returned for this page, before Seeds with no live Version were left out.
+   * Fewer than `limit`: the listing has ended. `items` can be shorter than `listed`.
+   */
+  listed: number
   /** Present when collection cache was consulted or updated (skip === 0). */
   etag?: string
 }
