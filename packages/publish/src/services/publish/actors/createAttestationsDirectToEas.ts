@@ -257,14 +257,12 @@ async function executeCreateAttestationsDirectToEas(
     })
 
     // Requests are attested in order, each before the next: an update aimed at an earlier request
-    // would never reach it (the relation stays unlinked). The publish contract reverts with
-    // PublishTargetAlreadyAttested in that case (SeedPublishLib.setSeedReference); fail the same
-    // way, before any attestation is sent.
+    // would never reach it (the relation stays unlinked). Fail before any attestation is sent.
     const backwards = findPropertiesToUpdateTargetingEarlierRequest(normalizedRequests)
     if (backwards) {
       const { requestIndex, targetIndex, requestLocalId, targetLocalId, propertySchemaUid } = backwards
       throw new ManagedAccountPublishError(
-        `Direct EAS publish from ${address} reverted with PublishTargetAlreadyAttested(${requestIndex}, ${targetIndex}): ` +
+        `Direct EAS publish from ${address} can't fill a reference backwards: ` +
           `request ${requestIndex} (${requestLocalId}) updates property ${propertySchemaUid} of request ${targetIndex} ` +
           `(${targetLocalId}), which is attested before it; nothing was sent.`,
         'PUBLISH_PREFLIGHT_FAILED',
@@ -400,8 +398,8 @@ async function executeCreateAttestationsDirectToEas(
         }
       }
 
-      // Relation and list values that name a seed of this publish by localId get its uid, as on the
-      // contract path (createAttestations): requests come referenced-first, so those seeds exist.
+      // Relation and list values that name a seed of this publish by localId get its uid: requests
+      // come referenced-first, so those seeds exist.
       await applyResolvedRefs(reqs[i], request, resolvedUids)
 
       for (const pu of request.propertiesToUpdate ?? []) {
@@ -411,8 +409,7 @@ async function executeCreateAttestationsDirectToEas(
         const att = targetReq.listOfAttestations.find(
           (a) => toHex32(a?.schema)?.toLowerCase() === schemaUid?.toLowerCase(),
         )
-        // A list is re-encoded whole from its resolved slots (applyResolvedRefs), as the contract
-        // leaves lists to the client (SeedPublishLib.setSeedReference fills single values only).
+        // A list is re-encoded whole from its resolved slots (applyResolvedRefs).
         if (!att?.data?.[0] || att._isList) continue
         att.data[0].data = encodeBytes32(newSeedUid as `0x${string}`)
       }

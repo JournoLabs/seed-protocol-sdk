@@ -5,6 +5,7 @@
  */
 export const seedExecutorRouterAbi = [
   { type: 'function', name: 'installSeedExecutor', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'uninstallSeedExecutor', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   {
     type: 'function',
     name: 'getSeedExecutor',
@@ -29,6 +30,11 @@ export const seedExecutorRouterAbi = [
   {
     type: 'event',
     name: 'SeedExecutorInstalled',
+    inputs: [{ name: 'executor', type: 'address', indexed: true }],
+  },
+  {
+    type: 'event',
+    name: 'SeedExecutorUninstalled',
     inputs: [{ name: 'executor', type: 'address', indexed: true }],
   },
   { type: 'error', name: 'Unauthorized', inputs: [{ name: 'caller', type: 'address' }] },

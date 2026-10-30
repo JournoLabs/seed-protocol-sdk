@@ -156,15 +156,6 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           )
         }
 
-        const validation = await (validateItemForPublish as any)(item, [], {
-          publishMode: publishMode ?? 'patch',
-        })
-        if (!validation.isValid) {
-          activePublishProcesses.delete(item.seedLocalId)
-          sendBack({ type: 'validationFailed', errors: validation.errors })
-          return
-        }
-
         let attestationStrategy: 'multiPublish' | 'directEas'
         try {
           attestationStrategy = await resolveAttestationStrategy(address.trim())
@@ -179,6 +170,21 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           })
           return
         }
+
+        // Validate the payload the route will build: the contract links back references, direct
+        // EAS defers them. Before an undeployed smart account is deployed below, so an invalid item
+        // costs no transaction.
+        const validate = async (): Promise<boolean> => {
+          const validation = await (validateItemForPublish as any)(item, [], {
+            publishMode: publishMode ?? 'patch',
+            backReferences: attestationStrategy === 'multiPublish' ? 'link' : 'defer',
+          })
+          if (validation.isValid) return true
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'validationFailed', errors: validation.errors })
+          return false
+        }
+        if (!(await validate())) return
 
         if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
           const publishWallet = (wallet ?? account) as
@@ -199,6 +205,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
               if (codeKind === 'contract') {
                 attestationStrategy = 'multiPublish'
                 problem = null
+                if (!(await validate())) return
               }
             }
           }

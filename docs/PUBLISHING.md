@@ -37,9 +37,11 @@ When using the publish package with `ConnectButton` and its publish flow:
    pending edits are written. The payload, uploads (`getPublishUploads`, the publish package's
    `getPublishUploadData`), `summarizePublishWork`, `getUnpublishedRelatedItems`, the Html passes and
    `ensureEasSchemasForItem` read that graph; none of them reads a loaded Item. In a cycle (A ↔ B, or a draft pointing back at the draft
-   being published), an item can only attest the uid of a seed created before it, so the reference
-   back to the item still being walked is left out of this publish; it keeps no attestation uid, and
-   the next publish of its item attests it with the target's uid.
+   being published), a publish through the contract attests both sides, since the contract creates
+   every seed first (`getPublishPayload` option `backReferences: 'link'`). Direct EAS can only attest
+   the uid of a seed created before the item, so there the reference back to the item still being
+   walked is left out of this publish (`'defer'`, the default); it keeps no attestation uid, and the
+   next publish of its item attests it with the target's uid.
 
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
    Direct EAS is used with `useDirectEas`, or when the publisher is an EOA (no bytecode). It
@@ -47,11 +49,17 @@ When using the publish package with `ConnectButton` and its publish flow:
    account that is not deployed yet is refused rather than sent down this path: deploy it first,
    then publish.
 
-   Requests are attested in order, so a link (`propertiesToUpdate`) must target its own request or
-   a later one: the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`,
-   and the direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
-   `PUBLISH_PREFLIGHT_FAILED`) before sending any attestation. `getPublishPayload` orders requests
-   referenced-first, so its payloads never do this.
+   The publish contract takes the whole payload in one transaction. It creates every Seed and
+   Version first, then writes each new Seed uid into the properties that reference it
+   (`propertiesToUpdate`: a relation, or one element of a list), then attests the properties.
+   Before sending, `encodeMultiPublish` puts a placeholder in each of those slots and refuses a
+   payload the contract would revert on, or one that still attests a draft's local id that no
+   reference fills.
+
+   Direct EAS attests requests in order, so a link must target its own request or a later one; it
+   refuses a payload that doesn't (`ManagedAccountPublishError`, `PUBLISH_PREFLIGHT_FAILED`) before
+   sending any attestation. `getPublishPayload` orders requests referenced-first, so its payloads
+   never do this.
 
 4. **Local recording.** Each request records its own seed, version and property attestation uids
    (`updateVersionUid`, `applyPropertyAttestationUidsFromPublish`). A request names the version row

@@ -124,6 +124,8 @@ mock.module('../../../helpers/resolvePublishWallet', () => ({
     txSender: { address: PUBLISHER, sendTransaction: async () => ({ transactionHash: '0x01' }) },
   }),
 }))
+mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
+mock.module('../../../helpers/publishGas', () => ({ publishGasLimit: async () => 1_234_567n }))
 mock.module('../../arweaveL1Finalize/enqueue', () => ({
   enqueueArweaveL1FinalizeJobsFromPublishContext: async () => {},
 }))

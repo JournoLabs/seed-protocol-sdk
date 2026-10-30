@@ -58,3 +58,18 @@ export function isEasEmptyValue(easType: string | undefined | null, value: unkno
   if (easType === 'bytes32') return typeof value === 'string' && /^0x0{64}$/i.test(value)
   return false
 }
+
+/** Seed uids are hashes; a relation value below this is a placeholder no reference filled. */
+const UNFILLED_REFERENCE_BOUND = 2n ** 32n
+
+/**
+ * Whether a relation value is a reference slot the publish contract never filled: a non-zero
+ * `bytes32` below 2^32. The contract fills a slot holding `bytes32(sourceIndex + 1)` with that
+ * request's new seed uid; a client that leaves the slot out of its references attests the number.
+ * Readers treat it as no related seed. Zero is a removal (`isEasEmptyValue`), not this.
+ */
+export function isUnfilledReference(value: unknown): boolean {
+  if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/i.test(value)) return false
+  const n = BigInt(value)
+  return n > 0n && n < UNFILLED_REFERENCE_BOUND
+}

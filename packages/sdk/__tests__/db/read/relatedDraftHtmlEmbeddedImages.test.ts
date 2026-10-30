@@ -84,8 +84,9 @@ const withTxIds = <U extends { seedLocalId: string }>(uploads: U[]) =>
 
 /**
  * Applies each request's propertiesToUpdate the way multiPublish does (SeedPublishLib.setSeedReference):
- * in request order, the request's new seed uid (here: its localId) is written into data[0] of the one
- * attestation with that schema in the target request. Returns what each (target, schema) ends up holding.
+ * the request's new seed uid (here: its localId) is written into data[0] of the one attestation with
+ * that schema in the target request. Also refuses a reference to an earlier request, which direct EAS
+ * can't fill. Returns what each (target, schema) ends up holding.
  */
 const applySeedReferencesLikeContract = (payload: any[]): Map<string, string> => {
   const indexByLocalId = new Map(payload.map((p, i) => [p.localId, i]))
@@ -93,8 +94,8 @@ const applySeedReferencesLikeContract = (payload: any[]): Map<string, string> =>
   payload.forEach((request, i) => {
     for (const pu of request.propertiesToUpdate ?? []) {
       const targetIndex = indexByLocalId.get(pu.publishLocalId)
-      if (targetIndex === undefined) throw new Error(`UnknownPublishLocalId ${pu.publishLocalId}`)
-      if (targetIndex < i) throw new Error(`PublishTargetAlreadyAttested(${i}, ${targetIndex})`)
+      if (targetIndex === undefined) throw new Error(`reference outside the batch: ${pu.publishLocalId}`)
+      if (targetIndex < i) throw new Error(`reference to an earlier request (${i} → ${targetIndex})`)
       const matches = payload[targetIndex].listOfAttestations.filter(
         (a: any) => String(a.schema).toLowerCase() === String(pu.propertySchemaUid).toLowerCase(),
       )

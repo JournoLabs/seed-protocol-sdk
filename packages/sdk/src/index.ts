@@ -238,7 +238,7 @@ export {
   getPublishedSeedRecord,
 } from './query'
 export type { GetPublishedSeedRecordOptions } from './query'
-export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublishPayload'
+export type { PublishMode, PublishBackReferences, GetPublishPayloadOptions } from './db/read/getPublishPayload'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'

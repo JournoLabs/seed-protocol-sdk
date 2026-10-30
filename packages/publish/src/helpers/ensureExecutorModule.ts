@@ -1,10 +1,12 @@
 import { isAddressEqual, parseEventLogs, type Address, type TransactionReceipt } from 'viem'
-import { waitForPublishReceipt, isContractDeployed } from './chainClient'
+import { waitForPublishReceipt, isContractDeployed, readUntil } from './chainClient'
 import type { PublishConfig } from '../config'
 import { ManagedAccountPublishError, PublishTransactionRevertedError } from '../errors'
 import { getPublishChainName } from './chainConfig'
 import {
   encodeInstallSeedExecutor,
+  encodeUninstallSeedExecutor,
+  readExecutorModuleIsInitialized,
   readSeedExecutorInstalled,
   readSeedExecutorRouter,
 } from './contracts'
@@ -29,6 +31,7 @@ export type EnsureExecutorModuleResult =
  * - Router accounts with the `SeedExecutorRouterExtension`: `installSeedExecutor()`, sent by the
  *   account's admin EOA (the extension rejects self-calls). The install is confirmed from the
  *   receipt's logs, not a follow-up read, so a lagging RPC node cannot make it look missing.
+ *   An account whose executor was replaced on the factory is migrated: see {@link clearReplacedInstall}.
  * - Any other account: nothing to install; skipped. `assertExecutorModuleReadyForAccount` reports
  *   why the executor cannot act for it.
  *
@@ -71,9 +74,11 @@ async function installViaRouterExtension(
   let receipt: TransactionReceipt | undefined
   let transactionHash: string
   try {
-    if (await readSeedExecutorInstalled(account, pinnedExecutor)) return { status: 'already-installed' }
+    const flagged = await readSeedExecutorInstalled(account, pinnedExecutor)
+    if (flagged && (await isInitializedFor(pinnedExecutor, account))) return { status: 'already-installed' }
     const wallet = await getAdmin()
     admin = wallet.txSender.address as Address
+    if (flagged) await clearReplacedInstall(account, pinnedExecutor, wallet)
     const result = await wallet.txSender.sendTransaction(encodeInstallSeedExecutor(account))
     transactionHash = result.transactionHash
     try {
@@ -103,6 +108,35 @@ async function installViaRouterExtension(
     'EXECUTOR_MODULE_NOT_INSTALLED',
     contractAddress,
   )
+}
+
+/** Reads more than once: a node behind the one that answered `isModuleInstalled` can say false. */
+function isInitializedFor(executor: Address, account: Address): Promise<boolean> {
+  return readUntil(() => readExecutorModuleIsInitialized(executor, account), Boolean, { attempts: 3 })
+}
+
+/**
+ * The account's installed flag lives in its own storage, so it survives the factory replacing
+ * the router extension, while the replacement executor has never been initialized for it. Such an
+ * account reports the new executor installed, can't publish through it, and refuses
+ * `installSeedExecutor`. Uninstalling through the new extension clears the flag.
+ */
+async function clearReplacedInstall(account: Address, executor: Address, admin: PublishWallet): Promise<void> {
+  const { transactionHash } = await admin.txSender.sendTransaction(encodeUninstallSeedExecutor(account))
+  const receipt = await waitForPublishReceipt(transactionHash)
+  const uninstalled = parseEventLogs({
+    abi: seedExecutorRouterAbi,
+    eventName: 'SeedExecutorUninstalled',
+    logs: receipt?.logs ?? [],
+    strict: false,
+  }).some((log) => isAddressEqual(log.address, account) && log.args.executor && isAddressEqual(log.args.executor, executor))
+  if (!uninstalled) {
+    throw new ManagedAccountPublishError(
+      `uninstallSeedExecutor in transaction ${transactionHash} did not clear the replaced Seed executor on ${account}.`,
+      'EXECUTOR_MODULE_NOT_INSTALLED',
+      account,
+    )
+  }
 }
 
 /**
