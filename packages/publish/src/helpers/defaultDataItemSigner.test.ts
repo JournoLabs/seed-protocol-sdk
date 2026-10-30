@@ -7,7 +7,7 @@ import { defaultDataItemSigner } from './publishWalletRegistry'
 import { signBundlerUploadDataList } from '../services/publish/actors/createArweaveDataItems'
 
 const upload = {
-  data: new TextEncoder().encode('<p>hello</p>'),
+  blob: new Blob([new TextEncoder().encode('<p>hello</p>')]),
   tags: [{ name: 'Content-Type', value: 'text/html' }],
   itemPropertyName: 'body',
   itemPropertyLocalId: 'p1',

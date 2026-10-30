@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **Breaking:** `signDataItems` and `getPublishUploadData` give each upload as `blob: Blob` instead of `data: Uint8Array`. Use the SDK's new `readPublishUploadBytes(upload)` where you need the bytes. For a file the Blob is disk-backed, so a publish no longer loads every upload before signing the first one. A file edited during the publish now fails it with "the file changed during the publish"; before, the publish signed the bytes it had already read.
+
 ## 0.8.0 (2026-10-30)
 
 - A publish run created with no wallet takes the registered wallet in `checking`, as the attestation steps do, so a wallet registered after the run starts gets the EAS schema check. `checking` used to skip the check and the attestation steps failed with "Wallet session is missing". With no wallet at all, `checking` fails with the new `PublishWalletMissingError` (code `PUBLISH_WALLET_MISSING`) before anything is uploaded.

@@ -153,6 +153,10 @@ export class NodeFileManager implements IFileManager {
     return await fsAsync.readFile(filePath)
   }
 
+  async openBlob(filePath: string): Promise<Blob> {
+    return fs.openAsBlob(filePath)
+  }
+
   async readFileAsString(filePath: string): Promise<string> {
     return await fsAsync.readFile(filePath, 'utf-8')
   }

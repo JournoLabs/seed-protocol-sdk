@@ -8,7 +8,7 @@ Chromium/Electron renderers often cannot grow far beyond **~4 GB of JS heap** 
 
 ## What dominates memory
 
-Total **bytes being published** (all Arweave uploads in the run, summed) is the main driver. Measured in Chromium on 2026-10-29, a browser publish peaks at about **7 copies** of those bytes as ArrayBuffers in the page: the file read makes 6 short-lived copies, and the OPFS mount keeps 1 for the whole session. Signing and the batch upload come after the read's copies are freed and stay below that peak. Sending the batch as a `Uint8Array` body adds another 3–5 copies across Chromium's renderer and network processes. Saving a File value before publish (`prop.value = file; save()`) peaks at about 8 copies.
+Total **bytes being published** (all Arweave uploads in the run, summed) is the main driver. Measured in Chromium on 2026-10-29, a browser publish peaked at about **7 copies** of those bytes as ArrayBuffers in the page: the file read made 6 short-lived copies, and the OPFS mount keeps 1 for the whole session. The read no longer copies: `getPublishUploadData` hands out disk-backed Blobs and hashes them in chunks. The peak is now in signing, which loads one upload at a time; that peak hasn't been measured again, so the estimate still uses 7. Sending the batch as a `Uint8Array` body adds another 3–5 copies across Chromium's renderer and network processes. Saving a File value before publish (`prop.value = file; save()`) peaks at about 8 copies.
 
 At 100 MB that is about 0.74 GB in the page during publish. A 1 GB publish fails reading the file from OPFS (`NotReadableError`) even with memory to spare.
 
@@ -49,7 +49,7 @@ To ask before the user presses Publish, `estimatePublishCost(item)` (and `usePub
 | Path | Notes |
 |------|--------|
 | **`dataItemSigner`** | Signs and batch-uploads in the same process as the publish machine. **Highest renderer peak** for large content. |
-| **`signDataItems`** | Your callback typically signs/uploads via a wallet/extension; the package may skip the batch upload step when there are no `signedDataItems`. Peak depends on whether your callback holds full buffers in memory. |
+| **`signDataItems`** | Your callback typically signs/uploads via a wallet/extension; the package may skip the batch upload step when there are no `signedDataItems`. Each upload arrives as a `blob`, so peak depends on whether your callback loads it whole. |
 
 When **Html embedded images** are materialized (`htmlEmbeddedDataUriPolicy` / defaults), publish runs **two sequential phases** (images + other files, then Html after rewrite). Peak memory is dominated by **one phase’s** packed batch at a time, not both simultaneously—but **`signDataItems` runs twice**, so wallet/extension flows should expect two back-to-back batches.
 

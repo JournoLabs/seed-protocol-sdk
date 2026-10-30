@@ -24,6 +24,17 @@ export const CONTENT_TYPE_TAG = 'Content-Type'
  */
 export const getContentSha256 = (data: Uint8Array): string => bytesToHex(sha256(data))
 
+/** {@link getContentSha256} of a Blob, read in chunks so the whole file is never in memory. */
+export const getBlobSha256 = async (blob: Blob): Promise<string> => {
+  const hash = sha256.create()
+  const reader = blob.stream().getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return bytesToHex(hash.digest())
+    hash.update(value)
+  }
+}
+
 /**
  * True when `tagValue` (a {@link CONTENT_SHA256_TAG} value read from Arweave) is the digest of
  * `data`. Accepts SHA-256 and, for uploads made by SDK 0.7.2 and earlier through the L1 transaction path,
