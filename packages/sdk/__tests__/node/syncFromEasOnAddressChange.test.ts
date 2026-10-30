@@ -51,9 +51,10 @@ describe.sequential('syncFromEasOnAddressChange', () => {
       },
       { timeout: WAIT_TIMEOUT_MS },
     )
-    expect(runSyncSpy).toHaveBeenCalledWith({
-      addresses: [ownedAddr, watchedAddr],
-    })
+    expect(runSyncSpy).toHaveBeenCalledWith(
+      { addresses: [ownedAddr, watchedAddr] },
+      expect.any(AbortSignal),
+    )
   })
 
   it('does not call runSyncFromEas after setAddresses when syncFromEasOnAddressChange is false', async () => {

@@ -8,6 +8,7 @@ All notable changes to this package are documented in this file.
 - New `verifyArchiveAgainstChain(bag, item)` checks a bag against a fresh reproducible export of the item at the time the bag covers, on top of `verifyArchive`'s checks. Every bag from `exportArchive` now carries `VERIFY.txt`.
 - `exportArchive` writes each Html to `data/source/` byte for byte. It decoded and encoded the text again, which dropped a BOM and replaced invalid UTF-8.
 - `exportArchive` records a published Relation or List of relations in `item.json` as seed uids. It wrote `null` for them. A related seed with no uid stays as its local id and is listed in `omitted`.
+- `client.stop()`, `client.unload()` and `client.resetLocalData()` end a running EAS sync before closing the database. Network waits end at once, a database write in progress finishes first, and a pending `client.syncFromEas()` rejects with `EAS sync stopped: the client stopped`. The sync used to keep running, and a queued one started, against a closed or deleted database.
 
 ## 0.8.0 (2026-10-30)
 

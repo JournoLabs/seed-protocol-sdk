@@ -33,6 +33,29 @@ describe('withTabLock', () => {
     await held
   })
 
+  it('gives up an untimed wait when its signal aborts, and never runs the section', async () => {
+    const lock = name()
+    let release!: () => void
+    let granted!: () => void
+    const holding = new Promise<void>((resolve) => (granted = resolve))
+    const held = withTabLock(lock, () => {
+      granted()
+      return new Promise<void>((resolve) => (release = resolve))
+    })
+    await holding
+
+    const stop = new AbortController()
+    const section = vi.fn(async () => {})
+    const waiting = withTabLock(lock, section, { timeoutMs: Infinity, signal: stop.signal })
+    const reason = new Error('stopped')
+    stop.abort(reason)
+
+    await expect(waiting).rejects.toBe(reason)
+    release()
+    await held
+    expect(section).not.toHaveBeenCalled()
+  })
+
   // AbortSignal.timeout is the Web Locks path; withProcessLock covers the fallback below.
   it.runIf(typeof navigator !== 'undefined' && !!navigator.locks)('still runs the section when the wait timeout fires after the lock was granted', async () => {
     // The wait timeout fires from inside the section, so it is certainly after the grant. (A real
@@ -119,6 +142,23 @@ describe('withProcessLock', () => {
     release()
     await Promise.all([held, later])
     expect(events).toEqual(['holder:start', 'holder:end', 'later'])
+  })
+
+  it('gives up an untimed wait when its signal aborts', async () => {
+    const lock = `seed:test:${Math.random().toString(36).slice(2)}`
+    let release!: () => void
+    const held = withProcessLock(lock, () => new Promise<void>((resolve) => (release = resolve)))
+
+    const stop = new AbortController()
+    const section = vi.fn(async () => {})
+    const waiting = withProcessLock(lock, section, { timeoutMs: Infinity, signal: stop.signal })
+    const reason = new Error('stopped')
+    stop.abort(reason)
+
+    await expect(waiting).rejects.toBe(reason)
+    release()
+    await held
+    expect(section).not.toHaveBeenCalled()
   })
 
   it('bounds only the wait: a granted section outlives the timeout', async () => {

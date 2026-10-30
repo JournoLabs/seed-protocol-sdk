@@ -10,6 +10,8 @@
  * only at the outermost call site.
  */
 
+import { abortable } from '@/helpers/abortable'
+
 /** Long enough for a slow init in another tab; short enough that a hung tab doesn't block forever. */
 export const TAB_LOCK_WAIT_TIMEOUT_MS = 60_000
 
@@ -41,19 +43,25 @@ export class TabLockTimeoutError extends Error {
   }
 }
 
+export type TabLockOptions = {
+  timeoutMs?: number
+  /** Gives up the wait when `timeoutMs` is Infinity. A finite timeout already ends the wait. */
+  signal?: AbortSignal
+}
+
 export async function withTabLock<T>(
   name: string,
   fn: () => Promise<T>,
-  { timeoutMs = TAB_LOCK_WAIT_TIMEOUT_MS }: { timeoutMs?: number } = {},
+  { timeoutMs = TAB_LOCK_WAIT_TIMEOUT_MS, signal }: TabLockOptions = {},
 ): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
-  if (!locks) return withProcessLock(name, fn, { timeoutMs })
+  if (!locks) return withProcessLock(name, fn, { timeoutMs, signal })
 
   try {
     // The timeout bounds the wait only; once granted, fn runs to completion. Infinity waits for as
     // long as the holder runs (it can't outlive its tab).
-    const signal = Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined
-    return await locks.request(name, { mode: 'exclusive', signal }, fn)
+    const waitSignal = Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : signal
+    return await locks.request(name, { mode: 'exclusive', signal: waitSignal }, fn)
   } catch (error) {
     if ((error as DOMException | null)?.name === 'TimeoutError') {
       throw new TabLockTimeoutError(name, timeoutMs)
@@ -92,7 +100,7 @@ const processLockTails = new Map<string, Promise<void>>()
 export async function withProcessLock<T>(
   name: string,
   fn: () => Promise<T>,
-  { timeoutMs = TAB_LOCK_WAIT_TIMEOUT_MS }: { timeoutMs?: number } = {},
+  { timeoutMs = TAB_LOCK_WAIT_TIMEOUT_MS, signal }: TabLockOptions = {},
 ): Promise<T> {
   const previous = processLockTails.get(name) ?? Promise.resolve()
   let release!: () => void
@@ -104,7 +112,7 @@ export async function withProcessLock<T>(
   })
 
   try {
-    await waitForTurn(previous, name, timeoutMs)
+    await waitForTurn(previous, name, timeoutMs, signal)
   } catch (error) {
     release()
     throw error
@@ -116,8 +124,13 @@ export async function withProcessLock<T>(
   }
 }
 
-function waitForTurn(previous: Promise<void>, name: string, timeoutMs: number): Promise<void> {
-  if (!Number.isFinite(timeoutMs)) return previous
+function waitForTurn(
+  previous: Promise<void>,
+  name: string,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!Number.isFinite(timeoutMs)) return abortable(previous, signal)
   let timer: ReturnType<typeof setTimeout> | undefined
   const timedOut = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new TabLockTimeoutError(name, timeoutMs)), timeoutMs)
