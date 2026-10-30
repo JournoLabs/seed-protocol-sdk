@@ -103,7 +103,7 @@ await initializeQueryPlatform({ models: schema.models })
 // co_author_identity_ids → coAuthors (and co_authors), featured_portfolio_clip_ids → featured
 ```
 
-Query reads each List property's `ref` (or the older `items.model`) and works out the EAS name the SDK publishes it under. The models stay set until `initializeQueryPlatform({ models })` sets others, `{ models: null }` clears them, or `teardownQueryPlatform()`; `setQueryModels(models)` does the same. Lists of models it wasn't given keep the first-word rule. The models are part of the cache key, so records cached without them aren't read with them.
+Query reads each List property's `ref` (or the older `items.model`) and works out the EAS name the SDK publishes it under. `models` and `properties` can be objects keyed by name or arrays with a `name` on each entry. The models stay set until `initializeQueryPlatform({ models })` sets others, `{ models: null }` clears them, or `teardownQueryPlatform()`; `setQueryModels(models)` does the same. Lists of models it wasn't given keep the first-word rule. The models are part of the cache key, so records cached without them aren't read with them.
 
 ## Many seeds (`getSeeds`)
 
