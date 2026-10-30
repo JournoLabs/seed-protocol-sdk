@@ -8,6 +8,7 @@ import {
   type Address,
   type Hex,
 } from 'viem'
+import { isUnfilledReference } from '@seedprotocol/eas'
 import {
   multiPublishAbi,
   publisherReadWriteAbi,
@@ -31,6 +32,8 @@ export type MultiPublishRequest = {
   seedIsRevocable: boolean
   listOfAttestations: Array<{
     schema: `0x${string}`
+    /** The property's EAS type, when known. Lets the encoder tell a relation slot from data. */
+    _easType?: string
     data: Array<{
       recipient: `0x${string}`
       expirationTime: bigint
@@ -79,8 +82,8 @@ function canonicalListLength(data: Hex): number | undefined {
  * Resolves each request's `propertiesToUpdate` to `publishIndex`es and returns the requests'
  * attestations with a placeholder in every slot a reference fills. Throws before anything is sent
  * on what `SeedPublishLib.applyReferences` would revert on, naming the request and property, and
- * on a slot still holding the local id of a request in the batch, which no reference fills: the
- * contract would attest the local id's bytes instead of a seed uid.
+ * on a relation slot holding a local id or a placeholder that no reference fills: the contract
+ * can't tell either from data and would attest it instead of a seed uid.
  */
 function prepareReferences(requests: MultiPublishRequest[]) {
   const indexByLocalId = new Map<string, number>()
@@ -148,10 +151,22 @@ function prepareReferences(requests: MultiPublishRequest[]) {
   attestations.forEach((list, i) => {
     for (const a of list) {
       for (const entry of a.data) {
-        const words =
-          byteLength(entry.data) === 32
-            ? [entry.data]
-            : Array.from({ length: canonicalListLength(entry.data) ?? 0 }, (_, k) => wordAt(entry.data, 64 + 32 * k))
+        const isList = byteLength(entry.data) !== 32
+        const words = isList
+          ? Array.from({ length: canonicalListLength(entry.data) ?? 0 }, (_, k) => wordAt(entry.data, 64 + 32 * k))
+          : [entry.data]
+        // Only a relation: `true` and small numbers encode to the same word as a placeholder.
+        if (a._easType === 'bytes32' || a._easType === 'bytes32[]') {
+          words.forEach((word, k) => {
+            const slot = `${i}:${a.schema.toLowerCase()}:${isList ? 64 + 32 * k : 0}`
+            if (isUnfilledReference(word) && !filled.has(slot)) {
+              throw new Error(
+                `multiPublish: request "${requests[i]!.localId}" attests ${word} in property ${a.schema}, ` +
+                  `a reference placeholder that no reference fills`,
+              )
+            }
+          })
+        }
         const missed = words.map((w) => localIdWords.get(w.toLowerCase())).find(Boolean)
         if (missed) {
           throw new Error(

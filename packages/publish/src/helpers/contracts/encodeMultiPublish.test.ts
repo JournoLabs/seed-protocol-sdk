@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeFunctionData, encodeAbiParameters, parseAbi, stringToHex, toFunctionSelector } from 'viem'
+import { normalizePublishRequest } from '../../services/publish/actors/publishRequestNormalize'
 import { executorModuleAbi } from '../abi/executor'
 import { multiPublishAbi } from '../abi/publisher'
 import { encodeExecutorMultiPublish, encodeMultiPublish, type MultiPublishRequest } from './index'
@@ -233,6 +234,36 @@ describe.each(encoders)('%s refuses a slot no reference fills', (_, encode) => {
     expect(() => encode([r, request('post', [], [list(localIdWord('tag'), localIdWord('tag'))])])).toThrow(
       /"post" attests the local id of "tag"/,
     )
+  })
+
+  const typed = (type: string, data: `0x${string}`) => ({ ...attestation(RELATION, data), _easType: type })
+
+  test('a relation holding a placeholder', () => {
+    expect(() => encode([request('post', [], [typed('bytes32', ph(0))])])).toThrow(
+      /"post" attests 0x0+1 .* a reference placeholder that no reference fills/,
+    )
+  })
+
+  test('a list element holding one, next to an element a reference fills', () => {
+    const data = encodeAbiParameters([{ type: 'bytes32[]' }], [[localIdWord('tag'), ph(5)]])
+    const post = request('post', [], [{ ...attestation(LIST, data), _easType: 'bytes32[]' }])
+    const tag = request('tag', [ref('post', { propertySchemaUid: LIST, listElement: true, elementIndex: 0 })])
+    expect(() => encode([tag, post])).toThrow(/a reference placeholder that no reference fills/)
+  })
+
+  test('the type survives normalizing the request', () => {
+    const post = normalizePublishRequest(request('post', [], [typed('bytes32', ph(0))]))
+    expect(() => encode([post])).toThrow(/no reference fills/)
+  })
+
+  test('a filled placeholder passes', () => {
+    const author = request('author', [ref('post')])
+    expect(() => encode([author, request('post', [], [typed('bytes32', localIdWord('author'))])])).not.toThrow()
+  })
+
+  test('data that encodes to the same word passes: a bool true or a small number', () => {
+    expect(() => encode([request('post', [], [typed('bool', ph(0))])])).not.toThrow()
+    expect(() => encode([request('post', [], [typed('uint256', ph(0))])])).not.toThrow()
   })
 
   test('a local id that is not in the batch is left alone', () => {

@@ -7,6 +7,14 @@ export const seedErrorsAbi = [
   // SeedPublishLib
   {
     type: 'error',
+    name: 'PublishValueMismatch',
+    inputs: [
+      { name: 'required', type: 'uint256' },
+      { name: 'sent', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
     name: 'PublishIndexOutOfBounds',
     inputs: [
       { name: 'targetIndex', type: 'uint256' },
@@ -80,14 +88,6 @@ export const seedErrorsAbi = [
       { name: 'targetIndex', type: 'uint256' },
       { name: 'propertySchemaUid', type: 'bytes32' },
       { name: 'found', type: 'bytes32' },
-    ],
-  },
-  {
-    type: 'error',
-    name: 'PublishValueMismatch',
-    inputs: [
-      { name: 'required', type: 'uint256' },
-      { name: 'sent', type: 'uint256' },
     ],
   },
   // SeedProtocolExtensionBase (the executor module's AttestationFailed() has no argument)

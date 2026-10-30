@@ -190,6 +190,9 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(indexOf(payload, b.seedLocalId)).toBeLessThan(indexOf(payload, a.seedLocalId))
     expect(indexOf(payload, a.seedLocalId)).toBeLessThan(indexOf(payload, root.seedLocalId))
     expectNoDanglingLocalRefs(payload)
+    // The encoder tells a relation slot from data by this type
+    const types = new Set(payload.flatMap((r: any) => r.listOfAttestations.map((a: any) => a._easType)))
+    expect(types).toContain('bytes32')
 
     // B's Html is uploaded with the root's publish.
     const bHtmlSeed = (b.allProperties.body!.getService().getSnapshot() as any).context.propertyValue

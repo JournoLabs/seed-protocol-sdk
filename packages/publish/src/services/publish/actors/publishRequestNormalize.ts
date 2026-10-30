@@ -86,6 +86,7 @@ export function normalizePublishRequest(req: any): any {
         expirationTime: d?.expirationTime != null ? BigInt(d.expirationTime) : BigInt(0),
         value: d?.value != null ? BigInt(d.value) : BigInt(0),
       })),
+      ...(typeof att?._easType === 'string' ? { _easType: att._easType } : {}),
       ...(typeof att?._propertyName === 'string' && att._propertyName !== ''
         ? { _propertyName: att._propertyName }
         : {}),
