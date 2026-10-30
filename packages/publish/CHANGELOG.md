@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- A publish run created with no wallet takes the registered wallet in `checking`, as the attestation steps do, so a wallet registered after the run starts gets the EAS schema check. `checking` used to skip the check and the attestation steps failed with "Wallet session is missing". With no wallet at all, `checking` fails with the new `PublishWalletMissingError` (code `PUBLISH_WALLET_MISSING`) before anything is uploaded.
 - **Breaking:** `ensureAutomationSessionKey` requires `expiresAt`, and refuses a time that has passed. There is no ten-year default.
 - **Breaking:** `enrollPublishAutomation` defaults to a 90-day key and `PublishAuthorization`, down from 365 days. Enroll again before the end to renew.
 - **Breaking:** `enrollPublishAutomation` fails with the new `AUTOMATION_ACCOUNT_FUNDED` code, before sending anything, when the account's balance plus EntryPoint deposit is above the new `maxAutomationExposureWei` config (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose. An automation publish over the limit logs a warning and goes ahead.

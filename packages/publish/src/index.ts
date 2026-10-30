@@ -59,6 +59,7 @@ export {
   PublishRetractionError,
   UploadTooLargeError,
   UploadNeedsConfirmError,
+  PublishWalletMissingError,
   Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
   type Eip7702ModularAccountPublishErrorCode,
