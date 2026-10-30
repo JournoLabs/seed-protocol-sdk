@@ -72,7 +72,7 @@ const RECEIPT = {
   ],
 }
 
-const sendTransaction = mock(async (_tx: { data: `0x${string}` }) => ({ transactionHash: '0x01' }))
+const sendTransaction = mock(async (_tx: { data: `0x${string}`; gas?: bigint }) => ({ transactionHash: '0x01' }))
 const identity = {
   seedLocalId: IDENTITY,
   seedUid: undefined as string | undefined,
@@ -111,6 +111,7 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
 mock.module('../../../helpers/resolvePublishWallet', () => ({
   resolvePublishWallet: () => ({ txSender: { address: PUBLISHER, sendTransaction } }),
 }))
+mock.module('../../../helpers/publishGas', () => ({ publishGasLimit: async () => 1_234_567n }))
 mock.module('../../arweaveL1Finalize/enqueue', () => ({
   enqueueArweaveL1FinalizeJobsFromPublishContext: async () => {},
 }))
@@ -191,6 +192,7 @@ describe('createAttestations: a draft relation', () => {
     // A relation back to an item this publish creates is filled now, not deferred.
     expect(item.getPublishPayload.mock.calls[0]![1]).toEqual({ publishMode: 'patch', backReferences: 'link' })
     expect(sendTransaction).toHaveBeenCalledTimes(1)
+    expect((sendTransaction.mock.calls[0]![0] as { gas?: bigint }).gas).toBe(1_234_567n)
     const { args } = decodeFunctionData({ abi: multiPublishAbi, data: sendTransaction.mock.calls[0]![0].data })
     const [sentIdentity, sentPost] = args[0]
     expect(sentIdentity.localId).toBe(IDENTITY)

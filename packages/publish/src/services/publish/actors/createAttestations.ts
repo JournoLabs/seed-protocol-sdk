@@ -14,6 +14,7 @@ import {
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
 import { explainUserOpError } from '~/helpers/describeRevert'
+import { publishGasLimit } from '~/helpers/publishGas'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import type { PublishWallet } from '~/helpers/seedSigner'
@@ -243,26 +244,27 @@ async function executeCreateAttestations(
       await ensureManagedAccountEasConfigured(address, activeWallet)
     }
 
-    // The executor module takes a different multiPublish struct than the ManagedAccount
-    // extension. Every publish is simulated from the sending account first, so a call that would
-    // revert is never sent and its decoded reason is reported. Automation also refuses to send
-    // when the simulation cannot run; other routes go ahead.
+    // Every publish is simulated from the sending account first, so a call that would revert is
+    // never sent and its decoded reason is reported. Automation also refuses to send when the
+    // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
     const sendPublishTx = async (requests: any[]) => {
       const to = routing.txTargetAddress as Address
-      const tx = routeToExecutorModule
-        ? encodeExecutorMultiPublish(to, requests, 5_000_000n)
-        : encodeMultiPublish(to, requests, 5_000_000n)
+      const unsized = routeToExecutorModule
+        ? encodeExecutorMultiPublish(to, requests)
+        : encodeMultiPublish(to, requests)
+      const from = routeToExecutorModule ? address : activeWallet.txSender.address
       await simulateCallFromAccount(
         routeToExecutorModule
-          ? { managedAddress: address, tx, action: 'multiPublish via the executor module' }
+          ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
           : {
-              managedAddress: activeWallet.txSender.address,
-              tx,
+              managedAddress: from,
+              tx: unsized,
               action: 'multiPublish',
               code: 'PUBLISH_PREFLIGHT_FAILED',
               requireSimulation: false,
             },
       )
+      const tx = { ...unsized, gas: await publishGasLimit(from, unsized) }
       try {
         return await activeWallet.txSender.sendTransaction(tx)
       } catch (err) {
