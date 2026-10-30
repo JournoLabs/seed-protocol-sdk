@@ -17,7 +17,6 @@ import {
   getSmartWalletAddressForAdmin,
   getWalletsForConnectButton,
   syncPublishInAppAuthToken,
-  disconnectPublishWallet,
   markPublishWalletConnected,
   userChosePublishWalletDisconnect,
 } from "../helpers/thirdweb"
@@ -30,6 +29,7 @@ import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
 import { getManagedAccountAdminWallet } from "../helpers/managedAccountAdmin"
 import { PublishManager } from "../services/publishManager"
+import { endPublishSession } from "./endPublishSession"
 import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
 
 function reportWalletSetupWarning(err: unknown) {
@@ -260,8 +260,7 @@ const ConnectButton: FC = () => {
   ])
 
   const handleDisconnect = () => {
-    void disconnectPublishWallet()
-    PublishManager.stopAll()
+    void endPublishSession()
   }
 
   const handleConnect = async (activeWallet: Wallet, _allConnectedWallets: Wallet[]) => {
