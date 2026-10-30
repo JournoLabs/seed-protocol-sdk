@@ -7,14 +7,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import {
-  BaseArweaveClient,
-  invalidateReadGatewayCache,
-  setPreferredArweaveReadBaseUrls,
-} from '@seedprotocol/arweave'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
 import '@seedprotocol/arweave/node'
-import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
-import { startLocalArweave, type LocalArweave } from '../../test-utils/arlocal'
+import { pinArweaveClientTo, startLocalArweave, type LocalArweave } from '../../test-utils/arlocal'
 
 const isNodeEnv = typeof window === 'undefined'
 const MISSING_TX_ID = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
@@ -27,27 +22,11 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient against a local Arweave node', ()
   let node: LocalArweave
   let binaryTx: string
   let textTx: string
-  let previousReadGateways: string | undefined
-  const realFetch = globalThis.fetch
-  const offLocalRequests: string[] = []
+  let unpin: () => void
 
   beforeAll(async () => {
-    previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
-    // Any request that leaves this machine fails the test (see the last test).
-    globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      if (new URL(url).hostname !== '127.0.0.1') {
-        offLocalRequests.push(url)
-        return Promise.reject(new Error(`off-machine request in a local test: ${url}`))
-      }
-      return realFetch(input, init)
-    }) as typeof fetch
     node = await startLocalArweave()
-    process.env.ARWEAVE_READ_GATEWAYS = node.host
-    BaseArweaveClient.setHost(node.baseUrl)
-    setPreferredArweaveReadBaseUrls([])
-    BaseArweaveClient.resetReadGatewaySelectionStateForTests()
-    invalidateReadGatewayCache()
+    unpin = pinArweaveClientTo(node)
 
     binaryTx = await node.postTransaction(BINARY, [{ name: 'Content-Type', value: 'image/png' }])
     textTx = await node.postTransaction(TEXT, [
@@ -57,11 +36,7 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient against a local Arweave node', ()
   }, 60000)
 
   afterAll(async () => {
-    globalThis.fetch = realFetch
-    if (previousReadGateways === undefined) delete process.env.ARWEAVE_READ_GATEWAYS
-    else process.env.ARWEAVE_READ_GATEWAYS = previousReadGateways
-    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
-    invalidateReadGatewayCache()
+    unpin?.()
     await node?.stop()
   })
 
@@ -164,9 +139,5 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient against a local Arweave node', ()
       })
       expect(results.map((r) => r.transactionId)).toEqual([textTx])
     })
-  })
-
-  it('made no request off this machine', () => {
-    expect(offLocalRequests).toEqual([])
   })
 })

@@ -76,14 +76,16 @@ To fix a blocked request, mock it at the network boundary: stub `fetch`, configu
 
 ### Arweave tests
 
-`ArweaveClient.arlocal.test.ts` runs the real Node Arweave client against a local Arweave node
-([arlocal](https://github.com/textury/arlocal), started on a free port by
-`__tests__/test-utils/arlocal.ts`), so it makes HTTP requests the way it would against a gateway
-and needs no network. Reads are pinned to the local node with `ARWEAVE_READ_GATEWAYS`, and the
-test fails if any request leaves the machine. arlocal 1.1.66 has no `/raw/<id>` route, so the
-fixture puts a small server in front of it that answers `/raw/<id>` from `/<id>`. Use
-`startLocalArweave()` from that file in other tests that need an Arweave node: `postTransaction`
-signs, posts and mines a transaction so it is readable at once.
+`ArweaveClient.arlocal.test.ts` and `integration/ArweaveFlows.test.ts` run the real Node Arweave
+client against a local Arweave node ([arlocal](https://github.com/textury/arlocal), started on a
+free port by `__tests__/test-utils/arlocal.ts`), so it makes HTTP requests the way it would against
+a gateway and needs no network. arlocal 1.1.66 has no `/raw/<id>` route, so the fixture puts a small
+server in front of it that answers `/raw/<id>` from `/<id>`.
+
+Use `startLocalArweave()` from that file in other tests that need an Arweave node, and
+`pinArweaveClientTo(node)` to pin reads to it with `ARWEAVE_READ_GATEWAYS`. `postTransaction` signs,
+posts and mines a transaction so it is readable at once (`{ mine: false }` leaves it unmined), and
+`failRawRead(id, status)` makes `/raw/<id>` answer with a gateway error.
 
 ### Live network tests
 

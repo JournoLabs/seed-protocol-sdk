@@ -1,5 +1,11 @@
 import Arweave from 'arweave'
 import type { JWKInterface } from 'arweave/node/lib/wallet'
+import {
+  BaseArweaveClient,
+  DEFAULT_ARWEAVE_HOST,
+  invalidateReadGatewayCache,
+  setPreferredArweaveReadBaseUrls,
+} from '@seedprotocol/arweave'
 
 /**
  * A local Arweave node for tests (arlocal: a real HTTP gateway API backed by SQLite), so tests of
@@ -10,14 +16,22 @@ import type { JWKInterface } from 'arweave/node/lib/wallet'
  *
  * arlocal 1.1.66 has no `/raw/<id>` route, which ar.io gateways serve and `downloadFiles` reads,
  * so the tests talk to a small server in front of it that answers `/raw/<id>` from arlocal's
- * `/<id>` and passes every other request through unchanged.
+ * `/<id>` and passes every other request through unchanged. That server is also where
+ * `failRawRead` makes a gateway error happen, which arlocal has no way to do.
  */
 export type LocalArweave = {
   /** `http://127.0.0.1:<port>` */
   baseUrl: string
   host: string
   arweave: Arweave
-  postTransaction: (data: string | Uint8Array, tags?: { name: string; value: string }[]) => Promise<string>
+  /** Signs and posts a transaction, and mines it unless `mine` is false. */
+  postTransaction: (
+    data: string | Uint8Array,
+    tags?: { name: string; value: string }[],
+    options?: { mine?: boolean },
+  ) => Promise<string>
+  /** `/raw/<id>` answers `status` from now on. */
+  failRawRead: (transactionId: string, status: number) => void
   stop: () => Promise<void>
 }
 
@@ -37,10 +51,19 @@ const freePort = async (): Promise<number> => {
 }
 
 /** Forwards to arlocal on `targetPort`, serving `/raw/<id>` from `/<id>`. */
-async function startRawRoute(targetPort: number): Promise<{ port: number; close: () => Promise<void> }> {
+async function startRawRoute(
+  targetPort: number,
+  failedReads: Map<string, number>,
+): Promise<{ port: number; close: () => Promise<void> }> {
   const { createServer } = await import('node:http')
   const server = createServer(async (req, res) => {
     try {
+      const failure = failedReads.get((req.url ?? '').replace(/^\/raw\//, ''))
+      if (failure !== undefined && req.url?.startsWith('/raw/')) {
+        res.writeHead(failure)
+        res.end()
+        return
+      }
       const path = (req.url ?? '/').replace(/^\/raw\//, '/')
       const chunks: Buffer[] = []
       for await (const chunk of req) chunks.push(chunk as Buffer)
@@ -69,7 +92,8 @@ export async function startLocalArweave(): Promise<LocalArweave> {
   const node = new ArLocal(await freePort(), false)
   await node.start()
   const nodePort = (node as unknown as { port: number }).port
-  const front = await startRawRoute(nodePort)
+  const failedReads = new Map<string, number>()
+  const front = await startRawRoute(nodePort, failedReads)
 
   const port = front.port
   const host = `127.0.0.1:${port}`
@@ -84,19 +108,43 @@ export async function startLocalArweave(): Promise<LocalArweave> {
     baseUrl,
     host,
     arweave,
-    async postTransaction(data, tags = []) {
+    async postTransaction(data, tags = [], { mine = true } = {}) {
       const tx = await arweave.createTransaction({ data }, wallet)
       for (const tag of tags) tx.addTag(tag.name, tag.value)
       await arweave.transactions.sign(tx, wallet)
       const posted = await arweave.transactions.post(tx)
       if (posted.status !== 200) throw new Error(`arlocal post failed: ${posted.status}`)
-      const mined = await fetch(`${baseUrl}/mine`)
-      if (!mined.ok) throw new Error(`arlocal mine failed: ${mined.status}`)
+      if (mine) {
+        const mined = await fetch(`${baseUrl}/mine`)
+        if (!mined.ok) throw new Error(`arlocal mine failed: ${mined.status}`)
+      }
       return tx.id
+    },
+    failRawRead(transactionId, status) {
+      failedReads.set(transactionId, status)
     },
     async stop() {
       await front.close()
       await node.stop()
     },
+  }
+}
+
+/**
+ * Points the Arweave client at `node` alone: reads are pinned with `ARWEAVE_READ_GATEWAYS`, so the
+ * public fallbacks are never asked. Returns a function that restores the default host.
+ */
+export function pinArweaveClientTo(node: LocalArweave): () => void {
+  const previousReadGateways = process.env.ARWEAVE_READ_GATEWAYS
+  process.env.ARWEAVE_READ_GATEWAYS = node.host
+  BaseArweaveClient.setHost(node.baseUrl)
+  setPreferredArweaveReadBaseUrls([])
+  BaseArweaveClient.resetReadGatewaySelectionStateForTests()
+  invalidateReadGatewayCache()
+  return () => {
+    if (previousReadGateways === undefined) delete process.env.ARWEAVE_READ_GATEWAYS
+    else process.env.ARWEAVE_READ_GATEWAYS = previousReadGateways
+    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
+    invalidateReadGatewayCache()
   }
 }
