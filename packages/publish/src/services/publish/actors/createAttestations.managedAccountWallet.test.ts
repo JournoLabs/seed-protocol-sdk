@@ -62,6 +62,8 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
   simulateCallFromAccount: async () => {},
   assertExecutorModuleReadyForAccount: async () => {},
 }))
+mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
+mock.module('../../../helpers/publishGas', () => ({ publishGasLimit: async () => 1_234_567n }))
 mock.module('../../../helpers/ensureAutomationSessionKey', () => ({ isAutomationSessionActive: async () => false }))
 const prep = mock(async () => ({ ok: false, error: new Error('Thirdweb in-app wallet prep ran') }))
 mock.module('../../../helpers/ensureManagedAccountReady', () => ({ runModularExecutorPublishPrep: prep }))
