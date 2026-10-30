@@ -54,14 +54,19 @@ const itemFind = mock(async (q: { seedLocalId?: string }) =>
   q.seedLocalId === relatedImage.seedLocalId ? relatedImage : undefined,
 )
 
+let recordFailure: Error | undefined
+
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
-  // The real one writes both in one transaction; here it hands each to its mock
-  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
-    if (version) await updateVersionUid(version)
-    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  // The real one writes them in one transaction; here it hands each to its mock
+  recordPublishRequests: async (records: Array<{ version?: unknown; properties?: unknown }>) => {
+    if (recordFailure) throw recordFailure
+    for (const { version, properties } of records) {
+      if (version) await updateVersionUid(version)
+      if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+    }
   },
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
@@ -251,6 +256,37 @@ describe('createAttestationsDirectToEas: related items published with the item',
     expect(relatedImage.persistSeedUid.mock.calls[0]).toEqual([PUBLISHER, 1_700_000_001_000])
     expect(item.seedUid).toBeUndefined()
     expect(item.persistSeedUid).not.toHaveBeenCalled()
+  })
+})
+
+describe('createAttestationsDirectToEas: a created seed that cannot be recorded', () => {
+  test('fails the publish, and no attestation is added to a seed no row points at', async () => {
+    updateVersionUid.mockClear()
+    recordFailure = new Error('disk full')
+    const item = {
+      seedLocalId: 'postLocalD1',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const actor = createActor(createAttestationsDirectToEas, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item,
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    await expect(toPromise(actor)).rejects.toThrow('disk full')
+    recordFailure = undefined
+    expect(updateVersionUid).not.toHaveBeenCalled()
   })
 })
 

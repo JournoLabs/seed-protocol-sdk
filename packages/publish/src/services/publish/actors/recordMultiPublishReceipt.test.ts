@@ -10,15 +10,20 @@ import { easAbi } from '../../../helpers/abi/eas'
 const realConfig = await import('../../../config')
 const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
 const updateVersionUid = mock(async (_: unknown) => {})
+// The real one writes them in one transaction; here it hands each to its mock
+const recordPublishRequests = mock(
+  async (records: Array<{ seed?: { seedLocalId: string; seedUid: string }; version?: unknown; properties?: unknown }>) => {
+    for (const { version, properties } of records) {
+      if (version) await updateVersionUid(version)
+      if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+    }
+  },
+)
 
 mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish,
   updateVersionUid,
-  // The real one writes both in one transaction; here it hands each to its mock
-  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
-    if (version) await updateVersionUid(version)
-    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
-  },
+  recordPublishRequests,
   // Related seeds are not recorded here (no item found): this file is about properties and versions.
   Item: { find: async () => undefined },
 }))
@@ -163,6 +168,34 @@ describe('recordMultiPublishReceipt: properties of several items in one transact
       imageLocal1: IMAGE_SEED,
       postLocal01: POST_SEED,
     })
+  })
+})
+
+describe('recordMultiPublishReceipt: one write', () => {
+  test('every request, seeds included, goes to one recordPublishRequests call', async () => {
+    recordPublishRequests.mockClear()
+    await record(RECEIPT, requests())
+    expect(recordPublishRequests).toHaveBeenCalledTimes(1)
+    const seeds = recordPublishRequests.mock.calls[0]![0].map((r) => [r.seed?.seedLocalId, r.seed?.seedUid])
+    expect(seeds).toEqual([
+      ['imageLocal1', IMAGE_SEED],
+      ['postLocal01', POST_SEED],
+    ])
+  })
+
+  test('a request that carried its seed uid records no seed', async () => {
+    recordPublishRequests.mockClear()
+    await record({ logs: [attested(SCHEMA_IMAGE_SRC, IMAGE_SRC)] }, [
+      { ...requests()[0]!, seedUid: IMAGE_SEED, versionUid: IMAGE_VERSION },
+    ])
+    expect(recordPublishRequests.mock.calls[0]![0][0]!.seed).toBeUndefined()
+  })
+
+  test('a failed write rejects', async () => {
+    recordPublishRequests.mockImplementationOnce(async () => {
+      throw new Error('disk full')
+    })
+    await expect(record(RECEIPT, requests())).rejects.toThrow('disk full')
   })
 })
 
