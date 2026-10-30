@@ -7,6 +7,14 @@ export const seedErrorsAbi = [
   // SeedPublishLib
   {
     type: 'error',
+    name: 'PublishValueMismatch',
+    inputs: [
+      { name: 'required', type: 'uint256' },
+      { name: 'sent', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
     name: 'PublishIndexOutOfBounds',
     inputs: [
       { name: 'targetIndex', type: 'uint256' },

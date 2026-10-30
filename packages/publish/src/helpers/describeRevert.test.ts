@@ -27,6 +27,11 @@ describe('describeRevert', () => {
     expect(describeRevert(outOfBounds)).toBe('reverted with PublishIndexOutOfBounds(3, 2)')
   })
 
+  test('decodes a publish value mismatch', () => {
+    const mismatch = encodeErrorResult({ abi: seedErrorsAbi, errorName: 'PublishValueMismatch', args: [5n, 0n] })
+    expect(describeRevert(mismatch)).toBe('reverted with PublishValueMismatch(5, 0)')
+  })
+
   test("decodes the three-phase multiPublish's reference errors", () => {
     const schema = `0x${'05'.repeat(32)}` as Hex
     const found = `0x${'00'.repeat(31)}02` as Hex

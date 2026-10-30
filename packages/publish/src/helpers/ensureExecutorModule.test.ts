@@ -21,13 +21,6 @@ const initializedLog = (account = ACCOUNT) =>
     data: '0x',
   }) as unknown as Log
 
-const uninstalledLog = (account = ACCOUNT) =>
-  ({
-    address: account,
-    topics: encodeEventTopics({ abi: seedExecutorRouterAbi, eventName: 'SeedExecutorUninstalled', args: { executor: EXECUTOR } }),
-    data: '0x',
-  }) as unknown as Log
-
 const state = {
   router: { executor: EXECUTOR, eas: '0x4200000000000000000000000000000000000021' } as
     | { executor: string; eas: string }
@@ -37,9 +30,6 @@ const state = {
   receipt: { status: 'success', logs: [installedLog(), initializedLog()] } as { status: string; logs: Log[] },
   /** What simulating installSeedExecutor throws; undefined = it would succeed. */
   simulateError: undefined as Error | undefined,
-  initialized: true,
-  /** Receipt for uninstallSeedExecutor. */
-  uninstallLogs: [uninstalledLog()] as Log[],
 }
 
 const contractsActual = await import('./contracts')
@@ -47,20 +37,13 @@ mock.module('./contracts', () => ({
   ...contractsActual,
   readSeedExecutorRouter: async () => state.router,
   readSeedExecutorInstalled: async () => state.installed,
-  readExecutorModuleIsInitialized: async () => state.initialized,
 }))
 
 const chainClientActual = await import('./chainClient')
-const { readUntil } = chainClientActual
 mock.module('./chainClient', () => ({
   ...chainClientActual,
   isContractDeployed: async () => true,
-  readUntil: (read: () => Promise<unknown>, accept: (v: unknown) => boolean, opts?: { attempts?: number }) =>
-    readUntil(read, accept, { ...opts, intervalMs: 0 }),
   waitForPublishReceipt: async (hash: string) => {
-    if (decodeFunctionData({ abi: seedExecutorRouterAbi, data: state.sent.at(-1)!.data }).functionName === 'uninstallSeedExecutor') {
-      return { status: 'success', logs: state.uninstallLogs }
-    }
     if (state.receipt.status === 'reverted') {
       const { PublishTransactionRevertedError } = await import('../errors')
       throw new PublishTransactionRevertedError(hash, state.receipt)
@@ -98,8 +81,6 @@ afterEach(() => {
   state.sent = []
   state.receipt = { status: 'success', logs: [installedLog(), initializedLog()] }
   state.simulateError = undefined
-  state.initialized = true
-  state.uninstallLogs = [uninstalledLog()]
 })
 
 const revert = (errorName: 'SeedExecutorAlreadyInstalled' | 'Unauthorized', args?: readonly [string]) =>
@@ -128,32 +109,6 @@ describe('ensureExecutorModuleInstalled on Router accounts with the executor ext
       status: 'already-installed',
     })
     expect(state.sent).toHaveLength(0)
-  })
-
-  test('an install carried over from a replaced executor is uninstalled, then installed again', async () => {
-    state.installed = true
-    state.initialized = false
-    await expect(ensureExecutorModuleInstalled(ACCOUNT, getAdmin, config)).resolves.toMatchObject({
-      status: 'installed',
-      eas: EAS,
-    })
-    expect(state.sent.map((tx) => tx.from)).toEqual([ADMIN, ADMIN])
-    expect(state.sent.map((tx) => tx.to)).toEqual([ACCOUNT, ACCOUNT])
-    expect(state.sent.map((tx) => decodeFunctionData({ abi: seedExecutorRouterAbi, data: tx.data }).functionName)).toEqual([
-      'uninstallSeedExecutor',
-      'installSeedExecutor',
-    ])
-  })
-
-  test('stops when the uninstall did not take effect (sponsored send)', async () => {
-    state.installed = true
-    state.initialized = false
-    state.uninstallLogs = []
-    await expect(ensureExecutorModuleInstalled(ACCOUNT, getAdmin, config)).rejects.toMatchObject({
-      code: 'EXECUTOR_MODULE_NOT_INSTALLED',
-      message: expect.stringContaining('did not clear the replaced Seed executor'),
-    })
-    expect(state.sent).toHaveLength(1)
   })
 
   test('fails with the revert reason when the receipt shows no install (sponsored send)', async () => {

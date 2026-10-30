@@ -67,6 +67,8 @@ type Attestation = Omit<AttestationRequest, 'data'> & {
   _schemaDef?: string
   _unresolvedValue?: string
   _easDataType?: string
+  /** The property's EAS type. `_easDataType` is a resolution hint and is cleared once resolved. */
+  _easType?: string
   /** Per-slot raw ids (local or 0x) before encodeBytes32String; re-encoded after sequential publish. */
   _rawListIdsForResolve?: string[]
 }
@@ -417,6 +419,7 @@ async function attestProperty(
       } as AttestationRequestData,
     ],
     _propertyName: key,
+    _easType: easDataType,
     ...(row?.localId ? { _metadataLocalId: row.localId } : {}),
     ...(uploaded && uploaded.txId !== row?.propertyValue ? { _attestedValue: uploaded.txId } : {}),
   }
