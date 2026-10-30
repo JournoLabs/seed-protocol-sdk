@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A repeated `dc:creator` or `author` stays a list. `rssXmlToSources` used to keep the first; `SourceNode.values` now holds them all (`value` is still the first), and lookup edges, `collectLookupValues`, lookup row state and `LookupEditor` read each one. Copy edges still read `value`.
+
 ## 0.8.0 (2026-10-30)
 
 - **Breaking (types):** `FieldMapperLookupRow.onSplitChange`, added in 0.7.13, is a required member, so code that builds its own lookup rows must supply it. Rows the package passes to `renderLookup` always have it.
