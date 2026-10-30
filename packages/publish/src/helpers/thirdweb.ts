@@ -101,7 +101,8 @@ export async function disconnectPublishWallet(): Promise<void> {
     } catch {
       /* private mode */
     }
-    const { thirdwebClientId } = getPublishConfig()
+    // Works before initPublish too: without a client id there is no default key to know of.
+    const thirdwebClientId = getConfigRef()?.thirdwebClientId
     if (thirdwebClientId) {
       try {
         const bareKey = `walletToken-${thirdwebClientId}`

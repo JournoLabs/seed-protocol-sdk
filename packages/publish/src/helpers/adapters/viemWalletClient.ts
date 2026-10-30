@@ -4,6 +4,8 @@ import {
   brandTxSender,
   type PublishWallet,
   type PublishWalletKind,
+  type SeedAuthorizationRequest,
+  type SeedSigner,
 } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
 
@@ -16,6 +18,12 @@ export type FromViemWalletClientOptions = {
    * sign data items and publish must not attest straight to EAS from it.
    */
   kind?: PublishWalletKind
+  /**
+   * Signs EIP-7702 authorizations, for the EIP-7702 sender's first UserOp from an EOA. A local
+   * viem account does this itself. A browser wallet can't over JSON-RPC, so pass the wallet
+   * vendor's own call here if it has one.
+   */
+  signAuthorization?: SeedSigner['signAuthorization']
 }
 
 /**
@@ -37,6 +45,12 @@ export function fromViemWalletClient(
   }
   const chain = options.chain ?? getPublishViemChain()
   const address = account.address
+  const signAuthorization =
+    options.signAuthorization ??
+    (account.type === 'local' && account.signAuthorization
+      ? ({ address: contractAddress, chainId, nonce }: SeedAuthorizationRequest) =>
+          account.signAuthorization!({ address: contractAddress, chainId, nonce })
+      : undefined)
 
   const signer = brandSigner({
     address,
@@ -49,6 +63,7 @@ export function fromViemWalletClient(
       walletClient.signTypedData({ ...args, account } as Parameters<
         typeof walletClient.signTypedData
       >[0]),
+    ...(signAuthorization && { signAuthorization }),
   })
 
   const txSender = brandTxSender({

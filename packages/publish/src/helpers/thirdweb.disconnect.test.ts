@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { setConfigRef } from '../config'
+import { getPublishWallet, setPublishWallet, type PublishWalletSession } from './publishWalletRegistry'
 import {
   clearInAppPublishSession,
   disconnectPublishWallet,
@@ -87,6 +88,21 @@ describe('disconnecting the publish wallet', () => {
     syncPublishInAppAuthToken()
 
     expect(localStorage.getItem(PREFIXED_KEY)).toBe('jwt-2')
+  })
+})
+
+describe('disconnecting before publish is configured', () => {
+  test('resolves, records the choice and clears the publish wallet', async () => {
+    const address = '0x00000000000000000000000000000000000000aa'
+    // Not awaited: it waits for the Seed client, which this test doesn't start
+    void setPublishWallet({ signer: { address }, txSender: { address } } as unknown as PublishWalletSession)
+    expect(getPublishWallet()).not.toBeNull()
+    setConfigRef(null)
+
+    await disconnectPublishWallet()
+
+    expect(sessionStorage.getItem('seedProtocol:publish:userChoseWalletDisconnect')).toBe('1')
+    expect(getPublishWallet()).toBeNull()
   })
 })
 

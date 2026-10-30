@@ -1,4 +1,4 @@
-import type { Address, Hex, SignableMessage, TypedData, TypedDataDefinition } from 'viem'
+import type { Address, Hex, SignableMessage, SignedAuthorization, TypedData, TypedDataDefinition } from 'viem'
 import { retryNonceTooLow } from './retryNonceTooLow'
 import { ethers } from 'ethers'
 
@@ -30,6 +30,20 @@ export interface SeedSigner {
   signTypedData?<const T extends TypedData | Record<string, unknown>, P extends keyof T | 'EIP712Domain'>(
     args: TypedDataDefinition<T, P>,
   ): Promise<Hex>
+
+  /**
+   * EIP-7702 authorization delegating this EOA to `address`. Optional: only the EIP-7702 sender
+   * needs it, once, on an EOA's first UserOp. Browser wallets don't expose this over EIP-1193.
+   */
+  signAuthorization?(args: SeedAuthorizationRequest): Promise<SignedAuthorization>
+}
+
+export type SeedAuthorizationRequest = {
+  /** Contract to delegate to. */
+  address: Address
+  chainId: number
+  /** The EOA's current transaction nonce. */
+  nonce: number
 }
 
 /** `signer.signTypedData`, bound; throws when the signer doesn't implement it. */
@@ -147,6 +161,17 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
         rest,
         message as Record<string, unknown>,
       )) as Hex
+    },
+    signAuthorization: async ({ address: delegate, chainId, nonce }) => {
+      const { signature } = await wallet.authorize({ address: delegate, chainId, nonce })
+      return {
+        address: delegate,
+        chainId,
+        nonce,
+        r: signature.r as Hex,
+        s: signature.s as Hex,
+        yParity: signature.yParity,
+      }
     },
   })
   const txSender = brandTxSender({

@@ -1,4 +1,4 @@
-import type { Address, LocalAccount, SignableMessage } from 'viem'
+import type { Address, LocalAccount, SignableMessage, SignedAuthorization } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { createPaymasterClient, entryPoint08Address } from 'viem/account-abstraction'
 import { createSmartAccountClient } from 'permissionless'
@@ -69,6 +69,28 @@ export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Pro
 }
 
 /**
+ * The authorization a UserOp from an undelegated EOA must carry. viem's prepareUserOperation only
+ * fills in a stub, which bundlers reject, so the caller has to sign the real one.
+ * @internal Exported for unit tests.
+ */
+export async function authorizationForUserOp(params: {
+  signer: SeedSigner
+  delegate: Address
+  chainId: number
+  isDelegated: () => Promise<boolean>
+  getNonce: () => Promise<number>
+}): Promise<SignedAuthorization | undefined> {
+  const { signer, delegate, chainId } = params
+  if (await params.isDelegated()) return undefined
+  if (typeof signer.signAuthorization !== 'function') {
+    throw new Error(
+      `@seedprotocol/publish: ${signer.address} hasn't delegated to an EIP-7702 account yet, and its signer has no signAuthorization to do so. Browser wallets don't expose it over EIP-1193: pass the wallet vendor's call as signAuthorization, or use accountMode: 'eoa'.`,
+    )
+  }
+  return signer.signAuthorization({ address: delegate, chainId, nonce: await params.getNonce() })
+}
+
+/**
  * EIP-7702 `SeedTxSender` via permissionless `to7702SimpleSmartAccount`, sponsored by a paymaster
  * unless `sponsored` is false.
  * @throws when `bundlerUrl` reports no EntryPoint v0.8 support
@@ -111,9 +133,17 @@ export async function createPermissionlessTxSender(
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
     sendTransaction: async (tx: SeedTxRequest) => {
+      const authorization = await authorizationForUserOp({
+        signer,
+        delegate: simpleAccount.authorization.address,
+        chainId: chain.id,
+        isDelegated: () => simpleAccount.isDeployed(),
+        getNonce: () => publicClient.getTransactionCount({ address }),
+      })
       try {
         const hash = await smartAccountClient.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
+          ...(authorization && { authorization }),
         })
         const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })
         return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
