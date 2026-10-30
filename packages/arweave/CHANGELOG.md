@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `probeGateway(url, signal)` from JavaScript throws a `TypeError` naming `{ signal }`. The signal was ignored, so the caller lost its abort and waited out the 5 s timeout.
 - `ArweaveTransaction` is the arweave package's `Transaction`, and `createTransaction` (on `BaseArweaveClient`, `IArweaveClient` and the default client) returns `Promise<ArweaveTransaction>`. Both were `any`, so code that read a property `Transaction` doesn't have now fails to type-check. Nothing changed at runtime.
 
 ## 0.7.13 (2026-10-29)
@@ -41,7 +42,7 @@ All notable changes to this package are documented in this file.
 - **Breaking:** `DEFAULT_ARWEAVE_HOST` is `arweave.net` (ADR 0025): the default read host, and the host publish writes into Html links unless `arweaveDomain` names another. `DEFAULT_ARWEAVE_GATEWAYS` is `arweave.net`, `permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`. An app that wants Seed's gateway sets `arweaveDomain: 'ar.seedprotocol.io'`.
 - `getArweaveReadGatewayHostsForPrimary` keeps every default gateway after a custom primary. It dropped `ar.seedprotocol.io` then.
 - With a Hyper sidecar or app proxy active, `getReadGatewayHostsForConfig` and `getArweaveReadBaseUrls` list the public gateway and the default list after it (as `https://` URLs), so `/raw` reads fall back to them when the sidecar or proxy is down. They listed the sidecar or proxy alone. `fetchTransactionStatusAcrossGateways` still asks only the sidecar or proxy (and preferred gateways) then, since a data item it just accepted isn't on the public gateways yet.
-- `getPublicArweaveBaseUrl` before client init resolves endpoints returns the env host or `https://arweave.net` when the read host is a loopback address. It returned the read host, which can be a local sidecar URL that a publish would write into Html. (A proxy read host was still returned until the fix under Unreleased.) An empty `arweaveDomain` now means the default host; it produced `https:///raw/<id>`.
+- `getPublicArweaveBaseUrl` before client init resolves endpoints returns the env host or `https://arweave.net` when the read host is a loopback address. It returned the read host, which can be a local sidecar URL that a publish would write into Html. (A proxy read host was still returned until the fix in 0.7.13.) An empty `arweaveDomain` now means the default host; it produced `https:///raw/<id>`.
 - New `rehostArweaveLinksInHtml(html, { baseUrls })` (ADR 0025) moves the Arweave links in an Html string onto the first of the reader's read gateways (`getArweaveReadBaseUrls` by default): `ar://<id>`, `/raw/<id>` on any host and any path prefix, and `/<id>` on a known gateway, in `src`, `href`, `poster` and `srcset`. Each link keeps its path form and its path, query and hash after the id; every other byte of the Html is kept. Also new: `parseArweaveTransactionLink`, `buildArweaveTransactionLink`, `nextArweaveGatewayUrl` (the same link on the next gateway, for retrying a failed load), `rewriteHtmlAttributes` and `mapUrlAttribute`. `@seedprotocol/arweave` now depends on `parse5`.
 
 ### Commits

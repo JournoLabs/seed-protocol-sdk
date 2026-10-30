@@ -592,9 +592,10 @@ export const createFeed = (
         entries: transformedItems.map((item) => {
           // Atom entries require: id, title, updated, links
           const entry: Record<string, unknown> = {
-            updated: item.date || item.pubDate || now,
-            links: item.link ? [{ href: item.link }] : [],
             ...item, // Preserve all dynamic properties, the item's own title, updated and links included
+            // A present null keeps the default: RFC 4287 requires <updated>
+            updated: item.updated ?? (item.date || item.pubDate || now),
+            links: item.links ?? (item.link ? [{ href: item.link }] : []),
             // The same identifier as RSS's guid (D26)
             id: item.guid || item.id || item.link,
           }

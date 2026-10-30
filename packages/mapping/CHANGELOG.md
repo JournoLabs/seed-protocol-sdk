@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `applyResolveToEdge(edge, 'lookup')` keeps `split`, so `useFieldMapper().setTransform(rowId, 'lookup')` on a lookup edge no longer clears it.
+
 ## 0.7.13 (2026-10-29)
 
 - **Breaking:** a lookup entry names an ordered list of refs: `LookupEntry` is `{ value, refs: string[] }`, and `ref` is removed from the type. A stored `{ value, ref }` still applies, read as `refs: [ref]`, and `lookupEntriesFromMapping` returns it in the new shape. `lookupRefFromEntries` is replaced by `lookupRefsFromEntries`, which returns the list, and `resolveLookupMapped` by `resolveLookup`, which returns `{ refs, unmatched, split }`. A Relation target given several refs takes the first. The fallback `LookupEditor` takes refs separated by commas or spaces.

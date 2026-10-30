@@ -78,8 +78,12 @@ export type ProbeGatewayOptions = {
 /** GET /info. Healthy when it answers 2xx with a JSON object. */
 export async function probeGateway(
   baseUrl: string,
-  { signal, timeoutMs = PROBE_TIMEOUT_MS, recordCircuit = true }: ProbeGatewayOptions = {},
+  options: ProbeGatewayOptions = {},
 ): Promise<boolean> {
+  if (options instanceof AbortSignal) {
+    throw new TypeError('probeGateway takes options: pass { signal }, not an AbortSignal')
+  }
+  const { signal, timeoutMs = PROBE_TIMEOUT_MS, recordCircuit = true } = options
   const url = `${baseUrl.replace(/\/$/, '')}/info`
   let hostKey = baseUrl
   try {

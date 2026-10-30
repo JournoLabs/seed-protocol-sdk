@@ -89,6 +89,7 @@ export function applyResolveToEdge(
       ...base,
       resolve: 'lookup',
       ...(prev.lookup ? { lookup: prev.lookup } : {}),
+      ...(prev.split ? { split: prev.split } : {}),
     })
   }
 
