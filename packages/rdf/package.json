@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/rdf",
-  "version": "0.7.13",
+  "version": "0.8.0",
   "description": "RDF export for Seed Protocol items: a state graph of each seed's current values as RDF/JS quads, N-Quads, Turtle or JSON-LD, with IRIs minted from the on-chain schemas",
   "keywords": [
     "seed-protocol",

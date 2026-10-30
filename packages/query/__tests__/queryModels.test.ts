@@ -77,6 +77,18 @@ describe('List relation keys from the schema models', () => {
     expect(data.tags).toEqual([PERSON])
   })
 
+  it('reads models and properties written as arrays', async () => {
+    const asArrays: QueryModels = Object.entries(models as Record<string, { properties: object }>).map(([name, model]) => ({
+      name,
+      properties: Object.entries(model.properties).map(([propertyName, property]) => ({ name: propertyName, ...property })),
+    }))
+    setQueryModels(asArrays)
+    const key = buildAssembleOptionsKey({ relations: 'uids' })
+    expect(await assemble('uids')).toMatchObject({ coAuthors: [PERSON], featured: [CLIP] })
+    setQueryModels(models)
+    expect(buildAssembleOptionsKey({ relations: 'uids' })).toBe(key)
+  })
+
   it('without models, keeps the first word, plural', async () => {
     expect(await assemble('uids')).toMatchObject({ cos: [PERSON], featureds: [CLIP] })
   })
