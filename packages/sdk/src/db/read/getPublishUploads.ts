@@ -3,7 +3,7 @@ import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/sto
 import { storageUploadPath } from '@/storageValue/resolve'
 import { BaseArweaveClient } from '@seedprotocol/arweave'
 import debug from 'debug'
-import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
+import { buildArweaveContentTags, getBlobSha256, getContentSha256 } from '@/helpers/arweaveContentTags'
 import type { TransactionTag } from '@seedprotocol/arweave'
 import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { findEmbeddedImageFilePath } from '@/helpers/htmlEmbeddedDataUriPublish'
@@ -54,44 +54,49 @@ export type PublishUploadSource = UploadTarget & {
   missingLocalEdits?: { name: string; tried: string[] }[]
 }
 
-const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
-  if (typeof Blob !== 'undefined' && data instanceof Blob) {
-    return new Uint8Array(await data.arrayBuffer())
-  }
-  return new Uint8Array(data as Buffer)
-}
-
-/** A local file's bytes plus its MIME type: the Blob's own type, else the name's extension, else a sniff of the bytes. */
-const readUploadFile = async (
-  filePath: string,
-  fileName: string = filePath,
-): Promise<{ bytes: Uint8Array; contentType: string | undefined }> => {
-  const data = await BaseFileManager.readFileAsBuffer(filePath)
-  const bytes = await toUint8Array(data)
-  const sourceType = typeof Blob !== 'undefined' && data instanceof Blob ? data.type : undefined
-  return { bytes, contentType: resolveUploadMimeType({ sourceType, fileName, bytes }) }
-}
+/** Longest a file's first bytes need to be for sniffMimeType. */
+const MIME_SNIFF_BYTES = 4096
 
 /**
- * The one place an upload's bytes become a {@link PublishUploadData}: everything after this
+ * A local file's MIME type: the name's extension, else a sniff of its first bytes. An OPFS File's
+ * own `type` isn't used, because each browser derives it from the name in its own way.
+ */
+const uploadFileMimeType = async (blob: Blob, fileName: string): Promise<string | undefined> =>
+  resolveUploadMimeType({ fileName }) ??
+  resolveUploadMimeType({ bytes: new Uint8Array(await blob.slice(0, MIME_SNIFF_BYTES).arrayBuffer()) })
+
+/**
+ * The one place an upload's content becomes a {@link PublishUploadData}: everything after this
  * (Content-SHA-256, tags, the L1 transaction or the bundler DataItem, signing) works from what it
  * returns. A future private-publish option that encrypts content belongs here, before the hash and
  * tags are computed, so both publish paths pick it up.
  */
-const buildPublishUploadData = (
-  data: Uint8Array,
+const buildPublishUploadData = async (
+  blob: Blob,
   contentType: string | undefined,
   target: UploadTarget,
   options: GetPublishUploadsOptions | undefined,
-): PublishUploadData => {
-  const contentHash = getContentSha256(data)
+): Promise<PublishUploadData> => {
+  const contentHash = await getBlobSha256(blob)
   return {
-    data,
+    blob,
     contentHash,
     contentType,
     tags: buildArweaveContentTags(contentHash, contentType, options?.arweaveUploadTags),
     ...target,
   }
+}
+
+/**
+ * An upload's bytes, checked against its hash. The Blob of a file reads what is on disk now, so a
+ * file edited during the publish would otherwise sign bytes other than those its tags describe.
+ */
+export const readPublishUploadBytes = async (upload: PublishUploadData): Promise<Uint8Array> => {
+  const bytes = new Uint8Array(await upload.blob.arrayBuffer())
+  if (upload.contentHash && getContentSha256(bytes) !== upload.contentHash) {
+    throw new Error(`Cannot publish ${upload.itemPropertyName}: the file changed during the publish`)
+  }
+  return bytes
 }
 
 const isUsablePath = (filePath: string | void | null | undefined): filePath is string =>
@@ -230,7 +235,7 @@ export async function getPublishUploadSources(
   return sources
 }
 
-/** The bytes of one source; a missing local ItemStorage edit fails the publish. */
+/** The content of one source; a missing local ItemStorage edit fails the publish. */
 async function readSource(source: PublishUploadSource, options: GetPublishUploadsOptions | undefined): Promise<PublishUploadData> {
   const { filePath, children, missingLocalEdits, ...target } = source
   const missing = missingLocalEdits?.[0]
@@ -245,11 +250,15 @@ async function readSource(source: PublishUploadSource, options: GetPublishUpload
     // Composite of the node's ItemStorage files; see helpers/compositeUpload.ts for the format.
     // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
     const parts: CompositeChild[] = []
-    for (const child of children) parts.push({ name: child.name, bytes: (await readUploadFile(child.filePath)).bytes })
-    return buildPublishUploadData(encodeCompositeUpload(parts), 'application/octet-stream', target, options)
+    for (const child of children) {
+      const blob = await BaseFileManager.openBlob(child.filePath)
+      parts.push({ name: child.name, bytes: new Uint8Array(await blob.arrayBuffer()) })
+    }
+    const composite = new Blob([encodeCompositeUpload(parts) as BlobPart])
+    return buildPublishUploadData(composite, 'application/octet-stream', target, options)
   }
-  const { bytes, contentType } = await readUploadFile(filePath!)
-  return buildPublishUploadData(bytes, contentType, target, options)
+  const blob = await BaseFileManager.openBlob(filePath!)
+  return buildPublishUploadData(blob, await uploadFileMimeType(blob, filePath!), target, options)
 }
 
 /** Fails like a publish would when an item's relation names a seed that isn't there. */
@@ -277,7 +286,7 @@ export async function itemHasPublishUploadCandidates(item: { seedLocalId: string
 
 /**
  * Upload data for a publish of `item`: its own, and that of every seed the publish attests with it
- * (see publishGraph.ts). Raw bytes plus Content-SHA-256 / Content-Type / configured tags; no
+ * (see publishGraph.ts). A Blob of the content plus Content-SHA-256 / Content-Type / configured tags; no
  * Arweave transaction is created, so this does not touch the network. The bundler path in
  * `@seedprotocol/publish` signs these as DataItems; {@link getPublishUploads} turns them into L1
  * transactions.
@@ -310,7 +319,7 @@ export const getPublishUploads = async (
     itemPropertyLocalId: upload.itemPropertyLocalId,
     seedLocalId: upload.seedLocalId,
     versionLocalId: upload.versionLocalId,
-    transactionToSign: await BaseArweaveClient.createTransaction(upload.data, {
+    transactionToSign: await BaseArweaveClient.createTransaction(await readPublishUploadBytes(upload), {
       tags: upload.tags.length ? upload.tags : undefined,
     }),
   }))

@@ -80,7 +80,7 @@ testDescribe('ItemStorage children in publish uploads', () => {
     const uploads = await getPublishUploadData(item as any)
     const composite = uploads.find((u) => u.itemPropertyName === 'storageTransactionId')
     expect(composite?.contentType).toBe('application/octet-stream')
-    const children = decodeCompositeUpload(composite!.data)!
+    const children = decodeCompositeUpload(new Uint8Array(await composite!.blob.arrayBuffer()))!
     return Object.fromEntries(children.map((c) => [c.name, c.bytes]))
   }
 

@@ -5,6 +5,7 @@ import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
 import { getPublishUploadData } from '../helpers/getPublishUploadData'
+import { readPublishUploadBytes } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import {
   buildPublishAnchorBytes,
@@ -59,6 +60,7 @@ export async function signBundlerUploadDataList(
     for (let i = 0; i < uploadDataList.length; i++) {
       const upload = uploadDataList[i]!
       const tags = upload.tags
+      const data = await readPublishUploadBytes(upload)
       const randomUniq = new Uint8Array(8)
       crypto.getRandomValues(randomUniq)
       const uniqueness =
@@ -68,14 +70,14 @@ export async function signBundlerUploadDataList(
       let dataItem: Awaited<ReturnType<typeof createSignedDataItem>>
       if (isEthersWallet(dataItemSigner)) {
         const rawAnchor = buildPublishAnchorBytes(dataItemSigner.address, timestampMs, uniqueness)
-        dataItem = await createSignedDataItem(upload.data, dataItemSigner, tags, rawAnchor)
+        dataItem = await createSignedDataItem(data, dataItemSigner, tags, rawAnchor)
       } else {
         const seedSigner: SeedSigner = isPublishWallet(dataItemSigner)
           ? dataItemSigner.signer
           : dataItemSigner
         const rawAnchor = buildPublishAnchorBytes(seedSigner.address, timestampMs, uniqueness)
         dataItem = await createSignedDataItemWithAccount(
-          upload.data,
+          data,
           seedSigner,
           tags,
           rawAnchor,

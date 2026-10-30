@@ -94,7 +94,7 @@ testDescribe('publish upload Content-Type', () => {
     expect(byProperty.untitled?.contentType).toBe('application/pdf')
     expect(byProperty.audio?.tags).toContainEqual({ name: 'Content-Type', value: 'audio/wav' })
     // Bytes are uploaded as stored.
-    expect(Array.from(byProperty.audio!.data)).toEqual(Array.from(WAV))
+    expect(Array.from(new Uint8Array(await byProperty.audio!.blob.arrayBuffer()))).toEqual(Array.from(WAV))
 
     // The L1 transactions carry the same tags, in the same order as the upload data.
     const txs = await getPublishUploads(item as any)

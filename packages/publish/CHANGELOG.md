@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - A `multiPublish` that landed and failed to record locally is no longer sent again. Its seed, version and property uids are written in one database transaction, so a failure leaves none of them, and the publish keeps the transaction hash. The new `AttestationRecordError` reports the failure, and `retryAttestations` records from the receipt without sending. A failure partway used to leave property uids recorded without their seed uid, and Retry then attested a second Seed.
 - A publish fails when a seed uid can't be written, on both paths. It used to log the failure and reach `success`, and the next Publish from a fresh load attested a second Seed.
+- **Breaking:** `signDataItems` and `getPublishUploadData` give each upload as `blob: Blob` instead of `data: Uint8Array`. Use the SDK's new `readPublishUploadBytes(upload)` where you need the bytes. For a file the Blob is disk-backed, so a publish no longer loads every upload before signing the first one. A file edited during the publish now fails it with "the file changed during the publish"; before, the publish signed the bytes it had already read.
 
 ## 0.8.0 (2026-10-30)
 

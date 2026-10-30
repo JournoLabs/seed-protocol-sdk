@@ -86,6 +86,12 @@ export interface IFileManager {
   readFile(filePath: string): Promise<File>
   readFileSync(filePath: string): File
   readFileAsBuffer(filePath: string): Promise<Buffer | Blob>
+  /**
+   * The file as a disk-backed Blob where the platform has one: reading a slice or stream of it reads
+   * only that part. Don't count on it as a snapshot: after the file changes, Chromium's OPFS Blob
+   * can return the new bytes, cut to the old size, instead of rejecting.
+   */
+  openBlob(filePath: string): Promise<Blob>
   readFileAsString(filePath: string): Promise<string>
   getFs(): Promise<any>
   getFsSync(): any
