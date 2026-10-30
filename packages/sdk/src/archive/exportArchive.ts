@@ -310,6 +310,11 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
   const htmlSources: { key: string; text: string; arweaveTransactionId?: string }[] = []
   const properties: Record<string, ItemJsonProperty> = {}
 
+  // A file's local name differs between clients (downloads are named after the transaction id), so
+  // a reproducible bag types a file by its bytes alone.
+  const mimeTypeOf = (filePath: string, bytes: Uint8Array): string =>
+    resolveUploadMimeType(reproducible ? { bytes } : { fileName: filePath, bytes }) ?? 'application/octet-stream'
+
   const addAsset = (bytes: Uint8Array, mimeType: string, arweaveTransactionId?: string): string => {
     const ext = getExtensionForMimeType(mimeType)
     const path = `assets/${digestHex('sha256', bytes)}${ext ? `.${ext}` : ''}`
@@ -358,8 +363,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       if (dataType === 'Html') {
         htmlSources.push({ key, text: new TextDecoder().decode(bytes) })
       } else {
-        const mimeType = resolveUploadMimeType({ fileName: filePath, bytes }) ?? 'application/octet-stream'
-        entry.file = addAsset(bytes, mimeType)
+        entry.file = addAsset(bytes, mimeTypeOf(filePath, bytes))
         assetPathByProperty.set(key, entry.file)
       }
       continue
@@ -393,8 +397,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       continue
     }
     const bytes = await readBytes(display.filePath)
-    const mimeType = resolveUploadMimeType({ fileName: display.filePath, bytes }) ?? 'application/octet-stream'
-    entry.file = addAsset(bytes, mimeType, arweaveTransactionId)
+    entry.file = addAsset(bytes, mimeTypeOf(display.filePath, bytes), arweaveTransactionId)
     assetPathByProperty.set(key, entry.file)
   }
 
@@ -410,8 +413,7 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     }
     if (!filePath) return undefined
     const bytes = await readBytes(filePath)
-    const mimeType = resolveUploadMimeType({ fileName: filePath, bytes }) ?? 'application/octet-stream'
-    return addAsset(bytes, mimeType, txId)
+    return addAsset(bytes, mimeTypeOf(filePath, bytes), txId)
   }
 
   const encoder = new TextEncoder()
@@ -549,23 +551,25 @@ const historyAgents = (attester: string | undefined) =>
 /**
  * The seed's history as EAS has it: its first Version as creation, later Versions and the property
  * attestations made after the current Version that hold its current values (patches) as
- * modifications. Times are block times.
+ * modifications. Times are block times. It stops at the current Version and leaves revocations out:
+ * a revocation comes later than the record it's about, and would change the bytes of a bag whose
+ * hash may already be anchored. EAS is where a reader checks one.
  */
 function chainHistoryEvents(record: ChainRecord, currentVersionUid: string, chainId: number): PremisEvent[] {
   const agents = historyAgents(record.seed.attester)
   const objects = [{ type: 'Seed Protocol seed UID', value: record.seed.id }]
   const time = `Time: ${describeClock('chain-block', chainId)}.`
-  const events: PremisEvent[] = record.versions.map((v, index) => ({
+  const currentIndex = record.versions.findIndex((v) => sameUid(v.id, currentVersionUid))
+  const events: PremisEvent[] = record.versions.slice(0, currentIndex + 1).map((v, index) => ({
     identifier: { type: 'EAS attestation UID', value: v.id },
     type: index === 0 ? 'creation' : 'modification',
     dateTime: isoFromSeconds(v.timeCreated),
     detail: `${index === 0 ? 'First Version attested' : 'New Version attested'}. ${time}`,
     outcome: 'success',
-    outcomeNote: v.revoked && v.revocationTime ? `Version revoked at ${isoFromSeconds(v.revocationTime)}` : undefined,
     agents,
     objects,
   }))
-  const current = record.versions.find((v) => sameUid(v.id, currentVersionUid))
+  const current = record.versions[currentIndex]
   for (const property of record.properties) {
     if (!current || property.timeCreated <= current.timeCreated) continue
     events.push({

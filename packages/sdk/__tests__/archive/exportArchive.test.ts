@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, unlink } from 'node:fs/promises'
+import { copyFile, mkdtemp, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
@@ -266,7 +266,15 @@ testDescribe('exportArchive', () => {
     const ATTESTER = '0xDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDd'
 
     /** A chain that agrees with the post's rows; the title was patched a minute after the Version. */
-    async function fakeChain(post: Item<any>, change: { newerVersion?: boolean; extraProperty?: boolean } = {}) {
+    async function fakeChain(
+      post: Item<any>,
+      change: {
+        newerVersion?: boolean
+        extraProperty?: boolean
+        olderVersion?: 'live' | 'revoked'
+        newerRevokedVersion?: boolean
+      } = {},
+    ) {
       const db = BaseDb.getAppDb()
       const [version] = await db.select().from(versions).where(eq(versions.seedLocalId, post.seedLocalId))
       const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, post.seedLocalId))
@@ -274,9 +282,14 @@ testDescribe('exportArchive', () => {
         id, attester: ATTESTER, timeCreated, revoked: false, revocationTime: 0, schemaId: `0x${'5'.repeat(64)}`, ...extra,
       })
       chainMocks.seeds.mockResolvedValue([att(post.seedUid!, T0)])
+      const revoked = { revoked: true, revocationTime: T0 + 7200 }
       chainMocks.versions.mockResolvedValue([
+        ...(change.olderVersion
+          ? [att(`0x${'6'.repeat(64)}`, T0 - 600, { refUID: post.seedUid, ...(change.olderVersion === 'revoked' ? revoked : {}) })]
+          : []),
         att(version.uid, T0, { refUID: post.seedUid }),
         ...(change.newerVersion ? [att(`0x${'7'.repeat(64)}`, T0 + 600, { refUID: post.seedUid })] : []),
+        ...(change.newerRevokedVersion ? [att(`0x${'9'.repeat(64)}`, T0 + 600, { refUID: post.seedUid, ...revoked })] : []),
       ])
       chainMocks.properties.mockResolvedValue([
         ...rows
@@ -354,6 +367,32 @@ testDescribe('exportArchive', () => {
       }
       const syncing = await exportArchive(post, { fetch: false, reproducible: true })
       expect(text(syncing.bag, 'tagmanifest-sha256.txt')).toBe(text(publisher.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('gives the same bag after an older Version or a later one is revoked', async () => {
+      const post = await createPublishedPost()
+      await fakeChain(post, { olderVersion: 'live' })
+      const before = await exportArchive(post, { fetch: false, reproducible: true })
+      await fakeChain(post, { olderVersion: 'revoked', newerRevokedVersion: true })
+      const after = await exportArchive(post, { fetch: false, reproducible: true })
+      expect(text(after.bag, 'tagmanifest-sha256.txt')).toBe(text(before.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('types a file by its bytes, whatever this device named it', async () => {
+      const post = await createPublishedPost()
+      await fakeChain(post)
+      const first = await exportArchive(post, { fetch: false, reproducible: true })
+
+      const image = contextOf(post, 'featureImage').refResolvedValue!
+      const stored = BaseFileManager.getFilesPath('images', image)
+      await copyFile(stored, `${stored}.jpg`)
+      await BaseDb.getAppDb()
+        .update(metadata)
+        .set({ refResolvedValue: `${image}.jpg` })
+        .where(eq(metadata.refResolvedValue, image))
+
+      const second = await exportArchive(post, { fetch: false, reproducible: true })
+      expect(text(second.bag, 'tagmanifest-sha256.txt')).toBe(text(first.bag, 'tagmanifest-sha256.txt'))
     }, 120000)
 
     it('refuses a relation it can only name by a local id', async () => {
