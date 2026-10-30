@@ -39,10 +39,12 @@ export type DecodedProperty = {
 
 /**
  * Decode a single property attestation into name + value (no relation expand).
- * Returns null when metadata cannot be parsed.
+ * Returns null when metadata cannot be parsed. `modelName` is the seed's schema name, which
+ * names List relations when models are set (see `setQueryModels`).
  */
 export function decodePropertyAttestation(
   property: AttestationLike,
+  modelName?: string,
 ): DecodedProperty | null {
   const parsed = parseEasPropertyMetadata(property.decodedDataJson)
   if (!parsed.ok) return null
@@ -57,7 +59,7 @@ export function decodePropertyAttestation(
   if (isRelationProperty(propertyNameSnake, easType)) {
     isRelation = true
     isList = Array.isArray(metadata.value)
-    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList, modelName)
   }
 
   let propertyValue: string | string[] = metadata.value as string | string[]
@@ -83,10 +85,11 @@ export function decodePropertyAttestation(
  */
 export function buildFlatSnapshotFromProperties(
   properties: AttestationLike[],
+  modelName?: string,
 ): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {}
   for (const property of properties) {
-    const decoded = decodePropertyAttestation(property)
+    const decoded = decodePropertyAttestation(property, modelName)
     // A removed property is absent, so it diffs as removed
     if (!decoded || decoded.removed) continue
     snapshot[decoded.propertyName] = decoded.value
@@ -142,6 +145,7 @@ export function diffVersionSnapshots(
  */
 export function diffPropertyAttestations(
   properties: AttestationLike[],
+  modelName?: string,
 ): PropertyChangelogEntry[] {
   const sorted = [...properties].sort((a, b) => {
     if (a.timeCreated !== b.timeCreated) return a.timeCreated - b.timeCreated
@@ -152,7 +156,7 @@ export function diffPropertyAttestations(
   const entries: PropertyChangelogEntry[] = []
 
   for (const property of sorted) {
-    const decoded = decodePropertyAttestation(property)
+    const decoded = decodePropertyAttestation(property, modelName)
     if (!decoded) continue
 
     const names = [decoded.propertyName]

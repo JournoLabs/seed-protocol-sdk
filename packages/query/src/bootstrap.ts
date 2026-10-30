@@ -5,6 +5,7 @@ import {
   resolveArweaveHostFromEnv,
 } from '@seedprotocol/arweave'
 import { assertSingleEasModule, BaseEasClient, ensureEasPlatform } from '@seedprotocol/eas'
+import { setQueryModels, type QueryModels } from './queryModels.js'
 import type { QuerySourceMode } from './types.js'
 
 let initialized = false
@@ -16,6 +17,11 @@ export type InitializeQueryPlatformOptions = {
    * DuplicateArweaveModuleError checks, since a local read uses neither client.
    */
   source?: QuerySourceMode
+  /**
+   * Your schema file's `models`, so List relations come back under their schema keys
+   * (`coAuthors`, not `cos`; see `setQueryModels`). Kept until set again; `null` clears it.
+   */
+  models?: QueryModels | null
 }
 
 /** Fills in Arweave for a process where nothing has registered an Arweave client. */
@@ -73,6 +79,7 @@ export async function initializeQueryPlatform(
     assertSingleEasModule()
     assertSingleArweaveModule()
   }
+  if (options?.models !== undefined) setQueryModels(options.models)
   if (initialized) return
   if (!BaseEasClient.isConfigured()) await registerEasPlatform()
   ensureEasPlatform()
@@ -89,6 +96,7 @@ export async function initializeQueryPlatform(
 
 export async function teardownQueryPlatform(): Promise<void> {
   initialized = false
+  setQueryModels(null)
 }
 
 export function isQueryPlatformInitialized(): boolean {

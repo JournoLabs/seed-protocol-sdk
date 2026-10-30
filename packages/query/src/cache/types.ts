@@ -7,6 +7,7 @@ import {
   type SeedRecord,
 } from '../types.js'
 import type { SeedDependencies } from '../assembleSeeds.js'
+import { queryModelsFingerprint } from '../queryModels.js'
 
 /**
  * How a cached entry is kept current: changes (see QueryDataSource.listChangesSince) after
@@ -110,6 +111,9 @@ export function buildAssembleOptionsKey(options?: {
 }): string {
   const hydrate = options?.hydrateStorage !== false
   let base = `${RELATIONS_CODES[relationsModeOf(options)]}-h${hydrate ? 1 : 0}`
+  // List relation keys follow the models set (setQueryModels)
+  const models = queryModelsFingerprint()
+  if (models) base += `-m${models}`
   if (options?.versionUid !== undefined) base += `-v${options.versionUid.toLowerCase()}`
   if (options?.asOf !== undefined) base += `-a${options.asOf}`
 

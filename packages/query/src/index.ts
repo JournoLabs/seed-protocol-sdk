@@ -85,6 +85,9 @@ export {
   tryCoerceJsonStringArray,
 } from './listRelationKey.js'
 
+export { setQueryModels } from './queryModels.js'
+export type { QueryModels } from './queryModels.js'
+
 export {
   parseEasPropertyMetadata,
 } from './parseEasPropertyMetadata.js'

@@ -94,7 +94,16 @@ Options on every API: `relations` (default `'expand'`), `hydrateStorage` (defaul
 
 `relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'uids'` leaves every relation as a seed UID and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
 
-A relation is a `bytes32` or `bytes32[]` property (an attestation with no type counts when its name ends in `_id` or `_ids`); a `string external_id` is not one and keeps its name. In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, so whether the key was plural is lost; the key returned is always the plural (`featured_portfolio_clip_ids` comes back as `featureds`).
+A relation is a `bytes32` or `bytes32[]` property (an attestation with no type counts when its name ends in `_id` or `_ids`); a `string external_id` is not one and keeps its name. In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, which keeps neither where the key ends and the model starts nor whether the key was plural. Without your schema, query takes the first word and makes it plural: `co_author_identity_ids` comes back as `cos`, `featured_portfolio_clip_ids` as `featureds`. Pass your schema file's models to get the keys the schema has:
+
+```ts
+import schema from './schema.json'
+
+await initializeQueryPlatform({ models: schema.models })
+// co_author_identity_ids → coAuthors (and co_authors), featured_portfolio_clip_ids → featured
+```
+
+Query reads each List property's `ref` (or the older `items.model`) and works out the EAS name the SDK publishes it under. The models stay set until `initializeQueryPlatform({ models })` sets others, `{ models: null }` clears them, or `teardownQueryPlatform()`; `setQueryModels(models)` does the same. Lists of models it wasn't given keep the first-word rule. The models are part of the cache key, so records cached without them aren't read with them.
 
 ## Many seeds (`getSeeds`)
 

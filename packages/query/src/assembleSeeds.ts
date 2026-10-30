@@ -163,10 +163,12 @@ async function processItemProperty(
   if (easType) setSchemaUidForSchemaDefinition({ text: `${easType} ${propertyNameSnake}`, schemaUid: property.schemaId })
   // A removed property (ADR 0021): absent from the seed, and a zero uid is no related seed
   if (isEasEmptyValue(easType, metadata.value)) return
+  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
   if (isRelationProperty(propertyNameSnake, easType)) {
     isRelation = true
     isList = Array.isArray(metadata.value)
-    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
+    const modelName = seedUidForProperty && ctx.seedUidToModelType.get(seedUidForProperty)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList, modelName || undefined)
     if (Array.isArray(metadata.value)) {
       metadata.value.forEach((value: string) => {
         if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
@@ -185,7 +187,6 @@ async function processItemProperty(
     propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
-  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
   if (!seedUidForProperty) {
     return
   }

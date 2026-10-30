@@ -1,4 +1,5 @@
 import pluralize from 'pluralize'
+import { modelListRelationKey } from './queryModels.js'
 
 /** Matches SDK list storage: singular(schemaKey) + PascalCase(ref) + "Ids", e.g. authorIdentityIds → authors */
 const CAMEL_LIST_RELATION_IDS = /^(.+?)([A-Z][a-zA-Z]+)Ids$/
@@ -41,11 +42,13 @@ export function isRelationProperty(easPropertyName: string, easType: string | un
 /**
  * The key a relation property is returned under, from its EAS name, in every `relations` mode: a
  * list's schema key (`author_identity_ids` → `authors`), a single relation's name without `_id`
- * (`author_id` → `author`). A list's EAS name is `singular(key) + Model + Ids`, which doesn't keep
- * whether the key was plural (`featured` and `featureds` give the same name); this returns the plural.
+ * (`author_id` → `author`). A list's EAS name is `singular(key) + Model + Ids`, which keeps neither
+ * where the key ends and the model starts nor whether the key was plural. With the models set by
+ * `setQueryModels`, a list of `modelName` (the seed's schema name) gets its schema key
+ * (`co_author_identity_ids` → `co_authors`); otherwise the first word, plural (`cos`, `featureds`).
  */
-export function relationPropertyKey(easPropertyName: string, isList: boolean): string {
-  if (isList) return publicListRelationPropertyKey(easPropertyName)
+export function relationPropertyKey(easPropertyName: string, isList: boolean, modelName?: string): string {
+  if (isList) return modelListRelationKey(easPropertyName, modelName) ?? publicListRelationPropertyKey(easPropertyName)
   return easPropertyName.endsWith('_id') ? easPropertyName.slice(0, -3) : easPropertyName
 }
 
