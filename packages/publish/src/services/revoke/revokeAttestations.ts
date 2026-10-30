@@ -3,7 +3,6 @@ import { getPublishPublicClient, waitForPublishReceipt } from '~/helpers/chainCl
 import { easAbi } from '~/helpers/abi/eas'
 import { findRevertData } from '~/helpers/describeRevert'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
-import { fromThirdwebAccount } from '~/helpers/adapters/thirdwebAccount'
 import type { PublishWallet } from '~/helpers/seedSigner'
 import type { Hex } from 'viem'
 import { getPublishConfig } from '~/config'
@@ -83,6 +82,7 @@ async function resolveRevokeWallet(attester: string | null): Promise<PublishWall
   try {
     const { getConnectedAccount } = await import('~/helpers/thirdweb')
     const { resolveRevokeAccount } = await import('~/helpers/resolveRevokeAccount')
+    const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
     const account = await getConnectedAccount()
     if (!account) {
       throw new Error('No wallet connected. Connect a wallet to revoke attestations.')

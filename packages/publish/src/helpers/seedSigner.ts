@@ -71,6 +71,18 @@ export type PublishWallet = {
   kind?: PublishWalletKind
 }
 
+/**
+ * Whether `wallet` sends as `publisher`, an account its signer administers (for example a
+ * ManagedAccount through `createManagedAccountTxSender`, with `kind: 'modular'`): the sender is the
+ * publisher and the signer is a different address. Such a wallet publishes as it is, with no
+ * Thirdweb in-app wallet setup.
+ */
+export function sendsAsManagedAccount(wallet: PublishWallet, publisher: string | undefined): boolean {
+  if (!publisher || wallet.kind === 'eoa') return false
+  const sender = wallet.txSender.address.toLowerCase()
+  return sender === publisher.toLowerCase() && sender !== wallet.signer.address.toLowerCase()
+}
+
 const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
 const SEED_TX_SENDER_BRAND = Symbol.for('seedprotocol.SeedTxSender')
 

@@ -15,7 +15,7 @@ import {
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
-import type { PublishWallet } from '~/helpers/seedSigner'
+import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
 import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
@@ -64,11 +64,6 @@ type PublishRouting = {
 
 function isExecutorModuleAddress(value: string | undefined): value is string {
   return !!value && /^0x[0-9a-fA-F]{40}$/.test(value.trim())
-}
-
-/** Whether `wallet` sends as the publishing account itself rather than as an EOA that administers it. */
-function sendsAsPublisher(wallet: PublishWallet, publisher: string | undefined): boolean {
-  return !!publisher && wallet.kind !== 'eoa' && wallet.txSender.address.toLowerCase() === publisher.toLowerCase()
 }
 
 export function resolvePublishRouting(input: PublishRoutingInput): PublishRouting {
@@ -233,7 +228,7 @@ async function executeCreateAttestations(
         routeToExecutorModule = true
         // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
         await assertExecutorModuleReadyForAccount(address)
-      } else if (sendsAsPublisher(activeWallet, address)) {
+      } else if (sendsAsManagedAccount(activeWallet, address)) {
         // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
         // publishes as it is: no Thirdweb in-app wallet to connect.
         routing = resolvePublishRouting({
