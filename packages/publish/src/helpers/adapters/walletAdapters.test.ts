@@ -118,6 +118,18 @@ describe('fromViemWalletClient', () => {
     )
   })
 
+  test('a local account signs EIP-7702 authorizations and a browser wallet has none', async () => {
+    const local = privateKeyToAccount(generatePrivateKey())
+    const localClient = createWalletClient({ account: local, transport: custom(injectedWallet(1).provider) })
+    const { signer } = fromViemWalletClient(localClient, { chain: optimismSepolia })
+    const auth = await signer.signAuthorization!({ address: TARGET, chainId: 1, nonce: 2 })
+    expect(auth).toMatchObject({ address: TARGET, chainId: 1, nonce: 2 })
+
+    const { account, provider } = injectedWallet(optimismSepolia.id)
+    const browserClient = createWalletClient({ account: account.address, transport: custom(provider) })
+    expect(fromViemWalletClient(browserClient, { chain: optimismSepolia }).signer.signAuthorization).toBeUndefined()
+  })
+
   test('throws for a client without an account', () => {
     const walletClient = createWalletClient({ transport: custom(injectedWallet(1).provider) })
     expect(() => fromViemWalletClient(walletClient)).toThrow(/needs a WalletClient with an account/)

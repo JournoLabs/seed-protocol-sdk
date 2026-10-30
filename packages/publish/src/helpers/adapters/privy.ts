@@ -1,5 +1,5 @@
 import type { Address, Chain, EIP1193Provider } from 'viem'
-import type { PublishWallet, PublishWalletKind } from '../seedSigner'
+import type { PublishWallet, PublishWalletKind, SeedSigner } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
 import { fromEip1193Provider } from './eip1193'
 
@@ -20,6 +20,8 @@ export type FromPrivyWalletOptions = {
   chain?: Chain
   /** As for `fromViemWalletClient`. Defaults to `'eoa'`, which Privy's embedded wallets are. */
   kind?: PublishWalletKind
+  /** As for `fromViemWalletClient`. Privy's provider has no such method; pass its own call. */
+  signAuthorization?: SeedSigner['signAuthorization']
 }
 
 function chainIdOf(value: string | number | undefined): number | undefined {
@@ -47,5 +49,6 @@ export async function fromPrivyWallet(
     chain,
     address: wallet.address as Address,
     kind: options.kind,
+    signAuthorization: options.signAuthorization,
   })
 }

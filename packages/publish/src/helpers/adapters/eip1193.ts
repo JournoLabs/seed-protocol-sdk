@@ -5,7 +5,7 @@ import {
   type Chain,
   type EIP1193Provider,
 } from 'viem'
-import type { PublishWallet, PublishWalletKind } from '../seedSigner'
+import type { PublishWallet, PublishWalletKind, SeedSigner } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
 import { fromViemWalletClient } from './viemWalletClient'
 
@@ -15,6 +15,8 @@ export type FromEip1193Options = {
   address?: Address
   /** As for `fromViemWalletClient`. Defaults to `'eoa'`. */
   kind?: PublishWalletKind
+  /** As for `fromViemWalletClient`. */
+  signAuthorization?: SeedSigner['signAuthorization']
 }
 
 /**
@@ -40,7 +42,11 @@ export async function fromEip1193Provider(
     chain,
     transport: custom(provider),
   })
-  return fromViemWalletClient(walletClient, { chain, kind: options.kind })
+  return fromViemWalletClient(walletClient, {
+    chain,
+    kind: options.kind,
+    signAuthorization: options.signAuthorization,
+  })
 }
 
 /** Convenience: wrap window.ethereum when present. */
