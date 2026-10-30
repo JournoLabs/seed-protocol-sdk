@@ -81,6 +81,16 @@ describe.each(encoders)('%s', (_, encode, to) => {
     expect(tx.data.slice(0, 10)).toBe('0xa1263421')
   })
 
+  test('carries the sum of the attestations\' value across requests', () => {
+    const paid = (value: bigint): Attestation => ({ ...attestation(TITLE, b32('0a')), data: [{ ...attestation(TITLE, b32('0a')).data[0]!, value }] })
+    const tx = encode([request('a', [], [paid(3n)]), request('b'), request('c', [], [paid(4n), { ...paid(1n), schema: LIST }])])
+    expect(tx.value).toBe(8n)
+  })
+
+  test('sends no value when no attestation asks for any', () => {
+    expect(encode([request('a', [], [attestation(TITLE, b32('0a'))])]).value).toBeUndefined()
+  })
+
   test('decodes with the contracts\' struct: uids in their fields, publishLocalId as publishIndex', () => {
     const tx = encode([request('a', [ref('c')]), request('b'), request('c', [], [relation('a')])])
     const [first, second, third] = decode(tx.data)

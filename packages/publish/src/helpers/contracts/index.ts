@@ -168,7 +168,8 @@ function prepareReferences(requests: MultiPublishRequest[]) {
 
 /**
  * Encode `multiPublish` for the account's SeedProtocolExtension: each `publishLocalId` becomes its
- * index in `requests`, and each slot a reference fills holds that reference's placeholder.
+ * index in `requests`, each slot a reference fills holds that reference's placeholder, and the
+ * call carries the sum of the attestations' `value`, which the contract requires exactly.
  */
 export function encodeMultiPublish(
   to: Address,
@@ -176,6 +177,7 @@ export function encodeMultiPublish(
   gas?: bigint,
 ): SeedTxRequest {
   const { attestations, references } = prepareReferences(requests)
+  const value = attestations.flat().reduce((sum, a) => sum + a.data.reduce((n, d) => n + d.value, 0n), 0n)
   return {
     to,
     data: encodeFunctionData({
@@ -194,6 +196,7 @@ export function encodeMultiPublish(
         })),
       ],
     }),
+    ...(value > 0n && { value }),
     gas,
   }
 }
@@ -296,14 +299,6 @@ export function encodeInstallSeedExecutor(account: Address): SeedTxRequest {
   return {
     to: account,
     data: encodeFunctionData({ abi: seedExecutorRouterAbi, functionName: 'installSeedExecutor' }),
-  }
-}
-
-/** `uninstallSeedExecutor()` on `account`. Admin-only, sent like {@link encodeInstallSeedExecutor}. */
-export function encodeUninstallSeedExecutor(account: Address): SeedTxRequest {
-  return {
-    to: account,
-    data: encodeFunctionData({ abi: seedExecutorRouterAbi, functionName: 'uninstallSeedExecutor' }),
   }
 }
 

@@ -13,6 +13,7 @@ import {
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
 import { explainUserOpError } from '~/helpers/describeRevert'
+import { ManagedAccountPublishError } from '~/errors'
 import { publishGasLimit } from '~/helpers/publishGas'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
@@ -266,6 +267,13 @@ async function executeCreateAttestations(
         ? encodeExecutorMultiPublish(to, requests)
         : encodeMultiPublish(to, requests)
       const from = routeToExecutorModule ? address : activeWallet.txSender.address
+      if (routeToExecutorModule && unsized.value) {
+        throw new ManagedAccountPublishError(
+          `This publish needs ${unsized.value} wei with its attestations, but session keys are granted no native value; nothing was sent.`,
+          'AUTOMATION_PREFLIGHT_FAILED',
+          address,
+        )
+      }
       // Contracts of another version answer with a Router revert; name the mismatch instead.
       await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
       await simulateCallFromAccount(

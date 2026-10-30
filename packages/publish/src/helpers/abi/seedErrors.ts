@@ -82,6 +82,14 @@ export const seedErrorsAbi = [
       { name: 'found', type: 'bytes32' },
     ],
   },
+  {
+    type: 'error',
+    name: 'PublishValueMismatch',
+    inputs: [
+      { name: 'required', type: 'uint256' },
+      { name: 'sent', type: 'uint256' },
+    ],
+  },
   // SeedProtocolExtensionBase (the executor module's AttestationFailed() has no argument)
   { type: 'error', name: 'InvalidEAS', inputs: [{ name: 'eas', type: 'address' }] },
   { type: 'error', name: 'AttestationFailed', inputs: [{ name: 'schemaUid', type: 'bytes32' }] },

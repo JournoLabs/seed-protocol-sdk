@@ -23,6 +23,11 @@ function thirdwebUndecodedError(data: Hex): unknown {
 }
 
 describe('describeRevert', () => {
+  test('names a value mismatch with the amounts', () => {
+    const data = encodeErrorResult({ abi: seedErrorsAbi, errorName: 'PublishValueMismatch', args: [5n, 0n] })
+    expect(describeRevert(data)).toBe('reverted with PublishValueMismatch(5, 0)')
+  })
+
   test('decodes Seed errors with their arguments', () => {
     expect(describeRevert(outOfBounds)).toBe('reverted with PublishIndexOutOfBounds(3, 2)')
   })
