@@ -82,7 +82,7 @@ await enrollPublishAutomation({
 
 Steps performed:
 
-1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found.
+1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found. When the factory has replaced the executor, an account that installed the old one reports the new one installed but can't use it, and the admin sends `uninstallSeedExecutor` first.
 2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain. After a fresh install this uses the EAS from the install receipt rather than re-reading, since a load-balanced RPC can serve the read from a node that hasn't seen the install yet.
 3. Grant the session key (`setPermissionsForSigner`, signed by `userWallet`'s admin EOA) with module-only `approvedTargets`.
 4. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).

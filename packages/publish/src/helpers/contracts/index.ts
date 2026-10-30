@@ -299,6 +299,14 @@ export function encodeInstallSeedExecutor(account: Address): SeedTxRequest {
   }
 }
 
+/** `uninstallSeedExecutor()` on `account`. Admin-only, sent like {@link encodeInstallSeedExecutor}. */
+export function encodeUninstallSeedExecutor(account: Address): SeedTxRequest {
+  return {
+    to: account,
+    data: encodeFunctionData({ abi: seedExecutorRouterAbi, functionName: 'uninstallSeedExecutor' }),
+  }
+}
+
 export function encodeSetEas(to: Address, eas: Address): SeedTxRequest {
   return {
     to,

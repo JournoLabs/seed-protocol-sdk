@@ -221,6 +221,8 @@ async function executeCreateAttestations(
         routeToExecutorModule = true
         // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
         await assertExecutorModuleReadyForAccount(address)
+        const { assertSessionKeyApprovesExecutor } = await import('~/helpers/ensureAutomationSessionKey')
+        await assertSessionKeyApprovesExecutor(address, sessionKeyAddress, module)
       } else if (sendsAsManagedAccount(activeWallet, address)) {
         // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
         // publishes as it is: no Thirdweb in-app wallet to connect.

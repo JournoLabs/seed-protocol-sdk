@@ -42,9 +42,12 @@ mock.module('./chainClient', () => ({
   isContractDeployed: (...args: unknown[]) => isContractDeployedMock(...(args as [])),
 }))
 
-const { ensureAutomationSessionKey, removeAutomationSessionKey, isAutomationSessionActive } = await import(
-  './ensureAutomationSessionKey'
-)
+const {
+  assertSessionKeyApprovesExecutor,
+  ensureAutomationSessionKey,
+  removeAutomationSessionKey,
+  isAutomationSessionActive,
+} = await import('./ensureAutomationSessionKey')
 
 /** An admin EOA's signer with a sender that records what it was asked to send. */
 function adminWallet(senderAddress?: Address) {
@@ -249,6 +252,34 @@ describe('isAutomationSessionActive', () => {
     })
     await expect(isAutomationSessionActive(MANAGED, SESSION)).rejects.toMatchObject({
       code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
+    })
+  })
+})
+
+describe('assertSessionKeyApprovesExecutor', () => {
+  const withTargets = (approvedTargets: readonly Address[]) =>
+    readPermissionsForSignerMock.mockImplementationOnce(async () => ({
+      approvedTargets,
+      nativeTokenLimitPerTransaction: 0n,
+      startTimestamp: 0n,
+      endTimestamp: 0n,
+    }))
+
+  test('passes a key approved for the executor, in any address case', async () => {
+    withTargets([EXECUTOR.toLowerCase() as Address])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).resolves.toBeUndefined()
+  })
+
+  test('passes a key approved for every target', async () => {
+    withTargets([`0x${'0'.repeat(40)}`])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).resolves.toBeUndefined()
+  })
+
+  test('refuses a key granted for a replaced executor and says how to fix it', async () => {
+    withTargets([getAddress('0xcccccccccccccccccccccccccccccccccccccccc')])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).rejects.toMatchObject({
+      code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
+      message: expect.stringContaining('enrollPublishAutomation'),
     })
   })
 })

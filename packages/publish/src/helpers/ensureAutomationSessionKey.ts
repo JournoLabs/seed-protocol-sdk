@@ -1,7 +1,7 @@
-import type { Address } from 'viem'
+import { isAddressEqual, zeroAddress, type Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
 import { isContractDeployed, readUntil } from './chainClient'
-import { readIsActiveSigner } from './contracts'
+import { readIsActiveSigner, readPermissionsForSigner } from './contracts'
 import { buildAutomationSessionKeyPermissions } from './automationSessionKeyPermissions'
 import { getPublishChainName } from './chainConfig'
 import type { PublishWallet } from './seedSigner'
@@ -82,6 +82,31 @@ export async function removeAutomationSessionKey(params: {
     admin: params.admin,
     failureMessage: MSG_REMOVAL_FAILED(),
   })
+}
+
+/**
+ * Refuses a session key that isn't approved to call `executor`, such as one granted for an executor
+ * the factory has since replaced. Its UserOp would pass the simulation, which runs from the account,
+ * and then fail validation at the bundler. A zero address among the targets approves every target.
+ *
+ * @throws ManagedAccountPublishError `MODULAR_SIGNER_ACTIVATION_FAILED`
+ */
+export async function assertSessionKeyApprovesExecutor(
+  managedAddress: string,
+  sessionKeyAddress: string,
+  executor: string,
+): Promise<void> {
+  const { approvedTargets } = await readPermissionsForSigner(managedAddress as Address, sessionKeyAddress as Address)
+  const approved = approvedTargets.some(
+    (target) => target === zeroAddress || isAddressEqual(target, executor as Address),
+  )
+  if (!approved) {
+    throw new ManagedAccountPublishError(
+      `The automation session key ${sessionKeyAddress} isn't approved for the Seed executor ${executor}. Run enrollPublishAutomation again to grant it.`,
+      'MODULAR_SIGNER_ACTIVATION_FAILED',
+      managedAddress,
+    )
+  }
 }
 
 /**
