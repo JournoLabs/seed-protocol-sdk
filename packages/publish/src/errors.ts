@@ -1,3 +1,5 @@
+import type { UnrecordedAttestation } from './types'
+
 export class AttestationVerificationError extends Error {
   constructor(
     message: string,
@@ -108,6 +110,24 @@ export class PublishTransactionRevertedError extends Error {
   ) {
     super(`Transaction ${transactionHash} reverted.`)
     this.name = 'PublishTransactionRevertedError'
+  }
+}
+
+/**
+ * Thrown when a `multiPublish` landed and recording it locally failed. Nothing was recorded. A
+ * retry records it from `unrecorded` and sends nothing.
+ */
+export class AttestationRecordError extends Error {
+  constructor(
+    public readonly unrecorded: UnrecordedAttestation,
+    cause: unknown,
+  ) {
+    super(
+      `Transaction ${unrecorded.transactionHash} attested this publish, but recording it failed: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    )
+    this.name = 'AttestationRecordError'
   }
 }
 

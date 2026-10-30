@@ -1,4 +1,4 @@
-import { Item, recordPublishRequest } from '@seedprotocol/sdk'
+import { Item, recordPublishRequests } from '@seedprotocol/sdk'
 import debug from 'debug'
 import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
@@ -23,15 +23,18 @@ const nonZero = (uid: string | undefined): string | undefined => (isZero(uid) ? 
 
 /**
  * Records locally what one multiPublish transaction attested, for every request in it (the item
- * being published and the related items published with it), each matched to its own events:
- * - the Version attestation it created, and its property attestation uids on that version, in one
- *   transaction (recordPublishRequest). A request that carried a version uid (a patch publish)
- *   created none: the executor's SeedPublished still reports that existing version, which must not
- *   be recorded as a new one.
- * - the Seed attestation it created, for related items (the item being published, `rootSeedLocalId`,
- *   is left to the caller: createAttestations assigns it to the publishing item and persists it).
+ * being published and the related items published with it), each matched to its own events, in one
+ * database transaction (recordPublishRequests): the Seed and Version attestations it created and
+ * its property attestation uids. A request that carried a version uid (a patch publish) created no
+ * version: the executor's SeedPublished still reports that existing version, which must not be
+ * recorded as a new one.
  *
- * Returns the requests with the seed and version uids this transaction created filled in.
+ * Throwing leaves nothing recorded, and calling this again with the same receipt and requests is
+ * safe, so a failed record is repeated from the receipt rather than by sending again.
+ *
+ * Loaded related items then take their seed uids; the item being published, `rootSeedLocalId`, is
+ * left to the caller. Returns the requests with the seed and version uids this transaction created
+ * filled in.
  */
 export async function recordMultiPublishReceipt<R extends MultiPublishRequestLike>(params: {
   receipt: ReceiptLike
@@ -64,37 +67,48 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
     if (req.localId && seedUid) resolvedSeedUids[req.localId] = seedUid
   }
 
-  // Each request's version uid and property uids, in one transaction so a reader never sees the
-  // version without its properties. The properties are recorded against the version they attested
-  // under: the request's own version uid (a patch publish), or the version this transaction created
-  // for it. Relation and list values are recorded as the seed uids they attested.
-  for (let i = 0; i < requests.length; i++) {
-    const req = requests[i]!
-    const { propertyPairs, versionUid } = attributed[i]!
-    if (!req.localId) continue
-    const createdVersion = isZero(req.versionUid) && !isZero(versionUid)
-    await recordPublishRequest({
-      ...(createdVersion && {
-        version: {
-          seedLocalId: req.localId,
-          versionUid: toHex32(versionUid),
-          ...(req.versionLocalId ? { versionLocalId: req.versionLocalId } : {}),
-          publisher: publisherAddress,
-          attestationCreatedAt: attMs,
+  // The properties are recorded against the version they attested under: the request's own version
+  // uid (a patch publish), or the version this transaction created for it. Relation and list values
+  // are recorded as the seed uids they attested.
+  await recordPublishRequests(
+    requests.flatMap((req, i) => {
+      const { propertyPairs, seedUid, versionUid } = attributed[i]!
+      if (!req.localId) return []
+      const createdSeed = isZero(req.seedUid) && !isZero(seedUid)
+      const createdVersion = isZero(req.versionUid) && !isZero(versionUid)
+      return [
+        {
+          ...(createdSeed && {
+            seed: {
+              seedLocalId: req.localId,
+              seedUid: seedUid!,
+              publisher: publisherAddress,
+              attestationCreatedAt: attMs,
+            },
+          }),
+          ...(createdVersion && {
+            version: {
+              seedLocalId: req.localId,
+              versionUid: toHex32(versionUid),
+              ...(req.versionLocalId ? { versionLocalId: req.versionLocalId } : {}),
+              publisher: publisherAddress,
+              attestationCreatedAt: attMs,
+            },
+          }),
+          ...(propertyPairs.length > 0 && {
+            properties: {
+              seedLocalId: req.localId,
+              attestationCreatedAtMs: attMs ?? null,
+              versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
+              pairs: propertyPairs,
+              resolvedSeedUids,
+              publisher: publisherAddress,
+            },
+          }),
         },
-      }),
-      ...(propertyPairs.length > 0 && {
-        properties: {
-          seedLocalId: req.localId,
-          attestationCreatedAtMs: attMs ?? null,
-          versionUid: nonZero(req.versionUid) ?? nonZero(versionUid) ?? null,
-          pairs: propertyPairs,
-          resolvedSeedUids,
-          publisher: publisherAddress,
-        },
-      }),
-    })
-  }
+      ]
+    }),
+  )
 
   for (let i = 0; i < requests.length; i++) {
     const req = requests[i]!
@@ -124,8 +138,9 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
 }
 
 /**
- * Records the Seed attestation a publish created for a related item (one published together with the
- * item being published) on that item. Best-effort: the attestation is already on-chain.
+ * Gives a related item (one published together with the item being published) the seed uid of the
+ * Seed attestation created for it, once the row holds it. Best-effort: only a loaded item's state
+ * depends on it.
  */
 export async function recordRelatedSeedUid(params: {
   seedLocalId: string

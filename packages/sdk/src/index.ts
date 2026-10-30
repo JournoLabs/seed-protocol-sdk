@@ -23,7 +23,8 @@ export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './brow
 export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'
 export { createNewItem } from './db/write/createNewItem'
 export { updateVersionUid, type UpdateVersionUidProps } from './db/write/updateVersionUid'
-export { recordPublishRequest } from './db/write/recordPublishRequest'
+export type { UpdateSeedUidProps } from './db/write/updateSeedUid'
+export { recordPublishRequests, type PublishRequestRecord } from './db/write/recordPublishRequests'
 export {
   applyPropertyAttestationUidsFromPublish,
 } from './db/write/applyPropertyAttestationUidsFromPublish'
