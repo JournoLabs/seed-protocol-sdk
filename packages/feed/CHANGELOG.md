@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Atom: a present `null` in an item's `updated` or `links` keeps the default (the pubDate, or the item's link). `{ updated: null }` gave an entry with no `<updated>`, which RFC 4287 requires.
+
 ## 0.7.13 (2026-10-29)
 
 - **Breaking:** an item with a storage transaction and no link of its own has the RSS `guid` `ar://<transactionId>` (D34), so Atom entry ids and JSON Feed item ids are that too (D26). Its `link` is still the public gateway URL. The guid was the gateway URL, so changing `arweaveDomain` changed every such item's guid and feed readers showed the items again; after this release they show them again once more, then never on a gateway change. RSS marks these guids `isPermaLink="false"`. A guid is no longer moved onto the public gateway with the item's other Arweave links. A cached feed body keeps the old guids until it is rebuilt.

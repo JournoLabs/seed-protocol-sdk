@@ -168,3 +168,14 @@ describe('resolveSidecarOrigin', () => {
     })
   })
 })
+
+describe('probeGateway arguments', () => {
+  it('refuses an AbortSignal passed where its options go', async () => {
+    const fetchMock = vi.fn(hangingFetch)
+    vi.stubGlobal('fetch', fetchMock)
+    const signal = new AbortController().signal
+
+    await expect(probeGateway('https://example.com', signal as never)).rejects.toThrow(TypeError)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

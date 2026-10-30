@@ -38,6 +38,26 @@ const targets: TargetProperty[] = [
   { name: 'html', dataType: 'Html' },
 ]
 
+describe('the package lookup editor', () => {
+  const render = (lookups: 'section' | false) =>
+    renderToStaticMarkup(
+      React.createElement(FieldMapper, {
+        sources,
+        targets,
+        mappings: [{ sourceId: 'rss-author', propertyName: 'authors', resolve: 'lookup' }],
+        onChange: () => {},
+        theme: 'none',
+        defaultRows: 'all',
+        slots: { lookups },
+      }),
+    )
+
+  it('shows without renderLookup, and slots.lookups false hides it', () => {
+    expect(render('section')).toContain('Relation lookups')
+    expect(render(false)).not.toContain('Relation lookups')
+  })
+})
+
 describe('renderLookup', () => {
   it('calls the host slot only on lookup rows and writes entries via onLookupChange', () => {
     const mappings: FieldMapping[] = [

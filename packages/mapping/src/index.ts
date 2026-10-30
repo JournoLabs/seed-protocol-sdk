@@ -6,7 +6,6 @@ export type {
   LookupEntry,
   LookupSeparator,
   MappingDocument,
-  MappingLookups,
   PropertyBag,
   ResolveJob,
   DeriveSpec,

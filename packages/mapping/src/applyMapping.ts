@@ -8,7 +8,6 @@ import { resolveMappingSource } from './resolvedSources'
 import type {
   ApplyMappingAsyncResult,
   FieldMapping,
-  MappingLookups,
   PropertyBag,
   ResolveCallback,
   ResolveContext,
@@ -99,10 +98,9 @@ function applyLookupEdge(
   mapping: FieldMapping,
   source: SourceNode,
   target: TargetProperty,
-  lookups: MappingLookups | undefined,
 ): { value?: string | string[]; misses: UnmatchedLookup[] } {
   const rawValue = normalizeLookupKey(source.value ?? '')
-  const { refs, unmatched, split } = resolveLookup(mapping, rawValue, lookups)
+  const { refs, unmatched, split } = resolveLookup(mapping, rawValue)
   const misses = unmatched.map((value) => ({
     sourceId: source.id,
     propertyName: mapping.propertyName,
@@ -117,14 +115,14 @@ function applyLookupEdge(
  * Missing sources or unknown target properties are skipped (no throw).
  * `resolve: 'extract' | 'file' | 'derive' | 'assemble'` edges are skipped.
  * Use `applyMappingAsync` for extract/file. Derive/assemble stay host-applied.
- * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups). A value
+ * `resolve: 'lookup'` is applied from stored entries. A value
  * with no entry is left out and reported to `onUnmatched`; an empty value is no lookup.
  */
 export function applyMapping(
   sources: SourceNode[],
   mappings: FieldMapping[],
   targets: TargetProperty[],
-  options?: { lookups?: MappingLookups; onUnmatched?: (miss: UnmatchedLookup) => void },
+  options?: { onUnmatched?: (miss: UnmatchedLookup) => void },
 ): PropertyBag {
   const byId = new Map(sources.map((s) => [s.id, s]))
   const byName = new Map(targets.map((t) => [t.name, t]))
@@ -138,7 +136,7 @@ export function applyMapping(
     if (!source || !target) continue
 
     if (mapping.resolve === 'lookup') {
-      const { value, misses } = applyLookupEdge(mapping, source, target, options?.lookups)
+      const { value, misses } = applyLookupEdge(mapping, source, target)
       if (value !== undefined) properties[mapping.propertyName] = value
       for (const miss of misses) options?.onUnmatched?.(miss)
       continue
@@ -157,11 +155,6 @@ export function applyMapping(
 export type ApplyMappingAsyncOptions = {
   /** Required for extract/file edges. Not called for lookup. */
   resolve?: ResolveCallback
-  /**
-   * String → seed uid dictionaries keyed by property name.
-   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback only.
-   */
-  lookups?: MappingLookups
 }
 
 /**
@@ -212,7 +205,7 @@ export async function applyMappingAsync(
         continue
       }
 
-      const { value, misses } = applyLookupEdge(mapping, source, target, options.lookups)
+      const { value, misses } = applyLookupEdge(mapping, source, target)
       if (value !== undefined) properties[mapping.propertyName] = value
       for (const miss of misses) {
         errors.push({

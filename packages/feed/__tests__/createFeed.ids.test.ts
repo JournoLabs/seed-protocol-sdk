@@ -17,6 +17,13 @@ describe('createFeed item ids', () => {
     expect(xml).not.toContain('<id>0xseed1</id>')
   })
 
+  it('keeps the default <updated> and links for a null item field', async () => {
+    const xml = await createFeed([{ ...post, updated: null, links: null } as any], 'post', 'atom')
+    const entry = xml.slice(xml.indexOf('<entry>'))
+    expect(entry).toContain('<updated>')
+    expect(entry).toContain('href="https://example.com/posts/1"')
+  })
+
   it('uses the RSS guid as the JSON Feed item id', async () => {
     const json = JSON.parse(await createFeed([post as any], 'post', 'json'))
     expect(json.items[0].id).toBe('urn:example:post-1')

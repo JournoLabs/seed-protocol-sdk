@@ -2,7 +2,6 @@ import type {
   FieldMapping,
   LookupEntry,
   LookupSeparator,
-  MappingLookups,
   SourceNode,
   TargetProperty,
 } from './types'
@@ -103,23 +102,6 @@ export function lookupRefsFromEntries(
   return undefined
 }
 
-/**
- * @deprecated Document-level table. Prefer `lookupRefsFromEntries`.
- */
-export function lookupRefFromTable(
-  lookups: MappingLookups | undefined,
-  propertyName: string,
-  rawKey: string,
-): string | string[] | undefined {
-  if (!lookups) return undefined
-  const table = lookups[propertyName]
-  if (!table) return undefined
-  if (Object.prototype.hasOwnProperty.call(table, rawKey)) {
-    return table[rawKey]
-  }
-  return undefined
-}
-
 const SEPARATOR_PATTERNS: Record<LookupSeparator, string> = {
   and: '\\s+and\\s+',
   '&': '\\s*&\\s*',
@@ -151,36 +133,25 @@ export type LookupResolution = {
   split: boolean
 }
 
-function refsForWhole(mapping: FieldMapping, value: string, lookups?: MappingLookups): string[] | undefined {
-  const fromEntries = lookupRefsFromEntries(mapping.lookup?.entries, value)
-  if (fromEntries) return fromEntries
-  const fromTable = lookupRefFromTable(lookups, mapping.propertyName, value)
-  if (fromTable === undefined) return undefined
-  const refs = (Array.isArray(fromTable) ? fromTable : [fromTable]).map((r) => String(r).trim()).filter(Boolean)
-  return refs.length > 0 ? refs : undefined
-}
-
 /**
- * Resolve a lookup value. The whole value's entry wins (edge entries, then the deprecated document
- * table). Without one, an edge with `split` breaks the value into parts and looks each up on its
+ * Resolve a lookup value. The whole value's entry wins. Without one, an edge with `split` breaks the value into parts and looks each up on its
  * own: the refs of the parts that have entries come back in the value's order, and each part
  * without one is listed in `unmatched`.
  */
 export function resolveLookup(
   mapping: FieldMapping,
   rawValue: string,
-  lookups?: MappingLookups,
 ): LookupResolution {
   const value = normalizeLookupKey(rawValue)
   if (!value) return { refs: [], unmatched: [], split: false }
-  const whole = refsForWhole(mapping, value, lookups)
+  const whole = lookupRefsFromEntries(mapping.lookup?.entries, value)
   if (whole) return { refs: [...new Set(whole)], unmatched: [], split: false }
   const parts = mapping.split ? splitLookupValue(value, mapping.split.separators) : [value]
   if (parts.length < 2) return { refs: [], unmatched: [value], split: false }
   const refs: string[] = []
   const unmatched: string[] = []
   for (const part of parts) {
-    const partRefs = refsForWhole(mapping, part, lookups)
+    const partRefs = lookupRefsFromEntries(mapping.lookup?.entries, part)
     if (partRefs) refs.push(...partRefs)
     else unmatched.push(part)
   }

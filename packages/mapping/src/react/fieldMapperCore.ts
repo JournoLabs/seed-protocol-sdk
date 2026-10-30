@@ -24,7 +24,6 @@ import type {
   FieldMapping,
   LookupEntry,
   LookupSeparator,
-  MappingLookups,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -103,13 +102,12 @@ export function computeRequiredResolve(
 
 export type PreviewForEdgeOptions = {
   target?: TargetProperty
-  lookups?: MappingLookups
   propertyName?: string
   mapping?: FieldMapping
 }
 
 /**
- * Sync row preview aligned with `applyMapping` / lookup tables.
+ * Sync row preview aligned with `applyMapping`.
  * `extract`/`file` stay descriptive (sync apply skips them).
  * `lookup` shows a stored-entry hit when present; otherwise a pending placeholder.
  * Plain copy shows the coerced value when a target is known.
@@ -142,7 +140,7 @@ export function previewForEdge(
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
       resolve: 'lookup' as const,
     }
-    const { refs, unmatched } = resolveLookup(mapping, raw, options?.lookups)
+    const { refs, unmatched } = resolveLookup(mapping, raw)
     if (refs.length > 0) {
       const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
       const shown = Array.isArray(shaped) ? shaped : [shaped]
@@ -203,7 +201,6 @@ export function rowState(args: {
   requiredResolve: ResolveJob | null
   conflict?: boolean
   sampleValue?: string
-  lookups?: MappingLookups
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
   if (!args.mapping || !isPresentEdge(args.mapping)) return 'empty'
@@ -215,7 +212,7 @@ export function rowState(args: {
   }
   if (actual === 'lookup') {
     const sample = args.sampleValue ?? ''
-    if (!sample || resolveLookup(args.mapping, sample, args.lookups).unmatched.length > 0) {
+    if (!sample || resolveLookup(args.mapping, sample).unmatched.length > 0) {
       return 'needsLookup'
     }
   }
@@ -366,29 +363,13 @@ export function upsertPropertyMapping(
   return next
 }
 
-export function clearLookupsForProperties(
-  lookups: MappingLookups,
-  propertyNames: string[],
-): MappingLookups | null {
-  if (propertyNames.length === 0) return null
-  let changed = false
-  const next = { ...lookups }
-  for (const name of propertyNames) {
-    if (name in next) {
-      delete next[name]
-      changed = true
-    }
-  }
-  return changed ? next : null
-}
-
 export function connectSourceToProperty(
   mappings: FieldMapping[],
   sources: SourceNode[],
   targets: TargetProperty[],
   sourceId: string,
   propertyName: string,
-): { mappings: FieldMapping[]; clearedLookupProps: string[] } {
+): FieldMapping[] {
   const targetsByName = new Map(targets.map((t) => [t.name, t]))
   let edge = normalizeMappingFromSourceId(sourceId, propertyName)
   edge = attachLookupIfNeeded(edge, targetsByName.get(propertyName))
@@ -403,48 +384,28 @@ export function connectSourceToProperty(
 
   const prev = mappings.find((m) => m.propertyName === propertyName)
   edge = withPreservedExtras(edge, prev)
-  const next = upsertPropertyMapping(mappings, edge)
-  const clearedLookupProps: string[] = []
-  if (prev?.resolve === 'lookup' && edge.resolve !== 'lookup') {
-    clearedLookupProps.push(propertyName)
-  }
-  return { mappings: next, clearedLookupProps }
+  return upsertPropertyMapping(mappings, edge)
 }
 
 export function removeMappingsForSourceId(
   mappings: FieldMapping[],
   sourceId: string,
-): { mappings: FieldMapping[]; clearedLookupProps: string[] } {
+): FieldMapping[] {
   const parsed = parseResolvedSourceId(sourceId)
-  const clearedLookupProps: string[] = []
-  const next = mappings.filter((c) => {
-    let keep: boolean
-    if (parsed) {
-      keep = !(
-        Boolean(c.sourceId) &&
-        c.sourceId === parsed.originId &&
-        c.resolve === parsed.resolve
-      )
-    } else {
-      keep = c.sourceId !== sourceId
-    }
-    if (!keep && c.resolve === 'lookup') {
-      clearedLookupProps.push(c.propertyName)
-    }
-    return keep
+  return mappings.filter((c) => {
+    if (!parsed) return c.sourceId !== sourceId
+    return !(Boolean(c.sourceId) && c.sourceId === parsed.originId && c.resolve === parsed.resolve)
   })
-  return { mappings: next, clearedLookupProps }
 }
 
 export function buildPropertyModeRows(args: {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   sources: SourceNode[]
-  lookups?: MappingLookups
   /** When set, only these property names appear (add-flow extras). */
   visiblePropertyNames?: Set<string> | null
 }): FieldMapperRow[] {
-  const { targets, mappings, sources, lookups } = args
+  const { targets, mappings, sources } = args
   const byName = new Map(mappings.map((m) => [m.propertyName, m]))
   const sourceById = new Map(originSources(sources).map((s) => [s.id, s]))
   // Also index all sources for resolve edges that still point at origin
@@ -464,7 +425,7 @@ export function buildPropertyModeRows(args: {
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
     const sampleValue = sampleValueFromSource(source)
-    const state = rowState({ mapping, requiredResolve, sampleValue, lookups })
+    const state = rowState({ mapping, requiredResolve, sampleValue })
     return {
       id: target.name,
       target,
@@ -473,7 +434,6 @@ export function buildPropertyModeRows(args: {
       sampleValue,
       preview: previewForEdge(source, mapping?.resolve, {
         target,
-        lookups,
         propertyName: target.name,
         mapping,
       }),
@@ -496,9 +456,8 @@ export function buildSourceModeRows(args: {
   drafts: SourceModeDraft[]
   sources: SourceNode[]
   targets: TargetProperty[]
-  lookups?: MappingLookups
 }): { rows: FieldMapperRow[]; conflicts: Set<string> } {
-  const { mappings, edgeIds, drafts, sources, targets, lookups } = args
+  const { mappings, edgeIds, drafts, sources, targets } = args
   const sourceById = new Map(sources.map((s) => [s.id, s]))
   const targetsByName = new Map(targets.map((t) => [t.name, t]))
 
@@ -563,7 +522,6 @@ export function buildSourceModeRows(args: {
       requiredResolve,
       conflict: conflicts.has(r.id),
       sampleValue,
-      lookups,
     })
     // Drafts with only source or only property stay empty
     const effectiveState =
@@ -581,7 +539,6 @@ export function buildSourceModeRows(args: {
       sampleValue,
       preview: previewForEdge(r.source, complete?.resolve, {
         target: r.target,
-        lookups,
         propertyName: complete?.propertyName,
         mapping: complete,
       }),

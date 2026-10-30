@@ -3,7 +3,6 @@ import type {
   FieldMapping,
   LookupEntry,
   LookupSeparator,
-  MappingLookups,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -76,15 +75,6 @@ export type UseFieldMapperArgs = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   onChange: (mappings: FieldMapping[]) => void
-  /**
-   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback for preview.
-   */
-  lookups?: MappingLookups
-  /**
-   * @deprecated Prefer `setLookupEntries` / `renderLookup`. Still clears the
-   * document-level table when a lookup edge is removed.
-   */
-  onLookupsChange?: (lookups: MappingLookups) => void
   rowKey?: FieldMapperRowKey
   onAutoMap?: () => FieldMapping[]
 }
