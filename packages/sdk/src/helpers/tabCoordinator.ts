@@ -1,6 +1,6 @@
 import debug from 'debug'
 import { isBrowser } from '@/helpers/environment'
-import { withTabLock } from '@/helpers/tabLocks'
+import { withTabLock, type TabLockOptions } from '@/helpers/tabLocks'
 
 const logger = debug('seedSdk:helpers:tabCoordinator')
 
@@ -120,7 +120,7 @@ export function onTabMessage(handler: (message: TabMessage) => void): () => void
 }
 
 /** `withTabLock` named for this database (`seed:<scope>:<db>`); runs `fn` directly before init. */
-export function withDbTabLock<T>(scope: string, fn: () => Promise<T>, options?: { timeoutMs?: number }): Promise<T> {
+export function withDbTabLock<T>(scope: string, fn: () => Promise<T>, options?: TabLockOptions): Promise<T> {
   return state ? withTabLock(`seed:${scope}:${state.dbKey}`, fn, options) : fn()
 }
 

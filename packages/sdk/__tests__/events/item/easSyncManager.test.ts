@@ -5,6 +5,7 @@ import {
   easSyncMachine,
   requestEasSyncFromModelsInit,
   startEasSyncActor,
+  stopEasSync,
 } from '@/events/item/easSyncManager'
 import { cancelAllRetriesWhenOnline, setRetriesWhenOnlineEnabled } from '@/helpers/retryWhenOnline'
 import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
@@ -67,7 +68,7 @@ describe('easSyncMachine', () => {
 
     releaseFirst!()
     await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(2), { timeout: WAIT_TIMEOUT_MS })
-    expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xAa', '0xbb'] })
+    expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xAa', '0xbb'] }, expect.any(AbortSignal))
 
     actor.stop()
   })
@@ -88,7 +89,7 @@ describe('easSyncMachine', () => {
         expect(easSyncActor.getSnapshot().context.lastFinishedStatus).toBe('success'),
       )
       // A full sync failed, so the retry is a full sync too.
-      expect(runSpy).toHaveBeenLastCalledWith(undefined)
+      expect(runSpy).toHaveBeenLastCalledWith(undefined, expect.any(AbortSignal))
     } finally {
       cancelAllRetriesWhenOnline()
       setRetriesWhenOnlineEnabled(previousRetrySetting)
@@ -119,11 +120,59 @@ describe('easSyncMachine', () => {
       await vi.advanceTimersByTimeAsync(15_000)
       await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(3))
       // Only the automatic request's addresses: client_api callers got the error
-      expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xcc'] })
+      expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xcc'] }, expect.any(AbortSignal))
     } finally {
       cancelAllRetriesWhenOnline()
       setRetriesWhenOnlineEnabled(previousRetrySetting)
       vi.useRealTimers()
     }
+  })
+
+  it('stopEasSync ends the run, fails queued callers and leaves nothing to run or retry', async () => {
+    const previousRetrySetting = setRetriesWhenOnlineEnabled(true)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      // A run that only ends when it's told to, like one waiting on the indexer.
+      runSpy.mockImplementationOnce(
+        (_options: unknown, signal: AbortSignal) =>
+          new Promise<void>((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason))
+          }),
+      )
+      startEasSyncActor()
+      easSyncActor.send({ type: 'REQUEST', correlationId: 's1', source: 'models_init' })
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1))
+      easSyncActor.send({ type: 'REQUEST', correlationId: 's2', source: 'client_api' })
+
+      await stopEasSync()
+
+      const { value, context } = easSyncActor.getSnapshot()
+      expect(value).toBe('idle')
+      expect(context.lastFinishedStatus).toBe('failed')
+      expect(context.lastFinishedError).toContain('EAS sync stopped')
+      expect(context.lastFinishedCorrelationIds).toEqual(['s1', 's2'])
+
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(runSpy).toHaveBeenCalledTimes(1)
+
+      // The same actor syncs again after a re-init.
+      easSyncActor.send({ type: 'REQUEST', correlationId: 's3', source: 'client_api' })
+      await vi.waitFor(() =>
+        expect(easSyncActor.getSnapshot().context.lastFinishedCorrelationIds).toEqual(['s3']),
+      )
+      expect(easSyncActor.getSnapshot().context.lastFinishedStatus).toBe('success')
+    } finally {
+      cancelAllRetriesWhenOnline()
+      setRetriesWhenOnlineEnabled(previousRetrySetting)
+      vi.useRealTimers()
+    }
+  })
+
+  it('stopEasSync resolves with no sync running', async () => {
+    startEasSyncActor()
+    await expect(stopEasSync()).resolves.toBeUndefined()
+    easSyncActor.send({ type: 'REQUEST', correlationId: 's4', source: 'client_api' })
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1), { timeout: WAIT_TIMEOUT_MS })
+    await vi.waitFor(() => expect(easSyncActor.getSnapshot().value).toBe('idle'))
   })
 })

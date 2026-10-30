@@ -1,4 +1,4 @@
-import { assign, createActor, fromPromise, setup } from 'xstate'
+import { assign, createActor, fromPromise, setup, waitFor } from 'xstate'
 import { MachineIds } from '@/client/constants'
 import {
   failInterruptedEasSyncProcessRows,
@@ -26,6 +26,8 @@ export type EasSyncRequestEvent = {
   options?: SyncFromEasOptions
   source: EasSyncRequestSource
 }
+
+export type EasSyncEvent = EasSyncRequestEvent | { type: 'STOP' }
 
 export type EasSyncMachineContext = {
   runOptions: SyncFromEasOptions
@@ -64,6 +66,7 @@ const runEasSync = fromPromise(
       options: SyncFromEasOptions
       requestPayload: Record<string, unknown>
       runningSnapshot: Record<string, unknown>
+      signal: AbortSignal
     }
   }) => {
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
@@ -72,6 +75,7 @@ const runEasSync = fromPromise(
     await withDbTabLock(
       'eas-sync',
       async () => {
+        input.signal.throwIfAborted()
         // Under the lock no other sync runs, so rows still in progress were interrupted.
         await failInterruptedEasSyncProcessRows()
         const rowId = await insertEasSyncProcessRow({
@@ -79,7 +83,7 @@ const runEasSync = fromPromise(
           persistedSnapshot: input.runningSnapshot,
         })
         try {
-          await runSyncFromEas(toRunSyncArg(input.options))
+          await runSyncFromEas(toRunSyncArg(input.options), input.signal)
           await finalizeEasSyncProcessRow(rowId, {
             status: 'completed',
             persistedSnapshot: {
@@ -105,7 +109,7 @@ const runEasSync = fromPromise(
           throw err
         }
       },
-      { timeoutMs: Infinity },
+      { timeoutMs: Infinity, signal: input.signal },
     )
   },
 )
@@ -124,6 +128,8 @@ const withRetryable = (
  * merged into a run a `client_api` request started are retried.
  */
 let failedSyncOptions: SyncFromEasOptions[] = []
+/** Aborted by stopEasSync; every run shares it, since at most one runs at a time. */
+let stopController = new AbortController()
 const syncRetry = createRetryWhenOnline(() => {
   const options = mergeEasSyncRequestIntents(failedSyncOptions)
   failedSyncOptions = []
@@ -156,7 +162,7 @@ const initialContext: EasSyncMachineContext = {
 export const easSyncMachine = setup({
   types: {
     context: {} as EasSyncMachineContext,
-    events: {} as EasSyncRequestEvent,
+    events: {} as EasSyncEvent,
   },
   actors: {
     runEasSync,
@@ -209,6 +215,21 @@ export const easSyncMachine = setup({
               ),
           }),
         },
+        // The run is aborting. Its callers and those of the pending run all get its result, and
+        // nothing is left to run or retry.
+        STOP: {
+          actions: assign({
+            activeCorrelationIds: ({ context }) => [
+              ...context.activeCorrelationIds,
+              ...context.pendingCorrelationIds,
+            ],
+            pendingMergedOptions: () => undefined,
+            pendingCorrelationIds: () => [],
+            pendingPrimarySource: () => null,
+            runRetryableOptions: () => undefined,
+            pendingRetryableOptions: () => undefined,
+          }),
+        },
       },
       invoke: {
         src: 'runEasSync',
@@ -223,6 +244,7 @@ export const easSyncMachine = setup({
             phase: 'running',
             correlationIds: context.activeCorrelationIds,
           },
+          signal: stopController.signal,
         }),
         onDone: {
           target: 'afterRun',
@@ -308,6 +330,21 @@ export function startEasSyncActor(): void {
   easSyncActor.start()
 }
 
+/**
+ * Ends any sync in this tab and resolves once it has stopped writing, so the caller can close the
+ * database. Network waits end at once; a database write in progress finishes first. Callers waiting
+ * on the sync, including those queued for the next run, get an error. The actor keeps running,
+ * since a stopped actor can't restart and init after client.stop() syncs again.
+ */
+export async function stopEasSync(): Promise<void> {
+  failedSyncOptions = []
+  if (!easSyncActorStarted) return
+  stopController.abort(new Error('EAS sync stopped: the client stopped'))
+  easSyncActor.send({ type: 'STOP' })
+  await waitFor(easSyncActor, (snapshot) => snapshot.matches('idle'))
+  stopController = new AbortController()
+}
+
 function newCorrelationId(): string {
   const c = globalThis.crypto
   if (c?.randomUUID) {
@@ -344,7 +381,7 @@ export function listenForEasSyncRequestsFromOtherTabs(): void {
   if (listeningToOtherTabs) return
   listeningToOtherTabs = true
   onTabMessage((message) => {
-    if (message.type === 'eas-sync-address-change' && isLeaderTab()) {
+    if (message.type === 'eas-sync-address-change' && isLeaderTab() && !stopController.signal.aborted) {
       requestEasSyncFromAddressChange(message.addresses)
     }
   })

@@ -26,6 +26,7 @@ import {
   easSyncActor,
   sendEasSyncClientRequest,
   startEasSyncActor,
+  stopEasSync,
 } from '@/events/item/easSyncManager'
 import {
   registerSeedQueryLocalSource,
@@ -167,6 +168,7 @@ const stopClient = async ({
 }
 
 const releaseClientResources = async (): Promise<void> => {
+  await stopEasSync()
   await stopOutbox()
   await whenCanonicalizeModelTypesSettled()
   // Before the database closes, so their live queries end first.
