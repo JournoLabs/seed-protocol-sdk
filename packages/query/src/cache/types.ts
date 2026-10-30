@@ -7,6 +7,7 @@ import {
   type SeedRecord,
 } from '../types.js'
 import type { SeedDependencies } from '../assembleSeeds.js'
+import { queryModelsFingerprint } from '../queryModels.js'
 
 /**
  * How a cached entry is kept current: changes (see QueryDataSource.listChangesSince) after
@@ -92,12 +93,13 @@ function includeCode(include?: ChangelogInclude): string {
   return 'i2' // changelog
 }
 
-const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e3', uids: 'e5' }
+const RELATIONS_CODES: Record<RelationsMode, string> = { expand: 'e6', uids: 'e7' }
 
 /**
  * Build a stable key for assemble options that affect cached payloads.
- * Relations modes map to `e3` (expand) and `e5` (uids). The codes changed from
- * e1, e0 and e2 when relation keys became the same in every mode, so no stored payload of the old shape is read.
+ * Relations modes map to `e6` (expand) and `e7` (uids). The codes change whenever a record's shape
+ * does, so no stored payload of an old shape is read: e1, e0 and e2 until relation keys became the
+ * same in every mode, then e3 and e5 until only `bytes32` properties counted as relations.
  */
 export function buildAssembleOptionsKey(options?: {
   relations?: RelationsMode
@@ -109,6 +111,9 @@ export function buildAssembleOptionsKey(options?: {
 }): string {
   const hydrate = options?.hydrateStorage !== false
   let base = `${RELATIONS_CODES[relationsModeOf(options)]}-h${hydrate ? 1 : 0}`
+  // List relation keys follow the models set (setQueryModels)
+  const models = queryModelsFingerprint()
+  if (models) base += `-m${models}`
   if (options?.versionUid !== undefined) base += `-v${options.versionUid.toLowerCase()}`
   if (options?.asOf !== undefined) base += `-a${options.asOf}`
 
