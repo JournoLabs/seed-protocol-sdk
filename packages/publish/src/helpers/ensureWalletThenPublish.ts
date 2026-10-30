@@ -3,7 +3,7 @@ import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { getPublishWallet } from './publishWalletRegistry'
-import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
+import { isPublishWallet, isSeedSigner, sendsAsManagedAccount, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
 import { resolvePublishPayment } from '../payment'
@@ -51,7 +51,9 @@ function coerceDataItemSigner(
 
 /**
  * Vendor-neutral publish entry: uses the registered publish wallet (EIP-1193 / permissionless / ethers).
- * When `useModularExecutor` is true, callers should use the Thirdweb `ensureSmartWalletThenPublish` instead.
+ * With `useModularExecutor`, a registered wallet that sends as its `publisherAddress` (see
+ * `sendsAsManagedAccount`) publishes as it is; otherwise this hands over to the Thirdweb
+ * `ensureSmartWalletThenPublish`.
  */
 export async function ensureWalletThenPublish(
   item: Item<any>,
@@ -59,8 +61,13 @@ export async function ensureWalletThenPublish(
 ): Promise<EnsureWalletThenPublishResult> {
   const config = getPublishConfig()
   const payment = resolvePublishPayment(config)
-  if (payment.sender === 'modular') {
-    // Modular / ManagedAccount Thirdweb bootstrap is adapter-only.
+  const registered = getPublishWallet()
+  if (
+    payment.sender === 'modular' &&
+    !(registered && sendsAsManagedAccount(registered, registered.publisherAddress))
+  ) {
+    // The Thirdweb in-app wallets find the ManagedAccount; a registered wallet that sends as it
+    // publishes below without them.
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     return ensureSmartWalletThenPublish(item, null, async () => {
       const w = getPublishWallet()
@@ -68,7 +75,7 @@ export async function ensureWalletThenPublish(
     }, options)
   }
 
-  let session = getPublishWallet()
+  let session = registered
   if (!session) {
     return { outcome: 'no_wallet' }
   }

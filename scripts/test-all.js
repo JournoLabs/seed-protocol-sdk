@@ -40,6 +40,7 @@ const STEPS = [
   'node scripts/check-internal-deps.js',
   'node scripts/check-knip.js',
   'node scripts/check-browser-entry-graph.js --fail',
+  'node scripts/check-publish-core-no-thirdweb.js',
   'node scripts/check-eas-sdk-node-import.js',
   'node scripts/check-dts-consumer.js',
   'bun run test:scripts',
