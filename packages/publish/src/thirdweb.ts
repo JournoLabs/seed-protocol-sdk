@@ -41,10 +41,8 @@ export {
   ensureSmartWalletThenPublish,
   type EnsureSmartWalletResult,
 } from './helpers/ensureSmartWalletThenPublish'
-export {
-  ensureExecutorModuleInstalled,
-  type EnsureExecutorModuleResult,
-} from './helpers/ensureExecutorModule'
+export { ensureExecutorModuleInstalled } from './helpers/thirdwebAutomation'
+export type { EnsureExecutorModuleResult } from './helpers/ensureExecutorModule'
 export {
   ensureManagedAccountReady,
   tryDeployManagedAccount,
@@ -58,7 +56,7 @@ export { approvedTargetsForAutomationPublish } from './helpers/approvedTargetsFo
 export {
   ensureAutomationSessionKey,
   removeAutomationSessionKey,
-} from './helpers/thirdwebAutomationSessionKey'
+} from './helpers/thirdwebAutomation'
 export { isAutomationSessionActive } from './helpers/ensureAutomationSessionKey'
 export {
   PUBLISH_AUTOMATION_SCOPES,
@@ -70,9 +68,9 @@ export {
   enrollPublishAutomation,
   revokePublishAutomation,
   type EnrollPublishAutomationParams,
-  type EnrollPublishAutomationResult,
   type RevokePublishAutomationParams,
-} from './helpers/enrollPublishAutomation'
+} from './helpers/thirdwebAutomation'
+export type { EnrollPublishAutomationResult } from './helpers/enrollPublishAutomation'
 export {
   assertStorageBoundToIdentity,
   type AssertStorageBoundToIdentityParams,

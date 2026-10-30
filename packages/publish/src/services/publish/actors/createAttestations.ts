@@ -7,7 +7,6 @@ import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
-import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
 import { encodeExecutorMultiPublish, encodeMultiPublish } from '~/helpers/contracts'
 import {
   assertExecutorModuleReadyForAccount,
@@ -65,6 +64,11 @@ type PublishRouting = {
 
 function isExecutorModuleAddress(value: string | undefined): value is string {
   return !!value && /^0x[0-9a-fA-F]{40}$/.test(value.trim())
+}
+
+/** Whether `wallet` sends as the publishing account itself rather than as an EOA that administers it. */
+function sendsAsPublisher(wallet: PublishWallet, publisher: string | undefined): boolean {
+  return !!publisher && wallet.kind !== 'eoa' && wallet.txSender.address.toLowerCase() === publisher.toLowerCase()
 }
 
 export function resolvePublishRouting(input: PublishRoutingInput): PublishRouting {
@@ -229,7 +233,18 @@ async function executeCreateAttestations(
         routeToExecutorModule = true
         // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
         await assertExecutorModuleReadyForAccount(address)
+      } else if (sendsAsPublisher(activeWallet, address)) {
+        // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
+        // publishes as it is: no Thirdweb in-app wallet to connect.
+        routing = resolvePublishRouting({
+          useModularExecutor,
+          publisherAddress: address,
+          modularAccountModuleContract,
+          managedAddress: address,
+        })
+        await ensureManagedAccountEasConfigured(address, activeWallet)
       } else {
+        const { runModularExecutorPublishPrep } = await import('~/helpers/ensureManagedAccountReady')
         const prep = await runModularExecutorPublishPrep()
         if (!prep.ok) {
           throw prep.error

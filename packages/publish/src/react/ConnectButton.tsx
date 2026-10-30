@@ -28,6 +28,7 @@ import { getPublishConfig } from "../config"
 import type { Account, Wallet } from "thirdweb/wallets"
 import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
+import { getManagedAccountAdminWallet } from "../helpers/managedAccountAdmin"
 import { PublishManager } from "../services/publishManager"
 import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
 
@@ -71,7 +72,7 @@ async function ensureExecutorModulesForConnect(
       if (!ma) {
         return
       }
-      await ensureExecutorModuleInstalled(managedAddress, ma, config)
+      await ensureExecutorModuleInstalled(managedAddress, () => getManagedAccountAdminWallet(managedAddress), config)
     } catch {
       /* managed wallet session may lag modular connect; publish prep retries module install */
     }
@@ -79,7 +80,11 @@ async function ensureExecutorModulesForConnect(
   }
 
   try {
-    await ensureExecutorModuleInstalled(modularAccount.address, modularAccount, config)
+    await ensureExecutorModuleInstalled(
+      modularAccount.address,
+      () => getManagedAccountAdminWallet(modularAccount.address),
+      config,
+    )
   } catch (err) {
     reportWalletSetupWarning(err)
   }
