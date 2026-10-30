@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- EAS sync skips a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas), drops such members from a list, and doesn't fetch them as related seeds. Only `0x…20` was skipped before; other small values were stored as relations to seeds that don't exist.
 - New `getPublishPayload` / `validateItemForPublish` / `getPublishGraph` option `backReferences` (`PublishBackReferences`): `'link'` attests a relation back to an item the publish is still creating (both sides of A ↔ B) and fills it with a reference; `'defer'`, the default, leaves it for a later publish as before.
 - `getPublishPayload` gives a reference into a list property `listElement: true` and the `elementIndex` it fills, one entry per position where the list holds the draft, so a draft listed twice fills both (see the @seedprotocol/publish changelog).
 - Schema files the SDK writes use `$schema: 'https://seedprotocol.io/schemas/data-model/v1'` (was `https://seedprotocol.org/...`, a domain the project doesn't own). Files with the old URL still load, and `$schema` no longer counts toward a schema's content hash, so a stored file with the old URL matches the same schema today instead of failing with "already exists with different content". Each schema is re-applied once after upgrading, because the hashes stored in the database change.

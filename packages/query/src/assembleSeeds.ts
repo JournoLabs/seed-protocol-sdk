@@ -1,6 +1,7 @@
 import {
   decodeEasNumber,
   isEasEmptyValue,
+  isUnfilledReference,
   isNumericEasType,
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
@@ -31,10 +32,6 @@ import {
 } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
-
-const relationValuesToExclude = [
-  '0x0000000000000000000000000000000000000000000000000000000000000020',
-]
 
 const RESERVED_KEYS = new Set([
   'seedUid',
@@ -188,11 +185,14 @@ async function processItemProperty(
     isRelation = true
     isList = Array.isArray(metadata.value)
     propertyNameSnake = relationPropertyKey(propertyNameSnake, isList)
+    // A reference slot the publisher's multiPublish never filled names no seed: a relation holding
+    // one is absent, and a list keeps its other members.
     if (Array.isArray(metadata.value)) {
-      metadata.value.forEach((value: string) => {
-        if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
-      })
-    } else if (!relationValuesToExclude.includes(metadata.value as string)) {
+      metadata.value = metadata.value.filter((value: unknown) => !isUnfilledReference(value))
+      metadata.value.forEach((value: string) => addRelatedSeedUid(ctx, property, value))
+    } else if (isUnfilledReference(metadata.value)) {
+      return
+    } else {
       addRelatedSeedUid(ctx, property, metadata.value as string)
     }
   }
@@ -384,7 +384,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
         const hasRelationUid = uids.some(
           (v) =>
             typeof v === 'string' &&
-            !relationValuesToExclude.includes(v) &&
+            !isUnfilledReference(v) &&
             ctx.assembledItems.has(v),
         )
         if (!hasRelationUid) continue
@@ -393,7 +393,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
         const models: string[] = []
         let resolved = false
         for (const uid of uids) {
-          if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+          if (typeof uid !== 'string' || isUnfilledReference(uid)) {
             urls.push(String(uid))
             models.push('unknown')
             continue
@@ -433,7 +433,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
           }
         }
       } else if (typeof value === 'string') {
-        if (relationValuesToExclude.includes(value)) continue
+        if (isUnfilledReference(value)) continue
         if (!ctx.assembledItems.has(value)) continue
 
         const related = ctx.assembledItems.get(value)
@@ -487,7 +487,7 @@ function expandRelationProperties(ctx: AssembleContext): void {
       let didExpand = false
 
       for (const uid of uids) {
-        if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+        if (typeof uid !== 'string' || isUnfilledReference(uid)) {
           expanded.push(uid)
           continue
         }

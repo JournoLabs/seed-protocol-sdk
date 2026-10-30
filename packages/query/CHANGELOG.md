@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Assembled records leave out a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas) and drop such members from a list; neither is fetched as a related seed. Only `0x…20` was skipped before.
 - New `getSeedAttestations(seedUids, { source, pins })`: each seed's record with the property attestations it is assembled from, as attested (`easName`, `easType`, `value`, `isRelation`, attestation and schema uids, attester, time). A `SeedRecord` keeps neither the EAS type nor the EAS name, which RDF export needs. It reads the same seeds, versions and pins as `getSeeds`, assembles with `relations: 'uids'` and no storage hydration, and doesn't use the query cache.
 
 ## 0.7.13 (2026-10-29)
