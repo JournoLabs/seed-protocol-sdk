@@ -102,6 +102,8 @@ const txSender = await createManagedAccountTxSender({
 await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, admin: { signer: owner.signer, txSender } })
 ```
 
+Register `{ signer: owner.signer, txSender, kind: 'modular' }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.
+
 ### Recipe 3: Thirdweb ConnectButton (batteries-included)
 
 ```tsx
@@ -330,7 +332,7 @@ await deletePublishProcessById(runId) // numeric row id from `records`
 
 Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md).
 
-APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
+APIs live on `@seedprotocol/publish` (sidecar attest/revoke, and `enrollPublishAutomation`, `revokePublishAutomation` and the session-key helpers taking wallets) and `@seedprotocol/publish/thirdweb` (the same with wallets defaulting to the connected in-app wallet, and `assertStorageBoundToIdentity`).
 
 ### Modular executor (`useModularExecutor`)
 

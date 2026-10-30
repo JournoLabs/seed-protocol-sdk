@@ -5,6 +5,8 @@ import { getPublishChainName } from './chainConfig'
 import { readIsAdmin } from './contracts'
 import { getClient, getModularAccountWallet, syncPublishInAppAuthToken } from './thirdweb'
 import { getPublishThirdwebChain } from './thirdwebChain'
+import { fromThirdwebAccount } from './adapters/thirdwebAccount'
+import type { PublishWallet } from './seedSigner'
 
 /**
  * Connects the user's in-app EOA, the ManagedAccount's admin, for admin-only transactions such as
@@ -46,4 +48,9 @@ export async function getManagedAccountAdmin(managedAddress: string): Promise<Ac
     )
   }
   return admin
+}
+
+/** {@link getManagedAccountAdmin} as a `PublishWallet` that sends from the admin EOA. */
+export async function getManagedAccountAdminWallet(managedAddress: string): Promise<PublishWallet> {
+  return fromThirdwebAccount(await getManagedAccountAdmin(managedAddress), { kind: 'eoa' })
 }

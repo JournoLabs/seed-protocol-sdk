@@ -90,6 +90,17 @@ export {
   isPublishWallet,
 } from './helpers/seedSigner'
 export {
+  enrollPublishAutomation,
+  revokePublishAutomation,
+  type EnrollPublishAutomationParams,
+  type EnrollPublishAutomationResult,
+  type RevokePublishAutomationParams,
+} from './helpers/enrollPublishAutomation'
+export {
+  ensureExecutorModuleInstalled,
+  type EnsureExecutorModuleResult,
+} from './helpers/ensureExecutorModule'
+export {
   ensureAutomationSessionKey,
   removeAutomationSessionKey,
   isAutomationSessionActive,
