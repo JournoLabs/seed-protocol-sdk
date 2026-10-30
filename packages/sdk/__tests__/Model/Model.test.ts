@@ -234,6 +234,63 @@ testDescribe('Model Integration Tests', () => {
     })
   })
 
+  describe('Model.create() - names that can not publish', () => {
+    const importSchema = async (schemaName: string) => {
+      const testSchema = createTestSchema(schemaName)
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      return Schema.create(schemaName, { waitForReady: true })
+    }
+
+    it('rejects a reserved model name with no properties, and leaves no model', async () => {
+      const schemaName = 'Test Schema Reserved Bare'
+      const schema = await importSchema(schemaName)
+
+      await expect(Model.create('Struct', schema)).rejects.toThrow('Model "Struct" publishes as "struct"')
+
+      expect(schema.models.map((model) => model.modelName)).not.toContain('Struct')
+      expect(Model.getByName('Struct', schemaName)).toBeUndefined()
+      expect(await schema.saveNewVersion()).toBeDefined()
+    })
+
+    it('rejects a reserved model name with properties, and leaves no model', async () => {
+      const schemaName = 'Test Schema Reserved Props'
+      const schema = await importSchema(schemaName)
+
+      await expect(
+        Model.create('Event', schema, { properties: { title: { dataType: 'Text' } } }),
+      ).rejects.toThrow('Model "Event" publishes as "event"')
+
+      expect(Model.getByName('Event', schemaName)).toBeUndefined()
+      expect(await schema.saveNewVersion()).toBeDefined()
+    })
+
+    it('rejects a reserved property name, and leaves no model', async () => {
+      const schemaName = 'Test Schema Reserved Property'
+      const schema = await importSchema(schemaName)
+
+      await expect(
+        Model.create('Reserved Property Note', schema, { properties: { view: { dataType: 'Text' } } }),
+      ).rejects.toThrow('Property "view" publishes as "view"')
+
+      expect(Model.getByName('Reserved Property Note', schemaName)).toBeUndefined()
+    })
+
+    it('throws at once with waitForReady false', async () => {
+      const schema = await importSchema('Test Schema Reserved Sync')
+      expect(() => Model.create('Struct', schema, { waitForReady: false })).toThrow('publishes as "struct"')
+    })
+
+    it('leaves no model when the write fails', async () => {
+      const schemaName = 'Test Schema No Row'
+      // A Schema instance with no row: the model has nothing to link to
+      const schema = { schemaName, _getSnapshotContext: () => ({ schemaName }) }
+      const model = Model.create('Unwritten Model', schema, { waitForReady: false }) as Model
+      const id = model.id!
+      await waitUntilOrThrow(() => Model.getById(id) === undefined)
+      expect(Model.getByName('Unwritten Model', schemaName)).toBeUndefined()
+    })
+  })
+
   describe('Model.create() - Duplicate Name Validation', () => {
     it('should automatically rename model when duplicate name exists in cache (case-insensitive)', async () => {
       const schemaName = 'Test Schema Duplicate Names Cache'
