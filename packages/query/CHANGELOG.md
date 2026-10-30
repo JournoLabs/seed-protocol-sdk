@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
 - Only `bytes32` and `bytes32[]` properties are relations. Since 0.7.13 a property of any type whose EAS name ended in `_id` or `_ids` came back without the suffix (a `string external_id` as `external`, with no `external_id` or `externalId`), in every `relations` mode and in changelog entries; it is back under its own name. Its value was also fetched as a related seed (before 0.7.13 too) and, with `'expand'`, replaced by that seed when one matched. The name rule now applies only to an attestation with no type. `getSeedAttestations` reports `isRelation` by the same rule, so RDF export no longer links a `string external_id` as a related seed. The item cache codes for `'expand'` and `'uids'` changed (`e6`, `e7`), so records cached in the 0.7.13 shape aren't read.
 - `initializeQueryPlatform({ models })` (or `setQueryModels(models)`) takes your schema file's `models`, and List relations come back under their schema keys: `co_author_identity_ids` as `coAuthors` and `featured_portfolio_clip_ids` as `featured`, in every `relations` mode, in changelog entries and in `getSeedAttestations` records. Without models the key is still the EAS name's first word, plural (`cos`, `featureds`): the EAS name doesn't keep where the key ends and the related model starts. Cache keys include the models. `models` and each model's `properties` can be objects keyed by name or arrays with a `name` on each entry.
@@ -10,6 +10,20 @@ All notable changes to this package are documented in this file.
 - `queryBySchema` results have `listed`: the number of Seeds the listing returned for the page, before Seeds with no Version were left out. Page on while `listed` equals `limit`; a short or empty page with `listed === limit` has more after it. Without it, finding the end took a second listing through `getRemoteQueryDataSource().listSeedsBySchemaName`. Code that builds its own `QueryBySchemaResult` (a mock, say) needs the field.
 - Assembled records leave out a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas) and drop such members from a list; neither is fetched as a related seed. Only `0x…20` was skipped before.
 - New `getSeedAttestations(seedUids, { source, pins })`: each seed's record with the property attestations it is assembled from, as attested (`easName`, `easType`, `value`, `isRelation`, attestation and schema uids, attester, time). A `SeedRecord` keeps neither the EAS type nor the EAS name, which RDF export needs. It reads the same seeds, versions and pins as `getSeeds`, assembles with `relations: 'uids'` and no storage hydration, and doesn't use the query cache.
+
+### Commits
+
+#### Features
+
+- eas, sdk: readers treat an unfilled reference as no related seed (de73cdfc)
+- name List relations from the schema's models (cbcb4766)
+- rdf: state-graph export with protocol IRIs, and getSeedAttestations in query (ac4b088e)
+
+#### Fixes
+
+- read schema models written as arrays (74a1f528)
+- getSeedAttestations uses the shared relation rule (3781b167)
+- only bytes32 properties are relations; listed count on queryBySchema (9c5f90a3)
 
 ## 0.7.13 (2026-10-29)
 

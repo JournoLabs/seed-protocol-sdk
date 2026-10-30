@@ -2,9 +2,19 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.0 (2026-10-30)
 
 - **Breaking:** `SeedProvider` and `SeedClientGate` apply a change to their `addresses` (`initConfig.addresses` for the gate) with `client.setAddresses` instead of running `client.init` again, which now leaves the stored addresses alone. Passing `[]` after a disconnect clears them. A remount runs init again and doesn't change them, so a gate remounted with `addresses: []` keeps the connected wallet's addresses. Leaving the prop out keeps the stored ones. A failed `setAddresses` is logged.
+
+### Commits
+
+#### Breaking
+
+- a repeat client.init leaves the stored addresses alone (0417ee9f)
+
+#### Fixes
+
+- sdk: use seedprotocol.io for the schema file $schema URL (ea2d96e3)
 
 ## 0.7.13 (2026-10-29)
 
