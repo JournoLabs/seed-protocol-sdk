@@ -61,15 +61,20 @@ describe('getEasSchemaUidForExactDefinition', () => {
     expect(request).toHaveBeenCalledTimes(2)
   })
 
-  it('looks up again once the schema is registered in this client', async () => {
+  it('answers with a schema registered in this client before the indexer has it', async () => {
     expect(await getEasSchemaUidForExactDefinition('string title')).toBeUndefined()
 
     // e.g. publish's ensureEasSchemasForItem after registering it on-chain
     setSchemaUidForSchemaDefinition({ text: 'string title', schemaUid: UID_A })
-    schemas = [{ id: UID_A }]
 
     expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the definition exact: a recorded `bytes32 title` does not answer `string title`', async () => {
+    setSchemaUidForSchemaDefinition({ text: 'bytes32 title', schemaUid: UID_B })
+    expect(await getEasSchemaUidForExactDefinition('string title')).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
   })
 
   it('looks up again after the miss TTL (schema registered by another client)', async () => {
@@ -109,9 +114,8 @@ describe('getEasSchemaUidForExactDefinition', () => {
     setSchemaUidForSchemaDefinition({ text: 'string title', schemaUid: UID_A })
     expect(await lookup).toBeUndefined()
 
-    schemas = [{ id: UID_A }]
     expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(1)
   })
 })
 

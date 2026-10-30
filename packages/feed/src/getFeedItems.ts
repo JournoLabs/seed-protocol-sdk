@@ -1,9 +1,15 @@
 import {
   queryBySchema,
   queryBySchemaForMonth,
-  getArweaveUrlForTransaction,
   type SeedRecord,
 } from '@seedprotocol/query'
+import {
+  buildArweaveTransactionLink,
+  getPublicArweaveBaseUrl,
+  getPublicArweaveRawUrl,
+  parseArweaveTransactionLink,
+  publishedArweaveLinksInHtml,
+} from '@seedprotocol/arweave'
 import { initializeFeedPlatform } from './bootstrap'
 import { loadFeedConfig } from './config'
 
@@ -73,18 +79,18 @@ export const setFeedItemDefaults = (
   let defaultLink = attestationLink
   if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
     try {
-      defaultLink = getArweaveUrlForTransaction(storageTransactionId)
+      defaultLink = getPublicArweaveRawUrl(storageTransactionId)
     } catch (error) {
       console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)
     }
   }
 
   const currentLink = (item.link || item.Link) as string | undefined
-  if (
+  const linkDefaulted =
     !currentLink ||
     currentLink === 'undefined' ||
     (typeof currentLink === 'string' && currentLink.trim() === '')
-  ) {
+  if (linkDefaulted) {
     item.link = defaultLink
     item.Link = defaultLink
   } else {
@@ -102,7 +108,9 @@ export const setFeedItemDefaults = (
     currentGuid === 'undefined' ||
     (typeof currentGuid === 'string' && currentGuid.trim() === '')
   ) {
-    item.guid = item.link || defaultLink
+    // A stored transaction's guid is its ar:// URI (D34), so it doesn't change with the gateway
+    // (`arweaveDomain`) the link is on. An item with its own link keeps that link as its guid.
+    item.guid = storageTransactionId && linkDefaulted ? `ar://${storageTransactionId}` : item.link || defaultLink
     item.Guid = item.guid
   } else {
     if (!item.guid || item.guid === 'undefined') {
@@ -206,7 +214,7 @@ const setImageRelationCloneForFeed = (
 
   if (storageTransactionId && storageTransactionId.length > 0) {
     try {
-      const mediaLink = getArweaveUrlForTransaction(storageTransactionId)
+      const mediaLink = getPublicArweaveRawUrl(storageTransactionId)
       clone.link = mediaLink
       clone.Link = mediaLink
     } catch {
@@ -282,9 +290,40 @@ function seedRecordsToFeedItems(
     itemUrlPath: feedConfig.itemUrlPath,
   }
 
-  return records.map((record) =>
-    applyFeedDefaultsDeep(record.data, schemaName, defaultsOptions),
+  const publicBaseUrl = getPublicArweaveBaseUrl()
+  return records.map(
+    (record) =>
+      withPublicArweaveLinks(applyFeedDefaultsDeep(record.data, schemaName, defaultsOptions), publicBaseUrl) as Record<
+        string,
+        unknown
+      >,
   )
+}
+
+/** Keys `withPublicArweaveLinks` leaves as they are. */
+const GUID_KEYS = new Set(['guid', 'Guid'])
+
+/**
+ * `value` with every Arweave link on the public gateway: a field that is a link, and the links in
+ * Html fields (ADR 0025). Query gives this reader's URLs (hydrated bodies and image URLs on its
+ * first read gateway, which on a Hyper feed server is the local sidecar); RSS readers are outside
+ * Seed and need public ones. A `guid` keeps its value. Returns new arrays and objects; query's
+ * records stay as they are.
+ */
+function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown {
+  if (typeof value === 'string') {
+    if (value.includes('<')) return publishedArweaveLinksInHtml(value, { publicBaseUrl })
+    const link = parseArweaveTransactionLink(value)
+    return link ? buildArweaveTransactionLink(link, publicBaseUrl) : value
+  }
+  if (Array.isArray(value)) return value.map((v) => withPublicArweaveLinks(v, publicBaseUrl))
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      // A guid is an identifier, not a link to follow: it keeps the value it was given (D34).
+      Object.entries(value).map(([key, v]) => [key, GUID_KEYS.has(key) ? v : withPublicArweaveLinks(v, publicBaseUrl)]),
+    )
+  }
+  return value
 }
 
 /**

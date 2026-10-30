@@ -12,7 +12,9 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
 
   const session = await createTunnelSession({
     key: options.key,
-    storePath: options.storePath,
+    keyFile: options.keyFile,
+    keyPair: options.keyPair,
+    bootstrap: options.bootstrap,
     requestTimeoutMs: options.requestTimeoutMs,
     connectTimeoutMs: options.connectTimeoutMs,
     maxStreams: options.maxStreams,
@@ -35,6 +37,7 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
 
   return {
     key: options.key,
+    clientKey: session.clientKey,
     host,
     port: boundPort,
     baseUrl,

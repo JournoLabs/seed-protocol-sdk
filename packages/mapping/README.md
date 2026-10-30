@@ -66,7 +66,7 @@ const doc: MappingDocument = {
 }
 ```
 
-RSS with resolve jobs:
+RSS with resolve jobs. `rssXmlToSources` parses with `rss-parser`, which imports Node's `timers`; in a Vite browser build, use `seedVitePlugin({ includeNodePolyfills: true })` from `@seedprotocol/vite`, which polyfills it.
 
 ```ts
 const { items } = await rssXmlToSources(xml)
@@ -124,7 +124,7 @@ const mappings = [
     propertyName: 'authors',
     resolve: 'lookup' as const,
     lookup: {
-      entries: [{ value: 'Jane Doe', ref: 'identity-seed-uid' }],
+      entries: [{ value: 'Jane Doe', refs: ['identity-seed-uid'] }],
     },
   },
 ]
@@ -146,13 +146,49 @@ const { properties, errors } = await applyMappingAsync(
 )
 // Unmatched values are omitted from the bag and listed in errors[].
 // Do not fetch identities inside apply — persist the assignment, then apply.
+
+// Sync apply reports the misses through a callback:
+applyMapping(itemSources, mappings, postTargets, {
+  onUnmatched: ({ propertyName, value }) => holdItem(propertyName, value),
+})
 ```
 
-`autoMap` pairs alias matches such as `author` → `authors` with
-`resolve: 'lookup'` and **empty** entries. It never invents refs.
+An entry maps one string to an ordered list of refs, so a joint byline such as "Mira Chen and Sam
+Ortiz" can name both people, lead first. A document saved with `{ value, ref }` entries reads as
+`refs: [ref]`; `lookupEntriesFromMapping` returns entries in the `refs` shape. A Relation target holds
+one ref, so an entry with several gives it the first.
 
-`MappingDocument.lookups` / `applyMappingAsync({ lookups })` remain a read-only
-fallback for 0.6.0 documents. Prefer `FieldMapping.lookup.entries`.
+Set `split` on a lookup edge to look up the parts of a string that has no entry of its own:
+
+```ts
+{
+  sourceId: 'rss-author',
+  propertyName: 'authors',
+  resolve: 'lookup',
+  split: { separators: ['and', '&'] }, // DEFAULT_LOOKUP_SEPARATORS
+  lookup: { entries: [{ value: 'Mira Chen', refs: ['mira'] }, { value: 'Sam Ortiz', refs: ['sam'] }] },
+}
+// "Sam Ortiz & Mira Chen" applies as ['sam', 'mira']
+```
+
+The whole string's own entry wins; only a string without one is split. `and` splits only as a word
+with spaces around it, in any case, and `,` is available but left out of the default because feeds
+print "Chen, Mira". The refs of the parts that have entries are applied in the string's order, and
+each part without one is reported to `onUnmatched` with `splitFrom` set to the whole string
+(`applyMappingAsync` lists it in `errors`). `useFieldMapper`'s `setLookupSplit(rowId, separators)` and
+a lookup row's `onSplitChange` set or clear it; `splitLookupValue` and `resolveLookup` expose the same
+rules to a host that matches strings itself.
+
+A source value matches an entry when their `lookupKey` is the same: NFC, internal whitespace
+collapsed, trimmed and case-folded, so `mira chen` finds the `Mira Chen` entry. Entries are stored
+with case kept (`normalizeLookupKey`). An empty source value is no lookup: it is neither applied nor
+reported as unmatched. `collectLookupValues(items, mapping)` lists every distinct value a lookup's
+source holds across a feed's items, for an editor that assigns them all.
+
+`autoMap` pairs alias matches such as `author` → `authors` with
+`resolve: 'lookup'` and **empty** entries. It never invents refs. Pass the current mappings as its
+third argument and a property that stays a lookup keeps its entries; `useFieldMapper` does. Moving a
+lookup to another source (`withPreservedExtras`) keeps its entries too.
 
 `classifyUrl({ url, contentType? })` is a pure MIME/extension classifier
 (`html` | `image` | `audio` | `video` | `unknown`). Enclosure nodes expose
@@ -247,9 +283,9 @@ const mapper = useFieldMapper({
 ```
 
 Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`.
-Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without
-`renderLookup`, `onLookupsChange` still enables the package uid-text fallback.
-`lookups` / `onLookupsChange` are deprecated — persist `lookup.entries` on the edge.
+Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without it the
+package's uid text editor is shown; `slots.lookups: false` hides it. Entries are stored in
+`lookup.entries` on the edge.
 
 Row and JSON previews match sync `applyMapping` output. Lookup hits appear in the
 bag; extract/file/derive/assemble stay under `_pendingResolve`. JSON sits behind a disclosure.
@@ -264,7 +300,7 @@ default html to assemble.
 
 | Prop | Behavior |
 |------|----------|
-| `theme="default"` (default) | Injects structural + paint CSS once into `document.head` (`@layer seed-field-mapper`) with `--sfm-*` tokens (`--fm-*` aliases kept for one minor) |
+| `theme="default"` (default) | Injects structural + paint CSS once into `document.head` (`@layer seed-field-mapper`) with `--sfm-*` tokens |
 | `theme="structural"` | Layout / spacing only — no color paint; inherits host colors |
 | `theme="none"` | No injection — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …); keeps `seed-field-mapper--unstyled` |
 | `theme="unstyled"` | **Deprecated** shim for `none` |
@@ -276,7 +312,7 @@ default html to assemble.
 | `renderRowExpansion` | Optional `(row: FieldMapperRow) => ReactNode` under the row (e.g. host assemble stack) in `.fm-row-expansion`. |
 | `transformOptions` | Optional `(row, defaults) => options` to add or relabel transforms (e.g. **from title** on slug). Defaults: copy / extract / file / lookup, plus assemble on `Html` targets. |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
-| `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
+| `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` |
 | `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
 
 `SourceNode` may include optional `subtitle` (display-only). Prefer `subtitle` over stuffing a secondary fact into `label` (e.g. origin field name on a resolved well).

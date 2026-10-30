@@ -8,6 +8,7 @@ import { planPropertyWrite, whenValidationLoaded } from '@/ItemProperty/property
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { StagedValueMissingError } from '@/storageValue/stage'
 import { startItemOutbox, waitForOutboxOp, type SetPropertyValueOp } from '@/outbox'
 import { appendOutboxOp, outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import type { SchemaFileFormat } from '@/types/import'
@@ -36,7 +37,7 @@ const pngFile = (name: string): File =>
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -207,6 +208,9 @@ testDescribe('overlay writes (decision D2)', () => {
 
     const error = await cover.save().catch((e: unknown) => e)
     expect((error as Error).message).toContain('was never written')
+    // The op failed in the drainer; the caller gets the class back as the cause (D31)
+    expect((error as Error).cause).toBeInstanceOf(StagedValueMissingError)
+    expect(((error as Error).cause as StagedValueMissingError).path).toContain('/staging/')
     const after = cover.getService().getSnapshot().context
     expect(after.propertyValue).toBe(saved.propertyValue)
     expect(after.refResolvedValue).toBe(saved.refResolvedValue)

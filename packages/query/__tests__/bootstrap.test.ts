@@ -61,6 +61,26 @@ describe.each(['browser', 'node'] as const)('initializeQueryPlatform (%s entry)'
     expect(eas.BaseQueryClient.getQueryClient()).toBeDefined()
     expect(arweave.BaseArweaveClient.getHost()).toBe(arweave.DEFAULT_ARWEAVE_HOST)
   })
+
+  it('keeps the models it was given until set again or torn down', async () => {
+    const loaded = await load(entry)
+    registerHostClients(loaded)
+    const key = () => loaded.query.buildAssembleOptionsKey()
+    const plain = key()
+    await loaded.query.initializeQueryPlatform({
+      models: { Post: { properties: { coAuthors: { type: 'List', ref: 'Identity' } } } },
+    })
+    const withModels = key()
+    expect(withModels).not.toBe(plain)
+    // Every query call initializes with only its source; the models stay
+    await loaded.query.initializeQueryPlatform({ source: 'remote' })
+    expect(key()).toBe(withModels)
+    await loaded.query.initializeQueryPlatform({ models: null })
+    expect(key()).toBe(plain)
+    await loaded.query.initializeQueryPlatform({ models: { Post: { properties: { coAuthors: { type: 'List', ref: 'Identity' } } } } })
+    await loaded.query.teardownQueryPlatform()
+    expect(key()).toBe(plain)
+  })
 })
 
 describe('Arweave client when none is registered', () => {
@@ -126,6 +146,26 @@ describe('a second copy of eas / arweave', () => {
     )
   })
 
+  it("reads with source: 'local' when the SDK registered its clients on another copy", async () => {
+    const sdkCopy = await load('browser')
+    registerHostClients(sdkCopy)
+    const queryCopy = await load('browser', { keepOwner: true })
+    queryCopy.query.registerLocalQuerySource({
+      kind: 'local',
+      getSeedByUid: async () => null,
+      getSeedsByUids: async () => [],
+      getVersionsForSeeds: async () => [],
+      getPropertiesForVersionUids: async () => [],
+      listSeedsBySchemaName: async () => [],
+      listSeedsBySchemaNameForMonth: async () => [],
+    } as never)
+
+    await expect(queryCopy.query.getSeed('0x' + 'ab'.repeat(32), { source: 'local' })).resolves.toBeNull()
+    await expect(queryCopy.query.getSeeds(['0x' + 'ab'.repeat(32)], { source: 'local' })).resolves.toEqual(new Map())
+    await expect(queryCopy.query.queryBySchema('post', { source: 'local' })).resolves.toMatchObject({ items: [] })
+    await expect(queryCopy.query.getSeed('0x' + 'ab'.repeat(32))).rejects.toThrow(/Two copies of @seedprotocol/)
+  })
+
   it('does not throw when the SDK and query share one copy', async () => {
     const loaded = await load('browser')
     registerHostClients(loaded)
@@ -134,4 +174,5 @@ describe('a second copy of eas / arweave', () => {
     registerHostClients(loaded)
     await expect(loaded.query.initializeQueryPlatform()).resolves.toBeUndefined()
   })
+
 })

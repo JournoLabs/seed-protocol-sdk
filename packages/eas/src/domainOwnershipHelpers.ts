@@ -1,5 +1,5 @@
 import { keccak256Hex } from './keccak.js'
-import { normalizeBytes32Hex } from './easUid.js'
+import { bytes32FromNumberHex, normalizeBytes32Hex } from './easUid.js'
 import { checksumAddress } from './utils.js'
 
 /** EAS schema definition for tool domain-ownership sidecar attestations (revocable). */
@@ -164,7 +164,7 @@ export function hashDomainRegistryFingerprint(
 function asBytes32(value: unknown): `0x${string}` {
   if (typeof value === 'string') return normalizeBytes32Hex(value) as `0x${string}`
   if (value && typeof value === 'object' && 'hex' in (value as object)) {
-    return normalizeBytes32Hex(String((value as { hex: string }).hex)) as `0x${string}`
+    return bytes32FromNumberHex(String((value as { hex: string }).hex)) as `0x${string}`
   }
   // EAS decodedDataJson nests each field's value: { name, type, value }.
   if (value && typeof value === 'object' && 'value' in (value as object)) {

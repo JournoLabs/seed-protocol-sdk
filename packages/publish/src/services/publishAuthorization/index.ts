@@ -129,7 +129,7 @@ export function encodePublishAuthorizationAttestationData(params: {
 }
 
 export type AttestPublishAuthorizationParams = {
-  /** Must be the ManagedAccount (identity) wallet — becomes EAS attester. */
+  /** The ManagedAccount (identity) wallet, which becomes the EAS attester. Any other sender throws. */
   wallet: PublishWallet | SeedTxSender
   identity: string
   sessionKey: string
@@ -160,12 +160,12 @@ export async function attestPublishAuthorization(
   params: AttestPublishAuthorizationParams,
 ): Promise<AttestPublishAuthorizationResult> {
   const sender = resolveTxSender(params.wallet)
-  const schemaUid =
-    params.ensureSchema === false
-      ? getPublishAuthorizationSchemaUid()
-      : await ensurePublishAuthorizationSchema(params.wallet)
-
   const identity = assertAddress('identity', params.identity)
+  if (sender.address.toLowerCase() !== identity.toLowerCase()) {
+    throw new Error(
+      `@seedprotocol/publish: attestPublishAuthorization must be sent by the identity (${identity}), not ${sender.address}`,
+    )
+  }
   const sessionKey = assertAddress('sessionKey', params.sessionKey)
   const app = params.app?.trim()
     ? assertAddress('app', params.app)
@@ -201,6 +201,12 @@ export async function attestPublishAuthorization(
         ? expiresAt
         : grantedAt + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS
 
+  // Register the schema only once the inputs are known good, so a bad call spends no gas.
+  const schemaUid =
+    params.ensureSchema === false
+      ? getPublishAuthorizationSchemaUid()
+      : await ensurePublishAuthorizationSchema(params.wallet)
+
   const data = encodePublishAuthorizationAttestationData({
     identity,
     sessionKey,
@@ -228,7 +234,7 @@ export async function attestPublishAuthorization(
     throw new Error('@seedprotocol/publish: attestPublishAuthorization failed — no receipt')
   }
   const { easContractAddress } = getPublishConfig()
-  const uid = getAttestationUidFromReceipt(receipt, easContractAddress)
+  const uid = getAttestationUidFromReceipt(receipt, easContractAddress, sender.address)
   if (!uid || !isValidEasAttestationUid(uid)) {
     throw new Error(
       '@seedprotocol/publish: attestPublishAuthorization failed — could not parse attestation UID',
@@ -305,7 +311,7 @@ export async function assessPublishAuthorizationLive(params: {
   return {
     uid: row.id,
     decoded,
-    assess: assessPublishAuthorization({ decoded, expirationTime }),
+    assess: assessPublishAuthorization({ decoded, expirationTime, revoked: row.revoked }),
     expirationTime,
   }
 }

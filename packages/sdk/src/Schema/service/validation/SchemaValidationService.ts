@@ -1,6 +1,13 @@
-import { Value } from '@sinclair/typebox/value'
+import { Value, ValueErrorType } from '@sinclair/typebox/value'
 import { TProperty } from '@/Schema'
-import { ModelPropertyDataTypes, TPropertyDataType, isDataType, normalizeDataType } from '@/helpers/property'
+import {
+  ModelPropertyDataTypes,
+  TPropertyDataType,
+  isDataType,
+  isKnownDataType,
+  normalizeDataType,
+  validationRuleProblems,
+} from '@/helpers/property'
 import { ValidationResult, ValidationError, ValidationRules, DEFAULT_TEXT_MAX_LENGTH } from '@/Schema/validation'
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
@@ -9,6 +16,28 @@ import { FormatRegistry, Type, TSchema, TUnion, TLiteral } from '@sinclair/typeb
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:validation')
+
+/** Codes for TypeBox's error kinds that have their own; every other kind is a wrong type. */
+const VALUE_ERROR_CODES: Partial<Record<ValueErrorType, string>> = {
+  [ValueErrorType.StringPattern]: 'pattern',
+  [ValueErrorType.StringMinLength]: 'min_length',
+  [ValueErrorType.StringMaxLength]: 'max_length_exceeded',
+  [ValueErrorType.StringFormat]: 'format',
+  [ValueErrorType.StringFormatUnknown]: 'format',
+  [ValueErrorType.ObjectRequiredProperty]: 'required',
+  [ValueErrorType.ObjectAdditionalProperties]: 'unknown_field',
+  [ValueErrorType.NumberMinimum]: 'minimum',
+  [ValueErrorType.NumberExclusiveMinimum]: 'minimum',
+  [ValueErrorType.IntegerMinimum]: 'minimum',
+  [ValueErrorType.IntegerExclusiveMinimum]: 'minimum',
+  [ValueErrorType.NumberMaximum]: 'maximum',
+  [ValueErrorType.NumberExclusiveMaximum]: 'maximum',
+  [ValueErrorType.IntegerMaximum]: 'maximum',
+  [ValueErrorType.IntegerExclusiveMaximum]: 'maximum',
+}
+
+/** The named code for a TypeBox error kind (TypeBox's own are numbers). */
+const valueErrorCode = (type: ValueErrorType): string => VALUE_ERROR_CODES[type] ?? 'type'
 
 // Date properties use Type.String({ format: 'date-time' }). TypeBox only checks formats that are
 // registered, and fails every value for an unknown one, so without this no Date value was valid.
@@ -206,22 +235,19 @@ export class SchemaValidationService {
           const fieldSchema = this.getSchemaForField(TProperty, fieldPath)
           const enhancedMessage = this.enhanceErrorMessage(err, fieldSchema || TProperty, fieldPath)
           
+          const isTypeName = fieldPath === '/dataType' || fieldPath === '/refValueType'
           return {
             field: fieldPath,
             message: enhancedMessage,
-            code: String(err.type || 'validation_error'),
+            code: isTypeName && err.type === ValueErrorType.Union ? 'unknown_data_type' : valueErrorCode(err.type),
             severity: 'error' as const,
           }
         }))
       }
-      
-      if (normalized.validation?.custom) {
-        errors.push({
-          field: 'validation.custom',
-          message: `Custom validators are not supported (validation.custom: "${normalized.validation.custom}"). Use pattern, minLength, maxLength or enum.`,
-          code: 'custom_validation_unsupported',
-          severity: 'error' as const,
-        })
+
+      const warnings: ValidationError[] = []
+      for (const problem of validationRuleProblems(normalized.dataType, normalized.refValueType, normalized.validation)) {
+        ;(problem.severity === 'warning' ? warnings : errors).push(problem)
       }
 
       // Non-List types: refValueType is only valid for Relation+Image (related entity type). Reject otherwise.
@@ -301,6 +327,7 @@ export class SchemaValidationService {
       return {
         isValid: errors.length === 0,
         errors,
+        warnings: warnings.length > 0 ? warnings : undefined,
       }
     } catch (error) {
       logger('Error validating property structure:', error)
@@ -352,10 +379,6 @@ export class SchemaValidationService {
         (dataType === ModelPropertyDataTypes.File && isFileObject) ||
         (dataType === ModelPropertyDataTypes.Image && isBlobObject)
       ) {
-        if (validationRules) {
-          const customErrors = this.validateCustomRules(value, validationRules)
-          errors.push(...customErrors)
-        }
         return {
           isValid: errors.length === 0,
           errors,
@@ -381,20 +404,14 @@ export class SchemaValidationService {
             elementDataType,
             elementEffectiveRules
           )
-          if (!elementResult.isValid && elementResult.errors.length > 0) {
           for (const err of elementResult.errors) {
             errors.push({
               field: `value[${i}]`,
               message: `Element at index ${i}: ${err.message}`,
-              code: validationRules?.enum && Array.isArray(validationRules.enum) && validationRules.enum.length > 0 ? 'enum_violation' : err.code,
+              code: err.code,
               severity: err.severity,
             })
           }
-          }
-        }
-        if (validationRules) {
-          const customErrors = this.validateCustomRules(value, validationRules)
-          errors.push(...customErrors)
         }
         return {
           isValid: errors.length === 0,
@@ -425,58 +442,44 @@ export class SchemaValidationService {
         effectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
       }
 
-      // Apply validation rules
-      const hasEnumRules = !!(validationRules?.enum && Array.isArray(validationRules.enum) && validationRules.enum.length > 0)
+      // Apply validation rules; enum is checked on its own below, so a miss is one problem
       if (Object.keys(effectiveRules).length > 0) {
         schema = this.applyValidationRules(schema, dataType, effectiveRules)
       }
 
       // Validate using TypeBox
-      const isValid = Value.Check(schema, value)
-      
-      if (!isValid) {
-        const typeBoxErrors = [...Value.Errors(schema, value)]
-        const effectiveMaxLength = effectiveRules.maxLength
+      if (!Value.Check(schema, value)) {
         const isDefaultTextLimit =
           dataType === ModelPropertyDataTypes.Text &&
-          effectiveMaxLength === DEFAULT_TEXT_MAX_LENGTH &&
+          effectiveRules.maxLength === DEFAULT_TEXT_MAX_LENGTH &&
           validationRules?.maxLength === undefined
-        errors.push(...typeBoxErrors.map(err => {
+        const typeLabel = dataType === ModelPropertyDataTypes.Html ? 'Html' : 'Text'
+        for (const err of Value.Errors(schema, value)) {
           const fieldPath = err.path || 'value'
-          const originalMessage = (err.message || '').toLowerCase()
-          // TypeBox maxLength errors have message like "Expected string length less or equal to X"
-          const isMaxLengthError = originalMessage.includes('length') && (originalMessage.includes('less') || originalMessage.includes('equal') || originalMessage.includes('max'))
-          let enhancedMessage: string
-          if (isMaxLengthError && effectiveMaxLength !== undefined) {
-            const typeLabel = dataType === ModelPropertyDataTypes.Html ? 'Html' : 'Text'
-            if (isDefaultTextLimit) {
-              enhancedMessage = `Text properties have a default limit of 255 characters. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
-            } else {
-              enhancedMessage = `${typeLabel} must be ${effectiveMaxLength} characters or less. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
-            }
+          const code = valueErrorCode(err.type)
+          let message: string
+          if (code === 'max_length_exceeded') {
+            message = isDefaultTextLimit
+              ? `Text properties have a default limit of ${DEFAULT_TEXT_MAX_LENGTH} characters. Set validation.maxLength for a higher limit, or use an Html property for long content.`
+              : `${typeLabel} must be ${effectiveRules.maxLength} characters or less.`
+          } else if (code === 'min_length') {
+            message = `${typeLabel} must be at least ${effectiveRules.minLength} characters.`
+          } else if (code === 'pattern') {
+            message = `${typeLabel} must match the pattern ${effectiveRules.pattern}. Received: ${JSON.stringify(value)}`
           } else {
-            enhancedMessage = this.enhanceErrorMessage(err, schema, fieldPath)
+            message = this.enhanceErrorMessage(err, schema, fieldPath)
           }
-          // Use max_length_exceeded when failure is due to maxLength; enum_violation when enum rules; else generic
-          const code = isMaxLengthError
-            ? 'max_length_exceeded'
-            : hasEnumRules
-              ? 'enum_violation'
-              : String(err.type || 'value_validation_error')
-
-          return {
-            field: fieldPath,
-            message: enhancedMessage,
-            code,
-            severity: 'error' as const,
-          }
-        }))
+          errors.push({ field: fieldPath, message, code, severity: 'error' as const })
+        }
       }
 
-      // Additional custom validations
-      if (validationRules) {
-        const customErrors = this.validateCustomRules(value, validationRules)
-        errors.push(...customErrors)
+      if (hasEnum && !effectiveRules.enum!.includes(value)) {
+        errors.push({
+          field: 'value',
+          message: `Expected one of: ${effectiveRules.enum!.map((v) => JSON.stringify(v)).join(', ')}. Received: ${JSON.stringify(value)}`,
+          code: 'enum_violation',
+          severity: 'error' as const,
+        })
       }
 
       return {
@@ -566,6 +569,13 @@ export class SchemaValidationService {
         code: 'missing_type',
         severity: 'error' as const,
       })
+    } else if (!isKnownDataType(definitionType)) {
+      errors.push({
+        field: 'property.type',
+        message: `Unknown property type "${definitionType}". Expected one of: ${Object.values(ModelPropertyDataTypes).join(', ')}`,
+        code: 'unknown_data_type',
+        severity: 'error' as const,
+      })
     }
 
     // Validate Relation: requires model
@@ -598,6 +608,13 @@ export class SchemaValidationService {
           code: 'missing_ref_value_type',
           severity: 'error' as const,
         })
+      } else if (!isKnownDataType(refValueType)) {
+        errors.push({
+          field: 'property.refValueType',
+          message: `Unknown refValueType "${rawRefValueType}". Expected one of: ${Object.values(ModelPropertyDataTypes).join(', ')}`,
+          code: 'unknown_data_type',
+          severity: 'error' as const,
+        })
       } else if (refValueType === 'Relation' || refValueType === 'RelationProperty') {
         const model = (propertyDefinition as any).ref ?? (propertyDefinition as any).model ?? (propertyDefinition as any).items?.model
         if (!model || String(model).trim() === '') {
@@ -615,6 +632,19 @@ export class SchemaValidationService {
             severity: 'error' as const,
           })
         }
+      }
+    }
+
+    // The structure check above covers the rules when propertyData is given
+    if (!propertyData && definitionType) {
+      const definition = propertyDefinition as {
+        refValueType?: string
+        items?: { type?: string }
+        validation?: Record<string, unknown>
+      }
+      const definitionRefValueType = definition.refValueType ?? definition.items?.type
+      for (const problem of validationRuleProblems(definitionType, definitionRefValueType, definition.validation)) {
+        if (problem.severity === 'error') errors.push({ ...problem, field: `property.${problem.field}` })
       }
     }
 
@@ -815,10 +845,9 @@ export class SchemaValidationService {
   }
 
   /**
-   * Apply validation rules to a TypeBox schema. For Text and Html, pattern, minLength and
-   * maxLength combine into one string schema; enum further restricts the value to its list.
-   * (Each rule used to replace the schema built so far, so e.g. Text's default maxLength
-   * silently dropped any pattern.)
+   * Apply the string rules to a TypeBox schema. For Text and Html, pattern, minLength and
+   * maxLength combine into one string schema. (Each rule used to replace the schema built so far,
+   * so e.g. Text's default maxLength silently dropped any pattern.) Enum is checked separately.
    */
   private applyValidationRules(
     schema: TSchema,
@@ -844,29 +873,6 @@ export class SchemaValidationService {
       }
     }
 
-    if (rules.enum && Array.isArray(rules.enum) && rules.enum.length > 0) {
-      const allowed = Type.Union(rules.enum.map(val => Type.Literal(val)))
-      result = result === schema ? allowed : Type.Intersect([result, allowed])
-    }
-
     return result
   }
-
-  /**
-   * Validate custom validation rules
-   */
-  private validateCustomRules(
-    value: any,
-    rules: ValidationRules
-  ): ValidationError[] {
-    const errors: ValidationError[] = []
-
-    // Custom validators are not supported; validatePropertyStructure rejects schemas that use them.
-    if (rules.custom) {
-      logger('Ignoring unsupported custom validator:', rules.custom)
-    }
-
-    return errors
-  }
 }
-

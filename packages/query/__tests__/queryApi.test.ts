@@ -105,7 +105,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     const result = await queryBySchema('post', {
       limit: 10,
       skip: 0,
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
       cache: false,
     })
@@ -113,6 +113,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     expect(result.limit).toBe(10)
     expect(result.skip).toBe(0)
     expect(result.items).toHaveLength(1)
+    expect(result.listed).toBe(1)
     const record = result.items[0]!
     expect(record.seedUid).toBe(seedUid)
     expect(record.schemaName).toBe('post')
@@ -170,7 +171,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     ])
 
     const records = await assembleSeeds('post', seeds, {
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
     })
     expect(records[0]!.data.title).toBe('New')
@@ -236,7 +237,7 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
 
     const result = await getSeed(seedUid, {
       include: 'data+changelog',
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
       cache: false,
     })
@@ -324,7 +325,7 @@ describe('queryBySchema / getSeed caching', () => {
     rmSync(cacheDir, { recursive: true, force: true })
   })
 
-  const uncachedOpts = { limit: 10, skip: 0, relations: 'urls' as const, hydrateStorage: false }
+  const uncachedOpts = { limit: 10, skip: 0, relations: 'expand' as const, hydrateStorage: false }
   const optionsKey = buildAssembleOptionsKey(uncachedOpts)
 
   it('caches collection on skip=0 and returns etag', async () => {
@@ -477,12 +478,12 @@ describe('queryBySchema / getSeed caching', () => {
   it('keeps collections for different assemble options apart', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'One', 100)
     await queryBySchema('post', uncachedOpts)
-    await queryBySchema('post', { ...uncachedOpts, relations: 'expand' })
+    await queryBySchema('post', { ...uncachedOpts, relations: 'uids' })
     expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(2)
     expect(
       await getQueryCacheManager().getCollection(
         'post',
-        buildAssembleOptionsKey({ relations: 'expand', hydrateStorage: false }),
+        buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false }),
       ),
     ).not.toBeNull()
   })
@@ -507,6 +508,8 @@ describe('queryBySchema / getSeed caching', () => {
       const second = await queryBySchema('post', opts)
       expect(second.items[0]!.data.title).toBe('One')
       expect(second.etag).toBe(first.etag)
+      expect(second.listed).toBe(first.listed)
+      expect(second.listed).toBe(1)
       expect(mockGetSeedsBySchemaName).toHaveBeenCalledTimes(1)
       expect(mockGetAttestationChangesSince).not.toHaveBeenCalled()
 
@@ -580,7 +583,7 @@ describe('queryBySchema / getSeed caching', () => {
 
     mockRequest.mockClear()
     const hit = await getSeed('0xseed1', {
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
     })
     expect(hit?.data.title).toBe('FromCollection')
@@ -602,7 +605,7 @@ describe('queryBySchema / getSeed caching', () => {
         },
       ],
     })
-    const opts = { relations: 'urls' as const, hydrateStorage: false }
+    const opts = { relations: 'expand' as const, hydrateStorage: false }
     expect((await getSeed('0xseed1', opts))?.data.title).toBe('Before')
 
     mockAssembledPost('0xseed1', '0xver2', 'New version', 100)
@@ -622,7 +625,7 @@ describe('queryBySchema / getSeed caching', () => {
       { id: '0xseed1', refUID: '0x0', timeCreated: 100, revocationTime: 9_999_999_999 },
     ])
     mockRequest.mockResolvedValue({ itemSeeds: [] })
-    expect(await getSeed('0xseed1', { relations: 'urls', hydrateStorage: false })).toBeNull()
+    expect(await getSeed('0xseed1', { relations: 'expand', hydrateStorage: false })).toBeNull()
     expect(await getQueryCacheManager().getItem('0xseed1', optionsKey)).toBeNull()
   })
 
@@ -656,7 +659,7 @@ describe('queryBySchema / getSeed caching', () => {
     it('getSeed results throw on mutation, fresh or cached', async () => {
       mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
       mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
-      const opts = { relations: 'urls' as const, hydrateStorage: false }
+      const opts = { relations: 'expand' as const, hydrateStorage: false }
 
       const fresh = await getSeed('0xseed1', opts)
       expect(writeTitle(fresh!)).toThrow(TypeError)
@@ -673,7 +676,7 @@ describe('queryBySchema / getSeed caching', () => {
       mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
       const result = await getSeed('0xseed1', {
         include: 'data+changelog',
-        relations: 'urls',
+        relations: 'expand',
         hydrateStorage: false,
       })
       expect(() => (result!.changelog as unknown[]).push({})).toThrow(TypeError)
@@ -714,6 +717,52 @@ describe('queryBySchema / getSeed caching', () => {
         { id: '0xver1', decodedDataJson: '', refUID: SEED, schemaId: '0xversion', timeCreated: 110, revoked: true },
       ])
       expect((await queryBySchema('post', { ...uncachedOpts, uidPrefix: '0xfd8c50ca' })).items).toEqual([])
+    })
+  })
+
+  describe('attesters', () => {
+    const SEED = '0x' + 'ab'.repeat(32)
+    const OWNER = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+
+    it('lists by normalized attesters, skips the collection cache, writes items through', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Owned', 100)
+      const result = await queryBySchema('post', {
+        ...uncachedOpts,
+        attesters: [OWNER, OWNER.toUpperCase().replace('0X', '0x'), 'nope'],
+        limit: 16,
+        skip: 32,
+      })
+
+      expect(result.items.map((r) => r.data.title)).toEqual(['Owned'])
+      expect(result.etag).toBeUndefined()
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 16, 32, {
+        attesters: [OWNER.toLowerCase()],
+      })
+      expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
+      expect((await getQueryCacheManager().getItem(SEED, optionsKey))?.record.data.title).toBe('Owned')
+    })
+
+    it('does not touch an existing collection', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Listed', 100)
+      const listed = await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', { ...uncachedOpts, attesters: [OWNER] })
+      expect((await getQueryCacheManager().getCollection('post', optionsKey))?.etag).toBe(listed.etag)
+    })
+
+    it('returns no items, without a request, when no attester is an address', async () => {
+      for (const attesters of [[], [''], ['0x1234', 'not-an-address']]) {
+        expect((await queryBySchema('post', { ...uncachedOpts, attesters })).items).toEqual([])
+      }
+      expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+    })
+
+    it('combines with uidPrefix', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Both', 100)
+      await queryBySchema('post', { ...uncachedOpts, attesters: [OWNER], uidPrefix: 'ABAB' })
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 10, 0, {
+        uidPrefix: '0xabab',
+        attesters: [OWNER.toLowerCase()],
+      })
     })
   })
 
@@ -768,18 +817,18 @@ describe('queryBySchema / getSeed caching', () => {
 
     const withCl = await getSeed(seedUid, {
       include: 'data+changelog',
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
     })
     expect(withCl?.changelog?.length).toBeGreaterThan(0)
 
     const dataKey = buildAssembleOptionsKey({
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
     })
     const clKey = buildAssembleOptionsKey({
       include: 'data+changelog',
-      relations: 'urls',
+      relations: 'expand',
       hydrateStorage: false,
     })
     expect(dataKey).not.toBe(clKey)

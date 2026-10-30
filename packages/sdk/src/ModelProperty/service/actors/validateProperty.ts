@@ -7,6 +7,7 @@ import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // - schema/Schema -> ... -> validateProperty -> Schema -> schema/Schema
 // import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
 // import { Schema } from '@/Schema/Schema'
+import { assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:actors:validateProperty')
@@ -71,12 +72,35 @@ export const validateProperty = fromCallback<
       return
     }
 
+    // A rename to a name that can't publish stops here, before compareAndMarkDraft writes the row
+    if (fullContext.name && fullContext.name !== fullContext._originalValues?.name) {
+      try {
+        assertPropertyNameCanPublish(fullContext.name, {
+          dataType: fullContext.dataType,
+          refValueType: fullContext.refValueType,
+          ref: fullContext.ref ?? fullContext.refModelName,
+          name: fullContext.name,
+        })
+      } catch (error) {
+        sendBack({
+          type: 'validationError',
+          errors: [{
+            field: 'name',
+            message: error instanceof Error ? error.message : String(error),
+            code: 'reserved_name',
+            severity: 'error' as const,
+          }],
+        })
+        return
+      }
+    }
+
     // If we have schema name and model name, validate against schema
     // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
     if (isActorStopped(self)) return
     if (fullContext._schemaName && fullContext.modelName) {
       try {
-        const schema = await Schema.find({ schemaName: fullContext._schemaName, waitForReady: false, hold: false })
+        const schema = await Schema.find({ schemaName: fullContext._schemaName, waitForReady: false })
         if (!schema) throw new Error(`No schema named "${fullContext._schemaName}"`)
         const schemaSnapshot = schema.getService().getSnapshot()
         const schemaStatus = schemaSnapshot.value

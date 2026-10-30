@@ -4,8 +4,160 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `ensureAutomationSessionKey` requires `expiresAt`, and refuses a time that has passed. There is no ten-year default.
+- **Breaking:** `enrollPublishAutomation` defaults to a 90-day key and `PublishAuthorization`, down from 365 days. Enroll again before the end to renew.
+- **Breaking:** `enrollPublishAutomation` fails with the new `AUTOMATION_ACCOUNT_FUNDED` code, before sending anything, when the account's balance plus EntryPoint deposit is above the new `maxAutomationExposureWei` config (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose. An automation publish over the limit logs a warning and goes ahead.
+- **Breaking:** an automation publish refuses a session key approved for anything besides the configured executor, including the zero address, with `MODULAR_SIGNER_ACTIVATION_FAILED`. `enrollPublishAutomation` replaces such a key's targets.
+- `ensureAutomationSessionKey` sends a grant whenever the key's end or targets differ from the request. Enrolling an active key used to attest the new end and leave the key on its old one.
+- A signed session-key grant can be sent for one hour, down from ten years.
+- A publish reads what it created from the `Attested` events of the publishing account on the configured EAS, on every route, including `attestPublishedBy`, `attestDomainOwnership` and `attestPublishAuthorization`. `CreatedAttestation` and `SeedPublished` are no longer read, so logs from other UserOps in the same bundle transaction can't be recorded as this publish's uids. `getAttestedUidsFromReceipt` and `getAttestationUidFromReceipt` take a required `attester`.
+- `multiPublish` is sent with `msg.value` equal to the sum of the attestations' `value` fields, as the contracts now require on both paths. `encodeMultiPublish` sets `value` from the batch, and an automation publish with a non-zero total fails with `AUTOMATION_PREFLIGHT_FAILED` before anything is sent, because session keys are granted no native value. `PublishValueMismatch` is decoded in revert messages.
+- The EIP-7702 sender works on an EOA's first UserOp. It sent viem's stub authorization, which bundlers reject (Alto: "recovered signer address does not match"), so no undelegated EOA could send through it. It now signs a real authorization once, on the first send. `SeedSigner` has an optional `signAuthorization`, implemented by `fromEthersWallet` and local viem accounts. Browser wallets don't expose it over EIP-1193, so `fromEip1193Provider`, `fromViemWalletClient` and `fromPrivyWallet` take a `signAuthorization` option for a wallet vendor's own call. Without one, an undelegated EOA's first send fails with an error that says so, before anything reaches the bundler.
+- A contract publish refuses a `bytes32` or `bytes32[]` property holding a reference placeholder that no reference fills, before anything is sent. The contract would attest it as data.
+- An automation publish whose session key isn't approved for the configured executor fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent, and the message says to run `enrollPublishAutomation` again, which grants it. It used to pass the simulation and fail validation at the bundler.
+- `disconnectPublishWallet()` works before publish is configured, as `clearInAppPublishSession()` does: it records the Disconnect and clears the publish wallet. It threw from `getPublishConfig()` after setting the flag, leaving the tokens and the wallet in place. Without a `thirdwebClientId` the default token key is left.
+- `ConnectButton` waits for the disconnect before stopping publishes, and a failed disconnect is logged and still stops them. The rejection was unhandled.
+- New `fromViemWalletClient(walletClient, { chain?, kind? })` builds a `PublishWallet` from a viem `WalletClient` with an account, such as wagmi's `useWalletClient()` and the kits built on wagmi (RainbowKit, ConnectKit, Reown AppKit). It signs messages and typed data and sends transactions through the client; the user pays gas. `fromEip1193Provider` now builds on it and also takes `kind`.
+- New `fromPrivyWallet(wallet, { chain?, kind? })` builds a `PublishWallet` from a Privy wallet (`useWallets()` in `@privy-io/react-auth`, embedded or external). It switches the wallet to the publish chain when it is on another, then takes its EIP-1193 provider. The package doesn't depend on Privy; `PrivyEthereumWalletLike` declares the fields it reads.
+- A contract publish first checks that the account routes the `multiPublish` this package sends (the executor module: that its bytecode has it), and fails with `ManagedAccountPublishError` code `MULTI_PUBLISH_NOT_ROUTED` naming both selectors when it doesn't, instead of a Router revert. New exports `MULTI_PUBLISH_SELECTOR` (`0xa1263421`) and `assertMultiPublishRouted(target, { executorModule })`, for deploy checks such as `seed:verify-live` to confirm the contracts route what the installed SDK sends.
+- A contract publish is sent with its gas estimate plus 30%, made from the sending account after the simulation passes, instead of a fixed 5,000,000. When the estimate can't be made it falls back to 5,000,000. One that needs more gas than a block holds fails with `ManagedAccountPublishError` code `PUBLISH_TOO_LARGE` before anything is sent. `encodeMultiPublish` callers that pass no `gas` get none.
+- A reverted publish names the contracts' new reference errors (`PlaceholderMismatch`, `ListElementOutOfBounds`, `InvalidRelationEncoding`, `InvalidListEncoding`, `ElementIndexOnSingleRelation`) with their arguments. `PublishTargetAlreadyAttested` and `UnknownPublishLocalId` are gone from `seedErrorsAbi`.
+- A publish through the contract attests both sides of a cycle between drafts (A ↔ B, or a draft pointing back at the published item) in one transaction. The side reached last was left out and attested by its item's next publish. Direct EAS still leaves it out. `checking` validates with the route's handling, and again after deploying a new smart account.
+- **Breaking:** publishing through a managed account or the executor module calls the three-phase `multiPublish` (selector `0xa1263421`), which contracts from before it don't route: the Router reverts with "function does not exist". This release needs the contracts deployed with it, and earlier releases stop working against those contracts. `encodeMultiPublish` takes `listElement` and `elementIndex` on each `propertiesToUpdate` entry and writes the contract's placeholder, `bytes32(sourceIndex + 1)`, into every slot a reference fills. Before sending it refuses what the contract would revert on (a target property missing, attested twice, not a single `bytes32` or `bytes32[]`, a list index out of range, two references to one slot), and a payload that still attests the local id of a request in the batch that no reference fills, which the contract would attest as-is.
+- A publish with draft relations, storage seeds or list members goes out as one transaction. The contract creates every seed before it attests any property, so `createAttestations` no longer sends one transaction per request for them.
+- The direct-to-EAS error for a reference to an earlier request no longer names `PublishTargetAlreadyAttested`, which the contracts removed.
+- **Breaking:** a publish whose uploads add up to more than 25 MiB fails with the new `UploadNeedsConfirmError` unless it is given `confirmUpload: true`, and one over 100 MiB fails with the new `UploadTooLargeError`. Both are thrown in the `checking` step from file sizes, before EAS schemas are registered or any file is read, and `item.publish()` rejects with them as they are. A browser publish holds about 7 copies of its upload bytes in memory and a 1 GB publish failed reading from OPFS, so a large publish froze the page or failed late. New `PublishConfig` options `maxUploadBytes`, `confirmUploadAboveBytes` and `uplinkBitsPerSecond`, and `CreatePublishOptions` `maxUploadBytes` and `confirmUpload`; `Infinity` turns a limit off. Each error carries an `estimate` (`UploadEstimate`).
+- `estimatePublishCost` returns `upload`: `uploadBytes`, `uploadCount`, `largestUploadBytes`, `uploadSeconds` at `uplinkBitsPerSecond` (default 5 Mbit/s), `memory` (`peakBytes`, `deviceMemoryBytes` from `navigator.deviceMemory`, `risk`), the limits, and `tooLarge` / `requiresConfirm`. New `estimateUpload(work, limits)` computes it from a work summary; `DEFAULT_MAX_UPLOAD_BYTES`, `DEFAULT_CONFIRM_UPLOAD_ABOVE_BYTES`, `DEFAULT_UPLINK_BITS_PER_SECOND` and `PUBLISH_MEMORY_MULTIPLIER` are exported.
+- `@seedprotocol/publish` no longer imports `thirdweb` when it loads. `revokeAttestations`, which `config.ts` imports, loaded the Thirdweb account adapter statically for its fallback, so an app without the optional `thirdweb` peer failed to import the package. The adapter now loads only when that fallback runs. `scripts/check-publish-core-no-thirdweb.js` fails the build when the core entry reaches `thirdweb` through a static import again.
+- With `useModularExecutor`, `ensureWalletThenPublish` publishes with a registered wallet that sends as its `publisherAddress` while its signer is a different address (`sendsAsManagedAccount`; for example `createManagedAccountTxSender` as the sender, `kind: 'modular'`). It handed every publish in that mode to the Thirdweb `ensureSmartWalletThenPublish`. Other registrations, including ConnectButton's in-app EOA, still go there.
+- **Breaking:** `ensureExecutorModuleInstalled(account, getAdmin, config)` takes a function returning the account's admin EOA as a `PublishWallet` that sends from itself, called only when an install has to be sent. The second argument was a thirdweb `Account` it ignored. The `/thirdweb` version takes `undefined` there for the connected in-app admin EOA. The core version is now exported from `@seedprotocol/publish`.
+- **Breaking:** `enrollPublishAutomation` and `revokePublishAutomation` are exported from `@seedprotocol/publish` without the Thirdweb SDK, and there `userWallet` is required: a wallet that sends as the ManagedAccount, whose signer is an admin EOA. Enroll takes `admin`, the admin EOA sending from itself, for an executor install; without it an install fails with `EXECUTOR_MODULE_NOT_INSTALLED`. Both refuse a `userWallet` that sends from another address with `MANAGED_ACCOUNT_UNAVAILABLE`, before sending anything; enroll used to grant the session key and then fail to attest. The `/thirdweb` versions default `userWallet` to the connected managed in-app wallet and `admin` to its in-app admin EOA, as before.
+- With `useModularExecutor`, a publish wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'` (for example `createManagedAccountTxSender` as the sender, `kind: 'modular'`) publishes through that wallet. Publish ran the Thirdweb in-app wallet prep and replaced the wallet for every publish in that mode. The publish actor now loads the Thirdweb prep only when it runs it.
+- New `createManagedAccountTxSender({ signer, bundlerUrl, paymasterUrl?, sponsored?, managedAddress?, factoryAddress?, entryPointAddress?, estimateFeesPerGas? })`: a `SeedTxSender` that sends UserOps from a Seed ManagedAccount through any EntryPoint v0.6 bundler with no Thirdweb SDK (permissionless `toThirdwebSmartAccount`). The signer is an admin EOA or a session key the account granted. It raises the bundler's `callGasLimit` estimate by `CALL_GAS_HEADROOM_BPS` (or to `tx.gas` when larger) before the paymaster signs, as `seedPaymaster` does on the Thirdweb path. A first UserOp from a counterfactual account deploys it.
+- The permissionless EIP-7702 sender asks its paymaster with viem's ERC-7677 paymaster client instead of permissionless's Pimlico client, and takes fees from the bundler's `pimlico_getUserOperationGasPrice` only when the bundler answers that method, falling back to the chain's estimate. A bundler without the method failed every send before.
+- `CALL_GAS_HEADROOM_BPS` is exported from `@seedprotocol/publish` as well as `/thirdweb`.
+- **Breaking:** `ensureAutomationSessionKey` and `removeAutomationSessionKey` no longer use the Thirdweb SDK and take `admin: PublishWallet`. `admin.signer`, an admin EOA of the ManagedAccount, signs the `setPermissionsForSigner` request; `admin.txSender` sends it, and since the account accepts an admin-signed request from any sender, that can be the admin EOA itself or a relayer. A signer that isn't an admin fails with `MODULAR_SIGNER_ACTIVATION_FAILED` naming the address, before anything is sent; the account would revert with a bare `!sig`. Both, with `isAutomationSessionActive`, are now exported from `@seedprotocol/publish`. The `/thirdweb` versions keep `admin` optional and default it to the connected managed in-app wallet, as before. `removeAutomationSessionKey` sends nothing for an undeployed account.
+- `enrollPublishAutomation` and `revokePublishAutomation` add and remove the session key with `userWallet` when one is given. They used the connected managed in-app wallet for the key whatever `userWallet` was.
+- **Breaking:** removed `ensureManagedSignerSessionKey`, `defaultApprovedTargetsForModularPublish` and `toThirdwebSessionKeyPermissions` from `@seedprotocol/publish/thirdweb`. The first two were deprecated: interactive publishing needs no session key. Use `ensureAutomationSessionKey` for a server-held key.
+- `SeedSigner` has an optional `signTypedData` (EIP-712, `eth_signTypedData_v4`), implemented by `fromEthersWallet`, `fromEip1193Provider` and `fromThirdwebAccount`. The permissionless EIP-7702 sender forwards its account's `signTypedData` to it; it threw before.
+
+## 0.7.13 (2026-10-29)
+
+- Creating attestations no longer checks EAS schemas a second time. `createAttestations` and `createAttestationsDirectToEas` called `ensureEasSchemasForItem` again after the `checking` state had run it for the same item and wallet. Every run passes `checking` first, and a restored run was persisted past it.
+- `persistSeedUidSafely` clears its 15 s timeout once the write settles. The timer stayed armed after a successful write, keeping the process alive and rejecting a promise nobody read 15 s later.
+- New `clearInAppPublishSession()` in `@seedprotocol/publish/thirdweb` removes the in-app wallet session this package stores: every `seedProtocol:inAppPublish:` localStorage key, thirdweb's default `walletToken-{clientId}` key that `ConnectButton`'s token sync mirrors, and the Disconnect flag in sessionStorage. It also clears the registered publish wallet. For a "start fresh" action beside the SDK's `client.resetLocalData()`, which leaves localStorage alone.
+- New `ensureEasSchemasForModels(modelNames, account, { schemaName, followRefs, dryRun, managedAddress })` registers the EAS schemas a publish of items of those models can attest under, read from the loaded model definitions with no item: each model, every property (list relations as `<singular>_<ref>_ids`), the storage models (Image, File, Html) its storage-seed properties reach with their properties, and `string storage_transaction_id`. `followRefs` (default true) also covers the models relation and list properties name, each once. It returns `{ missing, registered }`; with `dryRun` it sends nothing. With everything registered it only reads. An owner calls it so an automation key, which can't register schemas, finds them; a schema version that adds a property needs one more call.
+- New `EasSchemasNotRegisteredError` (`code: 'EAS_SCHEMAS_NOT_REGISTERED'`, `missing: string[]`), thrown by `ensureEasSchemasForItem` and `ensureEasSchemasForModels` when an automation key meets missing schemas. It lists every missing definition, checked before anything is sent; the plain `Error` it replaces named the first one found. The message now points to `ensureEasSchemasForModels`. A publish run's `checkingFailed` error is this instance.
+- `ensureEasSchemasForItem` checks every schema before registering any, and returns `{ missing, registered }`.
+- A contract publish records each request's version uid and property uids in one transaction (the SDK's `recordPublishRequest`). They were separate writes, so a reader between them, such as `getPublishPendingDiff` on a change-feed dispatch after a first publish, saw the version published and every property still pending. The direct-to-EAS path still records the version when its own transaction confirms, since the properties go in a later one.
+- `ensureEasSchemasForItem` asks only for the schemas a publish of the item attests: each seed's own model, properties with a value or with an empty value that removes a live attestation (ADR 0021), and `string storage_transaction_id` for a seed that uploads a file. It asked for every property of every model in the publish graph, set or not, plus the model of every relation, so an automation run failed on a schema nothing would attest under (an Image draft with no alt text stopped on `string alt`), and an owner publish registered schemas no attestation used.
+- Publish passes the attesting address to the SDK when it records property attestations, so those rows name it as publisher (see the SDK changelog).
+- The package no longer ships declarations for its `.tsx` tests (`dist/react/useSeedWallet.test.d.ts`, `dist/hooks/usePublishCostEstimate.test.d.ts`): the build excludes `src/**/*.test.tsx` as well as `*.test.ts`.
+- New `disconnectPublishWallet()` and `markPublishWalletConnected()` in `@seedprotocol/publish/thirdweb`. `disconnectPublishWallet` removes the in-app auth token from thirdweb's default `walletToken-{clientId}` key and the `seedProtocol:inAppPublish:` one, clears the registered publish wallet, and stops `ConnectButton`'s token sync from copying a default-key token back to the prefixed key until `markPublishWalletConnected` runs. `ConnectButton` calls them on disconnect and connect. thirdweb's `logout` removed only the prefixed key, so the next sync restored the session from the default key and a reload signed back in a user who had chosen Disconnect, with the JWT still in localStorage.
+- New `describePublishRun(value)`: the display phase of a publish machine value (`preparing`, `uploading`, `attesting`, `retracting`, `done`, `failed` or `stopped`), whether the run waits for `retry` (`awaitingRetry`), and whether it has ended (`terminal`). Every state of the publish machine is mapped; no value or an unknown one reads as `preparing`, not terminal.
+- `useItemPublishStatus().isActive` is false once the run's value is terminal (`success`, `failure`, `stopping`). It was true with a `success` or `failure` value while the final save was written, because the run stays in `publishProcesses` until that save finishes, and while the row still read `in_progress`. A run waiting for `retry` stays active.
+
+### Commits
+
+#### Features
+
+- clearInAppPublishSession removes the stored in-app wallet session (f12a2e5a)
+- ensureEasSchemasForModels registers a model's EAS schemas without an item (e9baae43)
+- sdk: an edit back to the attested value leaves no draft (6f39e4e8)
+
+#### Fixes
+
+- skip the second EAS schema check in attestations; clear the persistSeedUid timeout (52ab8d28)
+- ensureEasSchemasForItem asks only for schemas the publish attests (43196475)
+- sdk: publish records the attester as publisher on draft rows (1d07b478)
+- build excludes .tsx tests, so no test declarations ship (b85f1342)
+- useItemPublishStatus isActive is false once the run is terminal; add describePublishRun (fa21fdf1)
+- Disconnect removes the in-app token so sync can't restore it (d4e51c63)
+
+## 0.7.12 (2026-10-27)
+
+- `PublishProvider` (both entries) takes `seedConfig`, `addresses` and `onInitError` and passes them to the `SeedProvider` it renders, which initializes the Seed client when `seedConfig` is set (decision D25). It passed only the QueryClient, so the client had to be started some other way (`client.init`, `SeedClientGate`).
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`), and the `~/` imports kept from the source's path alias are relative. Eight declarations imported `~/…` paths, which no consumer resolves, so types such as `SeedSigner` in their signatures were errors.
+- A tab that opens while another tab is uploading no longer marks that publish `interrupted`. `restoreFromDb` takes the publish lock before deciding a row can't be resumed, and gives it back after marking an abandoned one. It marked the other tab's live publish, whose later progress saves were then skipped as stale.
+- `uploadApiBaseUrl` is optional in `PublishConfig`; it is still required unless `payment.storage` is `'user'`, which `initPublish` checks. The resolved config's is `''` when unset.
+- `MissingSignedDataItemsError` is exported, so a resumed publish's upload failure can be matched with `instanceof` as well as `code: 'SIGNED_DATA_ITEMS_MISSING'`.
+- Cost estimates measure charged bytes on the signed data items (each upload plus its ANS-104 header and tags), as Turbo and the bundler charge them. An upload just under Turbo's free size was estimated free though its signed data item is charged.
+- With user-paid storage, `estimatePublishCost` reads Turbo's free data item size from its `/v1/info` (cached 10 minutes per upload URL) and falls back to 102,400 bytes when Turbo doesn't answer. It always used 102,400; Turbo reports 107,520. Estimates report it as `arweave.freeBytes`, and where uploads go as `arweave.uploadTo`.
+- `watchPublishCost`'s built-in price refresh keeps the estimate's gas, charged bytes, payers, upload target and testnet, and applies the new rates (new `repricePublishCostEstimate`). It recomputed with only `evmUserPays`, so a Turbo or testnet estimate was repriced as an upload-API mainnet one.
+- `PublishWorkSummary` declares `revocationCount`, which the SDK's `summarizePublishWork` returns, and `heuristicPublishGas` counts each revocation (`PUBLISH_GAS_HEURISTICS.REVOCATION`, 35,000 gas, not measured). A publish that retracts properties was under-estimated.
+- `usePublishCostEstimate` shows a `previousEstimate` passed in its options until the first estimate arrives. The hook replaced it with its own, null for a new item.
+- `createPublish` picks the data item signer for every entry point: the caller's `dataItemSigner`, else the config's, else the registered session's `dataItemSigner` when that session publishes as the address, else the wallet's own signer unless it is `kind: 'smart'`. `PublishManager.createPublish` called directly set none, so a bundler or Turbo publish failed at signing; `item.publish()` let the session's default override a configured `dataItemSigner`.
+- New `PublishWalletKind` `'modular'`: the modular executor's in-app EOA (EIP-7702), which publishes as the user's ManagedAccount. `ConnectButton` and `ensureSmartWalletThenPublish` register it with that kind; they said `'smart'`, which tells publish the signer can't sign data items. Direct EAS refuses `'modular'` like `'smart'`.
+- With `useModularExecutor`, `ensureSmartWalletThenPublish` signs data items with the registered session's `dataItemSigner`. It used the in-app account's signer, so a session registered with a different signer was ignored.
+- Without `useModularExecutor` and with no registered session, `ensureSmartWalletThenPublish` signs data items with the connected account when it is the smart wallet's admin EOA. It had no signer, and bundler publishes failed at signing.
+- `useSeedWallet().connect` registers the wallet's `kind`. The session had none, so `checking` refused a direct-EAS publish from an EIP-1193 or ethers wallet as `unknown_wallet_kind` unless `useDirectEas` was set.
+- `checking` refuses a wallet that can't revoke a pending retraction, and a publish with no publisher address, before it registers EAS schemas. A refused publish paid for the schema registrations first. Validation still runs after registration, since it builds the payload from the schema uids.
+- Every publish holds its item until the publish actor stops (success, failure, or stopped by the manager): `createPublish` takes the hold, so `ensureWalletThenPublish`, `PublishManager.createPublish` and direct callers get it, not only `item.publish()`. An item a caller found with `Item.find()` (no hold) unloaded after the SDK's grace period, mid-publish.
+- A publish whose revocation of retracted properties fails rejects with the new `PublishRetractionError` (`code: 'PUBLISH_RETRACTION_FAILED'`), saying the new attestations are in place and that `PublishManager.retryAttestations(seedLocalId)` sends the revocation again. It rejected with the attestation-failure message.
+- New `htmlArweaveRefs` option (`initPublish` config and `createPublish`/`item.publish()` options, ADR 0025): `'gateway'` (default) writes `https://<public gateway>/raw/<id>` into published Html, as before; `'ar'` writes `ar://<id>`, which needs no gateway but loads only in a Seed reader (`SeedHtml`, the SDK's Html value, query hydration).
+
+### Commits
+
+#### Features
+
+- PublishProvider passes seedConfig, addresses and onInitError to SeedProvider (D25) (df1fb08c)
+- sdk: htmlArweaveRefs: 'ar' publishes ar://<id> links in Html (936db56e)
+
+#### Fixes
+
+- restoreFromDb locks before marking interrupted; optional uploadApiBaseUrl; export MissingSignedDataItemsError (e0966829)
+- cost estimates size signed data items, read Turbo's free size, keep flags on reprice (e5ba0c07)
+- createPublish defaults the data item signer; 'modular' wallet kind; useSeedWallet keeps kind (70fe3105)
+- refuse unrevokable retractions and missing addresses before registering schemas (2e4fc2ed)
+- every publish holds its item; retraction failures get their own error (a2bccc22)
+
+#### Other
+
+- Phase H text fixes (1bb65ae8)
+
+## 0.7.11 (2026-10-24)
+
+- **Breaking:** `configurePublish` (an alias of `initPublish`) and `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` (the deprecated name of `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA`) are removed.
+- `assessPublishAuthorizationLive` reports a revoked grant as `'revoked'`; it returned `'valid'`. It and `assertStorageBoundToIdentity` now see the grant's EAS `expirationTime`, so a grant past it is `'expired'` and no longer binds a data item owner.
+- `enrollPublishAutomation` defaults `expiresAt` to 365 days from now and gives the session key and the PublishAuthorization the same value. Before, a call without `expiresAt` added a session key with no expiry.
+- `attestPublishAuthorization` throws when `wallet` isn't the `identity` account.
+- `attestPublishAuthorization`, `attestPublishedBy` and `attestDomainOwnership` check their inputs before registering or naming a schema, so a bad call sends no transactions.
+
+### Commits
+
+#### Breaking
+
+- sdk, eas, arweave: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- eas, sdk: one store for property schema uids, read by every resolver (0ea6562b)
+- eas: enforce publish authorization revocation and expiry; validate attest inputs first (ce535cbe)
+
+#### Other
+
+- describe the gateway tunnel upstream generically (8ea5874e)
+
+## 0.7.10 (2026-10-24)
+
+- `publishItem` (the executor behind `item.publish()`) holds the item until the publish settles, so an item the caller looked up without a hold doesn't unload mid-publish after the SDK's grace period. The publish steps that look an item up themselves take an explicit hold (`Item.find({ hold: true })`), since `find` no longer holds by default.
+- `watchPublishCost` re-estimates after writes to the item's seed, version and property rows, through the SDK's change feed, where one runs (the browser). It compared the loaded property instances' values on every item update, so it missed edits made in another tab or to rows the loaded item hadn't read. In Node, which has no change feed, it still compares the loaded values. The new `watchRows` option replaces how rows are watched.
+- A publish restored from its saved record releases the Item it loads to create attestations once the step finishes or fails, on the multiPublish path too (the direct-EAS path already did). The item stayed held, so it was never unloaded. The lookup that waits for that item now runs one `Item.find` at a time; overlapping lookups each took a hold and only one was returned.
 - `usePublishCostEstimate` keeps showing the last estimate (as `isStale`) when it gets a new Item instance for the same `seedLocalId` and `publishMode`, until the new watcher's first estimate arrives. It showed `null` in between. `watchPublishCost` takes the estimate to start from as `previousEstimate`.
 - `watchPublishCost` retries a failed first estimate once after 5 s (`firstEstimateRetryMs`, 0 turns it off) and stays `isEstimating` until the retry settles. A failed first estimate left `estimate` null until the item changed or `refresh()` was called.
+
+### Commits
+
+#### Features
+
+- sdk: unload grace period and no-hold lookups by default (504f56dc)
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+- createAttestations releases the item it reloads (4fc2ab6f)
+- watchPublishCost re-estimates on row writes (0b1d44ac)
+- keep the cost estimate across a new Item instance, retry a failed first estimate (6d00fd2d)
 
 ## 0.7.9 (2026-10-22)
 
@@ -18,8 +170,7 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking
 
-- `getPublishUploadData(item, options)` takes the options second, as the SDK's does.
-- **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed, so the upload server can drop its reimbursement route. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
+- **Publish only uploads data items.** The L1 path (an Arweave transaction the upload API reimbursed from its own wallet, then confirmed and uploaded in chunks) is removed. Files go to `${uploadApiBaseUrl}/api/upload/arweave/batch` as signed data items, or to Turbo with `payment: { storage: 'user' }`.
 - `useArweaveBundler` is deprecated. `true` changes nothing; `false` makes `initPublish` throw `PublishPaymentConfigError`. Apps that left it unset now upload data items and need `signDataItems` or a `dataItemSigner` (at `createPublish` or in the config).
 - Removed: the `signArweaveTransactions` and `arweaveJwk` options (config and `createPublish`), the `SerializedPublishUpload` and `ArweaveTransactionInfoResult` types, and the context fields `reimbursementTransactionId`, `reimbursementConfirmed`, `requestResponse`, `transactionKeys`, `uploaderState` and `currentTransactionIndex`.
 - `resolvePublishPayment(...).storage.path` and a cost estimate's `arweave.path` are always `'bundler'`. `chargedUploadBytes(work, uploadTo)` drops its `path` argument; `combinePublishCostEstimate` still accepts `arweavePath: 'bundler'`.
@@ -43,6 +194,10 @@ All notable changes to this project will be documented in this file.
 - eas, sdk: one EAS model-schema lookup and one model_uids rule (02e732aa)
 - revoke retracted properties after attesting; unpublish revokes the seed first (62759057)
 - Unload items the publish actors reload, and ensureEasSchemas' related items (deacc79f)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.7 (2026-10-18)
 

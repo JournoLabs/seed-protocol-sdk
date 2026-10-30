@@ -318,7 +318,6 @@ describe('getSeeds with source auto', () => {
       kind: 'local',
       getSeedByUid: async (u) => localSeeds.get(u) ?? null,
       listSeedsBySchemaName: async () => [],
-      listSeedsByUidPrefix: async () => [],
       listSeedsBySchemaNameForMonth: async () => [],
       getVersionsForSeed: async () => [],
       getVersionsForSeeds: async (uids) =>

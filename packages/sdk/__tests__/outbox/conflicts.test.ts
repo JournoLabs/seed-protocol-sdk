@@ -27,7 +27,7 @@ const MODEL = 'ConflictPost'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -255,6 +255,22 @@ testDescribe('conflicts between a pending edit and sync', () => {
     await property.resolveConflict('remote')
     await vi.waitFor(() => expect(property.value).toBe('remote'))
     expect(await shownTitle(item.seedLocalId)).toBe('remote')
+  }, 30000)
+
+  it('records no conflict for a storage draft (Image, File, Html), which stays the value (ADR 0019)', async () => {
+    const { item, property, baseRow } = await publishedPost('base')
+    property.value = 'local'
+    await property.save()
+    // Make the property's rows an Image's: the rule reads the draft's seed type
+    await db()
+      .update(metadata)
+      .set({ refSeedType: 'image' })
+      .where(and(eq(metadata.seedLocalId, item.seedLocalId), eq(metadata.propertyName, 'title')))
+
+    await syncAfterDraft({ ...baseRow, refSeedType: 'image' }, 'remote', Date.now() + 5_000)
+
+    expect(await item.conflicts()).toEqual([])
+    expect(await shownTitle(item.seedLocalId)).toBe('local')
   }, 30000)
 
   // The change feed (browser only) puts the conflict on the loaded property: no rehydrate, and

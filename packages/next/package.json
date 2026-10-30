@@ -1,7 +1,7 @@
 {
   "name": "@seedprotocol/next",
-  "version": "0.7.9",
-  "description": "Next.js config helper for apps that use @seedprotocol/sdk in the browser: ZenFS fs aliases for Turbopack and webpack, and cross-origin isolation headers",
+  "version": "0.7.13",
+  "description": "Next.js config helper for apps that use @seedprotocol/sdk in the browser: its browser entries for Turbopack and webpack, cross-origin isolation headers, and optional fs aliases",
   "keywords": [
     "seed-protocol",
     "nextjs",
@@ -33,7 +33,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
@@ -45,8 +45,6 @@
     "@seedprotocol/react": "workspace:*",
     "@seedprotocol/sdk": "workspace:*",
     "@types/node": "^24.10.1",
-    "@zenfs/core": "2.5.6",
-    "@zenfs/dom": "1.2.9",
     "next": "16.4.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

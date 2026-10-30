@@ -13,7 +13,7 @@ import {
 import { configureEasReadChain } from '@seedprotocol/eas'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 import { applySeedConfigDefaults } from '../seedConfigDefaults'
-import { startTabCoordination } from '@/helpers/tabCoordinator'
+import { holdDbOpenLock, startTabCoordination } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
@@ -88,6 +88,8 @@ export async function platformClassesInit({ event }: { event: InitEvent }): Prom
   // Elect a leader tab for background work before anything requests it (docs/MULTI_TAB.md).
   if (normalizedFilesDir) {
     startTabCoordination({ filesDir: normalizedFilesDir, mode: options.multiTab })
+    // Held until the database closes; waits while client.resetLocalData() deletes it.
+    await holdDbOpenLock()
   }
 
   if (resolvedGateway.activePath !== 'hyper-sidecar' && resolvedGateway.activePath !== 'http-proxy') {

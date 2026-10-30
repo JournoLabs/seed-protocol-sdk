@@ -1,0 +1,72 @@
+{
+  "name": "@seedprotocol/rdf",
+  "version": "0.7.13",
+  "description": "RDF export for Seed Protocol items: a state graph of each seed's current values as RDF/JS quads, N-Quads, Turtle or JSON-LD, with IRIs minted from the on-chain schemas",
+  "keywords": [
+    "seed-protocol",
+    "rdf",
+    "linked-data",
+    "json-ld",
+    "turtle",
+    "n-quads",
+    "eas"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+  },
+  "dependencies": {
+    "@rdfjs/types": "^2.0.1",
+    "@seedprotocol/query": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/jsonld": "1.5.15",
+    "@types/node": "^24.10.1",
+    "jsonld": "9.0.0",
+    "n3": "2.13.12",
+    "rdf-canonize": "5.0.0",
+    "rdf-validate-shacl": "0.6.5",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/rdf"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/rdf#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

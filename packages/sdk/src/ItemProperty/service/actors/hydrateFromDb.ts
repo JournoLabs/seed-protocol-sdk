@@ -5,7 +5,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { currentPropertyRow } from '@/db/read/currentPropertyRow'
-import { resolveStorageDisplay, storedValueKind } from '@/storageValue/resolve'
+import { resolveStorageDisplay, storedValueKind, missingFileOf } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:property:actors:hydrateFromDb')
 
@@ -27,21 +27,26 @@ export const hydrateFromDb = fromCallback<
 
   const _hydrateFromDb = async () => {
     const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
-    const row = await currentPropertyRow(
-      { seedLocalId, seedUid },
-      {
-        propertyId: context.propertyId,
-        propertyName,
-        modelName,
-        modelFileId: context.modelFileId,
-        dataType: normalizedDataType,
-        refValueType: normalizeDataType(propertyRecordSchema?.refValueType),
-      },
-    )
+    const read = () =>
+      currentPropertyRow(
+        { seedLocalId, seedUid },
+        {
+          propertyId: context.propertyId,
+          propertyName,
+          modelName,
+          modelFileId: context.modelFileId,
+          dataType: normalizedDataType,
+          refValueType: normalizeDataType(propertyRecordSchema?.refValueType),
+        },
+      )
+    let row = await read()
     if (!row) return
 
     const { getPropertyConflict } = await import('@/outbox/conflicts')
     const conflict = await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
+    // Sync records a conflict and moves its draft to newest in one transaction: a row read before
+    // the conflict may be the synced one
+    if (conflict) row = (await read()) ?? row
 
     // Only with a definition: without one, a row's refSeedType alone doesn't decide the display here
     const kind = propertyRecordSchema ? storedValueKind(propertyRecordSchema) : undefined
@@ -49,12 +54,14 @@ export const hydrateFromDb = fromCallback<
     // A stored display value is a stale session URL for Image, File and Html (see resolveStorageDisplay)
     let refResolvedDisplayValue = kind ? undefined : row.refResolvedDisplayValue
     let renderValue: string | string[] | undefined = refResolvedDisplayValue ?? undefined
+    let missingFile: { path?: string } | null | undefined
     if (row.pendingText !== undefined) {
       // A pending Html value: its file isn't written until its op is prepared
       renderValue = row.pendingText
     } else if (kind && kind !== 'itemStorage') {
       try {
         const display = await resolveStorageDisplay(kind, row, { fetch: true })
+        missingFile = missingFileOf(kind, row, display)
         refResolvedValue = display.ref.refResolvedValue
         localStorageDir = display.ref.localStorageDir
         if (display.renderValue !== undefined) {
@@ -88,6 +95,7 @@ export const hydrateFromDb = fromCallback<
       // Html shows its text; with no file found the context keeps what it showed
       ...(kind === 'html' && renderValue === undefined ? {} : { renderValue }),
       conflict,
+      ...(missingFile !== undefined && { missingFile }),
       populatedFromDb: true,
     })
   }

@@ -12,7 +12,7 @@ const WORKING_DIR = '/app'
 
 const completeSchema = (id: string, name: string, version: number) =>
   JSON.stringify({
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version,
     id,
     metadata: { name, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },

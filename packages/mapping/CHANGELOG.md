@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking (types):** `FieldMapperLookupRow.onSplitChange`, added in 0.7.13, is a required member, so code that builds its own lookup rows must supply it. Rows the package passes to `renderLookup` always have it.
+- **Breaking:** the document lookup table is removed: `MappingDocument.lookups`, `MappingLookups`, `lookupRefFromTable`, the `lookups` option of `applyMapping`, `applyMappingAsync` and `resolveLookup`, and `lookups` / `onLookupsChange` on `FieldMapper` and `useFieldMapper`. Lookups read `lookup.entries` on the edge. Without `renderLookup`, the package's uid text editor now always shows on lookup rows; `slots.lookups: false` hides it. It needed `onLookupsChange`.
+- `applyResolveToEdge(edge, 'lookup')` keeps `split`, so `useFieldMapper().setTransform(rowId, 'lookup')` on a lookup edge no longer clears it.
+
+## 0.7.13 (2026-10-29)
+
+- **Breaking:** a lookup entry names an ordered list of refs: `LookupEntry` is `{ value, refs: string[] }`, and `ref` is removed from the type. A stored `{ value, ref }` still applies, read as `refs: [ref]`, and `lookupEntriesFromMapping` returns it in the new shape. `lookupRefFromEntries` is replaced by `lookupRefsFromEntries`, which returns the list, and `resolveLookupMapped` by `resolveLookup`, which returns `{ refs, unmatched, split }`. A Relation target given several refs takes the first. The fallback `LookupEditor` takes refs separated by commas or spaces.
+- A lookup edge takes `split: { separators }` (`'and'`, `'&'`, `','`; `DEFAULT_LOOKUP_SEPARATORS` is `['and', '&']`). A string with no entry of its own is split and each part is looked up; the known parts' refs apply in the string's order, and each unknown part is reported with `splitFrom`. New `splitLookupValue`, `withLookupSplit`, `useFieldMapper().setLookupSplit` and `FieldMapperLookupRow.onSplitChange`. Moving a lookup to another source, and Auto-map, keep `split`.
+- Lookups match case-insensitively: a source value finds an entry with the same new `lookupKey` (NFC, collapsed whitespace, trimmed, case-folded), so a feed that prints "mira chen" once finds the "Mira Chen" entry. `normalizeLookupKey` adds NFC and still keeps case; it's the form entries are stored in. `LookupEditor` shows one row per key.
+- `applyMapping` takes `onUnmatched`, called with `{ sourceId, propertyName, value }` for each lookup value that has no entry. Only `applyMappingAsync` reported misses.
+- An empty source value on a lookup edge is no lookup: `applyMappingAsync` no longer lists it as an error, and `onUnmatched` isn't called for it.
+- `autoMap(sources, targets, previous)` keeps the entries a property that stays a lookup has in `previous`, and `useFieldMapper`'s Auto-map passes its current mappings. One Auto-map click dropped every assignment.
+- `withPreservedExtras` keeps a lookup's entries when it moves to another source (`author` to `dc:creator`); they were dropped.
+- New `collectLookupValues(items, mapping)`: each distinct value a lookup's source holds across a feed's items, in first-seen spelling.
+
+- An `extract` or `file` edge on a source with an empty value passes `''` as the resolve callback's `url`, and lookups take their sample from the value only (`sampleValueFromSource`, the field mapper's previews and `LookupEditor`). 0.7.12 made `applyMapping` value-only but these still fell back to the source's `label`, so the field's name went to the resolve callback as a URL, and a lookup entry written in the editor for an empty source was stored under the label and never matched at apply.
+
+### Commits
+
+#### Features
+
+- joint bylines: lookup entries name a list of refs, and a lookup edge can split (a024b1a5)
+
+#### Fixes
+
+- case-insensitive lookups, sync unmatched reporting, entries kept through Auto-map and source changes (32e55f77)
+- extract/file urls and lookup samples use the source value only (ac651eea)
+
+## 0.7.12 (2026-10-27)
+
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
+- **Breaking:** the `--fm-*` and `--map-*` CSS custom properties are removed; theme with `--sfm-*` (`--sfm-color-*`, `--sfm-map-1` … `--sfm-map-8`). The default theme set each `--fm-*` from its `--sfm-*` token, so a host's own `--fm-*` value was overwritten, and the README's "aliases kept" didn't hold. Wire strokes default to `var(--sfm-map-N, currentColor)`.
+- `useFieldMapper` and `FieldMapper` keep a row's id when another row is added, removed or edited. The ids were by position, so removing a row shifted the ids, and React keys, of every row after it.
+- `coerceValue(raw, 'Boolean')` reads `true`, `1` and `yes` in any case, trimmed. `"TRUE"` was false.
+- `applyMapping` and `applyMappingAsync` copy a source's `value` only: an empty frontmatter field copies as `''` and an empty Markdown body as `''`. They fell back to the source's `label`, so the field's name (or "Full document") was copied.
+- `UseFieldMapperResult.conflicts`' doc comment says it holds every row that maps an already-mapped property, the first such row included, as `findConflicts` does.
+- The README says `rssXmlToSources` needs `seedVitePlugin({ includeNodePolyfills: true })` in a Vite browser build: `rss-parser` imports Node's `timers`.
+
+### Commits
+
+#### Breaking
+
+- --sfm-* tokens only, stable edge ids, Boolean case, no label fallback (d00c286e)
+
+#### Fixes
+
+- the hook reads row ids from the edge-id state (24e131e1)
+
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.10 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.9 (2026-10-22)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.7 (2026-10-18)
 
 ### Commits
@@ -54,7 +120,7 @@ _Derive and assemble. This file used to list them under `0.8.0`, a mapping versi
 - `resolvedSourceId` only suffixes `extract` / `file`.
 - Package `autoMap` is unchanged: it does not inject derive-only slug or default html to assemble.
 
-_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.2._
+_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.1._
 
 - Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.
 - `applyMapping` (sync) applies lookup entries and emits refs. Unmatched values are omitted. `applyMappingAsync` reports unmatched on `errors[]` and no longer calls the host `resolve` callback for lookup.

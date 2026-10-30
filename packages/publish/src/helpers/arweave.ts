@@ -18,6 +18,7 @@ import type { SeedSigner } from './seedSigner'
 
 const SIG_TYPE_ETHEREUM = 3
 const SIG_LENGTH = 65
+const OWNER_LENGTH_ETHEREUM = 65
 
 const PLACEHOLDER_MESSAGE = new TextEncoder().encode('seed-recovery')
 
@@ -194,6 +195,16 @@ async function getSignatureData(
 }
 
 /**
+ * Size of an Ethereum-signed (signature type 3) ANS-104 data item carrying `dataBytes` of data,
+ * these tags and a publish anchor, without signing it: what Turbo and bundlers charge for.
+ */
+export function signedDataItemByteLength(dataBytes: number, tags: Tag[]): number {
+  // sig type, signature, owner, empty target, anchor, tag count, tag bytes length
+  const header = 2 + SIG_LENGTH + OWNER_LENGTH_ETHEREUM + 1 + (1 + ANCHOR_LENGTH) + 8 + 8
+  return header + serializeTags(tags).length + dataBytes
+}
+
+/**
  * Build the ANS-104 message bytes (everything from owner onward) for the raw DataItem.
  */
 function buildMessageBytes(
@@ -325,8 +336,6 @@ export const createSignedDataItemWithAccount = async (
   const message = buildMessageBytes(ownerBytes, tags, data, rawTarget, rawAnchor)
   return assembleDataItemAndId(signature, message)
 }
-
-const OWNER_LENGTH_ETHEREUM = 65
 
 /**
  * Byte offset of the tags section (8-byte tag count + 8-byte tag bytes length + tags + data).

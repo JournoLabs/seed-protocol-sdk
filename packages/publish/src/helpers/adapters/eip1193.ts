@@ -4,21 +4,19 @@ import {
   type Address,
   type Chain,
   type EIP1193Provider,
-  type Hex,
 } from 'viem'
-import {
-  brandSigner,
-  brandTxSender,
-  type PublishWallet,
-  type SeedSigner,
-  type SeedTxSender,
-} from '../seedSigner'
+import type { PublishWallet, PublishWalletKind, SeedSigner } from '../seedSigner'
 import { getPublishViemChain } from '../chainConfig'
+import { fromViemWalletClient } from './viemWalletClient'
 
 export type FromEip1193Options = {
   chain?: Chain
   /** If omitted, uses the first account from eth_requestAccounts / eth_accounts. */
   address?: Address
+  /** As for `fromViemWalletClient`. Defaults to `'eoa'`. */
+  kind?: PublishWalletKind
+  /** As for `fromViemWalletClient`. */
+  signAuthorization?: SeedSigner['signAuthorization']
 }
 
 /**
@@ -44,36 +42,11 @@ export async function fromEip1193Provider(
     chain,
     transport: custom(provider),
   })
-
-  const signer = brandSigner({
-    address,
-    signMessage: async ({ message }) => {
-      return walletClient.signMessage({
-        account: address!,
-        message:
-          typeof message === 'string'
-            ? message
-            : { raw: message.raw as Hex | Uint8Array },
-      })
-    },
+  return fromViemWalletClient(walletClient, {
+    chain,
+    kind: options.kind,
+    signAuthorization: options.signAuthorization,
   })
-
-  const txSender = brandTxSender({
-    address,
-    sendTransaction: async (tx) => {
-      const hash = await walletClient.sendTransaction({
-        account: address!,
-        chain,
-        to: tx.to,
-        data: tx.data,
-        value: tx.value,
-        gas: tx.gas,
-      })
-      return { transactionHash: hash }
-    },
-  })
-
-  return { signer, txSender, kind: 'eoa' }
 }
 
 /** Convenience: wrap window.ethereum when present. */
@@ -85,12 +58,4 @@ export async function fromWindowEthereum(
     throw new Error('@seedprotocol/publish: window.ethereum is not available')
   }
   return fromEip1193Provider(eth, options)
-}
-
-/** Expose branded helpers for composing custom EIP-1193 senders. */
-export function brandEip1193Parts(signer: SeedSigner, txSender: SeedTxSender): PublishWallet {
-  return {
-    signer: brandSigner(signer),
-    txSender: brandTxSender(txSender),
-  }
 }

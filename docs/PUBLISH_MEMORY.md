@@ -8,13 +8,41 @@ Chromium/Electron renderers often cannot grow far beyond **~4 GB of JS heap** 
 
 ## What dominates memory
 
-Total **bytes being published** (all Arweave uploads in the run) is the main driver. Additional factors:
+Total **bytes being published** (all Arweave uploads in the run, summed) is the main driver. Measured in Chromium on 2026-10-29, a browser publish peaks at about **7 copies** of those bytes as ArrayBuffers in the page: the file read makes 6 short-lived copies, and the OPFS mount keeps 1 for the whole session. Signing and the batch upload come after the read's copies are freed and stay below that peak. Sending the batch as a `Uint8Array` body adds another 3–5 copies across Chromium's renderer and network processes. Saving a File value before publish (`prop.value = file; save()`) peaks at about 8 copies.
 
-1. **Signed DataItems** — Publish builds ANS-104 binaries; each item holds payload plus signatures/tags (similar order of magnitude to the source file per item).
-2. **Batch upload body** — The client packs all DataItems into **one** `application/octet-stream` body for `POST …/api/upload/arweave/batch`. Peak heap includes that buffer for the duration of the request (plus one item’s worth of transient copies during packing, depending on path).
-3. **SDK / Item graph** — The live `Item`, properties, and publish helpers add overhead unrelated to raw file size but usually smaller than multi‑gigabyte uploads.
+At 100 MB that is about 0.74 GB in the page during publish. A 1 GB publish fails reading the file from OPFS (`NotReadableError`) even with memory to spare.
 
-Very roughly, with in-process **`dataItemSigner`**, expect a **short-lived multiple** of the total payload size (signed items + packed batch + app overhead), not a single copy.
+The upload API also aborts a batch POST after 120 s, for all of a publish's uploads together: about 150 MB at 10 Mbit/s, 75 MB at 5 Mbit/s. Turbo uploads (`payment: { storage: 'user' }`) have no such timeout.
+
+## Upload size limits
+
+Publish checks the summed upload size in its `checking` step, from file sizes alone, before it registers EAS schemas or reads a file:
+
+- Over `maxUploadBytes` (default 100 MiB) it fails with `UploadTooLargeError` (`uploadBytes`, `maxUploadBytes`, `estimate`).
+- Over `confirmUploadAboveBytes` (default 25 MiB), or when 7 × the upload bytes is over a quarter of `navigator.deviceMemory`, it fails with `UploadNeedsConfirmError` (`estimate`) unless the publish was given `confirmUpload: true`.
+
+`item.publish()` rejects with these errors themselves. Set the limits in `initPublish` (`maxUploadBytes`, `confirmUploadAboveBytes`, `uplinkBitsPerSecond`) or per publish (`maxUploadBytes`, `confirmUpload`). `Infinity` turns a limit off.
+
+```typescript
+try {
+  await item.publish()
+} catch (error) {
+  if (!(error instanceof UploadNeedsConfirmError)) throw error
+  const { uploadBytes, uploadSeconds, memory } = error.estimate
+  if (await askUser({ uploadBytes, uploadSeconds, memory })) await item.publish({ confirmUpload: true })
+}
+```
+
+To ask before the user presses Publish, `estimatePublishCost(item)` (and `usePublishCostEstimate`) returns the same numbers in `upload`, beside the storage cost:
+
+| Field | Meaning |
+|---|---|
+| `uploadBytes`, `uploadCount`, `largestUploadBytes` | From file sizes; no file is read. |
+| `uploadSeconds` | At `uplinkBitsPerSecond` (default 5 Mbit/s). |
+| `memory.peakBytes` | 7 × `uploadBytes`. |
+| `memory.deviceMemoryBytes` | `navigator.deviceMemory`: Chromium only, rounded to a power of two and capped by the browser. Absent in Safari, Firefox and Node. |
+| `memory.risk` | `high` over a quarter of device memory, `unknown` without it. |
+| `tooLarge`, `requiresConfirm` | What publish will do with the current limits. |
 
 ## Paths and relative cost
 

@@ -59,16 +59,16 @@ import { initializeFeedPlatform } from '@seedprotocol/feed'
 await initializeFeedPlatform({ arweaveDomain: 'arweave.net' })
 ```
 
-When unset, the default primary gateway is `ar.seedprotocol.io`.
+When unset, the default primary gateway is `arweave.net`.
 
 **Read fallbacks** (image metadata probing, gateway health checks) use additional public gateways. To override the fallback list:
 
 - `ARWEAVE_READ_GATEWAYS` or `NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS` — comma-separated hostnames
 - `IMAGE_METADATA_GATEWAYS` — comma-separated hostnames for RSS image dimension detection
 
-When a custom primary gateway is configured, `ar.seedprotocol.io` is omitted from automatic fallbacks (unless you include it explicitly in one of the env lists above).
+A custom primary gateway goes first, followed by the default gateways (`arweave.net`, `permagate.io`, `zigza.xyz`, `ar.seedprotocol.io`) unless one of the env lists above replaces them.
 
-**Note:** Items already stored with full `https://ar.seedprotocol.io/...` URLs are passed through unchanged. Only newly resolved transaction IDs use the configured gateway.
+Arweave links in items, whether a field holds one or Html contains them, are written on the configured public gateway, so items published with `https://ar.seedprotocol.io/...` links come out on it too.
 
 ### Feed Item URLs (EASScan attestation links)
 

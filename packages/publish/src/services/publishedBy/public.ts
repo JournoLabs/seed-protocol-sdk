@@ -11,6 +11,5 @@ export {
   type OnPublishedCallback,
   type AttestPublishedByParams,
   type AttestPublishedByResult,
-  type PublishedByDecoded,
 } from './index'
 export { collectPublishedBatch, uidsFromAttestationPairs } from './collectBatchUids'

@@ -28,7 +28,7 @@ testDescribe('Schema.destroy evicts cached models and properties', () => {
     const schemaName = `Destroy Evict ${generateId()}`
     const modelFileId = generateId()
     const schemaFile = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -79,7 +79,7 @@ testDescribe('Schema.destroy evicts cached models and properties', () => {
   // its own row existed bound to A's row, so creating, destroying or re-importing B clobbered A.
   describe('a same-named model in another schema', () => {
     const makeSchemaFile = (schemaName: string, modelFileId: string) => ({
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

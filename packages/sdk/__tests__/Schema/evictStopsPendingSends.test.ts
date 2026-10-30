@@ -36,7 +36,7 @@ testDescribe('evicting a schema stops pending sends to its models and properties
       }
     }
     const schemaFile = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

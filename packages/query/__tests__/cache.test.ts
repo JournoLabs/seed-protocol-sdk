@@ -30,19 +30,19 @@ const deps = (seedUid: string) => ({ refUIDs: [seedUid, `v-${seedUid}`], ids: [s
 
 describe('buildAssembleOptionsKey', () => {
   it('defaults expand+hydrate to true', () => {
-    expect(buildAssembleOptionsKey()).toBe('e1-h1')
-    expect(buildAssembleOptionsKey({})).toBe('e1-h1')
+    expect(buildAssembleOptionsKey()).toBe('e6-h1')
+    expect(buildAssembleOptionsKey({})).toBe('e6-h1')
   })
 
   it('encodes false flags', () => {
     expect(
-      buildAssembleOptionsKey({ relations: 'urls', hydrateStorage: false }),
-    ).toBe('e0-h0')
+      buildAssembleOptionsKey({ relations: 'uids', hydrateStorage: false }),
+    ).toBe('e7-h0')
   })
 
   it('isolates changelog include from default key', () => {
     expect(buildAssembleOptionsKey({ include: 'data+changelog' })).toBe(
-      'e1-h1-i1-gv-s0-l0',
+      'e6-h1-i1-gv-s0-l0',
     )
   })
 })
@@ -180,7 +180,7 @@ describe('CacheManager collection + item', () => {
     expect(got?.optionsKey).toBe(KEY)
     expect(got?.dependencies).toEqual(deps('0xseed'))
 
-    const otherKey = buildAssembleOptionsKey({ relations: 'urls' })
+    const otherKey = buildAssembleOptionsKey({ relations: 'uids' })
     expect(await cache.getItem('0xseed', otherKey)).toBeNull()
 
     await cache.clearItem('0xseed', KEY)

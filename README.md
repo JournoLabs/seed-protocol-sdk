@@ -28,7 +28,7 @@ For setup, schema definition, models, items, files, and React integration, see:
 ## Requirements
 
 - **Node.js** `>= 20` and `<= 24`
-- **Browser** support: modern browsers with OPFS (e.g. Chromium-based, recent Firefox)
+- **Browser:** Chrome or Edge 102, Firefox 114, Safari 26 or later ([supported browsers](docs/GETTING_STARTED.md#supported-browsers))
 
 ## Installation
 

@@ -42,6 +42,9 @@ export class NodeFileManager implements IFileManager {
   /** Node reads the real file system; nothing is cached. */
   async invalidateCachedPaths(): Promise<void> {}
 
+  /** Node mounts nothing. */
+  async unmountFileSystem(): Promise<void> {}
+
   async getFileSize(filePath: string): Promise<number | null> {
     try {
       const stat = await fsAsync.stat(filePath)
@@ -174,9 +177,6 @@ export class NodeFileManager implements IFileManager {
     return path
   }
 }
-
-/** @deprecated Prefer NodeFileManager */
-export const FileManager = NodeFileManager
 
 BaseFileManager.configure(new NodeFileManager())
 

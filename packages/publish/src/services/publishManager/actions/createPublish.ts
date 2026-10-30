@@ -10,8 +10,9 @@ import {
 import { ethers } from 'ethers'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
-import { getPublishWallet } from '~/helpers/publishWalletRegistry'
+import { dataItemSignerForPublish, getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { settleCreatePublish } from '../createPublishResult'
+import { holdItemUntilStopped } from '../holdPublishItem'
 
 function coerceWallet(account: unknown): PublishWallet | undefined {
   if (!account) return undefined
@@ -87,7 +88,12 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         modelName: item.modelName,
         schemaId: item.schemaUid,
         signDataItems: options?.signDataItems,
-        dataItemSigner: coerceDataItemSigner(options?.dataItemSigner),
+        // A caller's signer, else the config's, else the wallet's EOA (A4): every entry point
+        // signs data items the same way.
+        dataItemSigner:
+          coerceDataItemSigner(options?.dataItemSigner) ??
+          coerceDataItemSigner(publishCfg.dataItemSigner) ??
+          dataItemSignerForPublish(wallet, address as string),
         publishMode: options?.publishMode ?? 'patch',
         publishRunId,
         arweaveUploadTags: arweaveUploadTags.length ? arweaveUploadTags : undefined,
@@ -95,12 +101,20 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
           options?.htmlEmbeddedDataUriPolicy ??
           publishCfg.htmlEmbeddedDataUriPolicy ??
           'materialize',
+        htmlArweaveRefs: options?.htmlArweaveRefs ?? publishCfg.htmlArweaveRefs ?? 'gateway',
         onPublished: options?.onPublished ?? publishCfg.onPublished,
         authorizePublish: options?.authorizePublish ?? publishCfg.authorizePublish,
+        uploadLimits: {
+          maxUploadBytes: options?.maxUploadBytes ?? publishCfg.maxUploadBytes,
+          confirmUploadAboveBytes: publishCfg.confirmUploadAboveBytes,
+          uplinkBitsPerSecond: publishCfg.uplinkBitsPerSecond,
+        },
+        confirmUpload: options?.confirmUpload === true,
       },
     })
 
     publishProcesses.set(item.seedLocalId, publishProcess)
+    holdItemUntilStopped(item, publishProcess)
     const settledPublishes = new Map(context.settledPublishes)
     settledPublishes.delete(item.seedLocalId)
     settleCreatePublish(createToken, publishProcess)

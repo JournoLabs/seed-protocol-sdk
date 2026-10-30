@@ -1,6 +1,6 @@
 import { Static, Type } from '@sinclair/typebox'
-import { PropertyDataType, PropertyDefs, StorageType } from '@/types'
-import { TValidationRules } from '@/Schema/validation'
+import { PropertyDataType, StorageType } from '@/types'
+import { TValidationRules, type ValidationError } from '@/Schema/validation'
 
 /**
  * Enum for all property data types
@@ -31,7 +31,6 @@ const DATA_TYPE_LOWER_MAP: Record<string, string> = {
   boolean: 'Boolean',
   date: 'Date',
   html: 'Html',
-  blob: 'Blob',
 }
 
 /**
@@ -43,6 +42,53 @@ export function normalizeDataType(value: string | undefined): string {
   if (!value || typeof value !== 'string') return value ?? ''
   const lower = value.toLowerCase().trim()
   return DATA_TYPE_LOWER_MAP[lower] ?? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
+}
+
+/** Whether `value` is one of {@link ModelPropertyDataTypes}, in any case. */
+export function isKnownDataType(value: string | null | undefined): boolean {
+  if (!value) return false
+  return (Object.values(ModelPropertyDataTypes) as string[]).includes(normalizeDataType(value))
+}
+
+const STRING_RULES = ['pattern', 'minLength', 'maxLength'] as const
+
+/**
+ * Problems with a property's `validation` rules for its type, shared by the structure check and
+ * schema-file loading. `pattern`, `minLength` and `maxLength` apply only to Text and Html (for a
+ * List, its element type), so they are errors elsewhere (decision D19). `custom` is not supported
+ * and is ignored, with a warning (decision D5).
+ */
+export function validationRuleProblems(
+  dataType: string | undefined,
+  refValueType: string | undefined,
+  rules: Record<string, unknown> | undefined | null,
+): ValidationError[] {
+  if (!rules || typeof rules !== 'object') return []
+  const problems: ValidationError[] = []
+  const valueType = normalizeDataType(
+    isDataType(dataType, ModelPropertyDataTypes.List) ? refValueType : dataType,
+  )
+  const isStringType = valueType === ModelPropertyDataTypes.Text || valueType === ModelPropertyDataTypes.Html
+  if (!isStringType) {
+    const set = STRING_RULES.filter((rule) => rules[rule] !== undefined && rules[rule] !== null)
+    if (set.length > 0) {
+      problems.push({
+        field: 'validation',
+        message: `validation.${set.join(', validation.')} only apply to Text and Html properties (this one is ${valueType || 'untyped'}). Remove ${set.length > 1 ? 'them' : 'it'} or use enum.`,
+        code: 'rule_not_applicable',
+        severity: 'error',
+      })
+    }
+  }
+  if (rules.custom) {
+    problems.push({
+      field: 'validation.custom',
+      message: `Custom validators are not supported (validation.custom: "${String(rules.custom)}"); it is ignored. Use pattern, minLength, maxLength or enum.`,
+      code: 'custom_validation_unsupported',
+      severity: 'warning',
+    })
+  }
+  return problems
 }
 
 /**
@@ -199,5 +245,4 @@ export const Property = {
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
   Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
   Html: htmlPropertyFactory,
-  /** `Html` opts are not representable in `TPropertyConstructor`; keep runtime shape via double assert. */
-} as unknown as PropertyDefs
+} satisfies Record<PropertyDataType, (...args: never[]) => Static<typeof TProperty>>

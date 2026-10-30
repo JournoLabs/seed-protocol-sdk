@@ -1,5 +1,4 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { isTestOrSeedDev } from '@/helpers/environment'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { ClientManagerContext } from '@/types'
 import { appState } from '@/seedSchema'
@@ -103,11 +102,6 @@ export async function saveConfig(context: ClientManagerContext): Promise<void> {
       const appDb = BaseDb.getAppDb()
 
       if (!appDb) {
-        // In test environments, continue anyway
-        if (isTestOrSeedDev()) {
-          logger('[internal/actors] [saveConfig] App DB not found, but continuing in test environment')
-          return
-        }
         throw new Error('App DB not found')
       }
       
@@ -170,11 +164,6 @@ export async function saveConfig(context: ClientManagerContext): Promise<void> {
       await loadLocalDbChain()
     } catch (error: any) {
       logger('[internal/actors] [saveConfig] Error saving config:', error)
-      // In test environments, continue anyway
-      if (isTestOrSeedDev()) {
-        logger('[internal/actors] [saveConfig] Continuing despite error in test environment')
-        return
-      }
       throw error
     }
   }

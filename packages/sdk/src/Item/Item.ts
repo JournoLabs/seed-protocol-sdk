@@ -1,6 +1,8 @@
 import { IItem, IItemProperty } from '@/interfaces'
+import type { DeleteOp, DeleteResult } from '@/outbox'
 import { timedDb, timingLogger, timingNow, timingSince } from '@/helpers/timing'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
+import { ClientNotInitializedError } from '@/client/errors'
 import {
   INTERNAL_PROPERTY_NAMES,
   PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
@@ -59,6 +61,7 @@ import { EntityCache } from '@/helpers/entity/entityCache'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   heldChildActors,
   holdChild,
@@ -121,6 +124,11 @@ const getModel = (): typeof import('@/Model/Model').Model => {
   }
   return ModelClass!
 }
+// Start loading Model with this module. Item.create builds an item's ItemProperty instances from
+// its Model synchronously; before this import resolved, the first items had none, and a property
+// assigned on one (`item.title = x` after create with waitForReady: false) became a plain field
+// and was lost when the properties loaded (decision D16).
+getModel()
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
@@ -348,13 +356,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * Cache a new item under its ids and keep its keys in step with them (a seed uid arrives on
    * publish, moves on republish), then start its load.
    */
-  private static cacheAndLoad(instance: Item<any>): void {
+  private static cacheAndLoad(instance: Item<any>, hold = true): void {
     const keys = () => {
       const { seedLocalId, seedUid } = instance._getSnapshotContext()
       return [seedLocalId, seedUid]
     }
     let current = keys().join('\u0000')
-    this.cache.add(instance, keys(), { hold: true })
+    this.cache.add(instance, keys(), { hold })
     const idWatch = instance._service.subscribe(() => {
       const next = keys()
       if (next.join('\u0000') === current || isEntityTornDown(instance)) return
@@ -391,6 +399,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       getContext: (target) => target._getSnapshotContext(),
       sendUpdate: (target, prop, value) => {
         if (prop === 'publisher') throw new Error('Cannot set item.publisher: publisher is read-only.')
+        target._assertLoaded(`set ${prop} on`)
         Item.sendTrackedPropertyUpdate(target, prop, value)
         if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
           target._persistSeedUid(value)
@@ -402,6 +411,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return {
           get: () => property.value,
           set: (value) => {
+            target._assertLoaded(`set ${prop} on`)
             property.value = value
           },
         }
@@ -416,6 +426,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }) as Item<any>
     reactiveProxies.set(instance._service, proxy)
     return proxy
+  }
+
+  /** Throws EntityUnloadedError, naming the item, when this instance was unloaded. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { seedLocalId, seedUid, modelName } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} ${modelName ?? 'item'} ${seedLocalId ?? seedUid ?? '(no id)'}: this Item instance was ` +
+        'unloaded. Look the item up again (Item.find), and hold it while you use it ' +
+        '(Item.find({ hold: true }) or Item.retain, then unload()).',
+    )
   }
 
   /**
@@ -508,12 +529,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return entityStatus(instance) === 'ready' ? instance : undefined
   }
 
-  static async create<_T extends ModelValues<ModelSchema>>(
-    props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
+  /** Property values go beside the item fields: `Item.create({ modelName: 'Post', title: 'Hello' })`. */
+  static async create<T extends Record<string, unknown> = Record<string, unknown>>(
+    props: Partial<ItemData> & Partial<T> & { modelInstance?: import('@/Model/Model').Model },
     options?: ItemCreateOptions,
   ): Promise<Item<any>> {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
+    const hold = options?.hold !== false
 
     if (!props.modelName && props.type) {
       // The model the seed's type names (its easName, at the model's nameMatch level): `blog_post`
@@ -529,7 +552,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Local id first, so list rows (local + uid) resolve the same instance as early draft loads
       const cached = this.cache.peek(props.seedLocalId) ?? this.cache.peek(props.seedUid)
       if (cached) {
-        this.cache.holdInstance(cached)
+        if (hold) this.cache.holdInstance(cached)
+        else this.cache.keepUnheld(cached)
         const propertyInstances = cached.getService().getSnapshot().context.propertyInstances
         for (const [propertyName, propertyValue] of Object.entries(props)) {
           propertyInstances?.get(propertyName)?.getService().send({ type: 'updateContext', propertyValue })
@@ -538,7 +562,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         try {
           await waitForEntityReady(cached, { timeout: readyTimeout })
         } catch (err) {
-          cached.unload()
+          if (hold) cached.unload()
           throw err
         }
         return cached
@@ -548,12 +572,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
       const { latestVersionUid: _latestVersionUid, ...propsWithoutVersionUid } = props
       const proxiedInstance = Item.wrapInProxy(new Item({ ...propsWithoutVersionUid } as any))
-      this.cacheAndLoad(proxiedInstance)
+      this.cacheAndLoad(proxiedInstance, hold)
       if (!waitForReady) return proxiedInstance
       try {
         await waitForEntityReady(proxiedInstance, { timeout: readyTimeout })
       } catch (err) {
-        proxiedInstance.unload()
+        if (hold) proxiedInstance.unload()
         throw err
       }
       return proxiedInstance
@@ -666,9 +690,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const propsWithModel = { ...propsWithoutVersionUid } as any
     const newInstance = new Item(propsWithModel)
     const proxiedInstance = Item.wrapInProxy(newInstance)
+    // Held while create saves its values; `hold: false` gives the hold back as it returns
     this.cacheAndLoad(proxiedInstance)
+    const created = () => {
+      if (!hold) this.cache.release(proxiedInstance)
+      return proxiedInstance
+    }
     // Storage values must be saved before returning, so wait for readiness even when not requested.
-    if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
+    if (!waitForReady && pipelineValues.length === 0) return created()
     try {
       await waitForEntityReady(proxiedInstance, { timeout: readyTimeout })
       await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
@@ -677,7 +706,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       await this.discardCreatedItem(proxiedInstance, seedLocalId)
       throw err
     }
-    return proxiedInstance
+    return created()
   }
 
   /**
@@ -694,10 +723,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     try {
       const { appendOutboxOpAndWait, deleteFiles, startItemOutbox } = await import('@/outbox')
       startItemOutbox()
-      const applied = await appendOutboxOpAndWait<import('@/outbox').DeleteResult>({
+      const applied = await appendOutboxOpAndWait<DeleteResult>({
         seedLocalId,
         kind: 'delete',
-        value: { mode: 'discard' } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'discard' } satisfies DeleteOp,
       })
       if (!applied.superseded) await deleteFiles(applied.result?.filePaths ?? [])
     } catch (error) {
@@ -769,17 +798,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Get Item instance by ID from cache
-   * The ID can be either seedUid or seedLocalId
-   * @param id - seedUid or seedLocalId
-   * @returns Cached Item instance or null if not found
+   * The cached Item for a seedUid or seedLocalId, or null. Takes no cache hold unless called with
+   * `hold: true`, like `Item.find` and the definitions' `getById`; without one, the instance stays
+   * cached for the grace period after this lookup. A caller that takes a hold releases it with
+   * `unload()`.
    */
-  static getById(id: string): Item<any> | null {
+  static getById(id: string, options?: { hold?: boolean }): Item<any> | null {
     if (!id) {
       return null
     }
-    
-    return this.cache.hold(id) ?? null
+    if (options?.hold) return this.cache.hold(id) ?? null
+    const item = this.peek(id)
+    if (item) this.cache.keepUnheld(item)
+    return item ?? null
   }
 
   /**
@@ -814,8 +845,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    // Check cache first
-    const cached = this.getById(id)
+    // Check cache first; createById holds what it returns
+    const cached = this.getById(id, { hold: true })
     if (cached) {
       return cached
     }
@@ -839,15 +870,29 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }))
   }
 
+  /**
+   * The Item for a seedLocalId or seedUid, loaded from its rows when it isn't cached. Takes no
+   * cache hold: an item no one holds stays cached for the grace period
+   * (`SeedConfig.entityCache.unloadGraceMs`) after this lookup, then unloads. A caller that keeps
+   * the item longer passes `hold: true` and releases it with `unload()`, or holds it with
+   * `Item.retain` (React hooks do). Returns undefined, keeping no hold, when there is no such item
+   * or it isn't ready in `readyTimeout`.
+   *
+   * Called while `client.init` runs, it waits for the database to open. It throws
+   * `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`) when the database isn't open within `readyTimeout` (no init, a
+   * failed or stopped client): an undefined result would read as "no such item".
+   */
   static async find({
     modelName,
     seedLocalId,
     seedUid,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold = false,
   }: ItemFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
+    hold?: boolean
   }): Promise<IItem<any> | undefined> {
     if (!seedLocalId && !seedUid) {
       return undefined
@@ -859,14 +904,24 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
+    if (!(await whenDbReady(readyTimeout))) throw new ClientNotInitializedError()
+
     let cached = false
+    let held: Item<any> | undefined
     try {
       return await timedDb(
         `find ${modelName ?? '?'} ${id}`,
         async () => {
-          const held = Item.getById(id) ?? undefined
-          cached = held !== undefined
-          const item = held ?? (await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined))
+          const fromCache = hold ? (Item.getById(id, { hold: true }) ?? undefined) : Item.peek(id)
+          if (fromCache && !hold) Item.cache.keepUnheld(fromCache)
+          cached = fromCache !== undefined
+          let item = fromCache
+          if (!item) {
+            item = await Item.createById(id, modelName, seedLocalId ? 'localId' : undefined)
+            // createById holds what it returns; without one the item waits out the grace period
+            if (item && !hold) Item.cache.release(item)
+          }
+          if (hold) held = item
           if (item && waitForReady) await waitForEntityReady(item, { timeout: readyTimeout })
           return item
         },
@@ -874,14 +929,32 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       )
     } catch (error) {
       timingLogger(`find ${modelName ?? '?'} ${id} returned undefined: ${error}`)
+      held?.unload()
       return undefined
     }
   }
 
+  /**
+   * Takes one more hold on a cached, running instance, released with `unload()`. False (and no
+   * hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: IItem<any>): boolean {
+    const item = instance as Item<any>
+    return item.getService().getSnapshot().status === 'active' && this.cache.holdInstance(item)
+  }
+
+  /**
+   * The items of a model (every model when `modelName` is omitted), newest first. Takes no cache
+   * holds, as `find`: an item no one holds unloads after the grace period. With `hold: true` each
+   * item comes with a hold the caller releases with `unload()`; when the call then throws (aborted,
+   * an item not ready in `readyTimeout`), it keeps none of the holds it took.
+   */
   static async all(
     modelName?: string,
     deleted?: boolean,
     options?: {
+      /** Take a cache hold on each returned item (default false). */
+      hold?: boolean
       waitForReady?: boolean
       readyTimeout?: number
       includeEas?: boolean
@@ -890,14 +963,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId?: string
       /** ... or the schema that defines it. */
       schemaName?: string
-      /**
-       * Stops building items once aborted and rejects with the signal's reason. Items already
-       * built stay loaded.
-       */
+      /** Stops building items once aborted and rejects with the signal's reason. */
       signal?: AbortSignal
     },
   ): Promise<Item<any>[]> {
     const {
+      hold = false,
       waitForReady = false,
       readyTimeout = DEFAULT_READY_TIMEOUT_MS,
       includeEas = false,
@@ -909,26 +980,23 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     signal?.throwIfAborted()
     const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
-    // Built without waiting; with waitForReady the items are then awaited together, below.
-    for (const itemData of itemsData) {
-      signal?.throwIfAborted()
-      itemInstances.push(
-        await Item.create(
-          {
-            ...itemData,
-            modelName,
-          },
-          { waitForReady: false },
-        ),
-      )
-    }
+    try {
+      // Built without waiting; with waitForReady the items are then awaited together, below.
+      for (const itemData of itemsData) {
+        signal?.throwIfAborted()
+        itemInstances.push(await Item.create({ ...itemData, modelName }, { waitForReady: false, hold }))
+      }
 
-    if (waitForReady && itemInstances.length > 0) {
-      await Promise.all(
-        itemInstances.map((item) => waitForEntityReady(item, { timeout: readyTimeout })),
-      )
+      if (waitForReady && itemInstances.length > 0) {
+        await Promise.all(
+          itemInstances.map((item) => waitForEntityReady(item, { timeout: readyTimeout })),
+        )
+      }
+      signal?.throwIfAborted()
+    } catch (error) {
+      if (hold) for (const item of itemInstances) item.unload()
+      throw error
     }
-    signal?.throwIfAborted()
 
     return orderBy(itemInstances, ['createdAt'], ['desc'])
   }
@@ -1190,6 +1258,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   unpublish = async (): Promise<void> => {
+    this._assertLoaded('unpublish')
     const { assertItemOwned } = await import('@/helpers/ownership')
     const { getRevokeExecutor } = await import('@/helpers/publishConfig')
     await assertItemOwned(this)
@@ -1236,6 +1305,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * if it failed. Throws OwnershipError if none of the client's addresses own the item.
    */
   publish = async (options?: ItemPublishOptions): Promise<void> => {
+    this._assertLoaded('publish')
     const { assertItemOwned } = await import('@/helpers/ownership')
     const { getPublishExecutor, PUBLISH_NOT_CONFIGURED_MESSAGE } = await import('@/helpers/publishConfig')
     await assertItemOwned(this)
@@ -1979,8 +2049,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Releases this holder's reference. Item.create, Item.find and createById return the same cached
-   * instance to every caller, so the instance is stopped only when the last holder unloads it.
+   * Releases this caller's hold (from `Item.create`, `find({ hold: true })`, `getById(id, { hold:
+   * true })` or `Item.retain`). Every caller gets the same cached instance; once no one holds it,
+   * it unloads after `SeedConfig.entityCache.unloadGraceMs` unless a hold is taken first. On an
+   * instance no one holds it does nothing.
    */
   unload(): void {
     releaseEntity(this, Item.cache)
@@ -2005,7 +2077,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       await appendOutboxOpAndWait({
         seedLocalId: context.seedLocalId,
         kind: 'delete',
-        value: { mode: 'item' } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'item' } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     })
   }

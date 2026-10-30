@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BaseArweaveClient } from '../src/ArweaveClient/BaseArweaveClient.js'
 import { resetArweaveReadGatewayForTests } from '../src/ArweaveClient/selectReadGateway.js'
 import {
+  DEFAULT_ARWEAVE_GATEWAYS,
   DEFAULT_ARWEAVE_HOST,
   getArweaveReadGatewayHostsForPrimary,
+  isKnownArweaveGatewayHostname,
   resolveArweaveHostFromEnv,
 } from '../src/constants.js'
+import { parseArweaveTransactionLink } from '../src/htmlLinks.js'
 
 describe('resolveArweaveHostFromEnv', () => {
   const keys = ['NEXT_PUBLIC_ARWEAVE_HOST', 'ARWEAVE_HOST', 'VITE_ARWEAVE_HOST'] as const
@@ -44,17 +47,25 @@ describe('resolveArweaveHostFromEnv', () => {
 })
 
 describe('getArweaveReadGatewayHostsForPrimary', () => {
-  it('includes seed gateway in fallbacks when primary is default', () => {
+  it('puts the default host first, once', () => {
     const hosts = getArweaveReadGatewayHostsForPrimary(DEFAULT_ARWEAVE_HOST)
-    expect(hosts[0]).toBe(DEFAULT_ARWEAVE_HOST)
-    expect(hosts).toContain('arweave.net')
+    expect(hosts).toEqual([...DEFAULT_ARWEAVE_GATEWAYS])
   })
 
-  it('omits seed gateway from fallbacks when primary is custom', () => {
-    const hosts = getArweaveReadGatewayHostsForPrimary('arweave.net')
-    expect(hosts[0]).toBe('arweave.net')
-    expect(hosts).not.toContain(DEFAULT_ARWEAVE_HOST)
-    expect(hosts).toContain('g8way.io')
+  it('keeps every default gateway after a custom primary', () => {
+    const hosts = getArweaveReadGatewayHostsForPrimary('gateway.example')
+    expect(hosts).toEqual(['gateway.example', ...DEFAULT_ARWEAVE_GATEWAYS])
+  })
+
+  it('reads from no retired gateway, but still recognizes its links', () => {
+    expect(DEFAULT_ARWEAVE_GATEWAYS).not.toContain('permagate.io')
+    expect(isKnownArweaveGatewayHostname('permagate.io')).toBe(true)
+    expect(parseArweaveTransactionLink(`https://permagate.io/${'a'.repeat(43)}`)?.transactionId).toBe('a'.repeat(43))
+  })
+
+  it('defaults to arweave.net, with Seed\'s gateway kept as a fallback', () => {
+    expect(DEFAULT_ARWEAVE_HOST).toBe('arweave.net')
+    expect(DEFAULT_ARWEAVE_GATEWAYS).toContain('ar.seedprotocol.io')
   })
 })
 

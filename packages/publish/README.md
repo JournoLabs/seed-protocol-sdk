@@ -26,7 +26,7 @@ Peer dependencies: `@seedprotocol/sdk` and `@seedprotocol/react` (the same versi
 
 From Node, a domain-locked client id returns 401. Set `thirdwebSecretKey` (server only) so Thirdweb RPC and the bundler authenticate, and either pass a public `rpcUrl` or pass `thirdwebClientId` together with that secret (`x-secret-key` is attached to viem reads). A secret key alone does not build the viem RPC URL. Call `await PublishManager.ready()` before `createPublish`; that promise is the spawned actor, not the finished publish. eas-sdk’s ESM build named-imports CommonJS `lodash`. Load it with `node --import @seedprotocol/sdk/node-eas-lodash`, which redirects that import to `lodash-es`.
 
-Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`.
+Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`. [docs/PUBLISH_WALLETS.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_WALLETS.md) covers wallet adapters, bundlers and paymasters.
 
 ### Recipe 1: EIP-1193 + EOA (no Thirdweb)
 
@@ -76,7 +76,27 @@ function App() {
 // if (result.outcome === 'already_publishing') ...          // this item is publishing already
 ```
 
-### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
+With wagmi (and RainbowKit, ConnectKit or Reown AppKit on top of it), pass the connected `WalletClient` through `fromViemWalletClient`. With Privy, pass a wallet from `useWallets()` to `fromPrivyWallet`, which switches it to the publish chain first. Neither adds a dependency: the Privy adapter takes any object with Privy's `address`, `chainId`, `switchChain` and `getEthereumProvider`.
+
+```tsx
+import { fromViemWalletClient, fromPrivyWallet, useSeedWallet } from '@seedprotocol/publish'
+import { useWalletClient } from 'wagmi'
+import { useWallets } from '@privy-io/react-auth'
+
+const { connect } = useSeedWallet()
+
+// wagmi
+const { data: walletClient } = useWalletClient()
+if (walletClient) await connect(fromViemWalletClient(walletClient))
+
+// Privy (embedded or external wallet)
+const { wallets } = useWallets()
+await connect(await fromPrivyWallet(wallets[0]))
+```
+
+Both send through the wallet, so the user pays gas, and both report `kind: 'eoa'`. For a connector whose account is a smart contract wallet (Coinbase Smart Wallet, Safe), pass `{ kind: 'smart' }` and register a `dataItemSigner`: its signatures can't sign data items, and publish won't attest straight to EAS from it. viem refuses to send from a wallet on another chain (`ChainMismatchError`), so switch a wagmi wallet to the publish chain before publishing.
+
+### Recipe 2: permissionless EIP-7702 (gasless, no Thirdweb)
 
 ```tsx
 initPublish({
@@ -89,7 +109,20 @@ initPublish({
 })
 ```
 
-`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. ModularCore / ManagedAccount session-key flows remain Thirdweb-only.
+`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. The first UserOp from an EOA carries an EIP-7702 authorization, which the signer's `signAuthorization` signs. Browser wallets don't expose that over EIP-1193, so a plain `connect(provider)` works only for an EOA already delegated to the Simple7702 account; otherwise pass the wallet vendor's call as the `signAuthorization` option of the adapter. `paymasterUrl` is asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`. Fees come from the bundler's `pimlico_getUserOperationGasPrice` when it answers that method, and from the chain's estimate otherwise.
+
+To send as a Seed ManagedAccount without Thirdweb, build its sender with `createManagedAccountTxSender`. It sends UserOps through any EntryPoint v0.6 bundler, sponsored by an ERC-7677 paymaster unless `sponsored: false`, and raises the bundler's `callGasLimit` estimate by `CALL_GAS_HEADROOM_BPS` (1.2x) before the paymaster signs. Without `managedAddress` it uses the account the signer administers through the factory, and its first UserOp deploys it. A session key the account granted can sign too; pass `managedAddress` then.
+
+```ts
+const txSender = await createManagedAccountTxSender({
+  signer: owner.signer, // admin EOA or session key
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  paymasterUrl: import.meta.env.VITE_PAYMASTER_URL,
+})
+await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, expiresAt, admin: { signer: owner.signer, txSender } })
+```
+
+Register `{ signer: owner.signer, txSender, kind: 'modular', publisherAddress: txSender.address }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.
 
 ### Recipe 3: Thirdweb ConnectButton (batteries-included)
 
@@ -119,7 +152,11 @@ function App() {
 }
 ```
 
+`config` is the publish config. `PublishProvider` renders a `SeedProvider`, and passes it `seedConfig` (as its `config`), `addresses` and `onInitError`: with `seedConfig` set, the provider initializes the Seed client, so the app needs no `SeedProvider` of its own.
+
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
+
+The in-app wallet session lives in localStorage under `seedProtocol:inAppPublish:`, mirrored to thirdweb's `walletToken-<clientId>` key. `clearInAppPublishSession()` from `@seedprotocol/publish/thirdweb` removes those keys and the Disconnect flag `disconnectPublishWallet()` sets, and clears the registered publish wallet, so the user signs in again. Call it beside the SDK's `client.resetLocalData()` when "start fresh" should also sign the user out. It leaves thirdweb's other keys and a wallet already connected in thirdweb's React state; disconnect that wallet as well.
 
 ### Who pays
 
@@ -213,7 +250,7 @@ initPublish({
 - **Known chains** (`EAS_CHAIN_DEPLOYMENTS`: Ethereum, Sepolia, Optimism, Optimism Sepolia, Base, Base Sepolia, Arbitrum One / Sepolia, Polygon, Scroll, Linea) resolve the EAS and SchemaRegistry addresses automatically.
 - **Other chains** need `easContractAddress` and `schemaRegistryAddress`; `initPublish` throws without them. These options also override the built-in addresses on known chains.
 - **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
-- `ensureEasSchemasForItem` registers missing model and property schemas on first publish. The base schemas (Version and EAS's "Name a Schema") are registered by the protocol for each supported chain (seed-protocol `seed:ensure-schemas`); if one is missing, publishing fails before sending anything.
+- `ensureEasSchemasForItem` registers the missing model and property schemas a publish attests under. `ensureEasSchemasForModels(modelNames, wallet)` registers everything a model can attest under, with no item, so an automation key (which can't register) finds them. The base schemas (Version and EAS's "Name a Schema") are registered by the protocol for each supported chain (seed-protocol `seed:ensure-schemas`); if one is missing, publishing fails before sending anything.
 - SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer, but one set to another chain's known easscan indexer throws (`SeedConfig.eas.indexerUrl` takes precedence over both).
 - The SDK's local database remembers which chain its attestations came from. Pointing an existing database at a different chain fails at init, sync or publish with a chain-mismatch error rather than mixing data from two chains. Use a separate `filesDir` / database per chain. Databases created before this check are treated as Optimism Sepolia.
 - Before the first publish or revoke, `verifyPublishChain()` checks that the RPC reports `chain.id` and that EAS, the SchemaRegistry and any configured factory / executor module have code on the chain. It throws `PublishChainConfigError` listing every problem. Call it at startup to fail earlier.
@@ -233,7 +270,7 @@ const twin = seedTwinConfig(twinJson)
 
 initPublish({
   ...twin.publish, // chain 31337, rpcUrl, addresses, executor, thirdweb: { bundlerUrl, sponsorGas: false, modularWalletMode: 'EOA' }
-  uploadApiBaseUrl: 'http://localhost:3000', // your seed-protocol-server
+  uploadApiBaseUrl: 'http://localhost:3000', // your local upload API
   thirdwebClientId, // login stays hosted; allow the local origin
   useModularExecutor: true,
 })
@@ -254,7 +291,7 @@ Publish signs each file (image, Html, ...) as an Arweave data item and posts the
 
 `useArweaveBundler` is deprecated: `true` changes nothing, and `false` makes `initPublish` throw. The L1 path it used to select, an Arweave transaction the upload API reimbursed, has been removed along with the `signArweaveTransactions` and `arweaveJwk` options.
 
-**Memory:** Large publishes hold signed DataItems and a single packed batch body in memory briefly. Electron and other Chromium renderers often cap near ~4 GB JS heap. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for scaling, `publishMode`, and path differences (`signDataItems` vs `dataItemSigner`).
+**Size limits:** a publish whose uploads add up to more than `maxUploadBytes` (default 100 MiB) fails with `UploadTooLargeError` before reading any file. Over `confirmUploadAboveBytes` (default 25 MiB) it fails with `UploadNeedsConfirmError` until it is given `confirmUpload: true`. Both errors carry an `estimate` with the size, upload time and memory, and `estimatePublishCost` returns the same in `upload`. A browser publish holds about 7 copies of its upload bytes in memory. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for the measurements and an example confirm.
 
 Provide a data item signer at publish time via `PublishManager.createPublish` options:
 
@@ -315,7 +352,7 @@ await deletePublishProcessById(runId) // numeric row id from `records`
 
 Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md).
 
-APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
+APIs live on `@seedprotocol/publish` (sidecar attest/revoke, and `enrollPublishAutomation`, `revokePublishAutomation` and the session-key helpers taking wallets) and `@seedprotocol/publish/thirdweb` (the same with wallets defaulting to the connected in-app wallet, and `assertStorageBoundToIdentity`).
 
 ### Modular executor (`useModularExecutor`)
 
@@ -331,7 +368,7 @@ With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 **Executor.** `runModularExecutorPublishPrep()` ensures the ManagedAccount is deployed and, when `modularAccountModuleContract` is set, tries to install the Seed executor: `installSeedExecutor()` from the admin EOA on Router accounts with the `SeedExecutorRouterExtension`; other accounts are skipped. Interactive publishing doesn't use the executor, so a failed install (for example, `modularAccountModuleContract` naming a different executor than the one the account's extension pins) only logs a warning. `enrollPublishAutomation` requires the install and fails with `EXECUTOR_MODULE_NOT_INSTALLED`. To catch a stale `modularAccountModuleContract` at startup, compare it with `readFactorySeedExecutor()`.
 
-**Session keys** may only target the executor (`approvedTargetsForAutomationPublish`). `ensureManagedSignerSessionKey` and `defaultApprovedTargetsForModularPublish` are deprecated: interactive publishing needs no session key, and both now grant the executor only, never the account (which would allow any self-call) or EAS.
+**Session keys** may only target the executor (`approvedTargetsForAutomationPublish`), never the account (which would allow any self-call) or EAS. Interactive publishing needs no session key. `ensureAutomationSessionKey` and `removeAutomationSessionKey` take an `admin` `PublishWallet`: its signer, an admin EOA of the account, signs the grant, and its sender sends it. The account accepts the grant from any sender, so the admin EOA can send it and pay the gas itself. The `/thirdweb` versions default `admin` to the connected managed in-app wallet.
 
 **Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
 

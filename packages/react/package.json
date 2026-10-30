@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/react",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "React hooks and components for Seed Protocol: live schemas, models, items and properties from @seedprotocol/sdk, backed by TanStack Query",
   "keywords": [
     "seed-protocol",
@@ -34,7 +34,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && vite build",
+    "build": "rimraf dist && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "cd ../.. && vitest run --reporter=default --config vite.config.js --project=browser-react",
     "test:watch": "cd ../.. && vitest --config vite.config.js --project=browser-react",
     "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser"
@@ -46,10 +46,8 @@
     "@tanstack/react-query": "^5"
   },
   "dependencies": {
-    "@xstate/react": "^6.1.0",
     "debug": "^4.4.1",
     "drizzle-orm": "^0.44.3",
-    "immer": "^11.0.1",
     "lodash-es": "^4.17.22",
     "pluralize": "^8.0.0",
     "rxjs": "^7.8.1",

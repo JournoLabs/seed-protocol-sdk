@@ -142,13 +142,15 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       modelType,
       seedLocalId: seedLocalIdFromDb,
       versionLocalId,
-      schemaUid,
+      schemaUid: schemaUidFromDb,
       easDataType,
       refSeedType: refSeedTypeFromDb,
       refResolvedValue: refResolvedValueFromDb,
       retract: retractFromDb,
     } = rows[0]
 
+    // The resolved schema uid fills in a row stored before its schema was known.
+    const rowSchemaUid = schemaUidFromDb || schemaUid
     // Stored model types are the model's EAS name (ADR 0008): `blog_post` for BlogPost.
     const modelTypeForName = modelName ? easName(modelName) : undefined
 
@@ -163,7 +165,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       logger(
         `[db/write] [updateItemPropertyValue] value is the same as most recent record for property: ${propertyNameFromDb}`,
       )
-      return localId == null ? undefined : { localId, uid: uid ?? null, schemaUid: schemaUid ?? '' }
+      return localId == null ? undefined : { localId, uid: uid ?? null, schemaUid: schemaUidFromDb ?? '' }
     }
 
     // This means we already have a local-only record so we should just update that one
@@ -188,12 +190,15 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       if (propertyIdFromDb == null && property.propertyId != null) {
         updatePayload.propertyId = property.propertyId
       }
+      if (!schemaUidFromDb && schemaUid) {
+        updatePayload.schemaUid = schemaUid
+      }
       await appDb
         .update(metadata)
         .set(updatePayload as Partial<typeof metadata.$inferInsert>)
         .where(eq(metadata.localId, localId))
 
-      return { localId, uid: null, schemaUid: schemaUid ?? '' }
+      return { localId, uid: null, schemaUid: rowSchemaUid ?? '' }
     }
 
     const seedDataFromDb = seedLocalId ? await findSeedRow({ localId: seedLocalId }, appDb) : null
@@ -216,7 +221,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       seedLocalId: seedLocalIdFromDb,
       versionLocalId,
       versionUid: versionDataFromDb?.uid || null,
-      schemaUid,
+      schemaUid: rowSchemaUid,
       easDataType: easDataType || null,
       refSeedType: refSeedType || null,
       refResolvedValue: refResolvedValue || null,
@@ -228,7 +233,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     return {
       localId: newLocalId,
       uid: null,
-      schemaUid: schemaUid ?? '',
+      schemaUid: rowSchemaUid ?? '',
     }
   }
 

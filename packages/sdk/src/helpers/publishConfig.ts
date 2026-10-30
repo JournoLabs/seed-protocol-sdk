@@ -54,6 +54,18 @@ export async function getPublisherForNewSeedsWithTimeout(): Promise<string | und
 export type ItemPublishOptions = {
   /** 'patch' (default) updates the current version; 'new_version' starts one. */
   publishMode?: 'patch' | 'new_version'
+  /**
+   * Signs this publish's Arweave data items: an EOA's signer, such as an ethers `Wallet` or a
+   * @seedprotocol/publish `SeedSigner`. Defaults to the publish wallet's EOA.
+   */
+  dataItemSigner?: { readonly address: string; signMessage(...args: never[]): Promise<string> }
+  /**
+   * The user agreed to this publish's upload size. @seedprotocol/publish refuses a publish over
+   * its confirm size (default 25 MiB) without it.
+   */
+  confirmUpload?: boolean
+  /** Most this publish may upload, in bytes. @seedprotocol/publish defaults to 100 MiB. */
+  maxUploadBytes?: number
   [option: string]: unknown
 }
 

@@ -1,5 +1,5 @@
 import { keccak256Hex } from './keccak.js'
-import { normalizeBytes32Hex } from './easUid.js'
+import { bytes32FromNumberHex, normalizeBytes32Hex } from './easUid.js'
 import { checksumAddress } from './utils.js'
 
 /** EAS schema definition for ManagedAccount publish-automation grants (revocable). */
@@ -12,8 +12,8 @@ export const PUBLISH_AUTHORIZATION_SCHEMA_NAME = 'seedprotocol.publishAuthorizat
 /** Fixed v1 scopes string. */
 export const PUBLISH_AUTHORIZATION_SCOPES = 'publish,revoke'
 
-/** Default EAS expiration when grant has no expiresAt (365 days from grantedAt). */
-export const PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS = 365 * 24 * 60 * 60
+/** Default EAS expiration when grant has no expiresAt (90 days from grantedAt). */
+export const PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS = 90 * 24 * 60 * 60
 
 export type PublishAuthorizationDecoded = {
   identity: string
@@ -25,7 +25,12 @@ export type PublishAuthorizationDecoded = {
   permissionsHash: `0x${string}`
 }
 
-export type PublishAuthorizationAssessStatus = 'valid' | 'expired' | 'scope_mismatch' | 'unknown'
+export type PublishAuthorizationAssessStatus =
+  | 'valid'
+  | 'revoked'
+  | 'expired'
+  | 'scope_mismatch'
+  | 'unknown'
 
 export type PublishAuthorizationAssessResult = {
   status: PublishAuthorizationAssessStatus
@@ -50,7 +55,7 @@ function normalizeAddress(addr: string): string {
 function asBytes32(value: unknown): `0x${string}` {
   if (typeof value === 'string') return normalizeBytes32Hex(value) as `0x${string}`
   if (value && typeof value === 'object' && 'hex' in (value as object)) {
-    return normalizeBytes32Hex(String((value as { hex: string }).hex)) as `0x${string}`
+    return bytes32FromNumberHex(String((value as { hex: string }).hex)) as `0x${string}`
   }
   return normalizeBytes32Hex(String(value ?? '')) as `0x${string}`
 }
@@ -107,10 +112,16 @@ export function assessPublishAuthorization(params: {
   decoded: PublishAuthorizationDecoded
   /** EAS on-chain expirationTime (unix seconds), when known. */
   expirationTime?: number | null
+  /** EAS `revoked`. A revoked grant is `'revoked'` whatever its expiry. */
+  revoked?: boolean | null
   now?: number
   /** When set, scopes must equal this string (default: publish,revoke). */
   expectedScopes?: string
 }): PublishAuthorizationAssessResult {
+  if (params.revoked) {
+    return { status: 'revoked', warnings: [] }
+  }
+
   const nowSec = Math.floor((params.now ?? Date.now()) / 1000)
   const warnings: string[] = []
   const expectedScopes = params.expectedScopes ?? PUBLISH_AUTHORIZATION_SCOPES

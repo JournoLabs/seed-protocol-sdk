@@ -1,13 +1,18 @@
-import type { AddressConfiguration, SeedConstructorOptions } from '@/types'
+import type {
+  AddressConfiguration,
+  ClientStopReason,
+  ResetLocalDataOptions,
+  ResetLocalDataResult,
+  SeedConstructorOptions,
+} from '@/types'
 import { isEqual } from 'lodash-es'
-import { normalizeAddressConfig } from '@/helpers/addresses'
 import debug                      from 'debug'
 import { createActor, waitFor }   from 'xstate'
 import { clientManagerMachine }   from '@/client/clientManagerMachine'
 // import { BaseDb }                 from '@/db/Db/BaseDb'
 // import { appState }               from '@/seedSchema'
 // import { eq }                     from 'drizzle-orm'
-import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
+import { ClientNotInitializedError, ResetLocalDataBrowserOnlyError } from '@/client/errors'
 import { ClientManagerState } from '@/client/constants'
 import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
@@ -32,11 +37,20 @@ import { resetAddressesPersistedAnnouncement } from '@/client/addressesPersisted
 import {
   findLocalOnchainCopiesForAddresses,
   hardDeleteLocalSeedsByLocalIds,
+  type RemoveLocalCopiesOptions,
 } from '@/db/write/removeLocalCopiesForAddresses'
 import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 import { registerClientActor } from '@/client/readiness'
+import { setEntityUnloadGraceMs } from '@/helpers/entity/entityCache'
+import { evictAllEntities } from '@/helpers/entity/entityLifecycle'
+import { stopOutbox } from '@/outbox/outbox'
+import { onTabMessage, releaseDbOpenLock, stopTabCoordination } from '@/helpers/tabCoordinator'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { isBrowser } from '@/helpers/environment'
+import { applySeedConfigDefaults, DEFAULT_FILES_DIR } from '@/client/seedConfigDefaults'
+import { whenCanonicalizeModelTypesSettled } from '@/db/canonicalizeModelTypes'
 
 const logger               = debug('seedSdk:client')
 
@@ -86,17 +100,19 @@ const notifyServiceListeners = () => {
 
 /** Config of the init that is running or has succeeded; cleared when init fails or the client stops. */
 let activeInitConfig: SeedConstructorOptions['config'] | undefined
+/** Config of the last init in this page, kept through failures and stops: resetLocalData's filesDir. */
+let lastInitConfig: SeedConstructorOptions['config'] | undefined
 
 export const INIT_CONFIG_CONFLICT_MESSAGE =
   'client.init was already called with a different config. The SDK keeps the config it was ' +
   'initialised with: pass the same config, or call client.stop() before initialising with a new one. ' +
-  'To change addresses, use client.setAddresses() (or call init again with the same config and new addresses).'
+  'To change addresses, use client.setAddresses().'
 
 const ensureInitialized = () => {
   const snapshot = clientManager.getSnapshot()
   // After stop() the stopped actor's context still says isInitialized, so check its status too.
   if (snapshot.status !== 'active' || !snapshot.context.isInitialized) {
-    throw new Error(CLIENT_NOT_INITIALIZED);
+    throw new ClientNotInitializedError();
   }
 }
 
@@ -104,23 +120,108 @@ export const CLIENT_ALREADY_STOPPED_WARNING =
   'client.stop() or client.unload() was called after the client had already stopped; this call does nothing. ' +
   'Remove the extra call, or call client.init() before stopping again.'
 
-/** Shared by stop() and unload(). A repeat call after a stop warns and does nothing. */
-const stopClient = ({ unsubscribe }: { unsubscribe: boolean }) => {
+/** Set while a stop releases the client's resources; init waits for it. */
+let stopping: Promise<void> | undefined
+/** Set while resetLocalData runs; init waits for it. */
+let resetting: Promise<unknown> | undefined
+
+/** How long resetLocalData waits for other tabs to close the database by default. */
+const RESET_OTHER_TABS_TIMEOUT_MS = 10_000
+
+/**
+ * Shared by stop() and unload(). Stops the client in any state, including after a failed or
+ * unfinished init, then releases what it holds: the outbox drain, cached entities, this tab's
+ * leadership and the database (closed, so its file is released). A repeat call after a stop warns
+ * and does nothing.
+ */
+const stopClient = async ({
+  unsubscribe,
+  reason = 'stop',
+}: {
+  unsubscribe: boolean
+  reason?: ClientStopReason
+}): Promise<void> => {
   if (clientManager.getSnapshot().status === 'stopped') {
     console.warn(CLIENT_ALREADY_STOPPED_WARNING)
     return
   }
-  ensureInitialized()
   activeInitConfig = undefined
   cancelAllRetriesWhenOnline()
   unregisterSeedQueryLocalSource()
   resetAddressesPersistedAnnouncement()
+  // The next init sets its own period. Instances waiting out this one are evicted with the rest
+  // (releaseClientResources), which cancels their timers.
+  setEntityUnloadGraceMs(undefined)
+  // The stopped actor keeps its last snapshot, so its context says why it stopped.
+  clientManager.send({ type: 'updateContext', context: { stopReason: reason } })
   clientManager.stop()
   if (unsubscribe) subscription.unsubscribe()
   notifyServiceListeners()
+  const releasing = releaseClientResources()
+  stopping = releasing
+  try {
+    await releasing
+  } finally {
+    if (stopping === releasing) stopping = undefined
+  }
+}
+
+const releaseClientResources = async (): Promise<void> => {
+  await stopOutbox()
+  await whenCanonicalizeModelTypesSettled()
+  // Before the database closes, so their live queries end first.
+  evictAllEntities()
+  stopTabCoordination()
+  await BaseDb.close()
+  // Only now: a reset waiting for it may delete the database file.
+  releaseDbOpenLock()
+}
+
+/**
+ * Another tab is resetting this database: stop the client, and drop the file system's mount,
+ * whose index lists files about to be deleted. The app decides what to do next (reload, show a
+ * message, init again); the snapshot says `status: 'stopped'`, `context.stopReason: 'reset'`.
+ */
+const stopForOtherTabReset = async (): Promise<void> => {
+  if (clientManager.getSnapshot().status !== 'stopped') {
+    await stopClient({ unsubscribe: false, reason: 'reset' })
+  } else if (stopping) {
+    await stopping
+  }
+  await BaseFileManager.unmountFileSystem()
+}
+
+onTabMessage((message) => {
+  if (message.type !== 'close-db') return
+  void stopForOtherTabReset().catch((error) => logger('stopping for another tab\'s reset failed:', error))
+})
+
+const resetLocalData = async (options: ResetLocalDataOptions = {}): Promise<ResetLocalDataResult> => {
+  if (!isBrowser()) {
+    throw new ResetLocalDataBrowserOnlyError()
+  }
+  const filesDir =
+    options.filesDir ||
+    clientManager.getSnapshot().context.filesDir ||
+    applySeedConfigDefaults(lastInitConfig)?.filesDir ||
+    DEFAULT_FILES_DIR
+  if (clientManager.getSnapshot().status !== 'stopped') {
+    await stopClient({ unsubscribe: false, reason: 'reset' })
+  } else if (stopping) {
+    await stopping
+  }
+  const { resetBrowserLocalData } = await import('@/browser/helpers/resetLocalData')
+  return resetBrowserLocalData({
+    filesDir,
+    otherTabsTimeoutMs: options.otherTabsTimeoutMs ?? RESET_OTHER_TABS_TIMEOUT_MS,
+  })
 }
 
 const coalescedInit = createCoalescedAsync(async (options: any) => {
+  // A stop still closing the database, or a reset deleting it: open it again only once that's done.
+  if (stopping) await stopping
+  if (resetting) await resetting
+
   // If the actor is stopped (e.g., from a previous failed test), restart it
   const snapshot = clientManager.getSnapshot()
   const currentState = snapshot.value as string
@@ -158,6 +259,8 @@ const coalescedInit = createCoalescedAsync(async (options: any) => {
     })
   }
   
+  setEntityUnloadGraceMs(options?.config?.entityCache?.unloadGraceMs)
+
   // The root-level init handler moves to PLATFORM_CLASSES_INIT (stopping any running step) as
   // send() returns; the platformClassesInit step fills the context from options.
   clientManager.send({ type: 'init', options });
@@ -214,27 +317,21 @@ const clientInstance = {
   },
   /**
    * Initialise the SDK. Calls made while an init is running share it. Once initialised, a
-   * call with the same config resolves at once and applies any change in `addresses`; a
-   * call with a different config throws INIT_CONFIG_CONFLICT_MESSAGE (call stop() first).
+   * call with the same config resolves at once and leaves the stored addresses as they are:
+   * only the first init applies `addresses`, and `setAddresses` changes them after that. A call
+   * with a different config throws INIT_CONFIG_CONFLICT_MESSAGE (call stop() first).
    */
   init: async (options: SeedConstructorOptions): Promise<void> => {
     if (activeInitConfig !== undefined && !isEqual(activeInitConfig, options?.config)) {
       throw new Error(INIT_CONFIG_CONFLICT_MESSAGE)
     }
-    const isRepeat = activeInitConfig !== undefined
     activeInitConfig = options?.config
+    lastInitConfig = options?.config
     try {
       await coalescedInit(options)
     } catch (error) {
       activeInitConfig = undefined
       throw error
-    }
-    if (isRepeat && options?.addresses !== undefined) {
-      const wanted = normalizeAddressConfig(options.addresses)
-      const current = { owned: await getOwnedAddressesFromDb(), watched: await getWatchedAddressesFromDb() }
-      if (!isEqual(wanted, current)) {
-        await clientInstance.setAddresses(wanted)
-      }
     }
   },
   setAddresses: async (addresses: AddressConfiguration) => {
@@ -275,13 +372,18 @@ const clientInstance = {
     return result
   },
   /**
-   * Hard-delete local on-chain seed copies for the given publisher addresses.
-   * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
+   * Hard-delete local on-chain seed copies for the given publisher addresses. Chain is untouched;
+   * reconnect can rehydrate via syncFromEas. Drafts (no uid / attestationRaw) are kept. A copy that
+   * holds unpublished edits or pending outbox ops, of an address still owned, is kept too and listed
+   * in `keptSeedLocalIds` (decision D24); `{ includeUnpublished: true }` removes it with the rest.
    */
-  removeLocalCopiesForAddresses: async (addresses: string[]) => {
+  removeLocalCopiesForAddresses: async (addresses: string[], options: RemoveLocalCopiesOptions = {}) => {
     ensureInitialized()
     const list = Array.isArray(addresses) ? addresses : []
-    const matched = await findLocalOnchainCopiesForAddresses(list)
+    const matched = await findLocalOnchainCopiesForAddresses(list, {
+      includeUnpublished: options.includeUnpublished,
+      ownedAddresses: options.includeUnpublished ? [] : await getOwnedAddressesFromDb(),
+    })
     const cacheIds = [
       ...matched.removedSeedLocalIds,
       ...matched.removedSeedUids,
@@ -346,8 +448,31 @@ const clientInstance = {
     });
     return () => subscription.unsubscribe()
   },
+  /**
+   * Stops the client, from any state (a failed init too), and closes the database. Resolves once
+   * everything is released; `init` may be called right away and waits for that.
+   */
   stop: () => stopClient({ unsubscribe: false }),
+  /** As `stop`, and also ends the client's internal state subscription. */
   unload: () => stopClient({ unsubscribe: true }),
+  /**
+   * Deletes this database's local data (browser only): stops the client in this tab (from any
+   * state), asks the other tabs of the database to stop theirs (`close-db`), waits up to
+   * `otherTabsTimeoutMs` for them, then removes `filesDir` from OPFS entry by entry and unmounts
+   * the file system. Resolves with what it deleted and what it couldn't, rather than throwing on
+   * the first failure. A client the reset stops, here or in another tab, ends with snapshot
+   * `status: 'stopped'` and `context.stopReason: 'reset'`. `init` works again without a reload and
+   * waits for a reset in progress. localStorage is left alone.
+   */
+  resetLocalData: (options?: ResetLocalDataOptions): Promise<ResetLocalDataResult> => {
+    const run = resetLocalData(options)
+    const settled = run.catch(() => {})
+    resetting = settled
+    void settled.then(() => {
+      if (resetting === settled) resetting = undefined
+    })
+    return run
+  },
 }
 
 // Export the singleton instance

@@ -1,4 +1,4 @@
-import type { Address, Hex, SignableMessage } from 'viem'
+import type { Address, Hex, SignableMessage, SignedAuthorization, TypedData, TypedDataDefinition } from 'viem'
 import { retryNonceTooLow } from './retryNonceTooLow'
 import { ethers } from 'ethers'
 
@@ -22,6 +22,38 @@ export interface SeedSigner {
    * Plain string is UTF-8 prefixed hash.
    */
   signMessage(args: { message: SignableMessage }): Promise<Hex>
+
+  /**
+   * EIP-712 signature (`eth_signTypedData_v4`). Optional: data item signing doesn't need it, but
+   * ManagedAccount session-key grants and smart-account UserOps do (see {@link requireSignTypedData}).
+   */
+  signTypedData?<const T extends TypedData | Record<string, unknown>, P extends keyof T | 'EIP712Domain'>(
+    args: TypedDataDefinition<T, P>,
+  ): Promise<Hex>
+
+  /**
+   * EIP-7702 authorization delegating this EOA to `address`. Optional: only the EIP-7702 sender
+   * needs it, once, on an EOA's first UserOp. Browser wallets don't expose this over EIP-1193.
+   */
+  signAuthorization?(args: SeedAuthorizationRequest): Promise<SignedAuthorization>
+}
+
+export type SeedAuthorizationRequest = {
+  /** Contract to delegate to. */
+  address: Address
+  chainId: number
+  /** The EOA's current transaction nonce. */
+  nonce: number
+}
+
+/** `signer.signTypedData`, bound; throws when the signer doesn't implement it. */
+export function requireSignTypedData(signer: SeedSigner): NonNullable<SeedSigner['signTypedData']> {
+  if (typeof signer.signTypedData !== 'function') {
+    throw new Error(
+      `@seedprotocol/publish: signer ${signer.address} has no signTypedData, which ManagedAccount session keys and smart-account UserOps need. fromEthersWallet, fromEip1193Provider, fromViemWalletClient, fromPrivyWallet and fromThirdwebAccount provide it.`,
+    )
+  }
+  return signer.signTypedData.bind(signer)
 }
 
 /**
@@ -40,15 +72,29 @@ export interface SeedTxSender {
 /**
  * What account a PublishWallet publishes from. `'eoa'`: a plain key, whose address is the signer
  * (publish may attest straight to EAS from it before it has any code). `'smart'`: a smart account
- * (ManagedAccount, thirdweb smart wallet). Unset: unknown, treated like `'smart'` when choosing
- * direct EAS.
+ * (ManagedAccount, thirdweb smart wallet), whose signatures can't sign data items. `'modular'`: an
+ * admin EOA that publishes as the user's ManagedAccount, either sending as the account itself
+ * (`createManagedAccountTxSender`) or as the thirdweb in-app EOA; its signer is an EOA, so it
+ * signs data items. Unset: unknown, refused when choosing direct EAS.
  */
-export type PublishWalletKind = 'eoa' | 'smart'
+export type PublishWalletKind = 'eoa' | 'smart' | 'modular'
 
 export type PublishWallet = {
   signer: SeedSigner
   txSender: SeedTxSender
   kind?: PublishWalletKind
+}
+
+/**
+ * Whether `wallet` sends as `publisher`, an account its signer administers (for example a
+ * ManagedAccount through `createManagedAccountTxSender`, with `kind: 'modular'`): the sender is the
+ * publisher and the signer is a different address. Such a wallet publishes as it is, with no
+ * Thirdweb in-app wallet setup.
+ */
+export function sendsAsManagedAccount(wallet: PublishWallet, publisher: string | undefined): boolean {
+  if (!publisher || wallet.kind === 'eoa') return false
+  const sender = wallet.txSender.address.toLowerCase()
+  return sender === publisher.toLowerCase() && sender !== wallet.signer.address.toLowerCase()
 }
 
 const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
@@ -106,6 +152,26 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
             ? raw
             : new Uint8Array(raw)
       return (await wallet.signMessage(bytes)) as Hex
+    },
+    signTypedData: async ({ domain, types, message }) => {
+      // ethers derives EIP712Domain from `domain` and rejects it in `types`.
+      const { EIP712Domain: _domainType, ...rest } = types as Record<string, ethers.TypedDataField[]>
+      return (await wallet.signTypedData(
+        (domain ?? {}) as ethers.TypedDataDomain,
+        rest,
+        message as Record<string, unknown>,
+      )) as Hex
+    },
+    signAuthorization: async ({ address: delegate, chainId, nonce }) => {
+      const { signature } = await wallet.authorize({ address: delegate, chainId, nonce })
+      return {
+        address: delegate,
+        chainId,
+        nonce,
+        r: signature.r as Hex,
+        s: signature.s as Hex,
+        yParity: signature.yParity,
+      }
     },
   })
   const txSender = brandTxSender({

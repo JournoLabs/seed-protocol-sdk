@@ -19,6 +19,7 @@ import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/sto
 import { notifyFileSaved } from '@/helpers/tabEvents'
 import { isItemOwned, OwnershipError } from '@/helpers/ownership'
 import { isValidEasAttestationUid } from '@seedprotocol/eas'
+import { propertyValuesEqual } from '@/helpers/propertyValuesEqual'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import { pendingWrites } from '@/seedSchema/PendingWriteSchema'
@@ -34,7 +35,7 @@ import { findSetConflict, recordPropertyEdit } from './conflicts'
 import { storageValueRowOf } from './storageValueRow'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { afterStorageValueApplied, prepareStorageValue, type PreparedStorageValue } from '@/storageValue/save'
-import { requireStagedFile } from '@/storageValue/stage'
+import { requireStagedFile, StagedValueMissingError } from '@/storageValue/stage'
 
 /**
  * A plain value (Text, Number, Boolean, Date, List, a Relation's seed id) for one item property,
@@ -511,27 +512,52 @@ export class RelationTargetError extends Error {
     super(`Relation target not found: ${targets.join(', ')}`)
     this.name = 'RelationTargetError'
   }
+
+  /** Rebuilds the error from its message, as an op row stores it; undefined for any other message. */
+  static fromMessage(message: string): RelationTargetError | undefined {
+    const match = /^Relation target not found: (.+)$/.exec(message)
+    return match ? new RelationTargetError(match[1]!.split(', ')) : undefined
+  }
 }
 
 /** The seed ids a Relation or List-of-Relation value names; none for other values. */
-function relationTargets(value: SetPropertyValueOp): string[] {
+function relationTargets(value: { dataType?: string; refValueType?: string; newValue: unknown }): string[] {
   const dataType = normalizeDataType(value.dataType)
   const refValueType = normalizeDataType(value.refValueType)
-  if (!value.newValue) return []
-  if (dataType === 'Relation' && refValueType !== 'Image') return [value.newValue]
-  if (dataType === 'List' && refValueType === 'Relation') return parseListPropertyValueFromStorage(value.newValue)
+  const { newValue } = value
+  if (!newValue) return []
+  if (dataType === 'Relation' && refValueType !== 'Image') return typeof newValue === 'string' ? [newValue] : []
+  if (dataType === 'List' && refValueType === 'Relation') {
+    if (Array.isArray(newValue)) return newValue.filter((id): id is string => typeof id === 'string')
+    return typeof newValue === 'string' ? parseListPropertyValueFromStorage(newValue) : []
+  }
   return []
 }
 
+/** The seed ids a create's initial Relation and List-of-Relation values name. */
+function createRelationTargets(value: CreateItemOp | undefined): string[] {
+  return (value?.rows ?? []).flatMap((row) =>
+    relationTargets({
+      dataType: row.propertyRecordSchema?.dataType,
+      refValueType: row.propertyRecordSchema?.refValueType,
+      newValue: row.propertyValue,
+    }),
+  )
+}
+
 /**
- * The relation-target rule, checked before a `set` applies: each seed a Relation value names by
- * local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
+ * The relation-target rule, checked before a `set` or `create` applies: each seed a Relation value
+ * names by local id must exist. An attestation uid may name a seed with no local copy, so uids pass. A
  * target whose create op is still pending defers the op (OutboxOpDeferredError) until it applies;
  * any other missing target fails it with RelationTargetError.
  */
 async function requireRelationTargets(op: OutboxOp): Promise<void> {
-  const value = outboxOpValue<SetPropertyValueOp>(op)
-  const localIds = [...new Set(value ? relationTargets(value) : [])].filter((id) => !isValidEasAttestationUid(id))
+  const targets =
+    op.kind === 'create'
+      ? createRelationTargets(outboxOpValue<CreateItemOp>(op))
+      : relationTargets(outboxOpValue<SetPropertyValueOp>(op) ?? { newValue: null })
+  // A create may relate the item to itself
+  const localIds = [...new Set(targets)].filter((id) => !isValidEasAttestationUid(id) && id !== op.seedLocalId)
   if (localIds.length === 0) return
   const db = BaseDb.getAppDb()
   const found = await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.localId, localIds))
@@ -553,12 +579,20 @@ async function requireRelationTargets(op: OutboxOp): Promise<void> {
 
 /**
  * Rethrows a failed item op's error as its caller expects it: OwnershipError when the drainer
- * refused the op for ownership, else the OutboxOpFailedError as is.
+ * refused the op for ownership, else the OutboxOpFailedError. For a RelationTargetError or a
+ * StagedValueMissingError its `cause` is that error, rebuilt from the op row (decision D31): the op
+ * may have failed in another tab or before a reload, so the original instance isn't here.
  */
 export function throwItemWriteError(error: unknown): never {
-  if (error instanceof OutboxOpFailedError && error.errorName === 'OwnershipError') {
-    throw new OwnershipError(error.message)
-  }
+  if (!(error instanceof OutboxOpFailedError)) throw error
+  if (error.errorName === 'OwnershipError') throw new OwnershipError(error.message)
+  const cause =
+    error.errorName === 'RelationTargetError'
+      ? RelationTargetError.fromMessage(error.message)
+      : error.errorName === 'StagedValueMissingError'
+        ? StagedValueMissingError.fromMessage(error.message)
+        : undefined
+  if (cause && error.cause === undefined) error.cause = cause
   throw error
 }
 
@@ -570,6 +604,44 @@ async function prepareItemStorageValue(op: OutboxOp, value: ItemStorageValueOp):
   await requireStagedFile(op.valueRef ?? value.itemStorage.stagedPath, value.itemStorage.source)
   const head = await getLatestVersionRow(op.seedLocalId)
   return { versionLocalId: head?.localId ?? undefined, versionUid: head?.uid ?? undefined }
+}
+
+/**
+ * A `set` that puts a property back to its latest attested value leaves no draft: the property's
+ * drafts are deleted, so the attested row is its current row again and the property isn't an
+ * unpublished edit (pending diff, cost estimate, publish). The value is compared with the latest
+ * attested row, not with the row the edit was made against: once sync has written a newer value,
+ * going back to the old one is still an edit, and wins as one (ADR 0019). Returns the attested
+ * row, or undefined when the op writes a row as usual.
+ */
+async function restoreAttestedRow(
+  op: Pick<OutboxOp, 'seedLocalId' | 'propertyName'>,
+  value: SetPropertyValueOp,
+  tx: ReturnType<typeof BaseDb.getAppDb>,
+): Promise<SetPropertyValueResult | undefined> {
+  if (!op.propertyName || value.clear || value.newValue == null || value.newValue.trim() === '') return undefined
+  const property = await matchMetadataProperty(
+    {
+      propertyName: op.propertyName,
+      seedLocalId: op.seedLocalId,
+      modelName: value.modelName,
+      dataType: value.dataType,
+      refValueType: value.refValueType,
+    },
+    tx,
+  )
+  const ofProperty = and(eq(metadata.seedLocalId, op.seedLocalId), metadataRowsOfProperty(property))
+  const rows = ((await tx.select().from(metadata).where(ofProperty)) as MetadataType[]).sort(
+    compareMetadataRowsLatestFirst,
+  )
+  const attestedAt = rows.findIndex((row) => isValidEasAttestationUid(row.uid))
+  const attested = rows[attestedAt]
+  if (!attested?.localId || attested.revokedAt != null) return undefined
+  // Only drafts above it: a row a publish in progress holds (a placeholder uid) stays the value
+  if (rows.slice(0, attestedAt).some((row) => row.uid != null || row.derivedFromUid != null)) return undefined
+  if (!(await propertyValuesEqual(value, value.newValue, attested.propertyValue, tx))) return undefined
+  await tx.delete(metadata).where(and(ofProperty, isNull(metadata.uid), isNull(metadata.derivedFromUid)))
+  return { localId: attested.localId, uid: attested.uid, schemaUid: attested.schemaUid ?? '' }
 }
 
 let registered = false
@@ -590,7 +662,7 @@ export function startItemOutbox(): void {
         return {
           schemaUid: await lookupPropertySchemaUid(
             op.propertyName,
-            value.propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+            value.propertyRecordSchema,
           ),
         }
       },
@@ -598,6 +670,11 @@ export function startItemOutbox(): void {
         const value = outboxOpValue<SetPropertyValueOp>(op)!
         // Before the write, which makes the edit the newest row
         const conflict = await findSetConflict(op, value, tx)
+        const restored = await restoreAttestedRow(op, value, tx)
+        if (restored) {
+          await recordPropertyEdit(op, conflict, tx)
+          return restored
+        }
         const { clear, propertyRecordSchema: _definition, ...props } = value
         const result = await updateItemPropertyValue(
           {
@@ -655,6 +732,7 @@ export function startItemOutbox(): void {
       discard: discardStorageValue,
     })
     registerOutboxApplier('create', {
+      prepare: (op) => requireRelationTargets(op),
       apply: async (op, tx): Promise<CreateItemResult> =>
         applyCreateItem(op.seedLocalId, outboxOpValue<CreateItemOp>(op)!, tx),
       // Staged ItemStorage values of a create that never applied

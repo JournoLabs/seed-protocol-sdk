@@ -36,6 +36,14 @@ export interface SeedNextOptions {
    * @default []
    */
   fsModules?: string[]
+
+  /**
+   * The app's directory, where the SDK and `next` are resolved from and Turbopack alias paths are
+   * relative to. Pass the config file's directory (`__dirname`, or `import.meta.dirname` in
+   * `next.config.mjs`) when Next.js runs from somewhere else, e.g. a monorepo root.
+   * @default process.cwd()
+   */
+  dir?: string
 }
 
 type NextConfigFunction = (
@@ -59,7 +67,7 @@ export function withSeed(
   nextConfig: NextConfig | NextConfigFunction = {},
   options: SeedNextOptions = {},
 ): NextConfig | NextConfigFunction {
-  warnIfNext15Turbopack()
+  warnIfNext15Turbopack(appDir(options))
   if (typeof nextConfig === 'function') {
     return async (phase, context) => applySeedConfig(await nextConfig(phase, context), options)
   }
@@ -79,9 +87,10 @@ function applySeedConfig(nextConfig: NextConfig, options: SeedNextOptions): Next
   // @seedprotocol/query's Node entry (a disk cache). That breaks webpack server builds and Next 15
   // Turbopack builds, and makes Next trace the whole project. Point them at their browser entries
   // in every graph; init never runs on the server.
-  const browserEntries = resolveBrowserEntries()
+  const dir = appDir(options)
+  const browserEntries = resolveBrowserEntries(dir)
   const browserEntryAliases: TurbopackResolveAlias = Object.fromEntries(
-    Object.entries(browserEntries).map(([specifier, file]) => [specifier, turbopackPath(file)]),
+    Object.entries(browserEntries).map(([specifier, file]) => [specifier, turbopackPath(file, dir)]),
   )
 
   const userWebpack = nextConfig.webpack
@@ -138,11 +147,15 @@ function applySeedConfig(nextConfig: NextConfig, options: SeedNextOptions): Next
  * the SDK's browser platform for `#seed-node-platform`, and `@seedprotocol/query`'s browser
  * build, resolved from the SDK so it's the copy the SDK uses. Empty when the SDK isn't installed.
  */
-function resolveBrowserEntries(): Record<string, string> {
+function appDir(options: SeedNextOptions): string {
+  return options.dir ? path.resolve(options.dir) : process.cwd()
+}
+
+function resolveBrowserEntries(dir: string): Record<string, string> {
   const entries: Record<string, string> = {}
   let sdkPackageJson: string
   try {
-    sdkPackageJson = createRequire(path.join(process.cwd(), 'package.json')).resolve('@seedprotocol/sdk/package.json')
+    sdkPackageJson = createRequire(path.join(dir, 'package.json')).resolve('@seedprotocol/sdk/package.json')
   } catch {
     return entries
   }
@@ -158,10 +171,10 @@ function resolveBrowserEntries(): Record<string, string> {
 
 /**
  * Turbopack's resolveAlias takes project-relative paths, not absolute ones. require.resolve
- * returns real paths, so compare against the real cwd (macOS temp and home dirs can be symlinks).
+ * returns real paths, so compare against the real app dir (macOS temp and home dirs can be symlinks).
  */
-function turbopackPath(absolutePath: string): string {
-  const relative = path.relative(fs.realpathSync(process.cwd()), absolutePath).split(path.sep).join('/')
+function turbopackPath(absolutePath: string, dir: string): string {
+  const relative = path.relative(fs.realpathSync(dir), absolutePath).split(path.sep).join('/')
   return relative.startsWith('.') ? relative : `./${relative}`
 }
 
@@ -172,9 +185,9 @@ let warnedNext15Turbopack = false
  * URL, which can't be resolved there, so the SDK's database never opens. Next 15 sets
  * TURBOPACK=1 before it loads next.config for `--turbopack` dev and build runs.
  */
-function warnIfNext15Turbopack(): void {
+function warnIfNext15Turbopack(dir: string): void {
   if (warnedNext15Turbopack || process.env.TURBOPACK !== '1') return
-  const major = nextMajorVersion()
+  const major = nextMajorVersion(dir)
   if (major !== 15) return
   warnedNext15Turbopack = true
   console.warn(
@@ -184,9 +197,9 @@ function warnIfNext15Turbopack(): void {
   )
 }
 
-function nextMajorVersion(): number | undefined {
+function nextMajorVersion(dir: string): number | undefined {
   try {
-    const require = createRequire(path.join(process.cwd(), 'package.json'))
+    const require = createRequire(path.join(dir, 'package.json'))
     const { version } = require('next/package.json') as { version: string }
     return Number(version.split('.')[0])
   } catch {

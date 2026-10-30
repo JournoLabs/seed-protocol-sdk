@@ -5,6 +5,7 @@ import { createSeedQueryClient } from './queryClient'
 import { client, eventEmitter, EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@seedprotocol/sdk'
 import type { SeedConfig, SeedConstructorOptions } from '@seedprotocol/sdk'
 import { SeedAddressRevisionProvider } from './SeedSessionContext'
+import { useAddressesProp } from './useAddressesProp'
 
 export type SeedProviderProps = {
   children: ReactNode
@@ -15,11 +16,16 @@ export type SeedProviderProps = {
    * the config object changes, so define it outside the component.
    */
   config?: SeedConfig
-  /** Addresses passed to `client.init` with `config`. See `SeedConstructorOptions.addresses`. */
+  /**
+   * Addresses passed to `client.init` with `config`. See `SeedConstructorOptions.addresses`. When
+   * the prop later holds different addresses the provider calls `client.setAddresses` with them,
+   * so `[]` after a disconnect clears them. Leaving it out keeps the stored ones.
+   */
   addresses?: SeedConstructorOptions['addresses']
   /**
-   * Called when `client.init` fails, e.g. with `DatabaseNotPersistentError` (`DB_NOT_PERSISTENT`)
-   * or `FileSystemLockedError` (`OPFS_LOCKED`). Without it the error is logged.
+   * Called when `client.init` fails, e.g. with `DatabaseNotPersistentError` (`DB_NOT_PERSISTENT`),
+   * `FileSystemLockedError` (`OPFS_LOCKED`) or `UnsupportedBrowserError` (`BROWSER_UNSUPPORTED`).
+   * Without it the error is logged.
    */
   onInitError?: (err: unknown) => void
   /** Optional: use your own QueryClient. If not provided, a default client with Seed options is created. */
@@ -62,19 +68,22 @@ function SeedClientInit({ config, addresses, onInitError }: Pick<SeedProviderPro
   onInitErrorRef.current = onInitError
   const addressesRef = useRef(addresses)
   addressesRef.current = addresses
-  const addressesKey = JSON.stringify(addresses ?? null)
+  const initRef = useRef<Promise<void> | undefined>(undefined)
 
   useEffect(() => {
     const options: SeedConstructorOptions =
       addressesRef.current === undefined ? { config } : { config, addresses: addressesRef.current }
-    client.init(options).catch((err: unknown) => {
+    initRef.current = client.init(options)
+    initRef.current.catch((err: unknown) => {
       if (onInitErrorRef.current) {
         onInitErrorRef.current(err)
       } else {
         console.error('[SeedProvider] client init failed', err)
       }
     })
-  }, [config, addressesKey])
+  }, [config])
+  // A repeat init leaves the stored addresses alone: later changes go through setAddresses
+  useAddressesProp(addresses, initRef, 'SeedProvider')
   return null
 }
 

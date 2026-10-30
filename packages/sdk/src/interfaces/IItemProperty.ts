@@ -25,6 +25,10 @@ export interface IItemProperty<_PropertyType = any> {
   readonly alias: string | undefined;
   readonly refResolvedValue: string | undefined;
   value: any;
+  /** Image, File and Html: whether `value` holds the file's content. See ItemProperty.valueStatus. */
+  readonly valueStatus: 'resolved' | 'fetching' | 'missing';
+  /** While `valueStatus` is `'missing'`: the file looked for. Else null. */
+  readonly missingFile: { path?: string } | null;
   readonly published: boolean;
   readonly saveValidationErrors: import('@/Schema/validation').ValidationError[];
 
@@ -36,7 +40,8 @@ export interface IItemProperty<_PropertyType = any> {
   /** The unresolved conflict between the last local edit and a value sync wrote meanwhile; null when none. */
   readonly conflict: import('@/outbox/conflicts').PropertyConflict | null;
   resolveConflict(choice: 'local' | 'remote'): Promise<void>;
-  save(): Promise<void>;
+  /** Resolves once the latest write is stored; `timeoutMs` stops waiting (the write stays queued). See ItemProperty.save. */
+  save(options?: { timeoutMs?: number }): Promise<void>;
   /** Clears the value; `retract` makes publish revoke it instead of attesting the empty value. See ItemProperty.clear. */
   clear(options?: { retract?: boolean }): Promise<void>;
   unload(): void;

@@ -1,9 +1,10 @@
 import debug from 'debug'
-import { gt, lt, sql } from 'drizzle-orm'
+import { gt, sql } from 'drizzle-orm'
 import type { Observable } from 'rxjs'
 import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { entityChanges } from '@/seedSchema'
 import { isLeaderTab } from '@/helpers/tabCoordinator'
+import { ENTITY_CHANGES_PRUNE_EVERY_MS, pruneEntityChanges } from '@/db/entityChangesPrune'
 
 const logger = debug('seedSdk:browser:db:changeFeed')
 
@@ -36,10 +37,6 @@ type Registration = {
 
 type ChangeRow = { seq: number; tbl: string; seedLocalId: string | null; seedUid: string | null; propertyName: string | null }
 
-/** Log rows older than this are pruned by the leader tab. */
-export const ENTITY_CHANGES_RETENTION_MS = 10 * 60_000
-/** The leader prunes at most this often. */
-export const ENTITY_CHANGES_PRUNE_EVERY_MS = 60_000
 
 type FeedDb = SqliteRemoteDatabase<Record<string, unknown>>
 type LiveQuery = <T>(query: (sql: any) => any) => Observable<T[]>
@@ -214,10 +211,6 @@ const maybePrune = async (db: FeedDb) => {
   }
 }
 
-/** Deletes log rows older than ENTITY_CHANGES_RETENTION_MS. Deleting doesn't raise max(seq), so it dispatches nothing. */
-export async function pruneEntityChanges(db: FeedDb, now = Date.now()): Promise<void> {
-  await db.delete(entityChanges).where(lt(entityChanges.at, now - ENTITY_CHANGES_RETENTION_MS))
-}
 
 /** Reads once at a time; an emission during a read makes it read once more. */
 const scheduleRead = (db: FeedDb) => {

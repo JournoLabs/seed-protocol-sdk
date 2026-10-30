@@ -21,7 +21,7 @@ const SCHEMA_NAME = 'Test Schema LiveQuery Teardown'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -79,7 +79,7 @@ describe.skipIf(typeof window === 'undefined')('Item watch teardown', () => {
     const item = await createPost('shared')
     const seedLocalId = item.seedLocalId
     await waitForItemWatches(seedLocalId)
-    const found = await Item.find({ seedLocalId })
+    const found = await Item.find({ seedLocalId, hold: true })
     expect(found).toBe(item)
 
     found!.unload()

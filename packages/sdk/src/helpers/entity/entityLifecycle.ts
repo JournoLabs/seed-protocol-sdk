@@ -1,4 +1,4 @@
-import type { ActorBacked, EntityCache } from './entityCache'
+import { EntityCache, type ActorBacked } from './entityCache'
 
 /**
  * Where an entity is in its load: `loading` until its row and definition are read, then `ready`,
@@ -23,7 +23,7 @@ interface Lifecycle {
   listeners: Set<(status: EntityStatus) => void>
   disposers: Set<() => void>
   /** Holds this entity owns on other entities, by the child's actor (see holdChild). */
-  children: Map<object, () => void>
+  children: Map<object, (options?: { immediate?: boolean }) => void>
   tornDown: boolean
 }
 
@@ -48,9 +48,10 @@ export function entityStatus(instance: ActorBacked): EntityStatus {
   return lifecycleOf(instance).status
 }
 
-/** The load error when `entityStatus` is `error`. */
-export function entityError(instance: ActorBacked): unknown {
-  return lifecycleOf(instance).error
+/** The error the entity's last load failed with, while its `status` is `error`; else undefined. */
+export function entityLoadError(instance: ActorBacked): unknown {
+  const lifecycle = lifecycleOf(instance)
+  return lifecycle.status === 'error' ? lifecycle.error : undefined
 }
 
 export function setEntityStatus(instance: ActorBacked, status: EntityStatus, error?: unknown): void {
@@ -131,6 +132,18 @@ export async function waitForEntityReady(
   }
 }
 
+/**
+ * A write or publish on an instance that was unloaded (no hold kept it past the grace period,
+ * or it was destroyed, evicted or dropped by another tab). Look it up again, and hold it while
+ * using it.
+ */
+export class EntityUnloadedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EntityUnloadedError'
+  }
+}
+
 /** Run `dispose` when the entity is torn down (unsubscribe a watch, revoke an object URL). */
 export function onEntityTeardown(instance: ActorBacked, dispose: () => void): void {
   const lifecycle = lifecycleOf(instance)
@@ -163,9 +176,10 @@ export function teardownEntity<T extends ActorBacked>(instance: T, cache: Entity
     lifecycle.error = new EntityLoadError('Entity was unloaded before it finished loading')
     lifecycle.settle()
   }
+  // At once: the parent already waited out its grace period, or was destroyed or evicted
   for (const release of lifecycle.children.values()) {
     try {
-      release()
+      release({ immediate: true })
     } catch {
       // A child that fails to release must not keep the rest held
     }
@@ -187,9 +201,16 @@ export function teardownEntity<T extends ActorBacked>(instance: T, cache: Entity
   }
 }
 
-/** Give back one hold; tear the entity down when it was the last. */
-export function releaseEntity<T extends ActorBacked>(instance: T, cache: EntityCache<T>): void {
-  if (cache.release(instance)) teardownEntity(instance, cache)
+/**
+ * Give back one hold. With the last one the entity is torn down after the grace period (at once
+ * with `immediate`, or when the grace period is 0); a hold taken meanwhile keeps it.
+ */
+export function releaseEntity<T extends ActorBacked>(
+  instance: T,
+  cache: EntityCache<T>,
+  options?: { immediate?: boolean },
+): void {
+  if (cache.release(instance, options)) teardownEntity(instance, cache)
 }
 
 /**
@@ -200,6 +221,14 @@ export function evictEntities<T extends ActorBacked>(cache: EntityCache<T>, filt
   const evicted = cache.instances(filter)
   for (const instance of evicted) teardownEntity(instance, cache)
   return evicted
+}
+
+/**
+ * Stop and drop every cached entity of every class, whoever holds it (client.stop()). Reaches the
+ * caches through EntityCache.all, so callers needn't import the entity classes.
+ */
+export function evictAllEntities(): void {
+  for (const cache of EntityCache.all) evictEntities(cache, () => true)
 }
 
 /**
@@ -239,7 +268,7 @@ export function holdChild<C extends ActorBacked>(parent: ActorBacked, child: C, 
   const key = child.getService()
   if (lifecycle.children.has(key)) return true
   if (!childCache.holdInstance(child)) return false
-  lifecycle.children.set(key, () => releaseEntity(child, childCache))
+  lifecycle.children.set(key, (options) => releaseEntity(child, childCache, options))
   return true
 }
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   isRelationLookupTarget,
-  lookupRefFromEntries,
+  lookupRefsFromEntries,
   normalizeLookupKey,
-  resolveLookupMapped,
+  resolveLookup,
   sampleValueFromSource,
   shapeLookupValue,
   withLookupEntries,
@@ -60,32 +60,11 @@ describe('relationLookup', () => {
   })
 
   it('matches lookup entries by normalized value', () => {
-    const entries = [{ value: '  Mira   Chen  ', ref: 'local_1' }]
-    expect(lookupRefFromEntries(entries, 'Mira Chen')).toBe('local_1')
-    expect(lookupRefFromEntries(entries, 'Sam Ortiz')).toBeUndefined()
-    expect(lookupRefFromEntries([], 'Mira Chen')).toBeUndefined()
-    expect(lookupRefFromEntries([{ value: 'Mira Chen', ref: '  ' }], 'Mira Chen')).toBeUndefined()
-  })
-
-  it('prefers edge entries over deprecated document lookups', () => {
-    const mapping = {
-      sourceId: 'author',
-      propertyName: 'authors',
-      resolve: 'lookup' as const,
-      lookup: { entries: [{ value: 'Mira Chen', ref: 'edge_ref' }] },
-    }
-    expect(
-      resolveLookupMapped(mapping, 'Mira Chen', {
-        authors: { 'Mira Chen': 'doc_ref' },
-      }),
-    ).toBe('edge_ref')
-    expect(
-      resolveLookupMapped(
-        { sourceId: 'author', propertyName: 'authors', resolve: 'lookup' },
-        'Mira Chen',
-        { authors: { 'Mira Chen': 'doc_ref' } },
-      ),
-    ).toBe('doc_ref')
+    const entries = [{ value: '  Mira   Chen  ', refs: ['local_1'] }]
+    expect(lookupRefsFromEntries(entries, 'Mira Chen')).toEqual(['local_1'])
+    expect(lookupRefsFromEntries(entries, 'Sam Ortiz')).toBeUndefined()
+    expect(lookupRefsFromEntries([], 'Mira Chen')).toBeUndefined()
+    expect(lookupRefsFromEntries([{ value: 'Mira Chen', refs: ['  '] }], 'Mira Chen')).toBeUndefined()
   })
 
   it('omits lookup when entries are cleared', () => {
@@ -94,7 +73,7 @@ describe('relationLookup', () => {
         sourceId: 'author',
         propertyName: 'authors',
         resolve: 'lookup',
-        lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
+        lookup: { entries: [{ value: 'Mira Chen', refs: ['local_1'] }] },
       },
       [],
     )
@@ -110,5 +89,9 @@ describe('relationLookup', () => {
         value: '  Mira   Chen  ',
       }),
     ).toBe('Mira Chen')
+  })
+
+  it("reads an empty value as '', not the source's label", () => {
+    expect(sampleValueFromSource({ id: 'author', label: 'author', kind: 'rssField', value: '' })).toBe('')
   })
 })

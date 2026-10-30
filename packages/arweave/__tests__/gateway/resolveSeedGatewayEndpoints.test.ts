@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import http from 'node:http'
 import {
   resolveSeedGatewayEndpoints,
@@ -43,6 +43,12 @@ describe('resolveSeedGatewayEndpoints', () => {
     expect(resolved.arweaveGraphqlUrl).toBe('https://custom.ar.example/graphql')
   })
 
+  it("leaves uploadApiBaseUrl empty when unset: a public gateway doesn't serve the upload API", async () => {
+    const resolved = await resolveSeedGatewayEndpoints({ transport: 'http-gateway' })
+    expect(resolved.arweaveBaseUrl).toBe(`https://${DEFAULT_ARWEAVE_HOST}`)
+    expect(resolved.uploadApiBaseUrl).toBe('')
+  })
+
   it('defaults to http-gateway with DEFAULT_ARWEAVE_HOST', async () => {
     const resolved = await resolveSeedGatewayEndpoints({})
     expect(resolved.mode).toBe('http-gateway')
@@ -81,10 +87,56 @@ describe('resolveSeedGatewayEndpoints', () => {
         ),
       )
       servers = []
+      requests = 0
+      vi.unstubAllGlobals()
     })
+
+    /** A page in a browser at `origin`. */
+    const onPage = (origin: string) => vi.stubGlobal('window', { location: { origin } })
+
+    it("hybrid doesn't probe the sidecar from a public web page", async () => {
+      const sidecarPort = await listenMockGateway()
+      onPage('https://app.example.com')
+      const resolved = await resolveSeedGatewayEndpoints({
+        transport: 'hybrid',
+        hyper: { localSidecarPort: sidecarPort, probeSidecar: true },
+      })
+      expect(resolved.activePath).toBe('hybrid-fallback-http')
+      expect(requests).toBe(0)
+    })
+
+    it('hybrid probes the sidecar from a loopback page, or with probeSidecarFromBrowser', async () => {
+      const sidecarPort = await listenMockGateway()
+      onPage('http://localhost:5173')
+      const local = await resolveSeedGatewayEndpoints({
+        transport: 'hybrid',
+        hyper: { localSidecarPort: sidecarPort, probeSidecar: true },
+      })
+      expect(local.activePath).toBe('hyper-sidecar')
+
+      invalidateSidecarProbeCache()
+      onPage('https://desktop.example.com')
+      const optedIn = await resolveSeedGatewayEndpoints({
+        transport: 'hybrid',
+        hyper: { localSidecarPort: sidecarPort, probeSidecar: true, probeSidecarFromBrowser: true },
+      })
+      expect(optedIn.activePath).toBe('hyper-sidecar')
+    })
+
+    it('probeProxy: false adopts the proxy without probing it, while probeSidecar stays on', async () => {
+      const resolved = await resolveSeedGatewayEndpoints({
+        transport: 'http-gateway',
+        proxyBaseUrl: 'http://127.0.0.1:9/api/seed-gateway',
+        hyper: { probeSidecar: true, probeProxy: false },
+      })
+      expect(resolved.activePath).toBe('http-proxy')
+    })
+
+    let requests = 0
 
     async function listenMockGateway(): Promise<number> {
       const server = http.createServer((_req, res) => {
+        requests += 1
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ network: 'arweave', version: 1 }))
       })

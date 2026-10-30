@@ -60,4 +60,27 @@ describe('usePublishCostEstimate', () => {
 
     await act(async () => root.unmount())
   })
+  test("shows the caller's previousEstimate, as stale, until the first estimate arrives", async () => {
+    let resolveFirst: (estimate: PublishCostEstimate) => void = () => {}
+    const options = {
+      itemIdleMs: 10_000,
+      priceRefreshMs: 0,
+      previousEstimate: makeEstimate(3),
+      estimate: () => new Promise<PublishCostEstimate>((resolve) => (resolveFirst = resolve)),
+    }
+    const seen: Array<{ total: number | null; isStale: boolean }> = []
+    const Probe = ({ item }: { item: ReturnType<typeof mockItem> }) => {
+      const { estimate, isStale } = usePublishCostEstimate(item, options)
+      seen.push({ total: estimate?.totalUsd ?? null, isStale })
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    await act(async () => root.render(<Probe item={mockItem('seed0000003')} />))
+    expect(seen.at(-1)).toEqual({ total: 3, isStale: true })
+    await act(async () => resolveFirst(makeEstimate(5)))
+    expect(seen.at(-1)).toEqual({ total: 5, isStale: false })
+
+    await act(async () => root.unmount())
+  })
 })

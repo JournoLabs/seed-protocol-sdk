@@ -1,7 +1,6 @@
 import React, { useMemo, useState, type ReactNode } from 'react'
 import type {
   FieldMapping,
-  MappingLookups,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -47,8 +46,6 @@ export type PropertyRowsProps = {
   mappings: FieldMapping[]
   mapper: UseFieldMapperResult
   defaultRows?: FieldMapperDefaultRows
-  lookups?: MappingLookups
-  onLookupsChange?: (lookups: MappingLookups) => void
   slots: ResolvedFieldMapperSlots
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
@@ -64,7 +61,6 @@ export function PropertyRows({
   mappings,
   mapper,
   defaultRows = 'requiredAndMapped',
-  onLookupsChange,
   slots,
   classNames,
   ui = {
@@ -118,12 +114,8 @@ export function PropertyRows({
   const { coverage, sourceOptions, addableProperties } = mapper
   const jsonPreview = showJsonPreview(slots.preview)
   const rowPreview = showRowPreview(slots.preview)
-  const showRowLookups =
-    slots.lookups === 'row' && (Boolean(renderLookup) || Boolean(onLookupsChange))
-  const showSectionLookups =
-    slots.lookups === 'section' &&
-    !renderLookup &&
-    Boolean(onLookupsChange)
+  const showRowLookups = slots.lookups === 'row'
+  const showSectionLookups = slots.lookups === 'section' && !renderLookup
 
   const handleAddProperty = (name: string) => {
     mapper.addRow(name)
@@ -297,6 +289,8 @@ export function PropertyRows({
                       sampleValue: row.sampleValue ?? '',
                       onLookupChange: (entries) =>
                         mapper.setLookupEntries(row.id, entries),
+                      onSplitChange: (separators) =>
+                        mapper.setLookupSplit(row.id, separators),
                     })}
                   </div>
                 ) : (

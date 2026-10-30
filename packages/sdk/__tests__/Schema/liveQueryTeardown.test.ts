@@ -23,7 +23,7 @@ const SCHEMA_SQL = /model_schemas/
 function schemaFile(name: string): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name, createdAt: now, updatedAt: now },
@@ -73,17 +73,15 @@ describe.skipIf(typeof window === 'undefined')('Schema liveQuery teardown', () =
     expect(liveQueries.active(filter), `still open: ${JSON.stringify(liveQueries.activeSql(filter))}`).toBe(0)
   }
 
-  it('the last unload closes the liveQuery', async () => {
+  it('the last unload leaves the liveQuery open (a schema stays cached)', async () => {
     const name = `Schema Teardown Unload ${generateId()}`
     const { schema, filter } = await importWatchedSchema(name)
-    const second = await Schema.create(name, { waitForReady: true })
+    const held = await Schema.create(name, { waitForReady: true, hold: true })
 
-    second.unload()
+    held.unload()
+    expect(schema.getService().getSnapshot().status).toBe('active')
     expect(liveQueries.active(filter)).toBeGreaterThan(0)
-    schema.unload()
-
-    expect(schema.getService().getSnapshot().status).toBe('stopped')
-    expectClosed(filter)
+    Schema.evict(name)
   }, 30000)
 
   it('evict closes the liveQuery', async () => {

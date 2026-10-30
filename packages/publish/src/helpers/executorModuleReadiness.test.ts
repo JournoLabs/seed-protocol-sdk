@@ -186,7 +186,7 @@ describe('simulateCallFromAccount', () => {
   })
 
   test('still throws a revert, with the given code, when the simulation is not required', async () => {
-    const data = encodeErrorResult({ abi: seedErrorsAbi, errorName: 'UnknownPublishLocalId', args: ['abc'] })
+    const data = encodeErrorResult({ abi: seedErrorsAbi, errorName: 'PublishIndexOutOfBounds', args: [3n, 2n] })
     callMock.mockImplementation(async () => {
       throw new RawContractError({ data })
     })
@@ -201,7 +201,7 @@ describe('simulateCallFromAccount', () => {
       }),
     ).rejects.toMatchObject({
       code: 'PUBLISH_PREFLIGHT_FAILED',
-      message: expect.stringContaining('reverted with UnknownPublishLocalId(abc)'),
+      message: expect.stringContaining('reverted with PublishIndexOutOfBounds(3, 2)'),
     })
   })
 })

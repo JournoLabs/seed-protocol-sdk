@@ -24,12 +24,12 @@ testDescribe('Item.unload releases one holder', () => {
 
   it('keeps a shared item running until its last holder unloads it', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({ title: 'shared' })
-    const found = await Item.find({ seedLocalId: item.seedLocalId! })
+    const found = await Item.find({ seedLocalId: item.seedLocalId!, hold: true })
     expect(found).toBe(item)
 
     found!.unload()
     expect(item.getService().getSnapshot().status).toBe('active')
-    const again = await Item.find({ seedLocalId: item.seedLocalId! })
+    const again = await Item.find({ seedLocalId: item.seedLocalId!, hold: true })
     expect(again).toBe(item)
     expect(again!.getService().getSnapshot().status).toBe('active')
 

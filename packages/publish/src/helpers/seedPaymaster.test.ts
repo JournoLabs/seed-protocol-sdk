@@ -18,7 +18,8 @@ mock.module('thirdweb/wallets/smart', () => ({
   },
 }))
 
-const { seedPaymaster, CALL_GAS_HEADROOM_BPS } = await import('./seedPaymaster')
+const { seedPaymaster } = await import('./seedPaymaster')
+const { CALL_GAS_HEADROOM_BPS } = await import('./adapters/userOps')
 
 const client = { clientId: 't' } as any
 const chain = { id: 11155420, rpc: 'https://sepolia.optimism.io' } as any

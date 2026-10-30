@@ -1,6 +1,5 @@
 export {
   MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA,
-  SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA,
   MANAGED_ACCOUNT_FACTORY_ADDRESSES,
 } from './helpers/constants'
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
@@ -14,7 +13,6 @@ export {
 } from '@seedprotocol/eas'
 export {
   initPublish,
-  configurePublish,
   getPublishConfig,
   resolvePublishEasChain,
   requireManagedAccountFactoryAddress,
@@ -38,6 +36,7 @@ export {
   DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'
 export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
+export { MissingSignedDataItemsError } from './services/publish/actors/uploadViaBundler'
 export {
   PublishNotAuthorizedError,
   PUBLISH_AUTHORIZATION_HEADER,
@@ -55,7 +54,11 @@ export {
   isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
+  PublishRetractionError,
+  UploadTooLargeError,
+  UploadNeedsConfirmError,
   Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
   type Eip7702ModularAccountPublishErrorCode,
@@ -87,10 +90,41 @@ export {
   isPublishWallet,
 } from './helpers/seedSigner'
 export {
+  enrollPublishAutomation,
+  revokePublishAutomation,
+  type EnrollPublishAutomationParams,
+  type EnrollPublishAutomationResult,
+  type RevokePublishAutomationParams,
+} from './helpers/enrollPublishAutomation'
+export {
+  ensureExecutorModuleInstalled,
+  type EnsureExecutorModuleResult,
+} from './helpers/ensureExecutorModule'
+export {
+  ensureAutomationSessionKey,
+  removeAutomationSessionKey,
+  isAutomationSessionActive,
+} from './helpers/ensureAutomationSessionKey'
+export {
   fromEip1193Provider,
   fromWindowEthereum,
+  type FromEip1193Options,
 } from './helpers/adapters/eip1193'
+export {
+  fromViemWalletClient,
+  type FromViemWalletClientOptions,
+} from './helpers/adapters/viemWalletClient'
+export {
+  fromPrivyWallet,
+  type FromPrivyWalletOptions,
+  type PrivyEthereumWalletLike,
+} from './helpers/adapters/privy'
 export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
+export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
+export {
+  createManagedAccountTxSender,
+  type CreateManagedAccountTxSenderOptions,
+} from './helpers/adapters/managedAccountTxSender'
 export {
   setPublishWallet,
   getPublishWallet,
@@ -102,6 +136,7 @@ export {
   waitForPublishReceipt,
   isContractDeployed,
 } from './helpers/chainClient'
+export { MULTI_PUBLISH_SELECTOR, assertMultiPublishRouted } from './helpers/multiPublishRoute'
 export {
   encodeMultiPublish,
   encodeSetEas,
@@ -116,6 +151,7 @@ export {
 export {
   estimatePublishCost,
   combinePublishCostEstimate,
+  repricePublishCostEstimate,
   getCachedTokenPrices,
   getCachedMarketRates,
   resetMarketRateCache,
@@ -123,9 +159,16 @@ export {
   watchPublishCost,
   PUBLISH_GAS_HEURISTICS,
   heuristicPublishGas,
+  estimateUpload,
+  DEFAULT_MAX_UPLOAD_BYTES,
+  DEFAULT_CONFIRM_UPLOAD_ABOVE_BYTES,
+  DEFAULT_UPLINK_BITS_PER_SECOND,
+  PUBLISH_MEMORY_MULTIPLIER,
 } from './services/publishCost'
 export type {
   PublishCostEstimate,
+  UploadEstimate,
+  UploadLimits,
   EstimatePublishCostOptions,
   WatchPublishCostOptions,
   WatchPublishCostHandle,
@@ -134,8 +177,13 @@ export type {
 } from './services/publishCost'
 export {
   ensureEasSchemasForItem,
+  ensureEasSchemasForModels,
 } from './services/publish/helpers/ensureEasSchemas'
-export type { EnsureEasSchemasOptions } from './services/publish/helpers/ensureEasSchemas'
+export type {
+  EnsureEasSchemasOptions,
+  EnsureEasSchemasForModelsOptions,
+  EnsureEasSchemasResult,
+} from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
 export {
@@ -167,10 +215,13 @@ export type { ArweaveL1FinalizeJobRow } from './hooks/useArweaveL1Finalize'
 export { getArweave } from './helpers/blockchain'
 export { buildPublishAnchorBytes, verifyDataItem } from './helpers/arweave'
 export {
+  describePublishRun,
   getDisplayStepId,
   getPublishMachineValueForUi,
   resolvePublishDisplayValue,
   type PublishRowForDisplay,
+  type PublishRunDescription,
+  type PublishRunPhase,
 } from './helpers/publishDisplayHelpers'
 export {
   ensureWalletThenPublish,

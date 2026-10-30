@@ -18,7 +18,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 
 const schemaName = 'Property Builds Per Load'
 const testSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'property-builds-per-load',
   metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

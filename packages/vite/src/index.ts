@@ -28,8 +28,8 @@ export interface SeedVitePluginOptions {
   }
 
   /**
-   * Add vite-plugin-node-polyfills (`path`, `buffer`, `events`, `string_decoder`, `util`, and
-   * the `Buffer` / `process` / `global` globals), a `stream` stub and inline `global` /
+   * Add vite-plugin-node-polyfills (`path`, `buffer`, `events`, `string_decoder`, `util`,
+   * `timers`, and the `Buffer` / `process` / `global` globals), a `stream` stub and inline `global` /
    * `process` shims in index.html. The SDK doesn't need them; turn this on when another
    * dependency of your app uses Node built-ins in the browser.
    * @default false
@@ -111,6 +111,16 @@ function sdkServePaths(appRoot: string): string[] {
   return dirs
 }
 
+/** Real paths of the Seed packages the app resolves: the SDK and the packages it imports. */
+function seedPackageDirs(appRoot: string): string[] {
+  const dirs: string[] = []
+  for (const pkg of ['@seedprotocol/sdk', '@seedprotocol/react', '@seedprotocol/query', '@seedprotocol/eas', '@seedprotocol/arweave']) {
+    const dir = findPackageDir(pkg, appRoot) ?? (dirs[0] ? findPackageDir(pkg, dirs[0]) : undefined)
+    if (dir) dirs.push(fs.realpathSync(dir))
+  }
+  return dirs
+}
+
 function isCoveredBy(allow: readonly string[], dir: string): boolean {
   return allow.some((entry) => {
     const parent = path.resolve(String(entry))
@@ -138,6 +148,8 @@ function applyIsolationHeaderMiddleware(
   })
 }
 
+const KNOWN_OPTIONS = new Set(['fsModules', 'debug', 'includeNodePolyfills', 'isolationHeaders'])
+
 /**
  * The Vite settings a browser app using @seedprotocol/sdk needs: cross-origin isolation headers
  * on the dev and preview servers, ES module workers, in-order dev pre-bundles, and, for SDK
@@ -145,6 +157,14 @@ function applyIsolationHeaderMiddleware(
  * opt-in.
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
+  for (const key of Object.keys(options)) {
+    if (KNOWN_OPTIONS.has(key)) continue
+    throw new Error(
+      key === 'autoInit'
+        ? "seedVitePlugin: autoInit was removed. Initialize the SDK from your app (client.init(), or <SeedProvider>)."
+        : `seedVitePlugin: unknown option "${key}". It takes ${[...KNOWN_OPTIONS].join(', ')}.`,
+    )
+  }
   const {
     fsModules = [],
     debug = false,
@@ -160,6 +180,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const log = (...args: unknown[]) => {
     if (debug) console.log('[seed-vite-plugin]', ...args)
   }
+  // Real paths of the installed Seed packages, set in configResolved: `debug` skips their chunks.
+  let sdkPackageDirs: string[] = []
 
   const configPlugin: Plugin = {
     name: 'seed-protocol:config',
@@ -217,6 +239,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         serverIsolationHeaders = effectiveIsolationHeaders(isolationHeaders, resolvedConfig.server.headers)
         previewIsolationHeaders = effectiveIsolationHeaders(isolationHeaders, resolvedConfig.preview.headers)
       }
+      sdkPackageDirs = seedPackageDirs(resolvedConfig.root)
       if (resolvedConfig.command !== 'serve') return
       const allow = resolvedConfig.server.fs.allow
       const added = sdkServePaths(resolvedConfig.root).filter((dir) => !isCoveredBy(allow, dir))
@@ -233,7 +256,12 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     },
 
     generateBundle(_options, bundle) {
-      if (debug) warnAboutNodeGlobals(bundle as Record<string, { type: string; code?: string }>)
+      if (debug) {
+        warnAboutNodeGlobals(
+          bundle as Record<string, { type: string; code?: string; moduleIds?: readonly string[] }>,
+          sdkPackageDirs,
+        )
+      }
     },
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "Vite plugin for browser apps using @seedprotocol/sdk: cross-origin isolation headers, ES module workers, linked-install support, and opt-in Node polyfills",
   "keywords": [
     "seed-protocol",
@@ -31,7 +31,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default && node ../../scripts/check-browser-entry-graph.js --fail",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
@@ -40,6 +40,8 @@
     "vite-plugin-node-polyfills": "^0.27.0"
   },
   "peerDependencies": {
+    "@zenfs/core": "^2.7.7",
+    "@zenfs/dom": "^1.2.14",
     "vite": ">=8.0.0"
   },
   "peerDependenciesMeta": {
@@ -52,7 +54,7 @@
   },
   "devDependencies": {
     "@seedprotocol/bundler-core": "workspace:*",
-    "@types/bun": "latest",
+    "@types/bun": "1.4.3",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-react": "^6.0.0",
     "react": "^19.0.0",

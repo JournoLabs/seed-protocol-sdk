@@ -106,7 +106,7 @@ export async function prepareStorageValue(op: OutboxOp, value: StorageValueOp): 
       ? rowSchemaUid
       : await lookupPropertySchemaUid(
           op.propertyName ?? '',
-          value.propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1],
+          value.propertyRecordSchema,
         )
   return {
     fileName,

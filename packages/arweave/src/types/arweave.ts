@@ -1,4 +1,4 @@
-import type { CreateTransactionInterface } from 'arweave/web'
+import type * as TransactionModule from 'arweave/web/lib/transaction.js'
 
 /**
  * Transaction presence / status as returned by {@link BaseArweaveClient.getTransactionStatus}.
@@ -49,11 +49,9 @@ export type DownloadResult = {
 }
 
 /**
- * Arweave transaction interface (from arweave package)
+ * An unsigned Arweave transaction (the arweave package's `Transaction`).
  */
-export type ArweaveTransaction = Awaited<ReturnType<{
-  createTransaction(attributes: Partial<CreateTransactionInterface>): Promise<any>
-}['createTransaction']>>
+export type ArweaveTransaction = TransactionModule.default
 
 /**
  * Options for creating a transaction

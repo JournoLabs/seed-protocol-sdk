@@ -14,6 +14,8 @@ const SMART = '0x' + '5'.repeat(40)
 
 const harness = {
   useDirectEas: false,
+  /** `backReferences` of each validateItemForPublish call. */
+  backReferences: [] as (string | undefined)[],
   codeKind: 'none' as 'none' | 'eip7702-delegated' | 'contract',
   session: null as null | {
     signer: { address: string }
@@ -27,8 +29,11 @@ const harness = {
 mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
   isItemOwned: async () => true,
-  validateItemForPublish: async () => ({ isValid: true, errors: [] }),
-  getUnpublishedRelatedItems: async () => [],
+  validateItemForPublish: async (_item: unknown, _uploads: unknown, options: { backReferences?: string }) => {
+    harness.backReferences.push(options.backReferences)
+    return { isValid: true, errors: [] }
+  },
+  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [] }),
   RelatedItemUnpublishedError,
 }))
 mock.module('~/helpers/chainClient', () => ({
@@ -76,8 +81,11 @@ describe('checking: direct EAS for publishers with no bytecode', () => {
   test('an EOA publishes straight to EAS', async () => {
     harness.useDirectEas = false
     harness.session = null
+    harness.backReferences = []
     const verdict = await runChecking(EOA, wallet(EOA, 'eoa'))
     expect(verdict.type).toBe('skipArweave')
+    // Direct EAS attests one item after another, so it validates with back references deferred.
+    expect(harness.backReferences).toEqual(['defer'])
     expect(verdict.attestationStrategy).toBe('directEas')
   }, TEST_TIMEOUT_MS)
 
@@ -152,10 +160,13 @@ describe('checking: direct EAS for publishers with no bytecode', () => {
         harness.codeKind = 'contract'
       },
     }
+    harness.backReferences = []
     try {
       const verdict = await runChecking(SMART, wallet(SMART, 'smart'))
       expect(deployed).toBe(1)
       expect(verdict.attestationStrategy).toBe('multiPublish')
+      // Validated before the deploy for direct EAS, then again for the contract, which links them.
+      expect(harness.backReferences).toEqual(['defer', 'link'])
     } finally {
       harness.codeKind = 'none'
       harness.session = null

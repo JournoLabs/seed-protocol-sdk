@@ -14,8 +14,10 @@ export const MIN_UPGRADE_SDK_VERSION = '0.7.7'
 export const FIRST_MIGRATION_AFTER_MIN_VERSION_MILLIS = 1792354539632
 
 /**
- * appState key that 0.7.7's first init wrote (its stored-display-URL fix) and no older SDK did. It
- * tells a 0.7.7 database from an older one with the same migrations.
+ * appState key that 0.7.7 wrote after its first init (its stored-display-URL fix) and no older SDK
+ * did. It tells a 0.7.7 database from an older one with the same migrations, but 0.7.7 wrote it from
+ * a background task, so a 0.7.7 database can lack it (closed right after init, the task failed).
+ * Such a database is treated as older and is backed up before it is recreated.
  */
 export const MIN_VERSION_APP_STATE_KEY = 'storedDisplayUrlsCleared'
 
@@ -74,18 +76,53 @@ async function dropAllObjects(db: SqlRunner): Promise<void> {
 }
 
 /**
+ * Path for the copy of a database about to be recreated: `seed.db` →
+ * `seed.before-recreate-<ms>.db` in the same folder.
+ */
+export function recreateBackupPath(dbFilePath: string, now = Date.now()): string {
+  return dbFilePath.replace(/(\.db)?$/, `.before-recreate-${now}.db`)
+}
+
+/**
  * Recreates a database an SDK older than {@link MIN_UPGRADE_SDK_VERSION} wrote (decision D1 of the
  * 2026-10 SDK audit): its tables are dropped before migrations run, so everything not yet published
- * is gone and published data comes back through EAS sync. Files under filesDir stay where they are.
- * Call it before migrations, holding the migrate lock. Returns true if it recreated the database.
+ * is gone from it and published data comes back through EAS sync. Files under filesDir stay where
+ * they are.
+ *
+ * The database is first copied to `backupPath` with `VACUUM INTO`, since a 0.7.7 database whose
+ * marker task never ran looks the same as an older one (see {@link MIN_VERSION_APP_STATE_KEY}).
+ * Without a `backupPath` (a remote libsql URL), or if the copy fails, the database is kept as it is:
+ * losing drafts is worse than opening an old one. Call it before migrations, holding the migrate
+ * lock. Returns true if it recreated the database.
  */
-export async function recreateIfOlderThanMinimumUpgradeVersion(db: SqlRunner): Promise<boolean> {
+export async function recreateIfOlderThanMinimumUpgradeVersion(
+  db: SqlRunner,
+  { backupPath }: { backupPath?: string } = {},
+): Promise<boolean> {
   if (!(await isOlderThanMinimumUpgradeVersion(db))) return false
+  if (!backupPath) {
+    console.warn(
+      `[seed-protocol] This local database looks older than ${MIN_UPGRADE_SDK_VERSION}, but it can't be ` +
+        'backed up here, so it is opened as it is.',
+    )
+    return false
+  }
+  try {
+    await db.run(sql`VACUUM INTO ${backupPath}`)
+  } catch (error) {
+    console.warn(
+      `[seed-protocol] This local database looks older than ${MIN_UPGRADE_SDK_VERSION}, but backing it up ` +
+        `to ${backupPath} failed, so it is opened as it is.`,
+      error,
+    )
+    return false
+  }
   console.warn(
     `[seed-protocol] This local database was written by an SDK older than ${MIN_UPGRADE_SDK_VERSION}. ` +
-      'It is being recreated: unpublished items are dropped, and published items come back through EAS sync.',
+      'It is being recreated: unpublished items are dropped, and published items come back through EAS sync. ' +
+      `A copy of the old database is at ${backupPath}.`,
   )
   await dropAllObjects(db)
-  logger('dropped the tables of a database older than %s', MIN_UPGRADE_SDK_VERSION)
+  logger('dropped the tables of a database older than %s; copy at %s', MIN_UPGRADE_SDK_VERSION, backupPath)
   return true
 }

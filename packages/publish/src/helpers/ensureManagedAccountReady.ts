@@ -197,8 +197,15 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
     // so installing it here is best-effort; enrollPublishAutomation requires it.
     if (config.modularAccountModuleContract) {
       try {
-        const signingAccount = await getManagedAccountSigningAccount()
-        await ensureExecutorModuleInstalled(state.managedAddress, signingAccount, config)
+        const managedAddress = state.managedAddress
+        await ensureExecutorModuleInstalled(
+          managedAddress,
+          async () => {
+            const { getManagedAccountAdminWallet } = await import('./managedAccountAdmin')
+            return getManagedAccountAdminWallet(managedAddress)
+          },
+          config,
+        )
       } catch (e) {
         console.warn(
           `[@seedprotocol/publish] Executor module setup failed on ${getPublishChainName()}; publishing continues, but publish automation needs it.`,

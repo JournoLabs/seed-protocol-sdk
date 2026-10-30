@@ -25,6 +25,8 @@ export function seedGatewayConfigFromSeedConfig(
       localSidecarHost: gateway.hyper?.localSidecarHost ?? gateway.localSidecarHost,
       localSidecarPort: gateway.hyper?.localSidecarPort ?? gateway.localSidecarPort,
       probeSidecar: gateway.hyper?.probeSidecar ?? gateway.probeSidecar,
+      probeProxy: gateway.hyper?.probeProxy,
+      probeSidecarFromBrowser: gateway.hyper?.probeSidecarFromBrowser,
     },
   }
 }

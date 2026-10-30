@@ -1,15 +1,13 @@
 # Gateway Hyper (P2P infrastructure tunnel)
 
-Tunnel a local **seed-protocol-server + ar.io gateway** stack to SDK users over **HyperDHT**, with optional localhost HTTP sidecar **or** an app-server HTTP proxy for browsers.
-
-Generation and bundler logic stay in `seed-protocol-server`. This repo adds transport only (`@seedprotocol/gateway-hyper` + SDK config).
+Tunnel an HTTP upstream that serves an Arweave gateway and the upload API to SDK users over **HyperDHT**, with optional localhost HTTP sidecar **or** an app-server HTTP proxy for browsers. `@seedprotocol/gateway-hyper` and the SDK config cover transport only; the upstream is whatever HTTP service the operator runs.
 
 ## Concepts
 
 | Concept | Role |
 |---------|------|
 | Operator key (z32) | Stable infrastructure identity (operator Ed25519 public key) |
-| `seed-gateway serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
+| `seed-gateway serve` | Operator: proxy Hyper connections → upstream HTTP |
 | `seed-gateway connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
 | `createGatewayProxy` | App server: dial operator key → Node HTTP handlers for a mount path (Path B) |
 | `DEFAULT_SEED_GATEWAY_HYPER_KEY` | Well-known official operator key (empty until ops publish one) |
@@ -95,6 +93,8 @@ export const gateway = {
 ```
 
 Relative `proxyBaseUrl` resolves against `window.location.origin` in the browser. Node/SSR resolution needs an absolute URL or `resolveSeedGatewayEndpoints(config, { origin })`.
+
+`resolveSeedGatewayEndpoints` probes `{proxyBaseUrl}/info` and the sidecar's `/info`, each for at most 5 s. Pass `{ timeoutMs }` to cap the whole resolve: a probe still running when it runs out counts as unreachable for that resolve only, and isn't cached or counted by the circuit breaker. A healthy probe is cached for 3 minutes and a failed one for 60 s.
 
 **Security:** the proxy is a privileged relay to upload + gateway APIs. Authenticate and rate-limit the route; do not expose an open unauthenticated proxy on the public internet.
 
@@ -183,20 +183,16 @@ initPublish({
 
 ## Operator runbook
 
-1. Run `seed-protocol-server` stack (Traefik + gateway + bundler). See server README.
+1. Run an HTTP upstream that serves the upload API and gateway routes.
 2. On the operator host:
 
    ```bash
    seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
 
-   If the tunnel runs in Docker on the stack's compose network, use the service that fronts the
-   gateway and seed API as the upstream, for example `--upstream http://traefik:80`.
-
    Upload API routes (`/api/upload/arweave/*`) and gateway reads (`/raw/{id}`, `/graphql`,
-   `/{txId}`) must go through the same upstream, and `ARWEAVE_GATEWAY_URL` on `seed_server` must
-   point at the gateway SDK users read through. Otherwise an item uploaded through the bundler isn't
-   readable right away.
+   `/{txId}`) must go through the same upstream, and the upload API must hand uploads to the
+   gateway SDK users read through. Otherwise an uploaded item isn't readable right away.
 
 3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional), in both `packages/arweave/src/constants.ts` and `packages/gateway-hyper/src/constants.ts`.
 4. Each SDK user (Path A) runs:
@@ -207,6 +203,64 @@ initPublish({
 
    Or each app server (Path B) mounts `createGatewayProxy` with that key.
 5. App uses `transport: 'hyper'` or `'hybrid'` (and `proxyBaseUrl` when using Path B).
+
+## Restricting who can connect
+
+Anyone with the operator key can use the tunnel unless the operator lists the clients it
+accepts:
+
+```bash
+seed-gateway serve --upstream http://127.0.0.1:80 \
+  --allow-keys <client-z32>,<client-z32> \
+  --allow-ips 192.168.1.0/24,203.0.113.7
+```
+
+or `serveTunnel({ upstream, allowlist: { keys: [...], ips: [...] } })`. A client is let in
+when its public key or its address is listed. With neither list set, every client is. Keys
+are z32 or hex; addresses are IPv4 or IPv6, single or CIDR, and `::ffff:`-prefixed IPv4
+addresses match IPv4 entries. An invalid entry stops `serve` at startup.
+
+List keys where you can. A client keeps the same key across runs only when it has a key file:
+
+```bash
+seed-gateway connect --print-key --key-file ./.seed/gateway-tunnel/client.key.json
+seed-gateway connect <operator-z32> --key-file ./.seed/gateway-tunnel/client.key.json
+```
+
+The first command creates the file if needed and prints the public key to send to the
+operator. `connectTunnel` and `createGatewayProxy` take the same `keyFile`, or a `keyPair`
+(`{ publicKey, secretKey }` buffers) for app servers that can't keep a file. Without either,
+each run uses a new key, which no key list can match.
+
+When only keys are listed, an unlisted client is refused during the handshake and never gets
+a stream. When addresses are listed too, the operator can't refuse on the key at that point,
+because the handshake arrives through a DHT node and its address isn't the client's. It
+accepts the connection, checks the UDP address the connection uses, and destroys the stream
+before reading from it if neither the key nor the address is listed. Two consequences:
+
+- A client on the operator's LAN, or on the operator's own machine, connects over the LAN and
+  shows its LAN address (`192.168.x.x`), not its public IP. List the LAN range.
+- A connection relayed through another HyperDHT node shows the relay's address, so it is
+  refused unless its key is listed.
+
+## Tracing
+
+`seed-gateway serve --trace` logs a line per stream and request event:
+
+```
+2026-10-23T18:00:00.000Z tunnel-trace req.recv request=mk2x-r7 stream=s3 method=GET path=/raw/abc bodyBytes=0 receiveMs=0
+```
+
+In code, `serveTunnel({ onEvent })` receives each event as a `TunnelEvent` object:
+`stream.open`, `stream.refused` (with `stage: 'handshake'` or `'connection'`), `stream.error`,
+`stream.close` (requests, bytes in, the request in flight if any), `req.recv`, `up.response`,
+`up.done`, `up.error` and `up.timeout` (with the phase it failed in: `send`, `wait` or `body`),
+and `res.sent`. The callback runs synchronously and a throw from it is dropped. Without
+`onEvent`, the operator keeps no tracing state and adds no listeners.
+
+`--request-id-header x-seed-tunnel-request-id` (or `requestIdHeader`) sends each request's id
+upstream under that header, so upstream logs can be matched to `tunnel-trace` lines. It replaces
+any value the client sent.
 
 ## Timeouts
 
@@ -241,19 +295,56 @@ before sending it, so the client sees no bytes until the upstream finishes; a re
 takes longer than `requestTimeoutMs` to arrive at the operator is abandoned even if the
 upstream is still sending.
 
+## Raw TCP mode
+
+The framed tunnel above buffers each request and response whole, caps them at 64 MiB, carries
+one request per stream, and can't carry WebSockets. For an HTTP proxy in front of the tunnel,
+such as nginx serving a public gateway hostname, raw mode carries TCP instead:
+
+```bash
+# Operator
+seed-gateway serve --raw --upstream http://127.0.0.1:80 --allow-keys <client-z32>
+
+# Client, e.g. on the proxy host
+seed-gateway connect --raw <raw-operator-z32> --port 1985 --key-file ./client.key.json
+```
+
+or `serveRawTunnel({ upstream, allowlist })` and `connectRawTunnel({ key, port, keyFile })`.
+Each TCP connection to the client's port gets its own HyperDHT stream, and the operator pipes
+it to a new TCP connection to the upstream. HTTP/1.1 runs end to end, so keep-alive, streamed
+bodies of any size, `Range` and WebSockets work. See
+[ADR 0024](adr/0024-raw-tcp-tunnel-mode.md).
+
+- A raw server needs its own key; it defaults to
+  `.seed/gateway-tunnel/raw-operator.key.json`. Framed clients can't use it, and raw clients
+  can't use a framed server.
+- Each new connection costs a DHT lookup and handshake, so put a client that keeps connections
+  alive in front: nginx with `keepalive` on its upstream block.
+- The client closes a connection whose stream hasn't opened within `--connect-timeout-ms`
+  (default 30 s) and refuses connections beyond `--max-connections` (default 64).
+- For a few seconds after the operator restarts, clients get `PEER_NOT_FOUND` until its new
+  announcement has spread.
+- `--trace` (or `onEvent`) logs `conn.open` and `conn.close` per connection, with bytes each
+  way, duration and the first error; the operator sees bytes, not requests. The operator also
+  logs `stream.refused`, and the client logs `conn.refused` past `maxConnections`.
+
+The SDK sidecar and `createGatewayProxy` still speak the framed protocol.
+
 ## Developer key swap
 
 Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed-gateway connect` when using Path A.
 
 ## CI / tests
 
-- `@seedprotocol/gateway-hyper` unit tests always run.
-- DHT loopback integration: `GATEWAY_HYPER_TESTS=1 bun run test` in `packages/gateway-hyper`.
+- `@seedprotocol/gateway-hyper` tests always run, including the DHT tests, which use a
+  `hyperdht/testnet` on 127.0.0.1 through the `bootstrap` option.
+- One smoke test over the public DHT: `GATEWAY_HYPER_TESTS=1 bun run test` in
+  `packages/gateway-hyper`.
 - SDK resolver tests use a mock HTTP sidecar / proxy (no natives required).
 
 ## Manual validation
 
-1. Operator: docker stack + `seed-gateway serve`.
+1. Operator: upstream + `seed-gateway serve`.
 2. Path A: `seed-gateway connect <key>` then `curl http://127.0.0.1:1984/info`.
 3. Path B: mount `createGatewayProxy`, then `curl https://your-app/api/seed-gateway/info`.
 4. Publish via app; confirm `GET /raw/{txId}` through the chosen path serves new uploads immediately.

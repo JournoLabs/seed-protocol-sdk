@@ -25,7 +25,7 @@ export function isRevert(err: unknown): boolean {
 const NO_DATA_REASON =
   'reverted with no data. The target likely has no matching function or the account cannot run executor calls'
 
-/** "reverted with UnknownPublishLocalId(abc)", decoded with the Seed, executor and EAS errors. */
+/** "reverted with PublishIndexOutOfBounds(3, 2)", decoded with the Seed, executor and EAS errors. */
 export function describeRevert(data: Hex | undefined, noDataReason = NO_DATA_REASON): string {
   if (!data || data === '0x') return noDataReason
   try {

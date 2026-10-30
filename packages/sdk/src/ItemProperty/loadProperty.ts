@@ -6,7 +6,7 @@ import { normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
 import { getPropertyDefinition } from '@/helpers/propertyDefinition'
 import { timingMarks } from '@/helpers/timing'
-import { resolveStorageDisplay, storedValueKind } from '@/storageValue/resolve'
+import { resolveStorageDisplay, storedValueKind, missingFileOf } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:itemProperty:loadProperty')
 
@@ -51,9 +51,8 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   timing.mark('metadata')
 
   if (!metadataRecord) {
-    // Metadata not found - this is a new property, will be created elsewhere.
-    // Still resolve propertyRecordSchema from Model so getSegmentedItemProperties and
-    // getPublishPayload can route and attest the property (e.g. title, description).
+    // No row yet: its first assignment writes one. The definition still comes from the model,
+    // since the setter checks and routes values by it (planPropertyWrite).
     let propertyRecordSchema: any = undefined
     const modelNameForNew = context.modelName
     if (modelNameForNew) {
@@ -132,6 +131,7 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   const kind = storedValueKind(propertyRecordSchema, metadataRecord)
   // A stored display value is a dead blob: URL after reload (or a file:// URL that breaks when
   // filesDir moves): Image, File and Html never read it.
+  let missingFile: { path?: string } | null | undefined
   let refResolvedDisplayValue: string | undefined =
     kind === 'image' || kind === 'file'
       ? context.refResolvedDisplayValue ?? undefined
@@ -144,6 +144,7 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   } else if (kind && kind !== 'itemStorage') {
     try {
       const display = await resolveStorageDisplay(kind, metadataRecord, { fetch: true })
+      missingFile = missingFileOf(kind, metadataRecord, display)
       metadataRecord.refResolvedValue = display.ref.refResolvedValue ?? null
       metadataRecord.localStorageDir = display.ref.localStorageDir ?? null
       if (display.renderValue !== undefined) {
@@ -187,6 +188,7 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
     refResolvedValue: metadataRecord.refResolvedValue ?? (cleared ? null : context.refResolvedValue),
     refResolvedDisplayValue,
     localStorageDir: metadataRecord.localStorageDir ?? context.localStorageDir ?? (normalizedDataType === 'Image' ? '/images' : undefined),
+    ...(missingFile !== undefined && { missingFile }),
   }
 }
 

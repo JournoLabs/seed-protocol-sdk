@@ -2,7 +2,6 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import {
-  Item,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
   resolvePublishPayloadValues,
@@ -11,10 +10,10 @@ import {
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
+import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
 import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
-import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { getPublishConfig } from '~/config'
@@ -62,31 +61,6 @@ const toBytesHex = (v: unknown): string => {
     return '0x' + Array.from(arr).map((b) => b.toString(16).padStart(2, '0')).join('')
   }
   return '0x'
-}
-
-const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
-  let item: IItem<any> | undefined
-  try {
-    item = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-  } catch {
-    // No-op
-  }
-  if (item) return item
-  return new Promise<IItem<any>>((resolve) => {
-    const interval = setInterval(() => {
-      try {
-        Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-          .then((found: IItem<any> | undefined) => {
-            if (found) {
-              clearInterval(interval)
-              resolve(found)
-            }
-          })
-      } catch {
-        // No-op
-      }
-    }, 200)
-  })
 }
 
 type RawAttestation = {
@@ -219,8 +193,6 @@ async function executeCreateAttestationsDirectToEas(
     const publishWallet = resolvePublishWallet(context)
     const txSender = publishWallet.txSender
 
-    await ensureEasSchemasForItem(item, publishWallet, { managedAddress: address })
-
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
         const tx = arweaveTransaction.transaction as { id?: string }
@@ -285,14 +257,12 @@ async function executeCreateAttestationsDirectToEas(
     })
 
     // Requests are attested in order, each before the next: an update aimed at an earlier request
-    // would never reach it (the relation stays unlinked). The publish contract reverts with
-    // PublishTargetAlreadyAttested in that case (SeedPublishLib.setSeedReference); fail the same
-    // way, before any attestation is sent.
+    // would never reach it (the relation stays unlinked). Fail before any attestation is sent.
     const backwards = findPropertiesToUpdateTargetingEarlierRequest(normalizedRequests)
     if (backwards) {
       const { requestIndex, targetIndex, requestLocalId, targetLocalId, propertySchemaUid } = backwards
       throw new ManagedAccountPublishError(
-        `Direct EAS publish from ${address} reverted with PublishTargetAlreadyAttested(${requestIndex}, ${targetIndex}): ` +
+        `Direct EAS publish from ${address} can't fill a reference backwards: ` +
           `request ${requestIndex} (${requestLocalId}) updates property ${propertySchemaUid} of request ${targetIndex} ` +
           `(${targetLocalId}), which is attested before it; nothing was sent.`,
         'PUBLISH_PREFLIGHT_FAILED',
@@ -369,7 +339,7 @@ async function executeCreateAttestationsDirectToEas(
         if (!receipt) throw new Error('Failed to create Seed attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
-        const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
+        const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
         if (!seedUidFromReceipt || seedUidFromReceipt === ZERO_BYTES32) {
           throw new Error('Failed to get Seed UID from attestation receipt')
         }
@@ -403,7 +373,7 @@ async function executeCreateAttestationsDirectToEas(
         if (!receipt) throw new Error('Failed to create Version attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
-        const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
+        const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
         if (!versionUidFromReceipt || versionUidFromReceipt === ZERO_BYTES32) {
           throw new Error('Failed to get Version UID from attestation receipt')
         }
@@ -428,8 +398,8 @@ async function executeCreateAttestationsDirectToEas(
         }
       }
 
-      // Relation and list values that name a seed of this publish by localId get its uid, as on the
-      // contract path (createAttestations): requests come referenced-first, so those seeds exist.
+      // Relation and list values that name a seed of this publish by localId get its uid: requests
+      // come referenced-first, so those seeds exist.
       await applyResolvedRefs(reqs[i], request, resolvedUids)
 
       for (const pu of request.propertiesToUpdate ?? []) {
@@ -439,8 +409,7 @@ async function executeCreateAttestationsDirectToEas(
         const att = targetReq.listOfAttestations.find(
           (a) => toHex32(a?.schema)?.toLowerCase() === schemaUid?.toLowerCase(),
         )
-        // A list is re-encoded whole from its resolved slots (applyResolvedRefs), as the contract
-        // leaves lists to the client (SeedPublishLib.setSeedReference fills single values only).
+        // A list is re-encoded whole from its resolved slots (applyResolvedRefs).
         if (!att?.data?.[0] || att._isList) continue
         att.data[0].data = encodeBytes32(newSeedUid as `0x${string}`)
       }
@@ -465,7 +434,7 @@ async function executeCreateAttestationsDirectToEas(
         lastAttestationMs = await attestationMsFromReceipt(receipt)
         logger('created property attestations for request', i)
         const { easContractAddress } = getPublishConfig()
-        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress)
+        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress, txSender.address)
         for (const a of attested) {
           if (a.uid) batchExtraUids.push(a.uid)
         }
@@ -478,6 +447,7 @@ async function executeCreateAttestationsDirectToEas(
           attestationCreatedAtMs: lastAttestationMs ?? null,
           versionUid: newVersionUid !== ZERO_BYTES32 ? newVersionUid : null,
           resolvedSeedUids: { ...resolvedUids },
+          publisher: address,
           pairs: attested.map((a, j) => ({
             schemaUid: a.schemaUid,
             attestationUid: a.uid,

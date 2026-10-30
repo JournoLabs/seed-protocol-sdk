@@ -91,7 +91,9 @@ describe('PublishManager on Node', () => {
       seedLocalId: 'seed-fast-fail',
       modelName: 'Post',
       schemaUid: '0xschema',
-    } as import('@seedprotocol/sdk').Item<any>
+      // An item no cache holds: createPublish takes no hold on it.
+      getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+    } as unknown as import('@seedprotocol/sdk').Item<any>
     const address = '0x00000000000000000000000000000000000000aa'
 
     const spawned = PublishManager.createPublish(item, address)

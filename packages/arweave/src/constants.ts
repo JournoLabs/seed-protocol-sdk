@@ -1,5 +1,8 @@
-/** Default Arweave gateway host used across all packages (first in {@link DEFAULT_ARWEAVE_GATEWAYS}) */
-export const DEFAULT_ARWEAVE_HOST = 'ar.seedprotocol.io'
+/**
+ * Default Arweave gateway host used across all packages (first in {@link DEFAULT_ARWEAVE_GATEWAYS}),
+ * and the host publish writes into Html links unless `arweaveDomain` names another (ADR 0025).
+ */
+export const DEFAULT_ARWEAVE_HOST = 'arweave.net'
 
 /**
  * Official Seed Protocol public feed Hyperdrive key (z32).
@@ -26,13 +29,20 @@ export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/grap
  * Override order with `ARWEAVE_READ_GATEWAYS` or `NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS` (comma-separated hosts).
  */
 export const DEFAULT_ARWEAVE_GATEWAYS = [
-  'ar.seedprotocol.io',
   'arweave.net',
-  'arweave.dev',
-  'g8way.io',
-  'permagate.io',
   'zigza.xyz',
+  'ar.seedprotocol.io',
 ] as const
+
+/**
+ * Gateways recognized in stored links but never read from: their `/<id>` URLs still parse as
+ * Arweave links and get re-hosted onto a read gateway. `permagate.io` was a default until it went
+ * down (404 "Application not found" on `/info`, `/raw/<id>` and `/graphql`, 2026-10-27).
+ */
+const RETIRED_ARWEAVE_GATEWAYS = ['permagate.io'] as const
+
+/** {@link DEFAULT_ARWEAVE_GATEWAYS} and the retired gateways: hosts whose `/<id>` paths are Arweave links. */
+export const KNOWN_ARWEAVE_GATEWAYS: readonly string[] = [...DEFAULT_ARWEAVE_GATEWAYS, ...RETIRED_ARWEAVE_GATEWAYS]
 
 const READ_GATEWAYS_ENV_KEYS = ['ARWEAVE_READ_GATEWAYS', 'NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS'] as const
 
@@ -63,21 +73,9 @@ export function resolveArweaveHostFromEnv(): string | undefined {
   return undefined
 }
 
-function filterDefaultsForPrimary(primary: string, defaults: readonly string[]): string[] {
-  const primaryNorm = primary.trim().toLowerCase().replace(/\/$/, '')
-  const seedNorm = DEFAULT_ARWEAVE_HOST.toLowerCase()
-  if (primaryNorm === seedNorm) return [...defaults]
-  return defaults.filter((g) => g.toLowerCase() !== seedNorm)
-}
-
-/**
- * Ordered read gateways: `primary` first, then fallbacks.
- * When `primary` is not {@link DEFAULT_ARWEAVE_HOST}, `ar.seedprotocol.io` is omitted from fallbacks
- * unless it appears in an explicit `ARWEAVE_READ_GATEWAYS` env list.
- */
+/** Ordered read gateways: `primary` first, then the defaults (or the env list) not already in it. */
 export function getArweaveReadGatewayHostsForPrimary(primary: string): string[] {
-  const defaults = getDefaultArweaveReadGatewayHostsOrdered()
-  return mergePrimaryHostWithDefaults(primary, filterDefaultsForPrimary(primary, defaults))
+  return mergePrimaryHostWithDefaults(primary, getDefaultArweaveReadGatewayHostsOrdered())
 }
 
 /** Ordered gateway hostnames for reads: env list if set, otherwise {@link DEFAULT_ARWEAVE_GATEWAYS}. */
@@ -125,7 +123,7 @@ export function isKnownArweaveGatewayHostname(hostname: string): boolean {
   if (!h) return false
   if (h.endsWith('arweave.net')) return true
   if (h.endsWith('ar-io.net')) return true
-  for (const g of DEFAULT_ARWEAVE_GATEWAYS) {
+  for (const g of KNOWN_ARWEAVE_GATEWAYS) {
     const gl = g.toLowerCase()
     if (h === gl || h.endsWith(`.${gl}`)) return true
   }

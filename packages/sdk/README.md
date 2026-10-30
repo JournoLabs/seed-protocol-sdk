@@ -20,7 +20,7 @@ Built and used by [PermaPress](https://permapress.xyz), the first client for See
 ## Requirements
 
 - **Node.js** `>= 20` and `<= 24`
-- **Browser:** a modern browser with OPFS (e.g. Chromium-based, recent Firefox)
+- **Browser:** Chrome or Edge 102, Firefox 114, Safari 26 or later ([supported browsers](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/GETTING_STARTED.md#supported-browsers))
 
 ## Installation
 
@@ -75,7 +75,7 @@ See the [Getting Started guide](https://github.com/JournoLabs/seed-protocol-sdk/
 | Import | Use |
 | --- | --- |
 | `@seedprotocol/sdk` | Main API: `client`, `Schema`, `Model`, `Item`, `ItemProperty`, query helpers |
-| `@seedprotocol/sdk/node` | Node entry: `client`, `Item`, `FileManager`, `Db` |
+| `@seedprotocol/sdk/node` | Node entry: `client`, `Item`, `NodeFileManager`, `NodeDb` |
 | `@seedprotocol/sdk/platform` | Platform services: `configurePlatform`, `createPlatformServices` |
 | `@seedprotocol/sdk/vite` | Re-export of `seedVitePlugin` from `@seedprotocol/vite`, which you install yourself (optional peer) |
 

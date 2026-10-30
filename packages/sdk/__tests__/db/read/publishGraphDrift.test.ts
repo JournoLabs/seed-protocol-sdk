@@ -5,7 +5,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, properties, seeds } from '@/seedSchema'
+import { metadata, seeds } from '@/seedSchema'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploadData } from '@/db/read/getPublishUploads'
@@ -30,7 +30,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const SCHEMA_NAME = 'Test Schema publishGraphDrift'
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -77,12 +77,6 @@ testDescribe('publish passes agree on what a publish does', () => {
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
     await ensureModelUidsForGetPublishPayloadTest(['DriftPost', 'Image', 'File', 'Html'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
-    // A schema file's single Relation keeps no refValueType (schemaApply); a code-defined
-    // Relation('Image', 'Image') stores it on the row.
-    await BaseDb.getAppDb()
-      .update(properties)
-      .set({ refValueType: 'Image' })
-      .where(eq(properties.schemaFileId, schema.models.DriftPost.properties.photo.id))
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {

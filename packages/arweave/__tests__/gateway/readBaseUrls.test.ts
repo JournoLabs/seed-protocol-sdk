@@ -12,6 +12,7 @@ import {
   getArweaveReadBaseUrls,
 } from '../../src/gateway/readBaseUrls.js'
 import type { ResolvedSeedGatewayEndpoints } from '../../src/types/gateway.js'
+import { DEFAULT_ARWEAVE_GATEWAYS } from '../../src/constants.js'
 
 const TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 const PROXY = 'https://app.example.com/api/seed-gateway'
@@ -90,22 +91,31 @@ describe('getArweaveReadBaseUrls', () => {
     expect(urls.every((u) => /^https:\/\//.test(u))).toBe(true)
   })
 
-  it('keeps the proxy-only list on http-proxy and dedupes a preferred URL equal to it', () => {
+  it('puts the proxy first on http-proxy, then the public gateways, and dedupes a preferred URL equal to it', () => {
     BaseArweaveClient.setHost(PROXY)
     setResolvedSeedGatewayEndpoints(
-      resolved({ activePath: 'http-proxy', arweaveHost: 'app.example.com/api/seed-gateway' }),
+      resolved({ activePath: 'http-proxy', arweaveHost: 'app.example.com/api/seed-gateway', arweaveBaseUrl: PROXY }),
     )
     setPreferredArweaveReadBaseUrls([PROXY])
-    expect(getArweaveReadBaseUrls()).toEqual([PROXY])
+    expect(getArweaveReadBaseUrls()).toEqual([PROXY, ...DEFAULT_ARWEAVE_GATEWAYS.map((host) => `https://${host}`)])
   })
 
-  it('mixes schemes: https preferred ahead of an http sidecar', () => {
+  it('mixes schemes: https preferred ahead of an http sidecar, then https public gateways', () => {
     BaseArweaveClient.setHost('http://127.0.0.1:1984')
     setResolvedSeedGatewayEndpoints(
-      resolved({ activePath: 'hyper-sidecar', arweaveHost: '127.0.0.1:1984', arweaveProtocol: 'http' }),
+      resolved({
+        activePath: 'hyper-sidecar',
+        arweaveHost: '127.0.0.1:1984',
+        arweaveProtocol: 'http',
+        arweaveBaseUrl: 'http://127.0.0.1:1984',
+      }),
     )
     setPreferredArweaveReadBaseUrls([PROXY])
-    expect(getArweaveReadBaseUrls()).toEqual([PROXY, 'http://127.0.0.1:1984'])
+    expect(getArweaveReadBaseUrls()).toEqual([
+      PROXY,
+      'http://127.0.0.1:1984',
+      ...DEFAULT_ARWEAVE_GATEWAYS.map((host) => `https://${host}`),
+    ])
   })
 
   it('uses the public list on hybrid-fallback-http', () => {

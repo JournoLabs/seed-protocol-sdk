@@ -31,7 +31,7 @@ describe.skipIf(typeof window === 'undefined')('teardownTestEnvironment in the b
 
   it("removes the file's test schemas, models, items, cached models and schema files", async () => {
     const schemaFile = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

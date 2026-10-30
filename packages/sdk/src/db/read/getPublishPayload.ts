@@ -37,15 +37,21 @@ import {
   type PublishGraph,
   type PublishGraphNode,
   type PublishGraphProperty,
+  type PublishBackReferences,
   type PublishMode,
 } from '@/db/read/publishGraph'
 
 export { PublishValidationFailedError, type PublishValidationError }
-export type { PublishMode }
+export type { PublishBackReferences, PublishMode }
 
 export type GetPublishPayloadOptions = {
   /** `patch` (default): new property attestations on the current Version. `new_version`: new Version attestation + attest all properties. */
   publishMode?: PublishMode
+  /**
+   * `defer` (default): a relation back to an item this publish is still creating is left for a later
+   * publish, as direct EAS needs. `link`: it is filled in this publish, as the publish contract can.
+   */
+  backReferences?: PublishBackReferences
 }
 
 type Attestation = Omit<AttestationRequest, 'data'> & {
@@ -61,6 +67,8 @@ type Attestation = Omit<AttestationRequest, 'data'> & {
   _schemaDef?: string
   _unresolvedValue?: string
   _easDataType?: string
+  /** The property's EAS type. `_easDataType` is a resolution hint and is cleared once resolved. */
+  _easType?: string
   /** Per-slot raw ids (local or 0x) before encodeBytes32String; re-encoded after sequential publish. */
   _rawListIdsForResolve?: string[]
 }
@@ -75,7 +83,8 @@ type PublishPayload = {
   versionSchemaUid: string
   versionUid: string
   listOfAttestations: Attestation[]
-  propertiesToUpdate: { publishLocalId: string; propertySchemaUid: string }[]
+  /** The properties this request's seed uid fills; a list's name the element (referenceListElements). */
+  propertiesToUpdate: { publishLocalId: string; propertySchemaUid: string; listElement?: boolean; elementIndex?: number }[]
 }
 
 type MultiPublishPayload = PublishPayload[]
@@ -222,6 +231,28 @@ const booleanFromRow = (value: string): boolean | string =>
   value === 'true' || value === '1' ? true : value === 'false' || value === '0' ? false : value
 
 /**
+ * Whether publishing `property` of `node` with an empty value attests a removal. 0 and false are
+ * values (ADR 0010). An empty value publishes only as a removal of a value attested before
+ * (ADR 0021); a retraction attests nothing (publish revokes instead).
+ */
+export async function publishRemovesValue(
+  node: Pick<PublishGraphNode, 'seedLocalId' | 'seedUid' | 'modelName'>,
+  property: Pick<PublishGraphProperty, 'key' | 'definition'>,
+): Promise<boolean> {
+  const { key, definition } = property
+  const clear = await getPropertyClear({
+    seedLocalId: node.seedLocalId,
+    seedUid: node.seedUid,
+    propertyId: definition._dbId,
+    modelName: node.modelName,
+    propertyName: key,
+    dataType: definition.dataType,
+    refValueType: definition.refValueType,
+  })
+  return !!clear && !clear.retract
+}
+
+/**
  * The attestation of one property of `node`, or undefined when the publish leaves it out (no
  * value, already attested in patch mode, deferred, invalid: the last reports an error).
  */
@@ -247,21 +278,10 @@ async function attestProperty(
   if (isStorageTransaction && !uploaded) return undefined
   let value: unknown = uploaded ? uploaded.txId : row?.propertyValue
 
-  // 0 and false are values (ADR 0010). An empty value publishes only as a removal of a value
-  // attested before (ADR 0021); a retraction attests nothing (publish revokes instead).
   let isRemoval = false
   if (value == null || value === '') {
     if (property.uid && !forceFullSnapshot) return undefined
-    const clear = await getPropertyClear({
-      seedLocalId: node.seedLocalId,
-      seedUid: node.seedUid,
-      propertyId: definition._dbId,
-      modelName: node.modelName,
-      propertyName: key,
-      dataType: definition.dataType,
-      refValueType: definition.refValueType,
-    })
-    if (!clear || clear.retract) return undefined
+    if (!(await publishRemovesValue(node, property))) return undefined
     isRemoval = true
   }
   // Patch mode skips properties that already have an EAS uid, except a storage transaction this
@@ -399,6 +419,7 @@ async function attestProperty(
       } as AttestationRequestData,
     ],
     _propertyName: key,
+    _easType: easDataType,
     ...(row?.localId ? { _metadataLocalId: row.localId } : {}),
     ...(uploaded && uploaded.txId !== row?.propertyValue ? { _attestedValue: uploaded.txId } : {}),
   }
@@ -480,6 +501,27 @@ async function buildRequest(node: PublishGraphNode, ctx: BuildContext): Promise<
 }
 
 /**
+ * A reference into a list names the element it fills: one per position where the list attestation
+ * holds the source's local id, so a draft listed twice fills both. Positions are those of the
+ * encoded array, which skips empty members.
+ */
+function referenceListElements(payload: MultiPublishPayload): void {
+  const byLocalId = new Map(payload.map((p) => [p.localId, p]))
+  for (const source of payload) {
+    source.propertiesToUpdate = source.propertiesToUpdate.flatMap((u) => {
+      const members = byLocalId
+        .get(u.publishLocalId)
+        ?.listOfAttestations.find((a) => a.schema.toLowerCase() === u.propertySchemaUid.toLowerCase())
+        ?._rawListIdsForResolve
+      if (!members) return [u]
+      return members.flatMap((id, elementIndex) =>
+        id.trim() === source.localId ? [{ ...u, listElement: true, elementIndex }] : [],
+      )
+    })
+  }
+}
+
+/**
  * Embedded image rows must still name an Html value of their owner, with a schema to attest under.
  * No propertiesToUpdate: the Html refers to the image by its Arweave URL (the data URI is
  * rewritten to it before the Html is uploaded), not by seed uid.
@@ -510,7 +552,7 @@ export const getPublishPayload = async (
   options?: GetPublishPayloadOptions,
 ): Promise<MultiPublishPayload> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const graph = await getPublishGraph(item, { publishMode })
+  const graph = await getPublishGraph(item, { publishMode, backReferences: options?.backReferences })
   const ctx: BuildContext = { graph, errors: [], uploadedTransactions }
 
   if (publishMode === 'new_version' && !graph.root.seedUid) {
@@ -524,6 +566,7 @@ export const getPublishPayload = async (
 
   let multiPublishPayload: MultiPublishPayload = []
   for (const node of graph.nodes) multiPublishPayload.push(await buildRequest(node, ctx))
+  referenceListElements(multiPublishPayload)
   await checkEmbeddedImages(ctx)
 
   // A request whose seed fills another request's property (propertiesToUpdate) publishes first, and a

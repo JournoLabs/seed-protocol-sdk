@@ -53,7 +53,6 @@ function makeSource(): QueryDataSource {
     kind: 'remote',
     getSeedByUid: async (uid) => (uid === POST ? seed : null),
     listSeedsBySchemaName: async () => [seed],
-    listSeedsByUidPrefix: async () => [],
     listSeedsBySchemaNameForMonth: async () => [],
     getVersionsForSeed: async (uid) => versions.filter((v) => v.refUID === uid),
     getVersionsForSeeds: async (uids) => versions.filter((v) => uids.includes(v.refUID)),

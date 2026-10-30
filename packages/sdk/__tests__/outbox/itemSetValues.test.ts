@@ -23,7 +23,7 @@ const SCHEMA_NAME = 'Test Schema Outbox Item Values'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -209,6 +209,24 @@ testDescribe('item values through the outbox', () => {
       expect(listed.errorName).toBe('RelationTargetError')
       expect(await rowsFor(post.seedLocalId, 'author')).toEqual([])
       expect(await rowsFor(post.seedLocalId, 'relatedIds')).toEqual([])
+    }, 30000)
+
+    it("a create whose initial relation names a local seed that doesn't exist fails with RelationTargetError", async () => {
+      const target = await createPost('existing target')
+      const createWith = (author: string) =>
+        appendOutboxOp({
+          seedLocalId: generateId(),
+          kind: 'create',
+          value: {
+            modelName: 'OutboxPost',
+            seed: { type: 'outbox_post', fields: {} },
+            rows: [{ propertyName: 'author', propertyValue: author, propertyRecordSchema: { dataType: 'Relation' } }],
+          },
+        })
+      const failed = await failureOf(await createWith('noSuchSeed4'))
+      expect(failed).toBeInstanceOf(OutboxOpFailedError)
+      expect(failed.errorName).toBe('RelationTargetError')
+      await waitForOutboxOp(await createWith(target.seedLocalId))
     }, 30000)
 
     it('a relation to a seed whose create op is pending waits for it, without counting an attempt', async () => {

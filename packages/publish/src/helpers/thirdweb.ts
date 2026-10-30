@@ -24,6 +24,7 @@ import type { PublishWallet } from './seedSigner'
 import { getPublishThirdwebChain, isLocalThirdwebChain } from './thirdwebChain'
 import { seedPaymaster } from './seedPaymaster'
 import { logGas } from './gasLog'
+import { clearPublishWallet } from './publishWalletRegistry'
 
 const logger = debug('permaPress:helpers:thirdweb')
 
@@ -59,13 +60,104 @@ export function getSharedPublishInAppWalletStorage() {
   return _publishInAppWalletStorage
 }
 
+/** Set by {@link disconnectPublishWallet} for the rest of the tab session (survives reload). */
+const USER_DISCONNECTED_SESSION_KEY = 'seedProtocol:publish:userChoseWalletDisconnect'
+
+/** Whether the user chose Disconnect in this tab session and hasn't connected since. */
+export function userChosePublishWalletDisconnect(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return sessionStorage.getItem(USER_DISCONNECTED_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Clears the flag {@link disconnectPublishWallet} sets. Call it when the user connects a wallet;
+ * `ConnectButton` does this in `onConnect`. Until then {@link syncPublishInAppAuthToken} won't
+ * restore the in-app session from thirdweb's default key.
+ */
+export function markPublishWalletConnected(): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
+  } catch {
+    /* private mode */
+  }
+}
+
+/**
+ * Ends the publish wallet session after the user chooses Disconnect: records the choice for the
+ * tab session, removes the in-app auth token from both localStorage keys (thirdweb's `logout`
+ * removes only the prefixed one) and clears the registered publish wallet. `ConnectButton` calls
+ * it from `onDisconnect`. It doesn't stop running publishes; call `PublishManager.stopAll()` for
+ * that, as `ConnectButton` does.
+ */
+export async function disconnectPublishWallet(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(USER_DISCONNECTED_SESSION_KEY, '1')
+    } catch {
+      /* private mode */
+    }
+    // Works before initPublish too: without a client id there is no default key to know of.
+    const thirdwebClientId = getConfigRef()?.thirdwebClientId
+    if (thirdwebClientId) {
+      try {
+        const bareKey = `walletToken-${thirdwebClientId}`
+        localStorage.removeItem(bareKey)
+        localStorage.removeItem(`${SEED_IN_APP_SESSION_PREFIX}${bareKey}`)
+      } catch {
+        /* private mode */
+      }
+    }
+  }
+  await clearPublishWallet()
+}
+
+/**
+ * Removes the in-app wallet session this package stores: every localStorage key under
+ * `seedProtocol:inAppPublish:`, thirdweb's default `walletToken-{clientId}` key that
+ * {@link syncPublishInAppAuthToken} mirrors, and the sessionStorage flag
+ * {@link disconnectPublishWallet} sets. Also clears the registered publish wallet. The user has to
+ * sign in again. Without publish config (no `thirdwebClientId`) the default key is left. thirdweb's own other keys and a wallet connected in thirdweb's React state are
+ * left alone; disconnect that wallet (or reload) as well. Meant for a "delete local data" action,
+ * beside the SDK's `client.resetLocalData()`, which leaves localStorage alone.
+ */
+export async function clearInAppPublishSession(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      const keys: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key?.startsWith(SEED_IN_APP_SESSION_PREFIX)) keys.push(key)
+      }
+      // Works before initPublish too: without a client id there is no default key to know of.
+      const thirdwebClientId = getConfigRef()?.thirdwebClientId
+      if (thirdwebClientId) keys.push(`walletToken-${thirdwebClientId}`)
+      for (const key of keys) localStorage.removeItem(key)
+    } catch {
+      /* private mode */
+    }
+    try {
+      sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
+    } catch {
+      /* private mode */
+    }
+  }
+  await clearPublishWallet()
+}
+
 /**
  * Copies Thirdweb in-app auth tokens between default localStorage keys and the
  * prefixed keys used by publish in-app wallets (`seedProtocol:inAppPublish:`).
  *
  * Modular ConnectButton writes the fresh session to prefixed storage; bare may be
  * stale. Prefer prefixed when both exist so managed-wallet autoConnect does not
- * overwrite a valid JWT with an old bare token.
+ * overwrite a valid JWT with an old bare token. After {@link disconnectPublishWallet}, and until
+ * {@link markPublishWalletConnected}, it doesn't copy bare → prefixed, so a leftover bare token
+ * can't sign the user back in.
  */
 export function syncPublishInAppAuthToken(): {
   syncedBareToPrefixed: boolean
@@ -88,7 +180,7 @@ export function syncPublishInAppAuthToken(): {
     let syncedPrefixedToBare = false
 
     // Only copy bare → prefixed when prefixed is missing (cold-start / refresh recovery).
-    if (bare && !prefixed) {
+    if (bare && !prefixed && !userChosePublishWalletDisconnect()) {
       localStorage.setItem(prefixedKey, bare)
       syncedBareToPrefixed = true
     }

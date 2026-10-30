@@ -22,11 +22,15 @@ export { BaseDb } from './db/Db/BaseDb'
 export { isChangeFeedRunning, watchEntityChanges, watchEntityRows } from './browser/db/changeFeed'
 export type { ChangeWatch, EntityChangeTable } from './browser/db/changeFeed'
 export { createNewItem } from './db/write/createNewItem'
-export { updateVersionUid } from './db/write/updateVersionUid'
+export { updateVersionUid, type UpdateVersionUidProps } from './db/write/updateVersionUid'
+export { recordPublishRequest } from './db/write/recordPublishRequest'
 export {
   applyPropertyAttestationUidsFromPublish,
 } from './db/write/applyPropertyAttestationUidsFromPublish'
-export type { PropertyAttestationApplyPair } from './db/write/applyPropertyAttestationUidsFromPublish'
+export type {
+  ApplyPropertyAttestationUidsParams,
+  PropertyAttestationApplyPair,
+} from './db/write/applyPropertyAttestationUidsFromPublish'
 export { getVersionData } from './db/read/subqueries/versionData'
 export { getMetadataLatest } from './db/read/subqueries/metadataLatest'
 export {
@@ -45,7 +49,6 @@ export {
   seeds,
   metadata,
   versions,
-  propertyUids,
   modelUids,
   appState,
   schemas,
@@ -82,11 +85,17 @@ export {
   type ItemCreateProblem,
 } from './Item/errors'
 export { ConflictError, type ConflictResult } from './Schema/errors'
+export { EntityUnloadedError, entityLoadError } from './helpers/entity/entityLifecycle'
+export { OutboxOpFailedError, OutboxSaveTimeoutError } from './outbox/outbox'
+export { RelationTargetError } from './outbox/itemAppliers'
+export { StagedValueMissingError } from './storageValue/stage'
 export type { ValidationError, ValidationResult } from './Schema/validation'
-export { DatabaseNotPersistentError, FileSystemLockedError } from './helpers/FileManager/errors'
+export { DatabaseNotPersistentError, FileSystemLockedError, UnsupportedBrowserError } from './helpers/FileManager/errors'
+export { checkBrowserSupport, type BrowserFeature, type BrowserSupport } from './helpers/browserSupport'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
+export { ClientNotInitializedError, ResetLocalDataBrowserOnlyError } from './client/errors'
 export {
   MODEL_AMBIGUOUS_EVENT,
   type ModelAmbiguousEventPayload,
@@ -229,7 +238,7 @@ export {
   getPublishedSeedRecord,
 } from './query'
 export type { GetPublishedSeedRecordOptions } from './query'
-export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublishPayload'
+export type { PublishMode, PublishBackReferences, GetPublishPayloadOptions } from './db/read/getPublishPayload'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
@@ -245,7 +254,7 @@ export {
   normalizeAddressConfig,
 } from './helpers/addresses'
 
-export { getArweaveUrlForTransaction } from './helpers'
+export { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 export {
   BaseArweaveClient,
   normalizeUploadApiBaseUrl,
@@ -282,6 +291,14 @@ export {
   hasArweaveContentReadTransform,
   transformArweaveContent,
   readArweaveContentResponse,
+  rehostArweaveLinksInHtml,
+  nextArweaveGatewayUrl,
+  mapUrlAttribute,
+  parseArweaveTransactionLink,
+} from '@seedprotocol/arweave'
+export type {
+  ArweaveTransactionLink,
+  HtmlArweaveRefs,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
@@ -330,6 +347,7 @@ export { getPropertySchema } from './helpers/property'
 export type { HtmlEmbeddedDataUriPolicy } from './helpers/property'
 
 export {
+  publishRemovesValue,
   resolvePublishPayloadValues,
   validateItemForPublish,
   PublishValidationFailedError,
@@ -352,6 +370,7 @@ export {
   type PublishPropertyKind,
   type GetPublishGraphOptions,
 } from './db/read/publishGraph'
+export { getPublishModels, type PublishModel, type GetPublishModelsOptions } from './db/read/publishModels'
 export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,
@@ -367,9 +386,10 @@ export {
 } from './helpers/arweaveContentTags'
 export {
   summarizePublishWork,
-  getUnpublishedRelatedItems,
+  summarizePublishUploads,
   estimateDataUriByteLength,
   type PublishWorkSummary,
+  type PublishUploadSummary,
   type SummarizePublishWorkOptions,
 } from './db/read/summarizePublishWork'
 

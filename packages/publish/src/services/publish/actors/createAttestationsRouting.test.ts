@@ -32,7 +32,7 @@ describe('resolvePublishRouting', () => {
     })
     expect(routing).toEqual({
       txTargetAddress: publisher,
-      contractAddressForEvents: publisher,
+      attesterAddress: publisher,
     })
   })
 
@@ -44,11 +44,11 @@ describe('resolvePublishRouting', () => {
     })
     expect(routing).toEqual({
       txTargetAddress: '0xmanaged',
-      contractAddressForEvents: '0xmanaged',
+      attesterAddress: '0xmanaged',
     })
   })
 
-  test('prefers module contract as event source in modular mode', () => {
+  test('keeps the account as target and attester when a module is configured', () => {
     const routing = resolvePublishRouting({
       useModularExecutor: true,
       publisherAddress: '0xabc',
@@ -57,7 +57,7 @@ describe('resolvePublishRouting', () => {
     })
     expect(routing).toEqual({
       txTargetAddress: '0xmanaged',
-      contractAddressForEvents: '0xmodule',
+      attesterAddress: '0xmanaged',
     })
   })
 
@@ -72,7 +72,7 @@ describe('resolvePublishRouting', () => {
     })
     expect(routing).toEqual({
       txTargetAddress: module,
-      contractAddressForEvents: module,
+      attesterAddress: '0xmanaged',
     })
   })
 

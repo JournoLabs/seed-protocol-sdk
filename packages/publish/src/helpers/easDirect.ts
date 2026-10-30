@@ -38,24 +38,28 @@ export function encodeBytes32(value: `0x${string}`): `0x${string}` {
 }
 
 /**
- * Extracts the attestation UID from an EAS attest transaction receipt.
+ * Extracts the UID of the attestation `attester` made from an EAS attest transaction receipt.
  */
 export function getAttestationUidFromReceipt(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   easContractAddress: string,
+  attester: string,
 ): string | undefined {
-  const all = getAttestedUidsFromReceipt(receipt, easContractAddress)
+  const all = getAttestedUidsFromReceipt(receipt, easContractAddress, attester)
   return all[0]?.uid
 }
 
 export type EasAttestedPair = { schemaUid: string; uid: string }
 
 /**
- * All `Attested` events from the EAS contract in this receipt, in log order.
+ * The `Attested` events of `attester` from the EAS contract in this receipt, in log order. These
+ * are the record of what a transaction attested: a bundle transaction can hold other senders'
+ * UserOps, and any contract can emit the Seed contracts' events.
  */
 export function getAttestedUidsFromReceipt(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   easContractAddress: string,
+  attester: string,
 ): EasAttestedPair[] {
   if (!receipt.logs?.length) return []
   const want = easContractAddress.toLowerCase()
@@ -68,8 +72,10 @@ export function getAttestedUidsFromReceipt(
       logs: logs as Log[],
       strict: false,
     })
+    const wantAttester = attester.toLowerCase()
     const out: EasAttestedPair[] = []
     for (const ev of parsed) {
+      if (ev.args?.attester?.toLowerCase() !== wantAttester) continue
       const uid = ev.args?.uid as string | undefined
       const schemaUid = ev.args?.schemaUID as string | undefined
       if (!uid || uid === ZERO_BYTES32) continue

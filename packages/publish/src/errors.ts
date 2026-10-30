@@ -19,7 +19,10 @@ export type ManagedAccountPublishErrorCode =
   | 'MODULAR_SIGNER_ACTIVATION_FAILED'
   | 'AUTOMATION_UNSUPPORTED_ACCOUNT'
   | 'AUTOMATION_PREFLIGHT_FAILED'
+  | 'AUTOMATION_ACCOUNT_FUNDED'
   | 'PUBLISH_PREFLIGHT_FAILED'
+  | 'PUBLISH_TOO_LARGE'
+  | 'MULTI_PUBLISH_NOT_ROUTED'
   | 'USEROP_FAILED_NO_REASON'
   | 'USEROP_REVERTED'
 
@@ -72,6 +75,27 @@ export class ManagedAccountPublishError extends Error {
     super(message + extra)
     this.name = 'ManagedAccountPublishError'
     this.underlyingCause = underlyingCause
+  }
+}
+
+/**
+ * EAS schemas a publish needs are missing and the account can't register them: an automation
+ * session key may call only the executor module. The owner wallet registers them with
+ * `ensureEasSchemasForModels` (or `ensureEasSchemasForItem`). Thrown before any transaction.
+ */
+export class EasSchemasNotRegisteredError extends Error {
+  readonly code = 'EAS_SCHEMAS_NOT_REGISTERED' as const
+
+  constructor(
+    /** The missing schema definitions, e.g. `string word_count`. */
+    public readonly missing: string[],
+  ) {
+    const list = missing.map((def) => `"${def}"`).join(', ')
+    super(
+      `${missing.length === 1 ? `schema ${list} is` : `schemas ${list} are`} not registered; automation keys can't register schemas. ` +
+        'Call ensureEasSchemasForModels with the owner wallet first.',
+    )
+    this.name = 'EasSchemasNotRegisteredError'
   }
 }
 
@@ -154,4 +178,59 @@ export function isRouterNonModularCoreAccountError(cause: unknown): boolean {
   if (/Router:\s*function does not exist/i.test(msg)) return true
   if (/Cannot decode zero data\s*\(\s*["']0x["']\s*\)/i.test(msg)) return true
   return false
+}
+
+/**
+ * A publish attested its properties, then failed to revoke the ones it retracts
+ * (`clear({ retract: true })`). The new attestations are in place; the actor waits in
+ * `retractionFailureRecoverable` for `PublishManager.retryAttestations(seedLocalId)`, which sends
+ * only the revocation again.
+ */
+export class PublishRetractionError extends Error {
+  readonly code = 'PUBLISH_RETRACTION_FAILED'
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'PublishRetractionError'
+  }
+}
+
+function formatMiB(bytes: number): string {
+  return `${(bytes / 2 ** 20).toFixed(1)} MiB`
+}
+
+/**
+ * A publish's uploads add up to more than `maxUploadBytes` (PublishConfig or CreatePublishOptions,
+ * default 100 MiB). Thrown in the checking step, before any file is read or anything is sent.
+ */
+export class UploadTooLargeError extends Error {
+  readonly code = 'UPLOAD_TOO_LARGE'
+  readonly uploadBytes: number
+  readonly maxUploadBytes: number
+
+  constructor(readonly estimate: import('./services/publishCost/uploadEstimate').UploadEstimate) {
+    super(
+      `This publish uploads ${formatMiB(estimate.uploadBytes)}, over the ${formatMiB(estimate.maxUploadBytes)} limit. ` +
+        'Raise maxUploadBytes in the publish config or options to allow it.',
+    )
+    this.name = 'UploadTooLargeError'
+    this.uploadBytes = estimate.uploadBytes
+    this.maxUploadBytes = estimate.maxUploadBytes
+  }
+}
+
+/**
+ * A publish's uploads are over `confirmUploadAboveBytes` (default 25 MiB), or would use more than
+ * a quarter of the device's memory, and the publish wasn't given `confirmUpload: true`. Show the
+ * user `estimate` and publish again with `confirmUpload: true` if they agree.
+ */
+export class UploadNeedsConfirmError extends Error {
+  readonly code = 'UPLOAD_NEEDS_CONFIRM'
+
+  constructor(readonly estimate: import('./services/publishCost/uploadEstimate').UploadEstimate) {
+    super(
+      `This publish uploads ${formatMiB(estimate.uploadBytes)} (about ${estimate.uploadSeconds} s at ` +
+        `${estimate.uplinkBitsPerSecond / 1e6} Mbit/s). Publish again with confirmUpload: true to go ahead.`,
+    )
+    this.name = 'UploadNeedsConfirmError'
+  }
 }

@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createActor } from 'xstate'
-import { easSyncActor, easSyncMachine, requestEasSyncFromModelsInit } from '@/events/item/easSyncManager'
+import {
+  easSyncActor,
+  easSyncMachine,
+  requestEasSyncFromModelsInit,
+  startEasSyncActor,
+} from '@/events/item/easSyncManager'
 import { cancelAllRetriesWhenOnline, setRetriesWhenOnlineEnabled } from '@/helpers/retryWhenOnline'
 import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
@@ -84,6 +89,37 @@ describe('easSyncMachine', () => {
       )
       // A full sync failed, so the retry is a full sync too.
       expect(runSpy).toHaveBeenLastCalledWith(undefined)
+    } finally {
+      cancelAllRetriesWhenOnline()
+      setRetriesWhenOnlineEnabled(previousRetrySetting)
+      vi.useRealTimers()
+    }
+  })
+
+  it("retries the automatic requests merged into a failed run that a client_api request started (K2.3)", async () => {
+    const previousRetrySetting = setRetriesWhenOnlineEnabled(true)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let releaseFirst: (() => void) | undefined
+      runSpy.mockImplementationOnce(() => new Promise<void>((resolve) => (releaseFirst = resolve)))
+      runSpy.mockRejectedValueOnce(new TypeError('fetch failed'))
+      runSpy.mockResolvedValue(undefined)
+      startEasSyncActor()
+
+      easSyncActor.send({ type: 'REQUEST', correlationId: 'k1', options: { addresses: ['0xaa'] }, source: 'client_api' })
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1))
+      easSyncActor.send({ type: 'REQUEST', correlationId: 'k2', options: { addresses: ['0xbb'] }, source: 'client_api' })
+      easSyncActor.send({ type: 'REQUEST', correlationId: 'k3', options: { addresses: ['0xcc'] }, source: 'models_init' })
+      releaseFirst!()
+
+      // The merged run (started by k2, a client_api request) fails
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(easSyncActor.getSnapshot().context.lastFinishedStatus).toBe('failed'))
+
+      await vi.advanceTimersByTimeAsync(15_000)
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(3))
+      // Only the automatic request's addresses: client_api callers got the error
+      expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xcc'] })
     } finally {
       cancelAllRetriesWhenOnline()
       setRetriesWhenOnlineEnabled(previousRetrySetting)

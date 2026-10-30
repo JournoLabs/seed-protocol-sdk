@@ -5,11 +5,23 @@ import {
   resolveArweaveHostFromEnv,
 } from '@seedprotocol/arweave'
 import { assertSingleEasModule, BaseEasClient, ensureEasPlatform } from '@seedprotocol/eas'
+import { setQueryModels, type QueryModels } from './queryModels.js'
+import type { QuerySourceMode } from './types.js'
 
 let initialized = false
 
 export type InitializeQueryPlatformOptions = {
   arweaveDomain?: string
+  /**
+   * The source the call reads from. `'local'` skips the DuplicateEasModuleError /
+   * DuplicateArweaveModuleError checks, since a local read uses neither client.
+   */
+  source?: QuerySourceMode
+  /**
+   * Your schema file's `models`, so List relations come back under their schema keys
+   * (`coAuthors`, not `cos`; see `setQueryModels`). Kept until set again; `null` clears it.
+   */
+  models?: QueryModels | null
 }
 
 /** Fills in Arweave for a process where nothing has registered an Arweave client. */
@@ -57,14 +69,17 @@ function resolveQueryArweaveDomain(explicit?: string): string {
  * running without replacing its clients or its Arweave gateway. Only missing pieces get defaults.
  *
  * Throws DuplicateEasModuleError / DuplicateArweaveModuleError when the clients were registered
- * on another copy of those packages. Checked on every call, since the SDK may register after
- * query's first call.
+ * on another copy of those packages, unless `source` is `'local'`. Checked on every call, since the
+ * SDK may register after query's first call.
  */
 export async function initializeQueryPlatform(
   options?: InitializeQueryPlatformOptions,
 ): Promise<void> {
-  assertSingleEasModule()
-  assertSingleArweaveModule()
+  if (options?.source !== 'local') {
+    assertSingleEasModule()
+    assertSingleArweaveModule()
+  }
+  if (options?.models !== undefined) setQueryModels(options.models)
   if (initialized) return
   if (!BaseEasClient.isConfigured()) await registerEasPlatform()
   ensureEasPlatform()
@@ -81,6 +96,7 @@ export async function initializeQueryPlatform(
 
 export async function teardownQueryPlatform(): Promise<void> {
   initialized = false
+  setQueryModels(null)
 }
 
 export function isQueryPlatformInitialized(): boolean {

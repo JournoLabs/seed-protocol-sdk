@@ -694,6 +694,8 @@ CREATE UNIQUE INDEX \`seeds_attested_uid_unique\` ON \`seeds\` (\`uid\`) WHERE "
 CREATE UNIQUE INDEX \`versions_attested_uid_unique\` ON \`versions\` (\`uid\`) WHERE "versions"."uid" IS NOT NULL AND trim("versions"."uid") NOT IN ('', 'NULL') AND lower(trim("versions"."uid")) != '0x0000000000000000000000000000000000000000000000000000000000000000';
 `
 
+export const migrationSql_0030_drop_property_uids = `DROP TABLE \`property_uids\`;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -908,18 +910,24 @@ export const journalJson = `{
       "when": 1792596480144,
       "tag": "0029_dedupe_chain_uids_add_unique_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1792866514704,
+      "tag": "0030_drop_property_uids",
+      "breakpoints": true
     }
   ]
-}
-`
+}`
 
 // Snapshot JSON file - this is large, so we'll import it dynamically if needed
 // For now, we'll read it from the actual file if ?raw works, otherwise we'll need to embed it
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "0937d0b1-f4ea-4ae1-885b-7173e7b786b9",
-  "prevId": "083c3909-4feb-4b61-bf23-fa806a60b826",
+  "id": "b6717ca6-f22d-4440-a51d-27a3aba4eb0e",
+  "prevId": "0937d0b1-f4ea-4ae1-885b-7173e7b786b9",
   "tables": {
     "appState": {
       "name": "appState",
@@ -2027,59 +2035,6 @@ export const snapshotJson = `{
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "property_uids": {
-      "name": "property_uids",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "uid": {
-          "name": "uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "property_id": {
-          "name": "property_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "property_uids_property_id_unique": {
-          "name": "property_uids_property_id_unique",
-          "columns": [
-            "property_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "property_uids_property_id_properties_id_fk": {
-          "name": "property_uids_property_id_properties_id_fk",
-          "tableFrom": "property_uids",
-          "tableTo": "properties",
-          "columnsFrom": [
-            "property_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

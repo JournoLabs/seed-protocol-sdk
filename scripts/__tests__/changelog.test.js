@@ -5,7 +5,9 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { execFileSync } from 'child_process'
 import {
+  NO_CHANGES,
   addReleaseSection,
+  breaksPackage,
   extendReleaseSection,
   formatCommitGroups,
   isVersionBump,
@@ -97,8 +99,31 @@ describe('splitChangelog / addReleaseSection', () => {
     assert.match(out, /## 0\.7\.4 \(2026-10-15\)\n\n### Commits/)
   })
 
-  it('changes nothing with no notes and no commits', () => {
-    assert.equal(addReleaseSection('# Changelog\n\n## 0.5.0\n', { version: '1', date: 'd', commitGroups: '' }), '# Changelog\n\n## 0.5.0\n')
+  it('writes a heading with no notes and no commits, since every package is released', () => {
+    assert.equal(
+      addReleaseSection('# Changelog\n\n## 0.5.0\n', { version: '1', date: 'd', commitGroups: '' }),
+      `# Changelog\n\n## 1 (d)\n\n${NO_CHANGES}\n\n## 0.5.0\n`,
+    )
+  })
+})
+
+describe('breaking commits', () => {
+  it('reads a BREAKING CHANGE footer in the body', () => {
+    const out = formatCommitGroups([{ sha: 'aaaaaaaa1', subject: 'feat(sdk): rename x', body: 'Why.\n\nBREAKING CHANGE: x is y' }], 'sdk')
+    assert.match(out, /#### Breaking\n\n- rename x \(aaaaaaaa\)/)
+  })
+  it('is Breaking only in the packages its scope names', () => {
+    const commits = [{ sha: 'bbbbbbbb2', subject: 'fix(sdk)!: drop the alias', body: '' }]
+    assert.match(formatCommitGroups(commits, 'sdk'), /#### Breaking/)
+    const elsewhere = formatCommitGroups(commits, 'react')
+    assert.doesNotMatch(elsewhere, /#### Breaking/)
+    assert.match(elsewhere, /#### Fixes\n\n- sdk: drop the alias/)
+  })
+  it('is Breaking in every package it touches without a scope', () => {
+    assert.equal(breaksPackage({ subject: 'refactor!: remove decorators' }, 'react'), true)
+  })
+  it('keeps a scoped test commit hidden where it breaks nothing', () => {
+    assert.equal(formatCommitGroups([{ sha: 'c', subject: 'test(sdk)!: x', body: '' }], 'react'), '')
   })
 })
 
@@ -205,5 +230,29 @@ describe('planReleaseChangelogs for a retry', () => {
     const expected = `# Changelog\n\n## 0.7.3 (2026-10-14)\n\n### Commits\n\n#### Features\n\n- first (00000000)\n\n#### Fixes\n\n- the release build (${fixSha.slice(0, 8)})\n`
     assert.equal(readFileSync(join(root, 'packages/sdk/CHANGELOG.md'), 'utf-8'), expected)
     assert.deepEqual(writeReleaseChangelogs(options), [])
+  })
+})
+
+describe('planReleaseChangelogs for a release', () => {
+  let root
+  const run = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf-8' }).trim()
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), 'changelog-release-'))
+    run('init', '--quiet')
+    mkdirSync(join(root, 'packages', 'sdk'), { recursive: true })
+    writeFileSync(join(root, 'packages', 'sdk', 'a.js'), '1')
+    run('add', '-A')
+    run('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--quiet',
+      '-m', 'feat(sdk): rename x', '-m', 'BREAKING CHANGE: x is y now')
+  })
+  after(() => rmSync(root, { recursive: true, force: true }))
+
+  it('reads the body footer, and gives a package with no commits a heading', () => {
+    const plan = planReleaseChangelogs({ rootDir: root, packages: ['sdk', 'mapping'], version: '0.8.0', date: '2026-11-01', range: 'HEAD' })
+    const sdk = plan.find((p) => p.path === 'packages/sdk/CHANGELOG.md')
+    assert.match(sdk.text, /#### Breaking\n\n- rename x \(/)
+    assert.equal(sdk.notableLines.length, 1)
+    const mapping = plan.find((p) => p.path === 'packages/mapping/CHANGELOG.md')
+    assert.match(mapping.text, new RegExp(`## 0\\.8\\.0 \\(2026-11-01\\)\\n\\n${NO_CHANGES.replace(/[.;]/g, '\\$&')}`))
   })
 })

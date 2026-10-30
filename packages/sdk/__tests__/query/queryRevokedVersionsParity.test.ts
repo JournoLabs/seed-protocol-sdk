@@ -160,7 +160,7 @@ const fakeEasClient = {
 }
 
 const summarize = async (ds: QueryDataSource, seedList: AttestationLike[]) =>
-  (await assembleSeeds(SCHEMA, seedList, { hydrateStorage: false, relations: 'urls' }, ds))
+  (await assembleSeeds(SCHEMA, seedList, { hydrateStorage: false, relations: 'uids' }, ds))
     .map((r) => ({ seedUid: r.seedUid, versionUid: r.versionUid, title: r.data.title }))
     .sort((a, b) => a.seedUid.localeCompare(b.seedUid))
 
@@ -245,17 +245,13 @@ describe.sequential('local and remote query sources: seeds with revoked versions
     { seedUid: mixed.seed.uid, versionUid: mixed.versions[0]!.uid, title: 'mixed live' },
   ]
 
-  it('lists the same published seeds from both sources; all-revoked and revoked seeds are left out', async () => {
+  it('lists the same published seeds from both sources; all-revoked, revoked and unversioned seeds are left out', async () => {
     const fromLocal = await list(local)
     const fromRemote = await list(remote)
 
     expect(fromLocal).toEqual(expectedPublished)
-    // Unchanged existing difference: the remote source lists a seed with no version at all (no
-    // versionUid, no data); the local source requires a published version.
-    expect(fromRemote).toEqual([
-      ...expectedPublished,
-      { seedUid: noVersions.seed.uid, versionUid: '', title: undefined },
-    ])
+    // A seed with no version at all is left out by both, like getSeed and getSeeds.
+    expect(fromRemote).toEqual(expectedPublished)
   })
 
   it('getSeed-style assembly leaves out a seed whose versions are all revoked, in both sources', async () => {
@@ -268,7 +264,7 @@ describe.sequential('local and remote query sources: seeds with revoked versions
 
   it('lists by uid prefix the same way in both sources, leaving out all-revoked seeds', async () => {
     const byPrefix = async (ds: QueryDataSource, prefix: string) =>
-      summarize(ds, await ds.listSeedsByUidPrefix(SCHEMA, prefix, { limit: 16, skip: 0 }))
+      summarize(ds, await ds.listSeedsBySchemaName(SCHEMA, { limit: 16, skip: 0, uidPrefix: prefix }))
     for (const ds of [local, remote]) {
       expect(await byPrefix(ds, '0xd5d5')).toEqual([expectedPublished[0]])
       expect(await byPrefix(ds, '0xdada')).toEqual([expectedPublished[1]])

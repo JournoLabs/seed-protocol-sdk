@@ -4,8 +4,8 @@ import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { entityChanges, metadata, seeds } from '@/seedSchema'
 import { createNewItem } from '@/db/write/createNewItem'
+import { ENTITY_CHANGES_RETENTION_MS } from '@/db/entityChangesPrune'
 import {
-  ENTITY_CHANGES_RETENTION_MS,
   resetChangeFeedForTests,
   watchEntityChanges,
   watchEntityRows,
@@ -29,7 +29,7 @@ const MODEL = 'FeedPost'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },

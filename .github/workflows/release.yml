@@ -83,17 +83,16 @@ jobs:
 
       # Workspace packages resolve to their dist: the root vite.config.js imports @seedprotocol/vite,
       # the SDK type check (first step of `bun run test`) imports eas, arweave and query, the
-      # publish bun:test files import sdk and react, and feed-hyper's tests import feed. Package builds only, not build:* (those run the
-      # tests first); SKIP_TESTS stops sdk's and react's build scripts doing the same.
-      - name: Build workspace packages the tests import
+      # publish bun:test files import sdk and react, and feed-hyper's tests import feed. The
+      # declaration check (check-dts-consumer.js) reads every package's dist. Package builds only,
+      # not build:* (those run the tests first); SKIP_TESTS stops sdk's and react's build scripts
+      # doing the same.
+      - name: Build workspace packages
         env:
           SKIP_TESTS: '1'
-        run: node scripts/build-packages.js bundler-core archive eas arweave query feed vite sdk react next
+        run: node scripts/build-packages.js
 
       - run: bun run test
-        env:
-          # Optional: the Arweave integration test asks this Hyper gateway first when it's set.
-          SEED_GATEWAY_HYPER_KEY: ${{ secrets.SEED_GATEWAY_HYPER_KEY }}
 
   publish:
     name: Publish to npm

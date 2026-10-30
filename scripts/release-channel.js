@@ -18,6 +18,7 @@ import { execFileSync } from 'child_process'
  * Keep in sync with real @seedprotocol/* package.json dependencies.
  */
 export const PUBLISH_ORDER = [
+  'archive',
   'eas',
   'arweave',
   'vite',
@@ -38,7 +39,7 @@ export const PUBLISH_ORDER = [
  * maintainer publishes them once by hand with `scripts/publish-package.js <name>` and adds their
  * trusted publishers (docs/RELEASING.md). Then move each one into PUBLISH_ORDER.
  */
-export const AWAITING_FIRST_PUBLISH = ['archive']
+export const AWAITING_FIRST_PUBLISH = ['rdf']
 
 /** Packages publish under this tag first; the real tag moves once all are published. */
 export const STAGING_TAG_PREFIX = 'ci-'

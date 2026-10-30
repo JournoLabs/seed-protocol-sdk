@@ -9,7 +9,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -54,7 +53,7 @@ async function waitForPropertyDef(property: { propertyDef?: unknown }) {
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -87,12 +86,11 @@ testDescribe('ItemProperty Integration Tests', () => {
     // Clean up - delete in order to respect foreign key constraints
     const db = BaseDb.getAppDb()
     if (db) {
-      // Delete in order: metadata -> versions -> seeds -> propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
+      // Delete in order: metadata -> versions -> seeds -> modelUids -> properties -> model_schemas -> models -> schemas
       await db.delete(metadata)
       await db.delete(versions)
       await db.delete(seeds)
       await db.update(properties).set({ refModelId: null })
-      await db.delete(propertyUids)
       await db.delete(modelUids)
       await db.delete(properties)
       await db.delete(modelSchemas)

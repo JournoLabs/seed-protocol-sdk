@@ -13,7 +13,7 @@ const SCHEMA_ID = 'rename-by-id-schema'
 const MODEL_ID = 'rename-by-id-story'
 const schemaFile = (version: number, properties: Record<string, { id: string; type: string }>) =>
   JSON.stringify({
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version,
     id: SCHEMA_ID,
     metadata: { name: 'Rename By Id', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

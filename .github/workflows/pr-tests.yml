@@ -30,14 +30,12 @@ jobs:
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
 
-      # Same as release.yml: the tests import these workspace packages from their dist
-      - name: Build workspace packages the tests import
+      # Same as release.yml: the tests import workspace packages from their dist, and the
+      # declaration check reads every package's dist
+      - name: Build workspace packages
         env:
           SKIP_TESTS: '1'
-        run: node scripts/build-packages.js bundler-core archive eas arweave query feed vite sdk react next
+        run: node scripts/build-packages.js
 
       - name: Run tests
         run: bun run test
-        env:
-          # Optional: the Arweave integration test asks this Hyper gateway first when it's set.
-          SEED_GATEWAY_HYPER_KEY: ${{ secrets.SEED_GATEWAY_HYPER_KEY }}

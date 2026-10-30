@@ -41,7 +41,7 @@ import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-items',
   metadata: {
@@ -91,7 +91,7 @@ const testSchemaWithItems: SchemaFileFormat = {
 
 // Empty schema with no models for integration test
 const emptyTestSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'empty-test-schema-items',
   metadata: {
@@ -105,6 +105,12 @@ const emptyTestSchema: SchemaFileFormat = {
 }
 
 // Test component for useItemProperty with object props
+function ConflictProbe({ seedLocalId }: { seedLocalId: string }) {
+  const { property } = useItemProperty({ seedLocalId, propertyName: 'title' })
+  const conflict = property?.conflict as { remoteValue?: string } | null | undefined
+  return <div data-testid="conflict-remote">{conflict?.remoteValue ?? 'none'}</div>
+}
+
 function UseItemPropertyWithPropsTest({
   seedLocalId,
   seedUid,
@@ -608,6 +614,25 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => expect(screen.getByTestId('render-log-value').textContent).toBe('Changed After Mount'),
         { timeout: WAIT_TIMEOUT_MS },
       )
+    })
+
+    it('re-renders when only the property\'s conflict changes', async () => {
+      const id = testItem!.seedLocalId
+      render(<ConflictProbe seedLocalId={id} />, { container })
+      const scoped = within(container)
+      await waitFor(() => expect(scoped.getByTestId('conflict-remote').textContent).toBe('none'), { timeout: WAIT_TIMEOUT_MS })
+
+      const titleProp = testItem!.properties.find((p) => p.propertyName === 'title')!
+      // What a sync conflict does to a loaded, idle property: only its conflict changes
+      titleProp.getService().send({
+        type: 'updateContext',
+        conflict: { seedLocalId: id, propertyName: 'title', baseValue: 'a', remoteValue: 'From another device', localValue: 'b', remoteUid: '0x1', opId: 'op' },
+      } as never)
+      await waitFor(() => expect(scoped.getByTestId('conflict-remote').textContent).toBe('From another device'), {
+        timeout: WAIT_TIMEOUT_MS,
+      })
+      titleProp.getService().send({ type: 'updateContext', conflict: null } as never)
+      await waitFor(() => expect(scoped.getByTestId('conflict-remote').textContent).toBe('none'), { timeout: WAIT_TIMEOUT_MS })
     })
   })
 
@@ -1178,6 +1203,30 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       } finally {
         spy.mockRestore()
       }
+    })
+  })
+
+  describe('useItemProperties after another tab\'s save', () => {
+    it('re-renders with the new value when the refetch returns the same instances', async () => {
+      if (!testItem) return
+      const seedLocalId = testItem.seedLocalId
+      render(<UseItemPropertiesWithPropsTest seedLocalId={seedLocalId} />, { container, wrapper: SeedProviderWrapper })
+      const scoped = within(container)
+      await waitFor(
+        () => expect(parseInt(scoped.getByTestId('properties-count').textContent || '0')).toBeGreaterThanOrEqual(3),
+        { timeout: WAIT_TIMEOUT_MS },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      // Another tab's save reaches this tab as a row write; the hook's refetch returns the same instances
+      await BaseDb.getAppDb()
+        .update(metadata)
+        .set({ propertyValue: 'Saved In Another Tab' })
+        .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, 'title')))
+
+      await waitFor(() => expect(container.textContent).toContain('title: Saved In Another Tab'), {
+        timeout: WAIT_TIMEOUT_MS,
+      })
     })
   })
 

@@ -21,6 +21,7 @@ import { AmbiguousModelError } from '@/Model/errors'
 import { normalizeDataType } from '@/helpers/property'
 import { propertyDefinitionColumn } from '@/helpers/propertyDefinition'
 import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
+import { assertModelNameCanPublish, assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
 
 const logger = debug('seedSdk:db:write:definitions')
 
@@ -190,6 +191,7 @@ export async function upsertModelRow(
   db: DefinitionsDb,
   input: { name: string; schemaFileId?: string | null; isEdited?: boolean },
 ): Promise<NewModelRecord> {
+  assertModelNameCanPublish(input.name)
   const values = { name: input.name, schemaFileId: input.schemaFileId || null, isEdited: input.isEdited ?? false }
   if (!values.schemaFileId) {
     const [row] = await db.insert(modelsTable).values(values).returning()
@@ -247,6 +249,7 @@ export async function findOrCreateModelRow(
     const [byFileId] = await db.select().from(modelsTable).where(eq(modelsTable.schemaFileId, modelFileId)).limit(1)
     if (byFileId) {
       if (byFileId.name === modelName) return byFileId
+      assertModelNameCanPublish(modelName)
       await db.update(modelsTable).set({ name: modelName }).where(eq(modelsTable.id, byFileId.id))
       return { ...byFileId, name: modelName }
     }
@@ -340,6 +343,7 @@ export async function renameModelRow(
   }
   const existingWithNewName = await resolveModelRecord(newName, scope, db)
   if (existingWithNewName) return existingWithNewName as NewModelRecord
+  assertModelNameCanPublish(newName)
   await db.update(modelsTable).set({ name: newName }).where(eq(modelsTable.id, model.id))
   return { ...model, name: newName } as NewModelRecord
 }
@@ -461,6 +465,15 @@ export async function upsertPropertyRow(
     definition: input.definition
       ? propertyDefinitionColumn(input.definition, input.replaceDefinition ? null : existing?.definition)
       : (existing?.definition ?? null),
+  }
+
+  if (values.name !== existing?.name) {
+    assertPropertyNameCanPublish(values.name, {
+      dataType: values.dataType,
+      refValueType: values.refValueType,
+      ref: input.refModelName ?? undefined,
+      name: values.name,
+    })
   }
 
   if (existing) {

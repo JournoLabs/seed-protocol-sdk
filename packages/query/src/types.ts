@@ -20,11 +20,11 @@ export type QuerySourceMode = 'local' | 'remote' | 'auto'
 
 /**
  * How relation properties are returned. `'expand'`: Html/File relations become Arweave URLs and
- * other related seeds nested objects. `'urls'`: storage relations become URLs, the rest stay seed
- * UIDs. `'uids'`: every relation stays a seed UID under its stored key, and related seeds aren't
- * fetched at all (no related seed, version or property requests).
+ * other related seeds nested objects. `'uids'`: every relation stays a seed UID, and related seeds
+ * aren't fetched at all (no related seed, version or property requests). In every mode a relation comes back under its
+ * schema key (`author`, `authors`), not its EAS name (`author_id`, `author_identity_ids`).
  */
-export type RelationsMode = 'expand' | 'urls' | 'uids'
+export type RelationsMode = 'expand' | 'uids'
 
 export type AssembleOptions = {
   /** Default `'expand'`. */
@@ -45,9 +45,13 @@ export type AssembleOptions = {
   source?: QuerySourceMode
 }
 
-/** The relations mode `options` ask for. */
+/** The relations mode `options` ask for. Throws a `TypeError` for any other value, such as the removed `'urls'`. */
 export function relationsModeOf(options?: { relations?: RelationsMode }): RelationsMode {
-  return options?.relations ?? 'expand'
+  const relations = options?.relations ?? 'expand'
+  if (relations !== 'expand' && relations !== 'uids') {
+    throw new TypeError(`relations must be 'expand' or 'uids', got ${JSON.stringify(relations)}`)
+  }
+  return relations
 }
 
 export type ChangelogInclude = 'data' | 'data+changelog' | 'changelog'
@@ -113,6 +117,10 @@ export type GetSeedResult = SeedRecord & {
 }
 
 export type QueryBySchemaOptions = AssembleOptions & {
+  /**
+   * Seeds to list, 100 by default. Seeds with no Version that isn't revoked are dropped after
+   * listing, so a page can hold fewer items than `limit` while later pages still have more.
+   */
   limit?: number
   skip?: number
   /**
@@ -122,10 +130,17 @@ export type QueryBySchemaOptions = AssembleOptions & {
    */
   uidPrefix?: string
   /**
+   * Only seeds whose Seed attestation was made by one of these addresses (`SeedRecord.attester`),
+   * in any case. Applied before `limit` and `skip`: in the EAS request on the remote source.
+   * Entries that aren't 20-byte hex addresses are ignored; if none is left, or the list is empty,
+   * no items. Combines with `uidPrefix`. Like `uidPrefix`, reads don't use the collection cache.
+   */
+  attesters?: readonly string[]
+  /**
    * Seconds after this collection was last checked against the indexer during which it is
    * returned from the collection cache with no request at all. New, changed and revoked seeds
    * show up to this many seconds late. Applies only where the collection cache does (remote,
-   * `skip` 0, no `uidPrefix`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
+   * `skip` 0, no `uidPrefix` or `attesters`, cache enabled). Default: `CACHE_MAX_AGE`, else 0 (check every read).
    */
   maxAge?: number
 }
@@ -134,6 +149,11 @@ export type QueryBySchemaResult = {
   items: SeedRecord[]
   limit: number
   skip: number
+  /**
+   * Seeds the listing returned for this page, before Seeds with no live Version were left out.
+   * Fewer than `limit`: the listing has ended. `items` can be shorter than `listed`.
+   */
+  listed: number
   /** Present when collection cache was consulted or updated (skip === 0). */
   etag?: string
 }

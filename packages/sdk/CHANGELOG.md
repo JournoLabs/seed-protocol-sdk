@@ -4,10 +4,219 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- New `exportArchive(item, { fetch, reproducible, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`. Every time in the bag says whose clock it came from (`chain-block`, `local-record`, `export-device`). With `reproducible`, every client with the Version synced and the same schema gets the same bytes: times and the attester come from EAS, the bag is dated with the Version, and it throws `not_synced`, `chain_unavailable`, `incomplete` or `invalid_options` instead of writing a bag another client couldn't reproduce.
+- `exportArchive` takes `reproducible`: every client with the Version synced and the same schema gets the same bytes and the same tagmanifest hash. Times and the attester come from EAS, the bag is dated with the Version, and it throws `not_synced`, `chain_unavailable`, `incomplete` or `invalid_options` instead of writing a bag another client couldn't reproduce. Every time in a bag, reproducible or not, now says whose clock it came from (`chain-block`, `local-record`, `export-device`), in PREMIS event details, `item.json` and `bag-info.txt`.
+- EAS sync skips a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas), drops such members from a list, and doesn't fetch them as related seeds. Only `0x…20` was skipped before; other small values were stored as relations to seeds that don't exist.
+- New `getPublishPayload` / `validateItemForPublish` / `getPublishGraph` option `backReferences` (`PublishBackReferences`): `'link'` attests a relation back to an item the publish is still creating (both sides of A ↔ B) and fills it with a reference; `'defer'`, the default, leaves it for a later publish as before.
+- `getPublishPayload` gives a reference into a list property `listElement: true` and the `elementIndex` it fills, one entry per position where the list holds the draft, so a draft listed twice fills both (see the @seedprotocol/publish changelog).
+- Schema files the SDK writes use `$schema: 'https://seedprotocol.io/schemas/data-model/v1'` (was `https://seedprotocol.org/...`, a domain the project doesn't own). Files with the old URL still load, and `$schema` no longer counts toward a schema's content hash, so a stored file with the old URL matches the same schema today instead of failing with "already exists with different content". Each schema is re-applied once after upgrading, because the hashes stored in the database change.
+- Listing a directory in the browser (`Schema.load`, `listCompleteSchemaFiles`, `fs.promises.readdir`) skips a file another context removed between the listing and its stat. The removal surfaced as `TypeError: Cannot set property message of ... which has only a getter`: OPFS's `NotFoundError` reached ZenFS unconverted, and ZenFS failed to append to its read-only message. The OPFS mount's `stat` now fails with `ENOENT` for a removed file and `EIO` for other OPFS errors.
+- **Breaking:** `client.init` called again leaves the stored addresses alone, whatever `addresses` it is given; change them with `client.setAddresses`. In 0.7.13 a repeat init with the same config replaced them with a different non-empty set and kept them for an empty one, so whether a remount changed the addresses depended on what the host passed. `SeedProvider` and `SeedClientGate` call `setAddresses` when their `addresses` change. The init config conflict message no longer suggests init for new addresses.
+- **Breaking:** `getUnpublishedRelatedItems` is removed. New `summarizePublishUploads(item, { publishMode })` returns its `unpublishedRelatedItems` together with `uploadCount`, `uploadBytes` and `uploadSizes`, from one read of the publish graph and file sizes only. Publish's `checking` step uses it for the upload size limits.
+- `Model.create` with a name that can't publish (a reserved ABI word), or a property in `properties` with one, rejects before making a model, and throws with `waitForReady: false`. With no properties it resolved `ready` with no row, and either way the model stayed in `schema.models` and `Model.getByName`, so the next `schema.saveNewVersion()` rejected. A runtime create whose write fails for another reason also leaves the cache.
+- Renaming a ModelProperty to a name that can't publish fails validation: `validate()` returns an error on `name` with code `reserved_name`, the row keeps its old name, and the instance shows the new name until it's renamed again. `validate()` reported nothing and the refusal reached only the debug log.
+- `getPublishModels` throws `UnknownModelError` (with `modelName` and `schemaName`) for a name with no model, as `Item.create` does. It threw a plain `Error` (`No model named Nope`).
+- `client.resetLocalData()` in Node throws `ResetLocalDataBrowserOnlyError` (`code: 'RESET_LOCAL_DATA_BROWSER_ONLY'`, decision D36), exported from both entries. It threw a plain `Error` with the same message.
+- `UpdateVersionUidProps`, the type of `recordPublishRequest`'s `version`, is exported from the main entry.
+- `ItemPublishOptions` documents `confirmUpload` and `maxUploadBytes` (see the @seedprotocol/publish changelog).
+
+## 0.7.13 (2026-10-29)
+
+- New `client.resetLocalData({ otherTabsTimeoutMs, filesDir })` (browser) deletes the database and every file under `filesDir` from OPFS and resolves with `{ deleted, failed }`: an entry it can't remove (a file another tab holds open) is listed in `failed` with the browser's error, and the rest are still removed. It stops the client from any state, including after a failed init, posts `close-db` to the other tabs of the database, waits up to `otherTabsTimeoutMs` (default 10 000) for them to close it, and unmounts the file system, so `init` works again without a reload and starts empty. An `init` during the reset waits for it. Each coordinating tab now holds the Web Lock `seed:open:<db>` in shared mode while its database is open; the reset takes it exclusively. A tab that hears `close-db` stops its client and unmounts its file system; it doesn't reload. The client snapshot's new `context.stopReason` (`ClientStopReason`: `'stop' | 'reset'`) says why a stopped client stopped. localStorage is left alone (see `clearInAppPublishSession` in @seedprotocol/publish). In Node, `resetLocalData` throws.
+- New `getPublishModels(modelNames, { schemaName, followRefs })`: the models a publish of items of those models attests, read from the loaded definitions with no seed, each with every property and its publish kind. It includes the storage models (Image, File, Html) storage-seed properties reach and, with `followRefs` (default true), the models relation and list properties name. A name with no model throws; a name two schemas define throws `AmbiguousModelError` unless `schemaName` is given.
+- An edit that puts a property back to its latest attested value leaves no draft: when the outbox applies it, the property's drafts are deleted and the attested row is current again (ADR 0019, amended). `getPublishPendingDiff` and publish leave the property out. A property edited from A to B and back to A was listed with `currentValue` and `previousPublishedValue` both A, and the next publish attested A again. After sync has stored a newer value, going back to the old one is still an edit. Drafts written by an earlier SDK that equal the attested value stay until the next publish attests them.
+- `getPublishPendingDiff` leaves out a property whose current value equals `previousPublishedValue`, compared by `propertyValuesEqual`: relations by the seed they name (a local id equals the seed's uid, the form a publish records), lists member by member in order. A pending edit back to the published value is left out before the outbox applies it.
+- New `recordPublishRequest({ version, properties })` records one publish request's version uid and property uids in one transaction. Publish uses it, so a change-feed dispatch between the two writes no longer showed the version published with every property still pending. `updateVersionUid` and `applyPropertyAttestationUidsFromPublish` take an optional `{ db }` to write in a caller's transaction.
+- New `publishRemovesValue(node, property)`: whether publishing an empty property of a publish graph node attests a removal (ADR 0021). `getPublishPayload` and the publish package's EAS schema check both use it.
+- **Breaking:** a model or property whose EAS name is a word the Solidity ABI parser reserves (`view`, `event`, `error`, `storage`, `struct`, `function`, `indexed`, `returns` and the other visibility and modifier keywords) is refused when the schema file loads, and when code creates or renames one. EAS parses schema strings with ethers, so such a name could never be registered or attested; publish failed at the first encode. A schema file that has one now makes `client.init` reject with `<Model>.<property>: Property "view" publishes as "view", …`. A List of relations is exempt: it publishes as `<name><Model>Ids`.
+- Recording a publish gives the seed, version and property rows that were unsealed drafts the address that attested as their publisher. They kept the publisher they were stamped with as drafts, so a draft stamped with the EOA and published by the smart account named the EOA, and the local query source reported it as the attester. A sealed row's publisher still never changes. `applyPropertyAttestationUidsFromPublish` takes `publisher`.
+- **Breaking:** an Image, File or Html property whose file isn't found reads as `undefined`. Its `value` was the stored storage seed id (Html), the file name (Image) or `'No file found'` (File), which callers couldn't tell from content. New `ItemProperty.valueStatus` (`'resolved' | 'fetching' | 'missing'`, also on `IItemProperty`) says which case applies, and `missingFile` gives the path looked up. A missing property reads its file again when the file is saved (a download, another tab), announced through `FILES_CHANGED_EVENT`; it didn't re-read until something else changed its row. A property that keeps showing content it resolved before (an Html body fetched through its transaction) stays `'resolved'`.
+- `client.init` called again with the same config and an empty `addresses` (`[]`, or no owned or watched) keeps the stored addresses; a different non-empty set still replaces them, and `client.setAddresses([])` clears them. It cleared them, so a host that passes `addresses: []` before a wallet connects lost the wallet's addresses when `SeedClientGate` remounted and ran init again.
+- `client.init` after `client.stop()` with another `filesDir` uses the new directory. The file system kept the first init's directory, so the second init applied the first directory's schema files to the new database (`Schema.all()` returned both schemas), and file reads and saves went to the first directory.
+- New `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`), exported from both entries (decision D36). `Item.find` rejects with it once `readyTimeout` passes without an open database, and client methods throw it after `client.stop()`. Both threw a plain `Error` with that message, which callers could tell from a load failure only by its text. The message is unchanged.
+- `IItemProperty.save` takes `{ timeoutMs }`, like `ItemProperty.save`, so code holding an `IItemProperty` (such as `useItemProperty().property`) can pass it without a cast.
+- `entityLoadError` is exported from `@seedprotocol/sdk/node`.
+- The slow-save warning and the removed-event warning read `process.env.NODE_ENV` in the form bundlers replace, so a browser production build no longer logs them. They read it through `globalThis.process`, which bundlers leave alone, so a bundle with no `process` global, or with the `process` polyfill and its empty `env`, counted as development. With no `process` and no replacement they now stay quiet.
+- A Schema loaded after a ModelProperty edit or rename, or after a model was created at runtime, starts as a draft with those edits, read from the rows' `is_edited` flags, so `saveNewVersion()` writes them to the next version file. It loaded with no edits and returned `''`, leaving a rename made while no Schema instance was loaded (or before a reload) in the database but never in a schema file. `saveNewVersion` now clears `is_edited` on each saved property's row even when no instance of the property is cached.
+
+### Commits
+
+#### Breaking
+
+- refuse model and property names that publish as a reserved ABI word (aa4fcaf5)
+- a file-backed value whose file is missing reads as undefined; add valueStatus (3942b9c7)
+
+#### Features
+
+- client.resetLocalData deletes the local database and files, stopping other tabs (97e82b67)
+- publish: ensureEasSchemasForModels registers a model's EAS schemas without an item (e9baae43)
+- an edit back to the attested value leaves no draft (6f39e4e8)
+
+#### Fixes
+
+- publish: ensureEasSchemasForItem asks only for schemas the publish attests (43196475)
+- publish records the attester as publisher on draft rows (1d07b478)
+- repeat client.init with empty addresses keeps the stored ones (f57dc2cd)
+- init after stop with another filesDir moves the files root (5c2cda3d)
+- ClientNotInitializedError (D36), IItemProperty.save timeoutMs, entityLoadError on ./node, production check bundlers replace (4a5bf4ae)
+- a Schema loaded after a property rename saves it in saveNewVersion (6dcae17a)
+
+## 0.7.12 (2026-10-27)
+
+- `TabLockTimeoutError` is exported from `@seedprotocol/sdk/node`. Node throws it when a storage-value or ItemStorage save waits longer than the lock timeout (60 s), through Web Locks on Node 24.5+ or the in-process fallback before that.
+- When `save()`, `Item.create` or a delete rejects with `OutboxOpFailedError` for a missing relation target or a staged file that was never written, its `cause` is a `RelationTargetError` (with `targets`) or a `StagedValueMissingError` (with `path`), rebuilt from the op (decision D31). The two classes were exported, but no caller ever received an instance. `errorName` is unchanged. `Item.create` now goes through the same rethrow as `save()`.
+- The local query source's `readStorageBody` finds the Html body on disk for the value query hydrates: a gateway URL or `ar://` link (the storage seed's `html/<local id>.html` by its `storageTransactionId`, else a download named after the transaction) or, with `relations: 'uids'`, the storage seed's uid. It looked for `html/<value>.html`, which never exists for those values, so every local read of an Html body went to a gateway.
+- `ItemPublishOptions.dataItemSigner` is typed: an object with an `address` and `signMessage`, such as an ethers `Wallet` or a @seedprotocol/publish `SeedSigner`. Any value type-checked through the index signature.
+- New `entityLoadError(instance)`: the error an entity's last load failed with, while its `status` is `'error'`.
+- Emitting `syncDbWithEas` or `fs.downloadAll.request` on `eventEmitter` warns once outside production that nothing handles it any more, and what to call instead (`client.syncFromEas()`). Both did nothing silently since the SDK stopped listening for them.
+- `client.removeLocalCopiesForAddresses(addresses, { includeUnpublished })` keeps a local copy that holds unpublished edits (a metadata row with no attestation uid) or a pending outbox op when its publisher is still an owned address, and lists it in the new `keptSeedLocalIds` (decision D24). It deleted those with the rest, so edits not yet published or applied were lost. `{ includeUnpublished: true }` removes them too.
+- An automatic EAS sync (startup, address change) merged into a run that a `client.syncFromEas()` call started is retried when that run fails, like one that runs on its own. The retry was decided by the first request's source alone, so the automatic part was dropped.
+- On Node, live queries complete when the database closes (`client.stop()`, `BaseDb.close()`). Their poll kept running on the closed libsql client, so subscribers got a `Failed query: select …` error at shutdown.
+- On Node, `entity_changes` is pruned like in the browser: rows older than 10 minutes, when the database opens and every minute after (on a timer that doesn't keep the process running). Node wrote the trigger rows and never deleted them, so the table grew without bound.
+- Sync records no conflict for an Image, File or Html draft, as ADR 0019 says for storage values; the draft still stays the value. Only edits still in the outbox were exempt, so a saved storage draft got a conflict when sync brought a newer attestation.
+- **Breaking:** `Item.create` checks its initial Relation and List-of-Relation values like an assignment does: a local seed id with no seed rejects the create (`Relation target not found: <id>`, the op's `errorName` is `RelationTargetError`), and a target whose own create is still pending makes it wait. It stored the dangling id. Attestation uids and a relation to the item itself pass.
+- `ItemProperty.save({ timeoutMs })` rejects with the new `OutboxSaveTimeoutError` (`code: 'OUTBOX_SAVE_TIMEOUT'`, the queued op's `opId`) after that long (decision D30). Nothing is cancelled: the op stays queued and applies once a leader tab drains the outbox. Without `timeoutMs` a save still waits with no limit, and outside production one still waiting after 10 s logs a warning naming the property. Exported from both entries.
+- Publish waits only for the pending outbox ops on the seeds in its graph (ADR 0019), reading the graph again if any were pending, since they can change which seeds it reaches. It waited for every pending op in the database, so one stuck op on another item held every publish. `getPublishGraph` does the waiting, so code that calls it directly gets the same behaviour.
+- The local query source (`createLocalQueryDataSource`) filters `listSeedsBySchemaName` by `attesters`, matching the seed's attester from `attestation_raw`, else `publisher`, in any case, so `queryBySchema(…, { attesters, source: 'local' })` returns what the remote source does. Its `listSeedsByUidPrefix` is removed with the `QueryDataSource` method (**Breaking** in `@seedprotocol/query`).
+- `ItemProperty.storagePropertyName` is the name new metadata rows are stored under: `authorId` for a single Relation `author` (it returned `author`), `authorIdentityIds` for a List of Relation. JSDoc corrected for `SeedConfig.entityCache.unloadGraceMs` (Schemas, Models and ModelProperties never unload for lack of holds; with 0, an instance that never had a hold is kept), `Item.unload`, `ItemProperty.unload`, `ItemProperty.saveValidationErrors` (cleared by the next assignment) and `Schema.find`.
+- **Breaking:** `Item.find` called before `client.init` (or after `client.stop()`) rejects with `CLIENT_NOT_INITIALIZED` once `readyTimeout` passes; it returned `undefined`, which read as "no such item". Called while init runs, it waits for the database to open.
+- **Breaking:** `Item.getById(id)` no longer takes a cache hold unless called with `{ hold: true }`, like `Item.find` and the definitions' `getById` (decision D29). Code that called `unload()` after a plain `getById` must drop that call; code that keeps the item across long work passes `{ hold: true }` and unloads it.
+- A property assigned right after `Item.create(…, { waitForReady: false })` is kept and saved. In a process's first items, `Item` hadn't finished its deferred import of `Model`, so `create` built no ItemProperty instances; the assignment became a plain field on the item and was lost once the properties loaded (decision D16). `Item` now starts that import when it loads.
+- `prepareHtmlEmbeddedImagesForPublish` and `rewriteHtmlEmbeddedImagesOnDisk` take `{ htmlArweaveRefs }`; with `'ar'` they write `ar://<id>` links into Html instead of gateway URLs.
+- **Breaking:** `getArweaveUrlForTransaction` is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}` (ADR 0025). The SDK's deprecated copy, which returned `BaseArweaveClient.getRawUrl(id)`, is removed.
+- The SDK re-exports `rehostArweaveLinksInHtml`, `nextArweaveGatewayUrl`, `mapUrlAttribute`, `parseArweaveTransactionLink` and the `ArweaveTransactionLink` and `HtmlArweaveRefs` types from `@seedprotocol/arweave`.
+- An Html property's value shows its Arweave links (`ar://<id>`, `/raw/<id>` on any host, `/<id>` on a known gateway) on this reader's first read gateway, so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down (ADR 0025). The stored file keeps the links as written, and `exportArchive` skips the rewrite, so a bag keeps each Html exactly as published.
+- Publish writes an Html value it uploads with every Arweave link on the public gateway (`arweaveDomain`, default `arweave.net`), in its path form. A link a reader re-hosted onto a Hyper sidecar or app proxy, and an editor saved back, was uploaded as that local URL.
+- **Breaking:** validation errors carry named codes (`ItemCreateValidationError.problems[].code`, `ItemPropertySaveValidationError.validationErrors[].code`, the `validate()` results): `type` for a wrong type, `pattern`, `min_length`, `max_length_exceeded`, `enum_violation`, `format` for a Date that isn't one, `unknown_data_type`, and `required`, `unknown_field`, `minimum`, `maximum` in a property definition. Type and pattern failures carried TypeBox's numeric kinds as strings (`'41'`, `'53'`, `'62'`), and a `minLength` failure was reported as `max_length_exceeded` with a "characters or less" message.
+- An enum miss is one problem, `enum_violation`, whose message lists the allowed values. It was two, with TypeBox's "Expected union value" messages, and every other problem on a property with an enum (a pattern miss, a List element of the wrong type) was coded `enum_violation` too.
+- The 255-character `Text` error suggests `validation.maxLength` or an `Html` property instead of a `File` property; an explicit `maxLength` error no longer suggests anything.
+- **Breaking:** `pattern`, `minLength` and `maxLength` on a property that isn't `Text` or `Html` (or a List of those) fail the property's validation, `rule_not_applicable` (decision D19). A schema file that sets them is rejected when it loads (`Schema <name>: <Model>.<property>: validation.maxLength only apply to Text and Html properties …`), before it is stored. They were silently ignored.
+- **Breaking:** an unknown type name fails validation, `unknown_data_type`: in a schema file it rejects the load, and `schema.validate()` and `model.validate()` report it. `blob` is no longer read as a type name. Unknown names were capitalized and kept.
+- `validation.custom` is ignored with a warning on every path (decision D5): a schema file that sets it loads and logs `[seed] schema <name>: <Model>.<property>: Custom validators are not supported …`, and the property's `validate()` reports it under `warnings` with `isValid` true. The structure check failed it, so renaming such a property in code wasn't written.
+- The `Property` builders keep their own parameter types: `Property.Html({ htmlEmbeddedDataUriPolicy: 'preserve' })` type-checks, `Property.List()` needs its element type, and `Property.Relation`'s third argument is a boolean. `Property` was cast to `PropertyDefs`, which typed every builder as `(string?, string?, string | boolean?)`.
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports of `@seedprotocol/sdk` and `@seedprotocol/sdk/node` were typed `any` and `export *` names such as `importJsonSchema` were missing (TS2305). drizzle-orm 0.44's own declarations still fail without `skipLibCheck`, so keep it on.
+- `Item.create`'s parameter type takes property values beside the item fields, so `Item.create({ modelName: 'Post', title: 'Hello' })` type-checks as an object literal. The excess-property check rejected `title`.
+
+### Commits
+
+#### Breaking
+
+- named validation codes; reject string rules on other types (8e806453)
+- Item.create checks relation targets like an assignment (12ac3085)
+- query, eas: queryBySchema attesters filter (e436bbcd)
+- Item.find before init throws instead of returning undefined (ff563f08)
+- Item.getById takes no hold unless asked (D29) (d8bc4654)
+- arweave, query, feed: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- warn when a removed request event is emitted (4276a0d4)
+- save({ timeoutMs }) and a slow-save warning (D30) (e3134c6c)
+- publish: htmlArweaveRefs: 'ar' publishes ar://<id> links in Html (936db56e)
+- react: SeedHtml re-hosts Arweave links and fails over media loads (bcb63c5f)
+- Html values show Arweave links on the reader's gateways; publish uploads them public (94d0b72b)
+- arweave: rehostArweaveLinksInHtml moves Html's Arweave links onto the reader's gateways (2d64ac74)
+
+#### Fixes
+
+- export TabLockTimeoutError from ./node; OutboxOpFailedError carries RelationTargetError and StagedValueMissingError as cause (D31) (eda2cd64)
+- type the Property builders with satisfies, not a PropertyDefs cast (a21c1cb5)
+- Item.create's props type takes property values (d2399394)
+- query: getSeed lowercases its uid, a seed with no Versions is not found, local reads skip the duplicate-module checks (527973ac)
+- publish: createPublish defaults the data item signer; 'modular' wallet kind; useSeedWallet keeps kind (70fe3105)
+- react: no '-<n>' schema-id fallback; create hooks report load errors (e1ad72b3)
+- removeLocalCopiesForAddresses keeps owned copies with unpublished work (D24) (21b0d3ad)
+- retry automatic EAS syncs merged into a failed client_api run (4e7ceea8)
+- type pruneEntityChanges' db as drizzle's async SQLite database (babff420)
+- Node live queries complete on close; Node prunes entity_changes (e9ed2a5c)
+- sync records no conflicts for storage drafts (b8e23907)
+- publish waits only for its own graph's outbox ops (fe32bb4c)
+- storagePropertyName gives the stored name; stale entity JSDoc (0367b2c1)
+- keep a property assigned right after Item.create without waiting (D16) (c6d88d5b)
+
+#### Other
+
+- Phase H text fixes (1bb65ae8)
+
+## 0.7.11 (2026-10-24)
+
+- **Breaking:** migration 0030 drops the `property_uids` table, and `propertyUids` is no longer exported. Nothing wrote to it; property EAS schema uids live in the schema uid store and on each metadata row's `schema_uid`.
+- **Breaking:** `@seedprotocol/sdk/node` exports `NodeDb` and `NodeFileManager` in place of the deprecated `Db` and `FileManager` aliases, which are removed. Rename the imports; the classes are the same.
+- A property saved after a publish registered its EAS schema stores that schema's uid on its metadata row, and `property.schemaUid` returns it. The row had none until it was published: publish recorded the uids it registered where `getEasSchemaUidForExactDefinition` didn't look, so the lookup asked the EAS indexer, which hadn't indexed the new schema yet. Saving a draft row again also fills in a uid it was stored without.
+- `getEasSchemaUidForExactDefinition`, `getEasSchemaUidForSchemaDefinition` and `getSchemaUidForSchemaDefinitionFromCache` read one store, which `setSchemaUidForSchemaDefinition` writes, so a uid recorded there answers all three without a request. Its keys are exact definitions on the current EAS endpoint (`string title`); they were snake-cased and shared across endpoints. EAS sync and `@seedprotocol/query` record `<type> <name>` for each property attestation they read instead of the bare name.
+- A local database that looks older than 0.7.7 is copied to `seed.before-recreate-<ms>.db` beside `seed.db` (in OPFS in the browser) before it is recreated, and the warning names the copy. A 0.7.7 database can look older: 0.7.7 wrote its `storedDisplayUrlsCleared` marker from a background task after init, so a database closed right after its first 0.7.7 start, or whose task failed, has no marker, and 0.7.8 to 0.7.10 recreated it, dropping its unpublished drafts. If the copy fails, or the database is a remote libsql URL with nowhere to copy it, the database is opened as it is instead of recreated.
+- `@seedprotocol/sdk/node` exports `EntityUnloadedError`, `ItemCreateError` (and `ItemCreateErrorCode`), `PublishValidationFailedError`, `RelatedItemUnpublishedError`, `HtmlEmbeddedDataUriLimitError`, `HtmlSeedPropertyRefError`, and `exportArchive` with `ArchiveExportError`. A Node app importing from `./node` couldn't `instanceof` the error a write on an unloaded item throws. Both entries now export `OutboxOpFailedError` (`code: 'OUTBOX_OP_FAILED'`, the failing error's name in `errorName`), `RelationTargetError` and `StagedValueMissingError`; `save()` rejects with the first, and `ItemCreateError.cause` is usually one.
+- `clear()` on an unloaded ItemProperty rejects with `EntityUnloadedError` before it writes. It appended the clear op first and then rejected from `save()`, so the caller got an error and the property was cleared anyway.
+
+### Commits
+
+#### Breaking
+
+- drop the unused property_uids table (88635bf0)
+- eas, arweave, publish: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- eas: one store for property schema uids, read by every resolver (0ea6562b)
+- fail init the same way in tests as in production (f9343543)
+- clear() on an unloaded property throws before it writes (652b7846)
+- export the outbox, unload, archive and publish errors from ./node (bd62f748)
+- back up a database before recreating it as older than 0.7.7 (55dd1a54)
+
+#### Other
+
+- fold resolveMetadataSchemaUid into lookupPropertySchemaUid (1725d65b)
+- testing: a test default that differs from production needs a reason and a test on the real one (14ea224e)
+
+## 0.7.10 (2026-10-24)
+
+- New `exportArchive(item, { fetch, sourceOrganization, baggingDate })` writes a published item as a BagIt bag (docs/ARCHIVE.md): the Html with references to bagged files made relative (`data/index.html`), each Html exactly as published (`data/source/`), Images, Files and embedded images under `data/assets/`, every property's value, attestation uid and Arweave transaction in `data/item.json`, and Dublin Core and PREMIS metadata. It throws `ArchiveExportError` (`not_published`, `unpublished_changes`), and lists files it couldn't read or download in `omitted`. `@seedprotocol/sdk` now depends on the new `@seedprotocol/archive`.
+- The browser client initialises without Iterator helpers (Chrome before 122, Firefox before 131, Safari before 18.4). `@zenfs/core` 2.5.6 called `Iterator.prototype.map` when it loaded, and init failed with `journalOperations.values(...).map is not a function`. `@zenfs/core` is now 2.7.7 and `@zenfs/dom` 1.2.14; an app that installs them beside the SDK needs the same versions.
+- **Breaking:** `client.stop()` and `client.unload()` return a promise and release what the client holds: the outbox stops draining (pending ops stay in the database and resume after the next init), every cached Item, ItemProperty, Model, ModelProperty and Schema is stopped and dropped, this tab hands tab leadership to another tab, and the database is closed (in the browser, SQLocal's worker is destroyed). An instance kept across `stop()` is stopped; look it up again after `init`. `init` called while a stop is releasing waits for it. New `BaseDb.close()` (`IDb.close()`) closes the database on its own.
+- `client.stop()` works after an init that failed or hasn't finished; it threw `CLIENT_NOT_INITIALIZED`. An init that runs again after a failed one closes the database the failed one left open, instead of starting a second SQLocal worker on the same file.
+- New `checkBrowserSupport()` lists the browser features the SDK needs that the page lacks (`opfs`, `opfs-writable`, `web-locks`, `cross-origin-isolation`). In a browser missing any of the first three, `client.init` fails with `UnsupportedBrowserError` (`code === 'BROWSER_UNSUPPORTED'`) before it loads ZenFS. Supported browsers are Chrome and Edge 102, Firefox 114 and Safari 26 or later (docs/GETTING_STARTED.md).
+- Creating a file in an OPFS directory that SQLocal's worker or another tab made after this tab mounted no longer fails with `ENOENT ... (Out of sync!)`. The mount now adds such directories and files to ZenFS's in-memory copy when it first finds them. ZenFS 2.5.6 ignored that error only when the stack trace was in Chromium's format, so Firefox and Safari could already hit it.
+- A schema file's single Relation keeps its `refValueType` on the property row (e.g. `{ type: 'Relation', refValueType: 'Image', model: 'Image' }`). Only List properties kept it, so a schema-file Relation to an Image, File or Html wasn't treated as one; code-defined properties were unaffected. A `data:image/...` URI assigned to such a property failed with `Relation target not found`; it is now saved as an Image.
+- A loaded item property takes its property's new definition when a schema change (`updateModelProperties`, a new schema file version) rewrites the property's row. It kept the definition it loaded with: in Node always, in the browser until the row's live query caught up, so a value assigned right after the change was written by the old definition's rules.
+- **Breaking:** `Item.find`, `Item.all`, `ItemProperty.find` and `ItemProperty.all` no longer take a cache hold unless called with `hold: true`. Before, each call took one the caller had to release with `unload()`, and every caller that didn't (most app code) kept the instance loaded for good. An instance no one holds now stays cached for the grace period after its last release or lookup, then unloads (see `entityCache.unloadGraceMs` below). Code that keeps an item across long work holds it: `Item.find({ hold: true })` or `Item.retain(item)`, then `unload()`. Code that called `unload()` after a `find` without `hold: true` must drop that call, since it would release a hold someone else took. `Item.create` and `ItemProperty.create` still hold by default; `Item.create(props, { hold: false })` creates an item without one. `item.publish()` holds the item until the publish settles.
+- **Breaking:** no lookup or create on `Schema`, `Model` or `ModelProperty` takes a cache hold unless called with `hold: true`: `create` (including when it returns a cached instance), `getById`, `Model.getByName`, `Model.getByNameAsync`, `createById`, `Model.createBySchemaId`, `find` and `all`. A definition stays cached whether or not anyone holds it (next entry), so a hold only counts the caller; `unload()` gives it back. Code that called `unload()` after one of these without `hold: true` can drop that call. When a call that took a hold throws (not ready within `readyTimeout`), it gives the hold back.
+- **Breaking:** an Item's or ItemProperty's last `unload()` no longer stops it at once. It stays cached for `SeedConfig.entityCache.unloadGraceMs` (default 60000 ms) and a hold taken meanwhile keeps the same instance, without a reload. With 0, the last `unload()` stops it at once, as before, and an instance that never had a hold (created with `hold: false`, or only looked up) stays cached until it is evicted or the client stops. `destroy()`, cache clears, schema eviction, removals from other tabs and local purges unload at once whatever the setting. `client.stop()` and `client.unload()` unload every instance still waiting. Pending timers don't keep a Node process running.
+- **Breaking:** a `Schema`, `Model` or `ModelProperty` stays cached until it is destroyed or evicted, or the client stops, whether or not anyone holds it: its last `unload()` no longer stops it, and there is no grace period. Evicting or destroying a schema or model still stops the models or properties only it held. Sync and name matching read the cached models synchronously (`Model.resolve`, `Model.findByModelType`), so with the grace period a model loaded without a hold unloaded after 60 s: sync then stored a seed's EAS name as its type (`htmlpage` instead of `html_page`), and a model name two schemas define could resolve to one of them instead of throwing `AmbiguousModelError`.
+- `unload()` on an instance no one holds does nothing. It stopped the instance even when the caller had never held it.
+- Assigning a property, `setValue`, `save`, `publish` or `unpublish` on an unloaded Item or ItemProperty instance throws `EntityUnloadedError` (exported), whose message names the item. So do assigning a property, `saveNewVersion`, `reload`, `model.create` and `modelProperty.save` on a destroyed or evicted Schema, Model or ModelProperty, naming it. Assignments did nothing and `publish()` never settled. Reads still return the last values.
+- A property with a sync conflict never shows the synced value beside it. Sync recorded the conflict and moved the local draft back to newest in two writes, and a read between them (the change feed, a rehydrate) took the synced row as current; the two writes now share a transaction, and both readers read the row again when they find a conflict.
+- `Item.retain(item)` takes a hold on a cached, running instance (false when it was stopped); so do `Schema.retain`, `Model.retain` and `ModelProperty.retain`. `Item.find` no longer keeps the hold it took when the item isn't ready within `readyTimeout`: it returned `undefined` and left the item held. When `Item.all` with `hold: true` throws (aborted by `signal`, or an item not ready within `readyTimeout` with `waitForReady`), it releases the holds it took; before, those items stayed held.
+
+### Commits
+
+#### Features
+
+- unload grace period and no-hold lookups by default (504f56dc)
+- state supported browsers, add checkBrowserSupport() (76447831)
+- exportArchive writes a published item as a BagIt bag (a8f5563e)
+- archive: add @seedprotocol/archive with BagIt bags, PREMIS, Dublin Core and an h-entry reader (9a88ae10)
+
+#### Fixes
+
+- a property never shows the synced value beside its sync conflict (da9afc01)
+- writes on a destroyed or evicted Schema throw EntityUnloadedError (8287922c)
+- definitions stay cached without holds; lookups take no hold (a2d3024d)
+- load the validation module with await, not import().then (9b1a045a)
+- evict entity caches on stop without importing the classes (fecfd304)
+- client.stop() closes the database and drops cached entities (006b0240)
+- react: useItems holds its items once per mounted hook (2a0a9492)
+- load without Iterator helpers (ZenFS 2.7.7) (f88840eb)
+- react: useItem holds its item once per mounted hook (8e9202d8)
+- loaded item properties take a changed definition at once (c2004e04)
+- keep refValueType for a schema file's single Relation (790a447a)
+
+#### Other
+
+- loadProperty comment names what reads a new property's definition (f7ff0798)
 
 ## 0.7.9 (2026-10-22)
 
+- Browser init no longer fails with `DatabaseNotPersistentError` in Chromium builds that refuse workers started from a worker with an http(s) URL (seen in the Claude desktop app's browser pane). SQLite's OPFS VFS starts its async proxy that way from inside SQLocal's worker, so the VFS didn't install and SQLocal opened a memory database. The blob that starts SQLocal's worker now first installs a `Worker` replacement that starts nested http(s) workers from a blob: `import` for module workers, `importScripts` for classic ones, with later `importScripts` calls resolved against the original URL. This applies wherever SQLocal's worker URL is http(s), in dev and in builds; a bundler that inlines the worker as a `blob:` or `data:` URL skips it. Apps that installed their own nested-worker workaround can remove it.
+- `DatabaseNotPersistentError` on a cross-origin isolated page says SQLite's OPFS VFS failed to install and points to SQLite's console lines, instead of telling you to set COOP/COEP headers that are already set. The constructor takes an optional second argument, `'headers'` (default) or `'vfs'`.
 - **Breaking:** `status` on `Model`, `Schema` and `ItemProperty` is the load status, `'loading'`, `'ready'` or `'error'`, not the actor's state value. An ItemProperty that was `'idle'` once loaded is `'ready'` (PermaPress `TipTap.tsx` compares `status === 'idle'`). `Item` gains `status`, and every entity has `waitForReady({ timeout })`. The state value is still `getService().getSnapshot().value`, and the entity machines no longer have `loading`, `waitingForDb` or `error` states: an actor is `idle` from the start, so waiting for `idle` no longer means loaded. Ready means loaded: an ItemProperty with a pending save is ready.
 - **Breaking:** removed `waitForEntityIdle` (use `entity.waitForReady()`), `Model.updateNameIndex`, the internal `Model.takeSchemaHold` / `dropSchemaHold` / `releaseSchemaHolds` and `ModelProperty.adoptForModel`.
 - New exports `isClientReady()` (client init finished and the app database open), `isClientReadySnapshot(snapshot)` (moved from `@seedprotocol/react`, which re-exports it) and `whenDbReady(timeoutMs)`. `BaseDb.isAppDbReady()` is unchanged.
@@ -203,8 +412,8 @@ All notable changes to this package are documented in this file.
 - map model types to models through modelNameForType (6a99d2cb)
 - inject the shared MIME sniffer and data-URL helpers into the workers (8820c557)
 - one model and seed-row resolver for every lookup (f8768d04)
-- ADR 0021: clearing a property; add metadata.retract (migration 0024) (90223275)
-- Refuse empty Image/File/Html values; restore the shown value on storage save errors (c59ee6f9)
+- ADR 0021: clearing a property; add metadata.retract (migration 0024) (90223275). The migration shipped as 0025.
+- Refuse empty Image/File/Html values; restore the shown value on storage save errors (c59ee6f9). Replaced before 0.7.9 shipped: an empty value clears the property.
 - Stop model loads from rewriting property rows and clearing is_edited (87eea50a)
 - Run the head-version regression test in the browser project too (d5030018)
 - Release the Item holds publish reads take on related items (097d8461)
@@ -216,12 +425,18 @@ All notable changes to this package are documented in this file.
 
 ## 0.7.8 (2026-10-20)
 
-- Browser init no longer fails with `DatabaseNotPersistentError` in Chromium builds that refuse workers started from a worker with an http(s) URL (seen in the Claude desktop app's browser pane). SQLite's OPFS VFS starts its async proxy that way from inside SQLocal's worker, so the VFS didn't install and SQLocal opened a memory database. The blob that starts SQLocal's worker now first installs a `Worker` replacement that starts nested http(s) workers from a blob: `import` for module workers, `importScripts` for classic ones, with later `importScripts` calls resolved against the original URL. This applies wherever SQLocal's worker URL is http(s), in dev and in builds; a bundler that inlines the worker as a `blob:` or `data:` URL skips it. Apps that installed their own nested-worker workaround can remove it.
-- `DatabaseNotPersistentError` on a cross-origin isolated page says SQLite's OPFS VFS failed to install and points to SQLite's console lines, instead of telling you to set COOP/COEP headers that are already set. The constructor takes an optional second argument, `'headers'` (default) or `'vfs'`.
+- Item edits go through an outbox (ADR 0019). Setters, `save`, `Item.create` and deletes append an op to the new `pending_writes` table (migrations 0020 and 0021), and the leader tab applies ops in order, retrying a busy database and marking any other failure `failed` with its error. Without a leader (Node, no Web Locks) every tab applies, each op at most once. An edit survives a reload before it applies. Applied ops are pruned.
+- Reads include edits not yet applied: an item's property list, `getItemData`, the edited-properties list and Html, File and Image values show a pending op's value over the stored row, so a storage value shows after a reload before its op applies. The local query data source reads published rows only.
+- The outbox checks item ownership before applying an op, and checks a Relation value's local targets: a target whose create is still pending makes the op wait, and a missing one fails it with `RelationTargetError`.
+- Sync keeps a local draft when it brings a newer value for the same property, and records the conflict: `property.conflict` holds the synced value (`remoteValue`), the `itemProperty.conflict` event fires, and `property.resolveConflict('local' | 'remote')` keeps the draft or drops it so the synced value shows. A new edit clears the conflict. Before, sync overwrote the draft.
+- New `BaseDb.transaction(fn)`: every query `fn` runs on its `tx` commits together or not at all. When another connection holds the database lock the whole transaction is retried, so `fn` must have no other side effects.
+- SQLocal is upgraded from 0.16 to 0.18.
+- New `property.showValue(value)` shows a value without saving it, for input that saves later; the next `setValue` saves, and if that save fails the property shows what it did before the first `showValue`. React's `useDebouncedItemProperty` uses it.
+- `Item.all({ waitForReady: false })` builds each item without waiting for it to load. `Item.all` created each item with `Item.create`'s default, waiting for one after another; with `waitForReady` it now waits for them together.
 - New exports `watchEntityChanges(watch, listener)` and `watchEntityRows(watch, read, onRows, options)` subscribe to the change feed (ADR 0020) for one seed's `seeds`, `versions` or `metadata` rows, and `isChangeFeedRunning()` says whether this tab has a feed (browser only). `@seedprotocol/react` uses them for `useItemProperties`.
-- A write no longer re-runs a query for every loaded Item and ItemProperty. Each Item held two liveQueries and each ItemProperty one, and every write to `seeds`, `versions` or `metadata` re-ran all of them in every tab: 400 statements per create and 320 per property save with 40 items of 8 properties loaded, which held up any find or load issued meanwhile (563 ms for an uncached `Item.find` right after a create). Now migration 0023 adds an `entity_changes` table that triggers fill on every write to those tables, each tab runs one query on it, and only the entities whose seed was written re-read their rows (ADR 0020): 2 statements per create and 3 per save, and the same find takes 114 ms. The triggers add 1–3 ms to a write. Other tabs' writes still reach loaded entities. `BaseDb.liveQuery` and the React hooks' own liveQueries are unchanged.
+- A write no longer re-runs a query for every loaded Item and ItemProperty. Each Item held two liveQueries and each ItemProperty one, and every write to `seeds`, `versions` or `metadata` re-ran all of them in every tab: 400 statements per create and 320 per property save with 40 items of 8 properties loaded, which held up any find or load issued meanwhile (563 ms for an uncached `Item.find` right after a create). Now migration 0023 adds an `entity_changes` table that triggers fill on every write to those tables, each tab runs one query on it, and only the entities whose seed was written re-read their rows (ADR 0020): 2 statements per create and 3 per save, and the same find takes 114 ms. The triggers add 1–3 ms to a write. Other tabs' writes still reach loaded entities. `BaseDb.liveQuery` and the React hooks' own liveQueries still re-run on every write to the tables they read; identical live queries now share one query and one initial read.
 - `DEBUG=seedSdk:timing` logs how long item creates, finds and property saves spend in each phase (for saves: ownership check, schema lookup, the write, waiting for the property to settle; for `createNewItem`: model resolve, schema lookups, seed fields, applying the outbox op). It also logs when `Item.find`, `Item.create` or `Item.all` waited out a ready timeout and continued, naming the item and the properties still loading, and why `Item.find` returned `undefined`.
-- `addresses.persisted` (`ADDRESSES_PERSISTED_EVENT`) fires only when the stored owned or watched addresses change, compared without case or order. Before, every `setAddresses()` and every init that saved addresses fired it, so a wallet reconnecting with the same address made React's `useItems` reload its list from scratch.
+- `addresses.persisted` (`ADDRESSES_PERSISTED_EVENT`) fires only when the saved owned or watched addresses differ from the ones this tab last announced, compared without case or order (a stopped client forgets its last announcement). Before, every `setAddresses()` and every init that saved addresses fired it, so a wallet reconnecting with the same address made React's `useItems` reload its list from scratch.
 - `Item.all` takes a `signal` (`AbortSignal`). Once it aborts, `Item.all` stops building items and rejects with the signal's reason.
 - Saving a property no longer waits on the EAS indexer each time. A save of a Text, Number, Date, List, Relation or Image value whose row had no EAS schema UID sent one uncached schema request before writing, which took seconds against a slow indexer. Saves now use the same cache as item creation (found UIDs kept, misses for 5 minutes), and `createNewItem` looks up all of a model's property schemas in parallel instead of one after another. Learning a schema UID, for example a model UID read from the local database during an Image save, now forgets only the cached misses that schema answers; before, it forgot all of them, so the next create and saves asked EAS again for every property.
 - Requests to the EAS indexer abort after 30 s (`EAS_REQUEST_TIMEOUT_MS` in `@seedprotocol/eas`). Before, a stalled indexer held any create or save waiting on a schema lookup indefinitely.
@@ -300,7 +515,7 @@ All notable changes to this package are documented in this file.
 - `item.destroy()` soft-deletes only that item's seed row. It matched the row by local id or uid, and `seeds.uid` isn't unique, so destroying one item also marked every other local row with the same uid as deleted.
 - `Item.all(modelName, true)` (deleted items) lists rows with `_markedForDeletion = 1` only. It also listed rows where the column was `0`, which the non-deleted list includes too.
 - A loaded item claimed by `client.claimUnpublishedDrafts` stops on its owner's `unload()`. The claim took a cache hold on each loaded item it updated and never released it, so the item kept running.
-- A schema file in the complete format (`$schema` and `metadata`) with no `metadata.name` fails init with `Could not load config.schema: Schema name is required (either at top level or in metadata.name)`. It failed with a raw SQL error (`Failed query: …`).
+- A schema file in the complete format (`$schema` and `metadata`) with no `metadata.name` fails init with `Could not load config.schema: Failed to parse JSON import content: Schema name is required (either at top level or in metadata.name)`. It failed with a raw SQL error (`Failed query: …`).
 - `nameMatch` levels (ADR 0009) load before `client.init` resolves. Until they loaded, a few seconds after init, model lookups by EAS type treated every model as `'fuzzy'`, so a model set to `'exact'` matched plural or misspelled types; each schema write reopened that window. After a schema write, lookups keep the previous levels until the reload finishes.
 - On Node, `BaseDb.isAppDbReady()` returns `false` until the database is open, as in the browser. It returned `true` before init.
 
@@ -334,6 +549,9 @@ All notable changes to this package are documented in this file.
 
 ## 0.7.6 (2026-10-17)
 
+- Browser bundles no longer include the Node platform. It shipped as an unused lazy chunk of about 150 KB gzipped (libsql and its migrator), and broke webpack and Next.js server builds. The Node platform now loads through `#seed-node-platform`, a `package.json` `imports` entry that maps to the browser platform under the `browser` condition. Platform selection at runtime is unchanged, so jsdom still gets the browser platform.
+- **Breaking: `@seedprotocol/vite` is an optional peer dependency** instead of a dependency, so installing the SDK no longer installs Vite, Rolldown and `vite-plugin-node-polyfills`. Apps that import `@seedprotocol/sdk/vite` must install `@seedprotocol/vite` themselves.
+- `withSeed` from `@seedprotocol/sdk/node` is deprecated in favor of `@seedprotocol/next`, which covers Turbopack and sets the cross-origin isolation headers.
 - **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.
 
 - The SDK has no peer dependencies. `@zenfs/core` (2.5.6), `@zenfs/dom` (1.2.9), `xstate` and `drizzle-orm` are regular dependencies, so installing `@seedprotocol/sdk` installs them; apps don't need to add them or match the ZenFS versions. The SDK no longer depends on `@tanstack/react-query` (its browser query cache uses `@tanstack/query-core`); `@seedprotocol/react` still declares React Query as a peer. `fsevents` is gone from the optional dependencies; nothing used it.
@@ -387,9 +605,6 @@ All notable changes to this package are documented in this file.
 
 ## 0.7.5 (2026-10-17)
 
-- Browser bundles no longer include the Node platform. It shipped as an unused lazy chunk of about 150 KB gzipped (libsql and its migrator), and broke webpack and Next.js server builds. The Node platform now loads through `#seed-node-platform`, a `package.json` `imports` entry that maps to the browser platform under the `browser` condition. Platform selection at runtime is unchanged, so jsdom still gets the browser platform.
-- **Breaking: `@seedprotocol/vite` is an optional peer dependency** instead of a dependency, so installing the SDK no longer installs Vite, Rolldown and `vite-plugin-node-polyfills`. Apps that import `@seedprotocol/sdk/vite` must install `@seedprotocol/vite` themselves.
-- `withSeed` from `@seedprotocol/sdk/node` is deprecated in favor of `@seedprotocol/next`, which covers Turbopack and sets the cross-origin isolation headers.
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
 - **Breaking: Number properties publish as `string <name>` instead of `uint8 <name>`** (ADR 0010), so values above 255, negatives and decimals publish; before, they failed with `Failed to encode property`. A stored value that isn't a finite number fails publish validation with `publish_invalid_number`. Published Number values are under a new EAS schema UID. Items published before keep their `uint8` attestations until the property changes, and sync still reads `uint8`, other integer and numeric string attestations into Number properties.
 - **Breaking: sync skips a property attestation whose EAS type doesn't fit the local property's type** (ADR 0008, ADR 0010), with a warning. A Number takes integer types and numeric strings; other types take the type publish writes for them. Before, any attestation with a matching name was stored.

@@ -27,7 +27,7 @@ const PER_ROUND = 10
 const schemaName = 'Bench Entity Changes Write Cost'
 const props = ['title', 'summary', 'url', 'kind', 'width', 'height', 'savedAt', 'datePublished']
 const testSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'bench-entity-changes-write-cost',
   metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

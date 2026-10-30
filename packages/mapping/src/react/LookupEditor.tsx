@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { lookupEntriesFromMapping, normalizeLookupKey } from '../relationLookup'
+import { lookupEntriesFromMapping, lookupKey, normalizeLookupKey, sampleValueFromSource } from '../relationLookup'
 import type {
   FieldMapping,
   LookupEntry,
@@ -9,16 +9,21 @@ import type {
 import type { FieldMapperSlot } from './fieldMapperSlots'
 import { slotClass } from './fieldMapperSlots'
 
+/** Refs typed into the fallback input, separated by commas or spaces (refs are ids without either). */
+function parseRefsInput(text: string): string[] {
+  return text.split(/[\s,]+/).filter(Boolean)
+}
+
 function upsertEntry(
   entries: LookupEntry[],
   value: string,
-  ref: string,
+  refsText: string,
 ): LookupEntry[] {
-  const key = normalizeLookupKey(value)
-  const trimmed = ref.trim()
-  const next = entries.filter((e) => normalizeLookupKey(e.value) !== key)
-  if (!trimmed) return next
-  next.push({ value: key, ref: trimmed })
+  const key = lookupKey(value)
+  const refs = parseRefsInput(refsText)
+  const next = entries.filter((e) => lookupKey(e.value) !== key)
+  if (refs.length === 0) return next
+  next.push({ value: normalizeLookupKey(value), refs })
   return next
 }
 
@@ -48,17 +53,18 @@ function LookupBlock({
   compact?: boolean
 }) {
   const source = sources.find((s) => s.id === mapping.sourceId)
-  const sampleKey = normalizeLookupKey(source?.value || source?.label || '')
+  const sampleKey = sampleValueFromSource(source)
   const entries = lookupEntriesFromMapping(mapping)
-  const keys = new Set<string>(
-    entries.map((e) => normalizeLookupKey(e.value)).filter(Boolean),
-  )
-  if (sampleKey) keys.add(sampleKey)
-  const keyList = [...keys]
+  // One row per lookupKey, shown as its entry spells it (else as the sample does)
+  const shownByKey = new Map<string, string>()
+  for (const e of entries) {
+    const shown = normalizeLookupKey(e.value)
+    if (shown && !shownByKey.has(lookupKey(shown))) shownByKey.set(lookupKey(shown), shown)
+  }
+  if (sampleKey && !shownByKey.has(lookupKey(sampleKey))) shownByKey.set(lookupKey(sampleKey), sampleKey)
+  const keyList = [...shownByKey.values()]
   const target = targetsByName.get(mapping.propertyName)
-  const refByKey = new Map(
-    entries.map((e) => [normalizeLookupKey(e.value), e.ref]),
-  )
+  const refsByKey = new Map(entries.map((e) => [lookupKey(e.value), e.refs.join(', ')]))
 
   return (
     <div className="fm-lookup-block">
@@ -69,7 +75,7 @@ function LookupBlock({
         </h4>
       )}
       <div className="fm-lookup-hint">
-        Map source strings to refs. Host owns Identity search/create.
+        Map source strings to refs, comma-separated for several. Host owns Identity search/create.
       </div>
       {keyList.length === 0 ? (
         <div className="fm-lookup-hint">
@@ -84,8 +90,8 @@ function LookupBlock({
             <input
               className="fm-lookup-input"
               type="text"
-              placeholder="ref"
-              value={refByKey.get(key) ?? ''}
+              placeholder="ref, ref"
+              value={refsByKey.get(lookupKey(key)) ?? ''}
               onChange={(e) =>
                 onLookupChange(mapping, upsertEntry(entries, key, e.target.value))
               }

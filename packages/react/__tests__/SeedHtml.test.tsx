@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import React from 'react'
+import { getArweaveReadBaseUrls } from '@seedprotocol/sdk'
 import { SeedHtml } from '../src/SeedHtml'
 
 describe('SeedHtml', () => {
@@ -54,5 +55,25 @@ describe('SeedHtml', () => {
     const article = screen.getByTestId('article')
     expect(article.tagName).toBe('ARTICLE')
     expect(article.innerHTML).toBe('<b>hi</b>')
+  })
+
+  describe('Arweave links (ADR 0025)', () => {
+    const TX = 'seedHtmlTx'.padEnd(43, 'w')
+
+    it('moves Arweave links onto the first read gateway before sanitize runs', () => {
+      const sanitize = vi.fn((s: string) => s)
+      render(<SeedHtml html={`<img src="ar://${TX}">`} sanitize={sanitize} data-testid="wrap" />)
+      const [first] = getArweaveReadBaseUrls()
+      expect(sanitize).toHaveBeenCalledWith(`<img src="${first}/raw/${TX}">`)
+    })
+
+    it('moves an image that fails to load to the next read gateway', () => {
+      const [first, second] = getArweaveReadBaseUrls()
+      expect(second).toBeTruthy()
+      render(<SeedHtml html={`<img src="${first}/raw/${TX}">`} sanitize={(s) => s} data-testid="wrap" />)
+      const img = screen.getByTestId('wrap').querySelector('img')!
+      img.dispatchEvent(new Event('error'))
+      expect(img.getAttribute('src')).toBe(`${second}/raw/${TX}`)
+    })
   })
 })

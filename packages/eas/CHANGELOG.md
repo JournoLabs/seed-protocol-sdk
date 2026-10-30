@@ -2,6 +2,64 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS` is 90 days, down from 365.
+- New `isUnfilledReference(value)`: whether a relation value is a reference slot the publish contract never filled, a non-zero `bytes32` below 2^32. The three-phase `multiPublish` fills a slot holding `bytes32(sourceIndex + 1)` with that request's seed uid; a client that leaves the slot out of its references attests the number.
+
+## 0.7.13 (2026-10-29)
+
+- **Breaking:** `createEasNodeDispatcher` is async and returns `Promise<Dispatcher | undefined>`. It loads undici's Agent with `import('undici/lib/dispatcher/agent.js')`, which bundlers resolve from `@seedprotocol/eas` and `@vercel/nft` traces. It loaded it with `createRequire(import.meta.url)`, so in an app that bundles `@seedprotocol/eas` (Astro with `ssr.noExternal`) the require resolved from the app's chunk and the first EAS request failed with "Cannot find module 'undici/lib/dispatcher/agent.js'" where only eas could reach undici (Bun isolated installs), and serverless functions shipped without undici. `NodeEasClient` creates the dispatcher once and awaits it before each request, so the first request still goes through the Agent.
+- `createEasGraphQLClient`'s `dispatcher` option takes a promise, awaited before each request is sent.
+
+### Commits
+
+#### Fixes
+
+- load undici's Agent with a literal dynamic import (251ea9e8)
+
+## 0.7.12 (2026-10-27)
+
+- **Breaking:** `normalizeBytes32Hex` returns `''` for a value that isn't 64 hex digits (with or without `0x`). It left-padded short values and turned non-hex characters into `0`, so `collectPublishedBatch({ seedUid: '0xabc' })` built a batch for a padded UID. Decoded BigNumber values (`{ hex }`) are padded by the new `bytes32FromNumberHex`.
+- **Breaking:** `toSnakeCase` is removed. It kept the old rule (`HTMLPage` → `htmlpage`); use `easName`.
+- A caller's abort signal keeps the 30 s request timeout where `AbortSignal.any` or `AbortSignal.timeout` don't exist (Safari before 17.4, Node before 20.3). The timeout dropped when a caller passed a signal, and didn't apply at all without `AbortSignal.timeout`. A timed-out request now rejects with a `TimeoutError` whose message is `EAS indexer request timed out after <ms> ms`; it had the runtime's generic timeout message.
+- `fetchEasModelSchemas` logs its lookup under `DEBUG=seedEas:timing`, like the other api helpers.
+- `engines` declares Node 20.18.1 or later: `@seedprotocol/eas/node` uses `process.getBuiltinModule` (Node 20.16) and undici 7 (20.18.1).
+- `getSeedsBySchemaName(schemaName, limit, skip, { attesters })` adds an `attester: { in: [...] }` condition with each address checksummed. With no address in the list, it returns `[]` without a request.
+- `checksumAddresses(addresses)` checksums a list for an `attester` or `recipient` filter and drops values that aren't 20-byte hex addresses. `getSeedsFromSchemaUids`, `getPublishedByFromEas`, `getDomainOwnershipFromEas` and `getPublishAuthorizationFromEas` use it, so a non-address in their address lists is left out of the request instead of sent.
+
+### Commits
+
+#### Breaking
+
+- strict normalizeBytes32Hex, timeout without AbortSignal.any, remove toSnakeCase (058a4667)
+- query, sdk: queryBySchema attesters filter (e436bbcd)
+
+## 0.7.11 (2026-10-24)
+
+- **Breaking:** the deprecated `EasClient` and `QueryClient` aliases are removed from `@seedprotocol/eas/node`. Use `NodeEasClient` and `NodeQueryClient`.
+- `getPublishAuthorizationFromEas` reads through the new `GET_PUBLISH_AUTHORIZATIONS` query, which selects `expirationTime` and `revoked`. `GET_SEEDS` selects neither, so grants it returned had no EAS expiry and never assessed as `'expired'` from it.
+- `assessPublishAuthorization` takes `revoked` and returns the new status `'revoked'` for a revoked grant. Code that switches exhaustively on `PublishAuthorizationAssessStatus` needs the extra case.
+
+### Commits
+
+#### Breaking
+
+- sdk, arweave, publish: remove deprecated aliases (4d349091)
+
+#### Fixes
+
+- sdk: one store for property schema uids, read by every resolver (0ea6562b)
+- publish: enforce publish authorization revocation and expiry; validate attest inputs first (ce535cbe)
+
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - On Node, `NodeEasClient` (registered by `@seedprotocol/eas/node` and `registerNodeEasPlatform`) sends EAS requests through its own undici `Agent` that offers only the X25519 and P-256 key-exchange groups and keeps idle connections for 30 s. Node 24.21+ also offers the post-quantum X25519MLKEM768 group by default; easscan doesn't support it, and with it each new connection's TLS handshake took about 1.45 s instead of about 175 ms. Node's fetch drops idle connections after 4 s, so most reads after a pause paid it. The process's TLS defaults and fetch's global dispatcher are unchanged. Under Bun or Deno undici is not loaded, and when the host has set a proxy or mock as fetch's global dispatcher (`setGlobalDispatcher`, `NODE_USE_ENV_PROXY`) EAS requests keep using it. Pass `new NodeEasClient({ dispatcher: false })` or `registerNodeEasPlatform({ easClient: { dispatcher: false } })` to use fetch's defaults, a `Dispatcher` of your own, or `dispatcherOptions: { ecdhCurve, keepAliveTimeoutMs }`. `createEasNodeDispatcher` builds the default one. `@seedprotocol/eas` now depends on `undici`; only the `./node` entry loads it.

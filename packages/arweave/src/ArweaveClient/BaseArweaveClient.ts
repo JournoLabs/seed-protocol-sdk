@@ -6,6 +6,7 @@ import type {
   DownloadFilesParams,
   DownloadResult,
   CreateTransactionOptions,
+  ArweaveTransaction,
 } from '../types/arweave.js'
 import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '../constants.js'
 import type { IArweaveClient } from './IArweaveClient.js'
@@ -245,7 +246,7 @@ export abstract class BaseArweaveClient {
   static createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions
-  ): Promise<any> {
+  ): Promise<ArweaveTransaction> {
     return BaseArweaveClient.requireImpl().createTransaction(data, options)
   }
 

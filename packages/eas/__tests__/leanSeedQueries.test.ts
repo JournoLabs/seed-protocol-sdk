@@ -101,4 +101,21 @@ describe('lean seed queries', () => {
     expect(seeds[0]!.schema.schemaNames).toEqual([{ name: 'post' }])
     expect(requests.map((r) => r.operation)).toEqual(['GetSeedsLean'])
   })
+
+  it('getSeedsBySchemaName sends attesters checksummed, before take and skip', async () => {
+    await getSeedsBySchemaName('post', 20, 40, {
+      attesters: ['0x5AAEB6053F3E94C9B9A09F33669435E7EF1BEAED', 'not-an-address', '5aaeb6053f3e94c9b9a09f33669435e7ef1beaed'],
+    })
+
+    expect(requests).toHaveLength(1)
+    const { where, take, skip } = requests[0]!.variables
+    expect(where.attester).toEqual({ in: ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'] })
+    expect([take, skip]).toEqual([20, 40])
+  })
+
+  it('getSeedsBySchemaName makes no request when no attester is an address', async () => {
+    expect(await getSeedsBySchemaName('post', 10, 0, { attesters: ['', '0x1234'] })).toEqual([])
+    expect(await getSeedsBySchemaName('post', 10, 0, { attesters: [] })).toEqual([])
+    expect(requests).toEqual([])
+  })
 })

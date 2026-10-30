@@ -15,6 +15,8 @@ yarn add @seedprotocol/sdk
 bun add @seedprotocol/sdk
 ```
 
+All `@seedprotocol/*` packages are released together, at one version, and depend on each other at that exact version. Install and upgrade them together (`npm install @seedprotocol/sdk@<version> @seedprotocol/react@<version>`); with a mismatched pair, npm refuses to install `@seedprotocol/react` or `@seedprotocol/publish` (`ERESOLVE`, since they take the SDK as an exact peer), and packages that depend on the SDK, such as `@seedprotocol/query`, install a second copy of it, which splits its module state.
+
 ## Prerequisites
 
 - Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (`filesDir`, optional `endpoints`, optional `dbConfig`, optional `schemaFile`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details. On Node, `filesDir` alone is enough: `endpoints.filePaths` and `endpoints.files` default to it. Browser init still requires `endpoints`.
@@ -31,7 +33,7 @@ await client.init({
 })
 ```
 
-Leaving `addresses` out keeps the addresses stored from an earlier session (the SDK warns once); `addresses: []` clears them. `client.init` runs once: calling it again with the same `config` resolves at once and applies any new `addresses`, while a different `config` throws (call `client.stop()` first). `client.onReady(cb)` also fires when the client is already ready.
+Leaving `addresses` out keeps the addresses stored from an earlier session (the SDK warns once); `addresses: []` clears them. `client.init` runs once: calling it again with the same `config` resolves at once and leaves the stored addresses as they are (change them with `client.setAddresses`; `SeedProvider` and `SeedClientGate` call it when their `addresses` change), while a different `config` throws (`await client.stop()` first; it closes the database and drops cached entities). `client.onReady(cb)` also fires when the client is already ready.
 
 ### Address session
 
@@ -284,13 +286,76 @@ async function main() {
 
 ## Browser: OPFS and hosting
 
+### Supported browsers
+
+| Browser | Minimum | Set by |
+| --- | --- | --- |
+| Chrome, Edge | 102 | OPFS sync access handles, which SQLite uses for the database |
+| Firefox | 114 | Module workers, which SQLocal starts the database in |
+| Safari (macOS and iOS) | 26 | `FileSystemFileHandle.createWritable`, which every file write uses |
+
+Versions are from MDN's browser compatibility data. On older browsers `client.init` fails with `UnsupportedBrowserError` (`code === 'BROWSER_UNSUPPORTED'`, `missing` lists what's absent) before it loads or stores anything. To check before init and show your own message, call `checkBrowserSupport()`:
+
+```ts
+import { checkBrowserSupport } from '@seedprotocol/sdk'
+
+const { supported, missing } = checkBrowserSupport()
+// missing: 'opfs' | 'opfs-writable' | 'web-locks' | 'cross-origin-isolation'
+```
+
+`cross-origin-isolation` is a hosting problem, not a browser version (see below). The check can't see what only exists inside workers, so Chrome 86–101 and Firefox 111–113 pass it and fail later in init.
+
+### Hosting
+
 The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Three integration notes:
 
 1. **Cross-origin isolation** — SQLite WASM / `SharedArrayBuffer` need the document to be cross-origin isolated. `seedVitePlugin()` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (plus `Cross-Origin-Resource-Policy: same-origin`) on the Vite **dev and preview** servers, including `writeHead` so React Router Framework Mode HTML still gets them. Production hosts must set the same headers themselves (nginx, Netlify `_headers`, etc.). Use `COEP: require-corp` if your WASM stack requires it. Opt out in Vite with `isolationHeaders: false`.
 
 2. **Concurrent access** — Avoid reading the same OPFS path while another context still has it open for writing, or before a writer has finished closing/flushing. The SDK retries a narrow class of transient read errors (`NotReadableError` / Chromium’s “permission problems … reference” wording) and `waitForFileWithContent` keeps polling until timeout, but coordinating writers and readers in your app still reduces flakes.
 
-3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.5.6` / `1.2.9`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
+3. **One `@zenfs/*` copy** — Browser file access goes through `@zenfs/core` and `@zenfs/dom`, which the SDK installs at exact versions (`2.7.7` / `1.2.14`). If your app installs them itself, use the same versions; the Vite plugin then dedupes them. A different pair beside the SDK's is a second copy, and `configureSingle` runs against a different module instance than the one the SDK imported.
+
+### Deleting local data
+
+`client.resetLocalData()` deletes the database and every file under `filesDir` from OPFS, for a "start fresh" action when local data stops the app from opening. It works from any client state, including after a failed `client.init`, and needs no reload:
+
+```ts
+import { client } from '@seedprotocol/sdk'
+
+const { deleted, failed } = await client.resetLocalData()
+if (failed.length) {
+  // Each entry is { path, error }, e.g. `${filesDir}/db/seed.db` still open in a tab that didn't close.
+}
+await client.init(options) // starts on an empty database
+```
+
+It stops this tab's client, which closes the database, and posts `close-db` to the other tabs of the same database, each of which stops its client ([MULTI_TAB.md](./MULTI_TAB.md#resetting-local-data)). It waits up to `otherTabsTimeoutMs` (default 10 000) for them to close the database, then deletes `filesDir` one entry at a time. An entry it can't remove goes in `failed` with the browser's error (`NoModificationAllowedError: …`) and the rest are still removed; a directory with a failed entry stays. `deleted` lists what went, children before their directory. Last, it unmounts the file system, whose index still lists the deleted files; the next `init` mounts it again.
+
+The directory is the `filesDir` of the last `client.init` in the page, else `.seed`; pass `{ filesDir }` to name another. A `client.init` called while the reset runs waits for it, in this tab and the others.
+
+A client the reset stops, in this tab or another, ends with `status: 'stopped'` and `context.stopReason: 'reset'` on its snapshot; `client.stop()` and `client.unload()` set `'stop'`. In React, `useGlobalServiceStatus()` returns `stopReason`. The SDK never reloads or navigates: the app decides whether another tab reloads, shows a message or calls `init` again. Outside React, read it from `client.subscribeService`, which runs when the client stops. The tab that called `resetLocalData` sees `'reset'` too, before the delete has finished, so act on it only in the others:
+
+```ts
+let resettingHere = false
+
+client.subscribeService((service) => {
+  const snapshot = service.getSnapshot()
+  if (snapshot.status === 'stopped' && snapshot.context.stopReason === 'reset' && !resettingHere) {
+    showDataDeletedNotice() // or location.reload()
+  }
+})
+
+async function startFresh() {
+  resettingHere = true
+  try {
+    return await client.resetLocalData()
+  } finally {
+    resettingHere = false
+  }
+}
+```
+
+The SDK keeps nothing in localStorage, so the reset leaves it alone. `@seedprotocol/publish/thirdweb` stores the in-app wallet session there; call its `clearInAppPublishSession()` too if the reset should sign the user out. `resetLocalData` throws in Node.
 
 ## Next.js
 

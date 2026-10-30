@@ -63,7 +63,8 @@ testDescribe('getItemsData', () => {
     // Manually insert an EAS-style seed (with uid) for testing
     const appDb = BaseDb.getAppDb()
     const easSeedLocalId = 'eas-test-seed-' + Date.now()
-    const easSeedUid = '0x' + 'b'.repeat(64)
+    // Unique per run: other browser test files insert seeds with fixed uids into the same database
+    const easSeedUid = '0x' + Date.now().toString(16).padStart(64, 'b')
     await appDb.insert(seeds).values({
       localId: easSeedLocalId,
       uid: easSeedUid,

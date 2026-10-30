@@ -124,6 +124,69 @@ describe('publish locks', () => {
     actor.stop()
   }, TEST_TIMEOUT_MS)
 
+  test("restoreFromDb doesn't mark interrupted an upload another tab is running", async () => {
+    const { locks, otherTab } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+
+    // Mid-upload without its signed data items: this tab can't resume it.
+    const uploading = (seedLocalId: string) => ({
+      seedLocalId,
+      status: 'in_progress',
+      updatedAt: 1,
+      persistedSnapshot: JSON.stringify({
+        status: 'active',
+        value: 'uploadingViaBundler',
+        children: {},
+        context: { item: { seedLocalId } },
+      }),
+    })
+    const interrupted: unknown[] = []
+    let rows = [uploading('seed-uploading-elsewhere')]
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () =>
+            Object.assign(Promise.resolve(rows), { orderBy: () => ({ limit: async () => rows }) }),
+        }),
+      }),
+      update: () => ({ set: (values: unknown) => ({ where: async () => void interrupted.push(values) }) }),
+    }
+    BaseDb.isAppDbReady = () => true
+    BaseDb.getAppDb = () => db as never
+
+    const restore = async () => {
+      let done = false
+      const machine = setup({ actors: { restoreFromDb } }).createMachine({
+        initial: 'restoring',
+        states: {
+          restoring: {
+            invoke: {
+              src: 'restoreFromDb',
+              input: () => ({ context: { publishProcesses: new Map(), subscriptions: new Map() } }),
+            },
+            on: { RESTORE_FROM_DB_DONE: { target: 'done', actions: () => (done = true) } },
+          },
+          done: {},
+        },
+      })
+      const actor = createActor(machine)
+      actor.start()
+      await waitUntilOrThrow(() => done, 'restoreFromDb to send RESTORE_FROM_DB_DONE')
+      actor.stop()
+    }
+
+    otherTab.hold(publishLockName('seed-uploading-elsewhere'))
+    await restore()
+    expect(interrupted).toEqual([])
+
+    // No tab holds it: the publish is gone, so it's marked interrupted and its lock given back.
+    rows = [uploading('seed-abandoned')]
+    await restore()
+    await waitUntilOrThrow(() => interrupted.length === 1, 'the abandoned publish to be marked interrupted')
+    expect(interrupted[0]).toMatchObject({ status: 'interrupted' })
+    expect(isHoldingPublishLock('seed-abandoned')).toBe(false)
+  }, TEST_TIMEOUT_MS)
+
   test('createPublish refuses a seed another tab is publishing and releases the lock when done', async () => {
     process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '0'
     process.env.SEED_PUBLISH_RESTORE_POLL_MS = '1'
@@ -135,7 +198,13 @@ describe('publish locks', () => {
     await PublishManager.ready()
     const address = '0x00000000000000000000000000000000000000aa'
     const item = (seedLocalId: string) =>
-      ({ seedLocalId, modelName: 'Post', schemaUid: '0xschema' }) as import('@seedprotocol/sdk').Item<any>
+      ({
+        seedLocalId,
+        modelName: 'Post',
+        schemaUid: '0xschema',
+        // An item no cache holds: createPublish takes no hold on it.
+        getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+      }) as unknown as import('@seedprotocol/sdk').Item<any>
 
     otherTab.hold(publishLockName('seed-busy'))
     expect(await PublishManager.createPublish(item('seed-busy'), address)).toBeUndefined()

@@ -23,7 +23,7 @@ const TITLE_SCHEMA_UID = '0x' + 'c'.repeat(64)
 testDescribe('EAS schema lookups when saving', () => {
   const schemaName = 'Test Schema Save Lookups'
   const testSchema: SchemaFileFormat = {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: 'test-schema-save-lookups',
     metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

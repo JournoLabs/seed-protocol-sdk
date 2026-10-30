@@ -1,5 +1,13 @@
 import type { AttestationChange, AttestationLike } from '../types.js'
 
+/** Filters on a schema listing, normalized by the query layer (see QueryBySchemaOptions). */
+export type SeedListFilter = {
+  /** Only seeds whose UID starts with this: `0x` + lowercase hex. */
+  uidPrefix?: string
+  /** Only seeds attested by one of these: lowercase `0x` + 40 hex, at least one. */
+  attesters?: readonly string[]
+}
+
 /**
  * Pluggable backend for Seed / Version / property attestation reads.
  * Remote uses EAS GraphQL; local (SDK) maps SQLite rows into the same shape.
@@ -9,19 +17,13 @@ export type QueryDataSource = {
 
   getSeedByUid(seedUid: string): Promise<AttestationLike | null>
 
+  /**
+   * Seeds of the schema, newest first, revoked ones left out. `limit` and `skip` apply after the
+   * filters.
+   */
   listSeedsBySchemaName(
     schemaName: string,
-    opts: { limit: number; skip: number },
-  ): Promise<AttestationLike[]>
-
-  /**
-   * Like listSeedsBySchemaName, limited to seeds whose UID starts with `uidPrefix`
-   * (normalized: `0x` + lowercase hex).
-   */
-  listSeedsByUidPrefix(
-    schemaName: string,
-    uidPrefix: string,
-    opts: { limit: number; skip: number },
+    opts: { limit: number; skip: number } & SeedListFilter,
   ): Promise<AttestationLike[]>
 
   listSeedsBySchemaNameForMonth(

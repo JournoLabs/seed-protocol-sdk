@@ -52,6 +52,7 @@ export async function assembleSeedChangelog(
   }
 
   const latestVersionUid = sortedVersions[sortedVersions.length - 1]!.id
+  const modelName = seed?.schema?.schemaNames?.[0]?.name
   const versionUids = sortedVersions.map((v) => v.id)
 
   const rawProperties = keepAttestationsFromRefAttester(
@@ -62,7 +63,7 @@ export async function assembleSeedChangelog(
   let changelog: ChangelogEntry[]
 
   if (granularity === 'property') {
-    changelog = diffPropertyAttestations(rawProperties)
+    changelog = diffPropertyAttestations(rawProperties, modelName)
   } else {
     const byVersion = new Map<string, AttestationLike[]>()
     for (const prop of rawProperties) {
@@ -80,7 +81,7 @@ export async function assembleSeedChangelog(
       snapshots.push({
         versionUid: version.id,
         at: version.timeCreated,
-        data: buildFlatSnapshotFromProperties(canonical),
+        data: buildFlatSnapshotFromProperties(canonical, modelName),
       })
     }
     changelog = diffVersionSnapshots(snapshots)

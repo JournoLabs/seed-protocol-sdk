@@ -11,7 +11,9 @@ export { assembleSeedChangelog } from './assembleChangelog.js'
 export {
   getSeed,
   getSeeds,
+  getSeedAttestations,
   normalizeUidPrefix,
+  normalizeAttesters,
   queryBySchema,
   queryBySchemaForMonth,
 } from './api.js'
@@ -26,7 +28,8 @@ export {
   resolveQuerySource,
   normalizeSourceMode,
 } from './source/index.js'
-export type { QueryDataSource, ResolvedQuerySource } from './source/index.js'
+export type { QueryDataSource, ResolvedQuerySource, SeedListFilter } from './source/index.js'
+export type { SeedAttestations, SeedPropertyAttestation } from './seedAttestations.js'
 
 export {
   buildFlatSnapshotFromProperties,
@@ -74,13 +77,16 @@ export type {
   QueryCacheStats,
 } from './cache/index.js'
 
-export { getArweaveUrlForTransaction } from './arweaveUrl.js'
+export { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 
 export {
   publicListRelationPropertyKey,
   stripListRelationStorageAliasesForPublicKey,
   tryCoerceJsonStringArray,
 } from './listRelationKey.js'
+
+export { setQueryModels } from './queryModels.js'
+export type { QueryModels } from './queryModels.js'
 
 export {
   parseEasPropertyMetadata,

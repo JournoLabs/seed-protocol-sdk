@@ -25,7 +25,7 @@ const SCHEMA_NAME = 'Test Schema ItemProperty RefCount'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -95,8 +95,8 @@ testDescribe('ItemProperty refCount', () => {
 
   it('item.unload() and one unload per find bring refCount to 0 and stop the property', async () => {
     const item = await createPost('find holds')
-    const first = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId })
-    const second = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId })
+    const first = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId, hold: true })
+    const second = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId, hold: true })
     expect(first).toBeDefined()
     expect(second?.getService()).toBe(first!.getService())
     const entry = entryFor(first!)
@@ -137,7 +137,7 @@ testDescribe('ItemProperty refCount', () => {
 
   it('a find kept past item.unload() keeps the property running until it is released', async () => {
     const item = await createPost('find outlives item')
-    const title = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId })
+    const title = await ItemProperty.find({ propertyName: 'title', seedLocalId: item.seedLocalId, hold: true })
     const summary = itemProperty(item, 'summary')
 
     item.unload()

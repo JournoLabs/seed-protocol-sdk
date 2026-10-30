@@ -19,6 +19,7 @@ export const PACKAGE_TESTS = [
   '@seedprotocol/archive',
   '@seedprotocol/vite',
   '@seedprotocol/query',
+  '@seedprotocol/rdf',
   '@seedprotocol/eas',
   '@seedprotocol/arweave',
   '@seedprotocol/feed-hyper',
@@ -29,14 +30,19 @@ export const PACKAGE_TESTS = [
 
 const STEPS = [
   'node scripts/check-node-env.js',
+  'node scripts/check-migrations.js',
   'tsc -p packages/sdk/tsconfig.typetests.json',
+  'tsc -p packages/react/tsconfig.typetests.json',
   'vitest run --reporter=default',
   ...PACKAGE_TESTS.map((name) => `bun run --filter ${name} test`),
   'node scripts/check-tests-wired.js',
   'node scripts/check-tier1-package-boundary.js',
   'node scripts/check-internal-deps.js',
+  'node scripts/check-knip.js',
   'node scripts/check-browser-entry-graph.js --fail',
+  'node scripts/check-publish-core-no-thirdweb.js',
   'node scripts/check-eas-sdk-node-import.js',
+  'node scripts/check-dts-consumer.js',
   'bun run test:scripts',
 ]
 

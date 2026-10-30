@@ -1,4 +1,4 @@
-import { constants, Inode, vfs } from '@zenfs/core'
+import { constants, ErrnoError, Inode, vfs } from '@zenfs/core'
 import type { CreationOptions, InodeLike } from '@zenfs/core'
 import { dirname, join } from '@zenfs/core/path'
 import { WebAccess, WebAccessFS } from '@zenfs/dom'
@@ -7,6 +7,13 @@ import debug from 'debug'
 import { isSkippableOpfsEntryError } from './opfsErrors'
 
 const logger = debug('seedSdk:browser:helpers:tolerantWebAccess')
+
+/** kerium errno numbers (Errno isn't re-exported by @zenfs/core). */
+const ENOENT = 2
+const EIO = 5
+
+/** The touch WebAccessFS inherits from ZenFS's Async mixin, under its own override. */
+const asyncTouch: WebAccessFS['touch'] = Object.getPrototypeOf(WebAccessFS.prototype).touch
 
 /** A truncate made through this mount that OPFS doesn't have yet. Compared by identity. */
 type PendingTruncate = { readonly length: number }
@@ -24,7 +31,7 @@ type OpfsVersion = { size: number; lastModified: number }
  * file this mount had indexed at a smaller size: OPFS only shrinks for a truncate made through this
  * mount, and stat() re-reads a file's size when OPFS changed since this mount last looked.
  *
- * Overrides @zenfs/dom 1.2.9 / @zenfs/core 2.5.6 internals (`_loadHandles`, `_loadMetadata`,
+ * Overrides @zenfs/dom 1.2.14 / @zenfs/core 2.7.7 internals (`_loadHandles`, `_loadMetadata`,
  * `crossCopy`, `stat`, `write`, `touch`, `remove`, `get`, `_handles`, `_sync`, `_isInitialized`,
  * `index`, and `vfs.Handle#truncate`/`truncateSync`, see `trackTruncates`); both packages are pinned
  * to exact versions, and tolerantWebAccess.test.ts / opfsOverwrite.test.ts cover the coupling.
@@ -122,10 +129,25 @@ export class TolerantWebAccessFS extends WebAccessFS {
    * the file changed.
    */
   async stat(path: string): Promise<Inode> {
-    const inode = (await super.stat(path)) as Inode
-    if ((inode.mode & constants.S_IFMT) != constants.S_IFREG) return inode
+    const indexed = this.index.has(path)
+    let inode: Inode
+    try {
+      inode = (await super.stat(path)) as Inode
+    } catch (error) {
+      // WebAccessFS.stat reads a file it hasn't indexed from its handle and lets OPFS's DOMException
+      // through when the file was removed in between (another context, or an unlink racing a
+      // readdir). ZenFS expects an errno error: readdir skips ENOENT entries, and it appends to the
+      // message of other errors, which a DOMException's getter-only message refuses.
+      if (!(error instanceof DOMException)) throw error
+      const converted = new ErrnoError(error.name == 'NotFoundError' ? ENOENT : EIO, error.message)
+      converted.path = path
+      converted.cause = error
+      throw converted
+    }
     // While mounting, sizes were just read and crossCopy stats every file.
     if (!(this as unknown as AsyncState)._isInitialized) return inode
+    if (!indexed) await this._cacheIndexed(path, inode)
+    if ((inode.mode & constants.S_IFMT) != constants.S_IFREG) return inode
     // This mount truncated the file and OPFS doesn't have it yet: the inode's size is the truth.
     if (this._truncates.has(path)) return inode
 
@@ -145,6 +167,32 @@ export class TolerantWebAccessFS extends WebAccessFS {
     this.index.set(path, inode)
     await this._recache(path, inode, file)
     return inode
+  }
+
+  /**
+   * Adds an entry WebAccessFS.stat() just indexed from OPFS (made by another context after this
+   * mount loaded: a tab, SQLocal's worker creating `db/`) to the in-memory copy behind the sync API.
+   * ZenFS mirrors every write and create into that copy and fails the call when the entry or its
+   * directory is missing there.
+   */
+  private async _cacheIndexed(path: string, inode: Inode): Promise<void> {
+    try {
+      this._sync.statSync(path)
+      return
+    } catch {
+      // Not cached yet.
+    }
+    await this._cacheParents(path)
+    try {
+      if ((inode.mode & constants.S_IFMT) == constants.S_IFDIR) {
+        this._sync.mkdirSync(path, inode as unknown as CreationOptions)
+        this._sync.touchSync(path, inode)
+      } else {
+        await this.crossCopy(path)
+      }
+    } catch (error) {
+      logger(`could not cache ${path}: ${(error as Error).name}`)
+    }
   }
 
   /** Replaces the sync API's in-memory copy of `path` with `file`, if it holds one. */
@@ -238,7 +286,9 @@ export class TolerantWebAccessFS extends WebAccessFS {
    */
   async touch(path: string, metadata: InodeLike): Promise<void> {
     const pending = this._truncates.get(path)
-    await super.touch(path, metadata)
+    // Skips WebAccessFS.touch, which cuts the OPFS file to any size it's given (a stale one too),
+    // for the Async mixin's index and in-memory update that it ends with.
+    await asyncTouch.call(this, path, metadata)
     const inode = this.index.get(path)
     if (!inode || (inode.mode & constants.S_IFMT) != constants.S_IFREG) return
     let handle: FileSystemFileHandle
@@ -310,13 +360,15 @@ export class TolerantWebAccessFS extends WebAccessFS {
     await this._loadHandles('/', this.root)
 
     for (const [path, handle] of [...this._handles]) {
+      // Each inode gets its own numbers, as WebAccessFS._loadMetadata gives them.
+      const ino = this.index._alloc()
       if (handle.kind == 'directory') {
-        this.index.set(path, new Inode({ mode: 0o777 | constants.S_IFDIR, size: 0 }))
+        this.index.set(path, new Inode({ mode: 0o777 | constants.S_IFDIR, size: 0, ino, data: ino + 1 }))
         continue
       }
       try {
         const { lastModified, size } = await (handle as FileSystemFileHandle).getFile()
-        this.index.set(path, new Inode({ mode: 0o644 | constants.S_IFREG, size, mtimeMs: lastModified }))
+        this.index.set(path, new Inode({ mode: 0o644 | constants.S_IFREG, size, mtimeMs: lastModified, ino, data: ino + 1 }))
         this._seen.set(path, { size, lastModified })
       } catch (error) {
         if (!isSkippableOpfsEntryError(error)) throw error
@@ -401,6 +453,8 @@ export class TolerantWebAccessFS extends WebAccessFS {
     for (const dir of missing) {
       try {
         const stats = await this.stat(dir)
+        // stat() caches a directory it indexes just now.
+        if (this._sync.existsSync(dir)) continue
         this._sync.mkdirSync(dir, stats as unknown as CreationOptions)
         this._sync.touchSync(dir, stats)
       } catch (error) {

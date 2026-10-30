@@ -2,6 +2,63 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Atom: a present `null` in an item's `updated` or `links` keeps the default (the pubDate, or the item's link). `{ updated: null }` gave an entry with no `<updated>`, which RFC 4287 requires.
+
+## 0.7.13 (2026-10-29)
+
+- **Breaking:** an item with a storage transaction and no link of its own has the RSS `guid` `ar://<transactionId>` (D34), so Atom entry ids and JSON Feed item ids are that too (D26). Its `link` is still the public gateway URL. The guid was the gateway URL, so changing `arweaveDomain` changed every such item's guid and feed readers showed the items again; after this release they show them again once more, then never on a gateway change. RSS marks these guids `isPermaLink="false"`. A guid is no longer moved onto the public gateway with the item's other Arweave links. A cached feed body keeps the old guids until it is rebuilt.
+- An Atom entry keeps an item's own `title`, `updated` and `links` again. 0.7.12 moved the item's fields before the defaults, so the defaults replaced them.
+- `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Feed declared none.
+
+### Commits
+
+#### Breaking
+
+- a stored transaction's guid is ar://<id>, so it survives a gateway change (D34) (c4131e0e)
+
+#### Fixes
+
+- Atom entries keep an item's own title, updated and links (e8425b31)
+- arweave, query: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
+
+## 0.7.12 (2026-10-27)
+
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, named re-exports were typed `any` and names re-exported with `export *` were missing (TS2305).
+- Feed items and media links use the public gateway (`arweaveDomain`, default `arweave.net`) for every Arweave link, in link fields and in Html fields (ADR 0025). A feed server reading through a Hyper sidecar emitted sidecar URLs, and Html published with `ar.seedprotocol.io` links kept them.
+- **Breaking:** Atom entry ids and JSON Feed item ids are the item's RSS `guid` (its `guid` field, else its link), so the three formats identify an item the same way (D26). They were the Seed UID. Feed readers show each item of an existing Atom or JSON feed once more as new after the upgrade.
+- The stale fallback (served when a rebuild fails) serves only a body built for the same site config. With two sites on one cache directory, a failed build could be served the other site's feed. Cache entries written before 0.7.12 have no site config recorded, so the stale fallback never serves them.
+- A weak `If-None-Match` (`W/"…"`) for the current ETag gets a 304. Proxies that compress the response mark its ETag weak, so their clients never got one.
+- An archive request whose year or month isn't an integer (`NaN` from a non-numeric path segment) returns 400 instead of passing the range check and failing with 500.
+
+### Commits
+
+#### Breaking
+
+- Atom and JSON Feed ids use the RSS guid (5c31f134)
+- arweave, query, sdk: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- arweave: arweave.net is the default host; public fallbacks behind a sidecar or proxy (18eec823)
+
+#### Fixes
+
+- stale fallback matches the site, weak If-None-Match, 400 for NaN archive params (52a53cd2)
+
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - Page 1 of a feed asks `@seedprotocol/query` on every request and rebuilds its cached body only when query's collection ETag changed, so new and changed posts appear on the next request instead of up to `CACHE_TTL` (an hour) later. Each request costs one round of indexer requests when query's collection is cached, none within `CACHE_MAX_AGE`. Page 1's `Cache-Control` max-age and s-maxage are now `CACHE_MAX_AGE` (default 0) instead of 3600, so clients and CDNs revalidate and get a 304 when nothing changed.
@@ -23,7 +80,7 @@ All notable changes to this package are documented in this file.
 - The cache config is read once per process instead of on every request, and per-request logs (cache hits and misses, item counts, image probes) only print under `DEBUG=seedFeed`.
 - Breaking: `GraphQLItem` (use `FeedItem`), `enrichImageSeedCloneForFeed`, `FEED_RICH_BODY_STORAGE_SCHEMAS` and `isFeedRichBodyStorageSchema` are no longer exported. Import `enrichImageSeedClone`, `RICH_BODY_STORAGE_SCHEMAS` and `isRichBodyStorageSchema` from `@seedprotocol/query`.
 - `FeedItem` names the feed entry type. `GraphQLResponse` and the Express `Request`, `Response` and `ApiHandler` types are removed (none were exported from the package).
-- `express`, `@types/express` and `graphql-request` are no longer dependencies.
+- `express`, `@types/express` and `graphql-request` are no longer dependencies. `debug` is a new one: the per-request logs print under `DEBUG=seedFeed`.
 - `CACHE_BACKGROUND_REFRESH` and `CACHE_REFRESH_INTERVAL` are no longer read; they never did anything.
 
 ### Commits
@@ -51,6 +108,10 @@ All notable changes to this package are documented in this file.
 
 - correct env var and rich-field docs (803c2bfc)
 - import query helpers directly, FeedItem type, drop unused deps (a3079128)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.5 (2026-10-17)
 

@@ -1,4 +1,3 @@
-import type { Account } from 'thirdweb/wallets'
 import { isAddressEqual, parseEventLogs, type Address, type TransactionReceipt } from 'viem'
 import { waitForPublishReceipt, isContractDeployed } from './chainClient'
 import type { PublishConfig } from '../config'
@@ -13,7 +12,7 @@ import { executorModuleAbi } from './abi/executor'
 import { seedExecutorRouterAbi } from './abi/seedExecutorRouter'
 import { describeRevert, findRevertData } from './describeRevert'
 import { simulateCallFromAccount } from './executorModuleReadiness'
-import { fromThirdwebAccount } from './adapters/thirdwebAccount'
+import type { PublishWallet } from './seedSigner'
 
 const MODULE_INSTALL_MSG = () =>
   `The executor module could not be installed on your publishing account on ${getPublishChainName()}. Reconnect and try again, or contact support if this persists.`
@@ -33,12 +32,13 @@ export type EnsureExecutorModuleResult =
  * - Any other account: nothing to install; skipped. `assertExecutorModuleReadyForAccount` reports
  *   why the executor cannot act for it.
  *
- * @param _account unused; kept for compatibility
+ * @param getAdmin returns the account's admin EOA as a `PublishWallet` whose sender is that EOA
+ *   itself; called only when an install has to be sent
  * @throws ManagedAccountPublishError `EXECUTOR_MODULE_NOT_INSTALLED` when the install fails
  */
 export async function ensureExecutorModuleInstalled(
   contractAddress: string,
-  _account: Account,
+  getAdmin: () => Promise<PublishWallet>,
   config: Pick<PublishConfig, 'modularAccountModuleContract'>,
 ): Promise<EnsureExecutorModuleResult> {
   const { modularAccountModuleContract } = config
@@ -50,13 +50,14 @@ export async function ensureExecutorModuleInstalled(
 
   const router = await readSeedExecutorRouter(contractAddress as Address)
   if (!router) return { status: 'skipped' }
-  return installViaRouterExtension(contractAddress, router.executor, modularAccountModuleContract)
+  return installViaRouterExtension(contractAddress, router.executor, modularAccountModuleContract, getAdmin)
 }
 
 async function installViaRouterExtension(
   contractAddress: string,
   pinnedExecutor: Address,
   configuredModule: string,
+  getAdmin: () => Promise<PublishWallet>,
 ): Promise<EnsureExecutorModuleResult> {
   if (pinnedExecutor.toLowerCase() !== configuredModule.trim().toLowerCase()) {
     throw new ManagedAccountPublishError(
@@ -71,8 +72,7 @@ async function installViaRouterExtension(
   let transactionHash: string
   try {
     if (await readSeedExecutorInstalled(account, pinnedExecutor)) return { status: 'already-installed' }
-    const { getManagedAccountAdmin } = await import('./managedAccountAdmin')
-    const wallet = fromThirdwebAccount(await getManagedAccountAdmin(contractAddress))
+    const wallet = await getAdmin()
     admin = wallet.txSender.address as Address
     const result = await wallet.txSender.sendTransaction(encodeInstallSeedExecutor(account))
     transactionHash = result.transactionHash

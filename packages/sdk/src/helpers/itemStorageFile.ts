@@ -1,6 +1,3 @@
-import { eq } from 'drizzle-orm'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, type MetadataType } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 import { tryWithTabLock, withTabLock } from '@/helpers/tabLocks'
@@ -73,47 +70,4 @@ export function tryWithItemStorageFileLock<T>(
   fn: () => Promise<T>,
 ): Promise<{ acquired: true; value: T } | { acquired: false }> {
   return tryWithTabLock(itemStorageFileLockName(filePath), fn)
-}
-
-/** Lock attempts before giving up when the row's target file keeps changing under us. */
-const ROW_LOCK_ATTEMPTS = 3
-
-const readRow = async (localId: string): Promise<MetadataType | undefined> => {
-  const rows: MetadataType[] = await BaseDb.getAppDb()
-    .select()
-    .from(metadata)
-    .where(eq(metadata.localId, localId))
-    .limit(1)
-  return rows[0]
-}
-
-/**
- * Runs `fn` with a fresh read of metadata row `localId`, holding the lock of the file that row's
- * content goes to. `fileOf` names that file (absolute path) for a row, or returns undefined when
- * there is nothing to write (then `fn` isn't called and the result is undefined).
- *
- * The file depends on the row, so the row is read once to pick the lock and again once it is held;
- * if the row now points at another file (another writer changed it meanwhile), the lock is
- * released and taken again for that file.
- */
-export async function withLockedItemStorageRow<T>(
-  localId: string,
-  fileOf: (row: MetadataType) => string | undefined,
-  fn: (row: MetadataType, filePath: string) => Promise<T>,
-): Promise<T | undefined> {
-  for (let attempt = 0; attempt < ROW_LOCK_ATTEMPTS; attempt++) {
-    const row = await readRow(localId)
-    const filePath = row && fileOf(row)
-    if (!filePath) return undefined
-
-    const outcome = await withItemStorageFileLock(filePath, async () => {
-      const fresh = await readRow(localId)
-      const freshPath = fresh && fileOf(fresh)
-      if (!freshPath) return { done: true as const, value: undefined }
-      if (freshPath !== filePath) return { done: false as const }
-      return { done: true as const, value: await fn(fresh, filePath) }
-    })
-    if (outcome.done) return outcome.value
-  }
-  throw new Error(`ItemStorage file of metadata row ${localId} kept changing; not written`)
 }

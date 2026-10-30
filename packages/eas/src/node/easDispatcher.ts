@@ -36,22 +36,23 @@ function hostSetGlobalDispatcher(): boolean {
 
 /**
  * An undici `Agent` for EAS requests only; the process's TLS defaults and fetch's global
- * dispatcher are left alone. Returns undefined outside Node (Bun, Deno), whose fetch has its
+ * dispatcher are left alone. Resolves to undefined outside Node (Bun, Deno), whose fetch has its
  * own connection handling, and undici is then not loaded. Also undefined when the host set a
  * proxy or mock as fetch's global dispatcher, so EAS requests don't bypass it.
  */
-export function createEasNodeDispatcher({
+export async function createEasNodeDispatcher({
   ecdhCurve = EAS_NODE_ECDH_CURVE,
   keepAliveTimeoutMs = EAS_NODE_KEEP_ALIVE_TIMEOUT_MS,
-}: EasNodeDispatcherOptions = {}): Dispatcher | undefined {
+}: EasNodeDispatcherOptions = {}): Promise<Dispatcher | undefined> {
   const versions = typeof process === 'undefined' ? undefined : (process.versions as Record<string, string | undefined>)
   if (!versions?.node || versions.bun || versions.deno) return undefined
   if (hostSetGlobalDispatcher()) return undefined
   // The Agent module alone: undici's index installs a global dispatcher when none is set yet,
   // which would move every other fetch in the process onto this copy of undici.
-  // getBuiltinModule rather than a static `node:module` import keeps this entry loadable in a
-  // browser (some browser tests import NodeQueryClient from it).
-  const { createRequire } = process.getBuiltinModule('node:module') as typeof import('node:module')
-  const Agent = createRequire(import.meta.url)('undici/lib/dispatcher/agent.js') as typeof import('undici').Agent
+  // A literal dynamic import, so a bundler resolves undici from this package rather than from the
+  // app that bundles it, and @vercel/nft copies undici into serverless functions. Dynamic, so this
+  // entry stays loadable in a browser (some browser tests import NodeQueryClient from it).
+  // The module is CommonJS (`module.exports = Agent`), which ESM sees as `default`.
+  const { default: Agent } = await import('undici/lib/dispatcher/agent.js')
   return new Agent({ connect: { ecdhCurve }, keepAliveTimeout: keepAliveTimeoutMs })
 }

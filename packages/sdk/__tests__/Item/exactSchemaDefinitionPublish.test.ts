@@ -21,7 +21,7 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 const SCHEMA_NAME = 'Test Schema exact schema definition publish'
 
 const schema = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -99,7 +99,8 @@ testDescribe('publish uses the schema for the exact definition', () => {
     const item = await loadArticle({ kicker: 'News' })
     const kicker = item.properties.find((p) => p.propertyName === 'kicker')!
     await waitForEntityReady(kicker, { timeout: WAIT_TIMEOUT_MS })
-    expect(kicker.schemaUid).toBeUndefined()
+    // Found at creation (the definition's uid is recorded); forget it so the rehydrate looks it up.
+    kicker.getService().send({ type: 'updateContext', schemaUid: undefined })
     // EAS sync rehydrates properties after writing metadata; that runs the initialize actor.
     kicker.getService().send({ type: 'rehydrateFromDb' })
     // The rehydrate runs in the machine (hydratingFromDb, initializing) and ends back in idle

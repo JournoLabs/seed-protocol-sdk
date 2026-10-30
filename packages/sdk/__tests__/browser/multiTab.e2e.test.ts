@@ -79,7 +79,9 @@ describe('two tabs of one app', () => {
     ).slice(before)
     expect(bulkMessages.every((message) => message.from === leaderId)).toBe(true)
     expect(new Set(bulkMessages.flatMap((message) => message.paths))).toEqual(new Set(bulk))
-    expect(bulkMessages.length).toBeLessThan(10)
+    // Fewer messages than files: they coalesced. How many windows the writes span depends on how
+    // fast OPFS is on the runner, so don't bound it tighter than that.
+    expect(bulkMessages.length).toBeLessThan(bulk.length)
 
     // Receiving only refreshes caches: the follower never sent a files-changed of its own.
     await new Promise((resolve) => setTimeout(resolve, 200))
@@ -98,6 +100,27 @@ describe('two tabs of one app', () => {
     open.splice(open.indexOf(leader), 1)
     await vi.waitFor(async () => expect(await tabs.callSeedTab(follower, 'isLeader')).toBe(true), { timeout: WAIT_TIMEOUT_MS })
   }, 120_000)
+
+  it('a reset in one tab stops the other, deletes everything, and both init again on an empty database', async () => {
+    const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
+    open.push(a, b)
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+    await tabs.callSeedTab(b, 'insertSeed')
+    const notePath = await tabs.callSeedTab(b, 'saveFile', 'files/reset-note.txt', 'before the reset')
+
+    const result = await tabs.callSeedTab(a, 'resetLocalData')
+
+    // b closed its database when asked, so nothing was left open.
+    expect(result.failed).toEqual([])
+    expect(result.deleted).toEqual(expect.arrayContaining([`/${testDir}/db/seed.db`, notePath, `/${testDir}`]))
+    expect(await tabs.callSeedTab(b, 'clientStatus')).toEqual({ status: 'stopped', stopReason: 'reset' })
+    expect(await tabs.callSeedTab(a, 'clientStatus')).toEqual({ status: 'stopped', stopReason: 'reset' })
+
+    await Promise.all([tabs.callSeedTab(a, 'init'), tabs.callSeedTab(b, 'init')])
+    expect(await tabs.callSeedTab(a, 'seedCount')).toBe(0)
+    expect(await tabs.callSeedTab(b, 'seedCount')).toBe(0)
+    expect(await tabs.callSeedTab(b, 'readFileSync', notePath)).toBeNull()
+  }, 60000)
 
   it('transactions in both tabs at once neither lose updates nor fail busy', async () => {
     const [a, b] = await Promise.all([tabs.openSeedTab(tabUrl), tabs.openSeedTab(tabUrl)])
@@ -143,7 +166,7 @@ describe('two tabs of one app', () => {
     const id = () => Math.random().toString(16).slice(2, 12)
     const now = new Date().toISOString()
     const file = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: id(),
       metadata: { name: schemaName, createdAt: now, updatedAt: now },

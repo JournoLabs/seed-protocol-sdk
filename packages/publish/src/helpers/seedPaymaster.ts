@@ -2,14 +2,7 @@ import type { ThirdwebClient } from 'thirdweb'
 import type { Chain } from 'thirdweb/chains'
 import { estimateUserOpGas, getPaymasterAndData, type UserOperation } from 'thirdweb/wallets/smart'
 import { gasFields, logGas } from './gasLog'
-
-/**
- * Headroom on the bundler's callGasLimit, in basis points (1.2x). The bundler's estimate tracks
- * gas used, but the call needs more than that while it runs: refunds are only credited when the
- * transaction ends, and each nested call (EntryPoint → account → executor → EAS) holds back 1/64.
- * EntryPoint v0.6 charges only for gas used, so unused headroom costs nothing.
- */
-export const CALL_GAS_HEADROOM_BPS = 12_000n
+import { CALL_GAS_HEADROOM_BPS } from './adapters/userOps'
 
 type PaymasterResult = Awaited<ReturnType<typeof getPaymasterAndData>>
 

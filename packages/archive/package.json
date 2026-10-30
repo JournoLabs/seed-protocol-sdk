@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/archive",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "Standards-based archive packaging for Seed Protocol items: BagIt (RFC 8493) bags with SHA-256/SHA-512 manifests, Dublin Core and PREMIS metadata, and an h-entry archive document reader",
   "keywords": [
     "seed-protocol",
@@ -13,6 +13,9 @@
     "digital-preservation"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -43,7 +46,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },

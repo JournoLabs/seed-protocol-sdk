@@ -33,7 +33,7 @@ function StatusProbe({ percentLog }: { percentLog?: number[] }) {
   const isClientReady = useIsClientReady()
   const { dbsAreReady } = useDbsAreReady()
   const isDbReady = useIsDbReady()
-  const { internalStatus } = useGlobalServiceStatus()
+  const { status, internalStatus, stopReason } = useGlobalServiceStatus()
   const { services, percentComplete: servicesPercent } = useServices()
   const { percentComplete } = useService(useClientService())
   percentLog?.push(percentComplete)
@@ -42,7 +42,9 @@ function StatusProbe({ percentLog }: { percentLog?: number[] }) {
       <div data-testid="client-ready">{String(isClientReady)}</div>
       <div data-testid="dbs-ready">{String(dbsAreReady)}</div>
       <div data-testid="db-ready">{String(isDbReady)}</div>
+      <div data-testid="status">{String(status)}</div>
       <div data-testid="internal-status">{String(internalStatus)}</div>
+      <div data-testid="stop-reason">{String(stopReason)}</div>
       <div data-testid="services-current">{String(services[0] === client.getService())}</div>
       <div data-testid="services-percent">{servicesPercent}</div>
       <div data-testid="service-percent">{percentComplete}</div>
@@ -95,6 +97,10 @@ describe('client status hooks across stop and init', () => {
     await waitFor(() => expect(text('client-ready')).toBe('false'))
     expect(text('dbs-ready')).toBe('false')
     expect(text('db-ready')).toBe('false')
+    // A stopped client's last state is idle; the hook mustn't report it as running
+    expect(text('status')).toBe('stopped')
+    expect(text('internal-status')).toBe('stopped')
+    expect(text('stop-reason')).toBe('stop')
     expect(gateLoadingShown()).toBe(true)
 
     percentLog.length = 0
@@ -104,6 +110,7 @@ describe('client status hooks across stop and init', () => {
     expect(text('dbs-ready')).toBe('true')
     expect(text('db-ready')).toBe('true')
     expect(text('internal-status')).toBe('ready')
+    expect(text('stop-reason')).toBe('undefined')
     expect(text('services-current')).toBe('true')
     expect(text('services-percent')).toBe('100')
     expect(text('service-percent')).toBe('100')
@@ -115,8 +122,9 @@ describe('client status hooks across stop and init', () => {
     }
   })
 
-  it('does not call init again when an inline initConfig re-renders with the same values', () => {
+  it('does not call init again when an inline initConfig re-renders with the same values', async () => {
     const initSpy = vi.spyOn(client, 'init').mockResolvedValue(undefined as never)
+    const setSpy = vi.spyOn(client, 'setAddresses').mockResolvedValue(undefined)
     const schema = { metadata: { name: 'Inline Gate Schema' }, models: {} }
 
     const { rerender } = render(
@@ -131,8 +139,18 @@ describe('client status hooks across stop and init', () => {
     )
     expect(initSpy).toHaveBeenCalledTimes(1)
 
+    // New addresses go to setAddresses; a new schema runs init again
+    const addresses = ['0x0000000000000000000000000000000000000001']
     rerender(
-      <SeedClientGate initConfig={{ ...initConfig, addresses: ['0x0000000000000000000000000000000000000001'] }} schema={{ ...schema }}>
+      <SeedClientGate initConfig={{ ...initConfig, addresses }} schema={{ ...schema }}>
+        <div />
+      </SeedClientGate>,
+    )
+    await waitFor(() => expect(setSpy).toHaveBeenCalledWith(addresses))
+    expect(initSpy).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <SeedClientGate initConfig={{ ...initConfig, addresses }} schema={{ ...schema, models: { Other: {} } }}>
         <div />
       </SeedClientGate>,
     )

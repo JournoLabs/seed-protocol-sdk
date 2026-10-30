@@ -84,6 +84,20 @@ export interface SeedConfig {
    * - object: the schema itself; only `metadata.name` and `models` are required
    */
   schema?: string | import('./import').SchemaFileInput
+  entityCache?: {
+    /**
+     * How long a loaded Item or ItemProperty no one holds stays cached before it is unloaded, in ms.
+     * A hold taken meanwhile (`Item.retain`, `find({ hold: true })`, a hook mounting) keeps the same
+     * instance. Default 60000. Schemas, Models and ModelProperties never unload for having no holds.
+     *
+     * 0 unloads an instance as soon as its last hold is released. An instance that never had a hold
+     * (looked up with `find` or created with `hold: false`) is then kept until it is destroyed or
+     * evicted, since unloading it at once would hand the caller an unloaded instance.
+     * `destroy()`, cache clears, schema eviction, other tabs' removals and local purges unload at
+     * once whatever this is.
+     */
+    unloadGraceMs?: number
+  }
 }
 
 /**
@@ -107,8 +121,8 @@ export interface SeedConstructorOptions {
    * Addresses to save at init. Leave it out to keep the addresses already stored (the
    * SDK warns once when it does). Pass `[]` (or `{ owned: [] }`) to clear them, e.g.
    * before a wallet connects. In a second tab, `[]` keeps the first tab's addresses
-   * (docs/MULTI_TAB.md). Calling init again with only different addresses applies them
-   * like `client.setAddresses`.
+   * (docs/MULTI_TAB.md). Only the first init applies them: calling init again leaves
+   * the stored addresses alone, so change them with `client.setAddresses`.
    */
   readonly addresses?: AddressConfiguration
   /**
@@ -124,6 +138,28 @@ export interface SeedConstructorOptions {
    * and the Arweave L1 finalize worker; `'off'` runs them in every tab.
    */
   readonly multiTab?: MultiTabMode
+}
+
+/** Options for `client.resetLocalData()`. */
+export interface ResetLocalDataOptions {
+  /**
+   * How long to wait for other tabs of this database to close it before deleting anyway
+   * (default 10 000 ms). Files a tab still holds open then show up in `failed`.
+   */
+  otherTabsTimeoutMs?: number
+  /**
+   * The directory to delete. Defaults to the `filesDir` of the last `client.init` in this page,
+   * else `.seed`.
+   */
+  filesDir?: string
+}
+
+/** What `client.resetLocalData()` deleted, and what it couldn't. Paths start with `filesDir`. */
+export interface ResetLocalDataResult {
+  /** Every file and directory removed, children before their directory. */
+  deleted: string[]
+  /** Entries that are still there, with the browser's error (`<name>: <message>`). */
+  failed: { path: string; error: string }[]
 }
 
 /**
@@ -142,4 +178,10 @@ export interface ItemCreateOptions extends CreateWaitOptions {
    * attested as-is; the values are then written unchecked.
    */
   validate?: boolean
+  /**
+   * Take a cache hold on the item (default true), released with `item.unload()`. With false the
+   * item is cached with no hold and unloads after the grace period
+   * (`SeedConfig.entityCache.unloadGraceMs`) unless something holds it first.
+   */
+  hold?: boolean
 }

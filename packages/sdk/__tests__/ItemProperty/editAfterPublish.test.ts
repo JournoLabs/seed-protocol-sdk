@@ -101,7 +101,7 @@ testDescribe('editing a property after its seed is published', () => {
     expect(rows).toHaveLength(2)
   }, 60_000)
 
-  it('restores the published value over a draft that holds an edit', async () => {
+  it('an edit back to the published value leaves no draft, even with a context naming the published row', async () => {
     const { postItem } = await createItemWithList({ tagLabels: ['x'] })
     await markPublished(postItem)
     const title = propertyOf(postItem, 'title')
@@ -114,8 +114,10 @@ testDescribe('editing a property after its seed is published', () => {
 
     await setAndSave(title, publishedValue)
 
+    // The draft that held the edit is gone, and the published row is current again (ADR 0019)
     const drafts = (await rowsFor(postItem.seedLocalId!, 'title')).filter((r) => !r.uid)
-    expect(drafts.map((r) => r.propertyValue)).toEqual([publishedValue])
+    expect(drafts).toEqual([])
+    expect(title.value).toBe(publishedValue)
   }, 60_000)
 
   it('patch Publish attests a draft row the property context missed', async () => {

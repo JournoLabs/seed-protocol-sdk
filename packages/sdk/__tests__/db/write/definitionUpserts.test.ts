@@ -11,7 +11,7 @@ import { Model } from '@/Model/Model'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { savePropertyToDb, writePropertyToDb } from '@/helpers/db'
-import { inDefinitionsTransaction, linkModelToSchemaRow } from '@/db/write/definitions'
+import { inDefinitionsTransaction, linkModelToSchemaRow, upsertPropertyRow } from '@/db/write/definitions'
 import { createSeeds } from '@/db/write/createSeeds'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
 import { updateVersionUid } from '@/db/write/updateVersionUid'
@@ -26,7 +26,7 @@ const randomUid = () =>
 const schemaFile = (name: string): SchemaFileFormat => {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name, createdAt: now, updatedAt: now },
@@ -81,6 +81,22 @@ testDescribe('definition upserts (T9)', () => {
 
     const [row] = await db().select().from(properties).where(eq(properties.schemaFileId, propertyFileId))
     expect(row).toMatchObject({ required: true, isEdited: true })
+  })
+
+  it('refuses a new property or a rename to a reserved ABI word, and leaves no row', async () => {
+    const file = schemaFile(`T9 Reserved ${Date.now()}`)
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const [model] = await db().select().from(models).where(eq(models.schemaFileId, file.models.Note.id!))
+    await expect(
+      writePropertyToDb(generateId(), { modelId: model.id, name: 'storage', dataType: 'Text' }),
+    ).rejects.toThrow('Property "storage" publishes as "storage"')
+    await expect(
+      inDefinitionsTransaction((tx) => upsertPropertyRow(tx, { modelId: model.id, name: 'view', previousName: 'body', dataType: undefined })),
+    ).rejects.toThrow('publishes as "view"')
+    const names = (await db().select().from(properties).where(eq(properties.modelId, model.id))).map((row) => row.name)
+    expect(names).toContain('body')
+    expect(names).not.toContain('storage')
+    expect(names).not.toContain('view')
   })
 
   it('Model.lastSaveError reports a failed rename save (G11-7)', async () => {

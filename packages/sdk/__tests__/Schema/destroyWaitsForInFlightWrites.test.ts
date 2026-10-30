@@ -29,7 +29,7 @@ testDescribe('Schema.destroy with a model write in flight', () => {
   it('lets the write finish before deleting the rows', async () => {
     const schemaName = `Destroy In Flight ${generateId()}`
     const schemaFile = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

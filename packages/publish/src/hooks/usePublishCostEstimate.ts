@@ -50,7 +50,9 @@ export function usePublishCostEstimate(
     const seedLocalId = item.seedLocalId
     const last = lastEstimateRef.current
     const previousEstimate =
-      last && last.seedLocalId === seedLocalId && last.publishMode === publishMode ? last.estimate : null
+      (last && last.seedLocalId === seedLocalId && last.publishMode === publishMode ? last.estimate : null) ??
+      options?.previousEstimate ??
+      null
 
     const handle = watchPublishCost(
       item,
