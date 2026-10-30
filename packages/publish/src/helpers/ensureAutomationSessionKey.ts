@@ -1,4 +1,4 @@
-import { isAddressEqual, zeroAddress, type Address } from 'viem'
+import { isAddressEqual, type Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
 import { isContractDeployed, readUntil } from './chainClient'
 import { readIsActiveSigner, readPermissionsForSigner } from './contracts'
@@ -20,13 +20,20 @@ const MSG_REMOVAL_FAILED = () =>
 export async function ensureAutomationSessionKey(params: {
   managedAddress: string
   sessionKeyAddress: string
-  /** Unix seconds end time for the session key (optional). */
-  expiresAt?: number
+  /** Unix seconds the session key ends. A key with another end is granted again with this one. */
+  expiresAt: number
   admin: PublishWallet
 }): Promise<void> {
   const { managedAddress, sessionKeyAddress, expiresAt, admin } = params
+  if (expiresAt <= Math.floor(Date.now() / 1000)) {
+    throw new ManagedAccountPublishError(
+      `The session key's expiresAt (${expiresAt}) has passed; it needs a time in the future.`,
+      'MODULAR_SIGNER_ACTIVATION_FAILED',
+      managedAddress,
+    )
+  }
   const { approvedTargets } = buildAutomationSessionKeyPermissions({ expiresAt })
-  const grant = { approvedTargets, ...(expiresAt != null && expiresAt > 0 && { endsAt: expiresAt }) }
+  const grant = { approvedTargets, endsAt: expiresAt }
 
   let shouldUpdate = false
   try {
@@ -85,9 +92,9 @@ export async function removeAutomationSessionKey(params: {
 }
 
 /**
- * Refuses a session key that isn't approved to call `executor`, such as one granted for an executor
- * the factory has since replaced. Its UserOp would pass the simulation, which runs from the account,
- * and then fail validation at the bundler. A zero address among the targets approves every target.
+ * Refuses a session key approved for anything but `executor`. A key granted for an executor the
+ * factory has since replaced would pass the simulation, which runs from the account, and then fail
+ * validation at the bundler. A key with other targets, or the zero address, can do more than publish.
  *
  * @throws ManagedAccountPublishError `MODULAR_SIGNER_ACTIVATION_FAILED`
  */
@@ -97,12 +104,10 @@ export async function assertSessionKeyApprovesExecutor(
   executor: string,
 ): Promise<void> {
   const { approvedTargets } = await readPermissionsForSigner(managedAddress as Address, sessionKeyAddress as Address)
-  const approved = approvedTargets.some(
-    (target) => target === zeroAddress || isAddressEqual(target, executor as Address),
-  )
-  if (!approved) {
+  const [target, ...others] = approvedTargets
+  if (!target || others.length > 0 || !isAddressEqual(target, executor as Address)) {
     throw new ManagedAccountPublishError(
-      `The automation session key ${sessionKeyAddress} isn't approved for the Seed executor ${executor}. Run enrollPublishAutomation again to grant it.`,
+      `The automation session key ${sessionKeyAddress} must be approved for the Seed executor ${executor} and nothing else. Run enrollPublishAutomation again to grant it.`,
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
     )

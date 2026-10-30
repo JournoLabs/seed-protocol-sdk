@@ -2,6 +2,7 @@ import { PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS } from '@seedprotocol/eas
 import type { PublishWallet } from './seedSigner'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
+import { assertAutomationExposureAllowed } from './automationExposure'
 import { ensureExecutorModuleInstalled, type EnsureExecutorModuleResult } from './ensureExecutorModule'
 import { assertExecutorModuleReadyForAccount } from './executorModuleReadiness'
 import {
@@ -20,9 +21,10 @@ export type EnrollPublishAutomationParams = {
   /** Optional app label stored in the sidecar (defaults to zero address). */
   appAddress?: string
   /**
-   * Unix seconds when the session key and the grant end. Defaults to 365 days from now
+   * Unix seconds when the session key and the grant end. Defaults to 90 days from now
    * ({@link PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS}); the same value goes to both, so the
-   * on-chain key never outlives its PublishAuthorization.
+   * on-chain key never outlives its PublishAuthorization. Enrolling an active key again moves
+   * its end to this value.
    */
   expiresAt?: number
   /**
@@ -110,6 +112,8 @@ function assertSendsAsAccount(managedAddress: string, userWallet: PublishWallet)
  *
  * @throws ManagedAccountPublishError `MANAGED_ACCOUNT_UNAVAILABLE` before sending anything when
  * `userWallet` doesn't send as `managedAddress`
+ * @throws ManagedAccountPublishError `AUTOMATION_ACCOUNT_FUNDED` before sending anything when the
+ * account holds more ETH than {@link PublishConfig.maxAutomationExposureWei}
  * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding the session
  * key when the executor cannot act for the account (e.g. Router accounts without the extension)
  */
@@ -124,6 +128,7 @@ export async function enrollPublishAutomation(
 
   const { userWallet } = params
   assertSendsAsAccount(managedAddress, userWallet)
+  await assertAutomationExposureAllowed(managedAddress)
   await assertExecutorModuleInstalled(managedAddress, params.admin)
   await ensureAutomationSessionKey({
     managedAddress,

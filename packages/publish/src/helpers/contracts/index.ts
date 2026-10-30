@@ -19,6 +19,7 @@ import { MODULE_TYPE_EXECUTOR, seedExecutorRouterAbi } from '../abi/seedExecutor
 import { easAbi } from '../abi/eas'
 import { schemaRegistryAbi } from '../abi/schemaRegistry'
 import { accountPermissionsAbi } from '../abi/accountPermissions'
+import { accountEntryPointAbi, entryPointDepositAbi } from '../abi/entryPoint'
 import type { SeedTxRequest } from '../seedSigner'
 import { getPublishPublicClient } from '../chainClient'
 import { getPublishConfig, requireManagedAccountFactoryAddress } from '../../config'
@@ -375,6 +376,27 @@ export async function readPermissionsForSigner(
     functionName: 'getPermissionsForSigner',
     args: [signer],
   })
+}
+
+export async function readAccountEntryPoint(account: Address): Promise<Address> {
+  return getPublishPublicClient().readContract({
+    address: account,
+    abi: accountEntryPointAbi,
+    functionName: 'entryPoint',
+  })
+}
+
+export async function readEntryPointDeposit(entryPoint: Address, account: Address): Promise<bigint> {
+  return getPublishPublicClient().readContract({
+    address: entryPoint,
+    abi: entryPointDepositAbi,
+    functionName: 'balanceOf',
+    args: [account],
+  })
+}
+
+export async function readEthBalance(address: Address): Promise<bigint> {
+  return getPublishPublicClient().getBalance({ address })
 }
 
 export async function readGetEas(managedAddress: Address): Promise<Address> {

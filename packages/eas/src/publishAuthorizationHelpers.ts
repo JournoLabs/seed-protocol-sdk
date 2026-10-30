@@ -12,8 +12,8 @@ export const PUBLISH_AUTHORIZATION_SCHEMA_NAME = 'seedprotocol.publishAuthorizat
 /** Fixed v1 scopes string. */
 export const PUBLISH_AUTHORIZATION_SCOPES = 'publish,revoke'
 
-/** Default EAS expiration when grant has no expiresAt (365 days from grantedAt). */
-export const PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS = 365 * 24 * 60 * 60
+/** Default EAS expiration when grant has no expiresAt (90 days from grantedAt). */
+export const PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS = 90 * 24 * 60 * 60
 
 export type PublishAuthorizationDecoded = {
   identity: string

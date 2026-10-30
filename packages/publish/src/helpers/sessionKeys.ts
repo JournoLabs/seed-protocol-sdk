@@ -17,16 +17,16 @@ import {
 } from './contracts'
 import { requireSignTypedData, type PublishWallet } from './seedSigner'
 
-/** Thirdweb's defaults for the request's own validity window and an unset key end. */
-const TEN_YEARS_SECS = 10n * 365n * 24n * 60n * 60n
+/** How long a signed grant can be sent. The account accepts one from any sender until then. */
+const REQUEST_VALIDITY_SECS = 60n * 60n
 
 export type SessionKeyGrant = {
   /** Targets the key may call through the account; `[]` removes the key. */
   approvedTargets: readonly Address[]
   /** Unix seconds the key starts working. Default 0. */
   startsAt?: number
-  /** Unix seconds the key stops working. Default ten years from now. */
-  endsAt?: number
+  /** Unix seconds the key stops working. */
+  endsAt: number
 }
 
 function nowSecs(): bigint {
@@ -38,9 +38,9 @@ function randomUid(): Hex {
 }
 
 /**
- * Whether `sessionKeyAddress` lacks `grant` on the account, by the rule thirdweb's
- * `shouldUpdateSessionKey` uses: an undeployed account, a key past its end, or a target the key
- * doesn't have yet. A later end than the current one is not a reason to update.
+ * Whether the account's permissions for `sessionKeyAddress` differ from `grant`: an undeployed
+ * account, another end time (so a grant both renews and shortens a key), or targets that aren't
+ * exactly `grant.approvedTargets`. A grant replaces the key's whole target list.
  */
 export async function sessionKeyNeedsGrant(
   managedAddress: Address,
@@ -49,7 +49,8 @@ export async function sessionKeyNeedsGrant(
 ): Promise<boolean> {
   if (!(await isContractDeployed(managedAddress))) return true
   const current = await readPermissionsForSigner(managedAddress, sessionKeyAddress)
-  if (current.endTimestamp > 0n && current.endTimestamp < nowSecs()) return true
+  if (current.endTimestamp !== BigInt(grant.endsAt)) return true
+  if (current.approvedTargets.length !== grant.approvedTargets.length) return true
   return !grant.approvedTargets.every((target) =>
     current.approvedTargets.some((have) => isAddressEqual(have, target)),
   )
@@ -75,16 +76,15 @@ export async function setSessionKeyPermissions(params: {
   const fail = (cause?: unknown) =>
     new ManagedAccountPublishError(failureMessage, 'MODULAR_SIGNER_ACTIVATION_FAILED', managedAddress, cause)
 
-  const now = nowSecs()
   const req: SignerPermissionRequest = {
     signer: sessionKeyAddress,
     isAdmin: 0,
     approvedTargets: grant.approvedTargets,
     nativeTokenLimitPerTransaction: 0n,
     permissionStartTimestamp: BigInt(grant.startsAt ?? 0),
-    permissionEndTimestamp: grant.endsAt != null ? BigInt(grant.endsAt) : now + TEN_YEARS_SECS,
+    permissionEndTimestamp: BigInt(grant.endsAt),
     reqValidityStartTimestamp: 0n,
-    reqValidityEndTimestamp: now + TEN_YEARS_SECS,
+    reqValidityEndTimestamp: nowSecs() + REQUEST_VALIDITY_SECS,
     uid: randomUid(),
   }
   const typedData = {

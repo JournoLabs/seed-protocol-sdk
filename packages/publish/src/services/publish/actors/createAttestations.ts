@@ -224,6 +224,8 @@ async function executeCreateAttestations(
         await assertExecutorModuleReadyForAccount(address)
         const { assertSessionKeyApprovesExecutor } = await import('~/helpers/ensureAutomationSessionKey')
         await assertSessionKeyApprovesExecutor(address, sessionKeyAddress, module)
+        const { warnOnAutomationExposure } = await import('~/helpers/automationExposure')
+        await warnOnAutomationExposure(address)
       } else if (sendsAsManagedAccount(activeWallet, address)) {
         // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
         // publishes as it is: no Thirdweb in-app wallet to connect.

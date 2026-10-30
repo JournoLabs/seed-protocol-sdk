@@ -243,6 +243,14 @@ export interface PublishConfig {
    */
   authorizePublish?: import('./authorization').AuthorizePublish
   /**
+   * Most ETH, in wei, an account may hold when `enrollPublishAutomation` adds a session key,
+   * counting its balance and its EntryPoint deposit. Default 0.001 ETH: accounts with automation
+   * keys are meant to be sponsored and hold no ETH. Above it enroll fails with
+   * `AUTOMATION_ACCOUNT_FUNDED` and an automation publish logs a warning. Raise it to enroll an
+   * account that holds ETH on purpose, such as one paying its own gas with `payment: { gas: 'user' }`.
+   */
+  maxAutomationExposureWei?: bigint
+  /**
    * Most a publish may upload, summed over its files, in bytes. Default 100 MiB; `Infinity` turns
    * the limit off. A larger publish fails with `UploadTooLargeError` before reading any file.
    */

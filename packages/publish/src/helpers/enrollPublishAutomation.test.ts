@@ -20,6 +20,11 @@ const attestPublishAuthorizationMock = mock(async () => ({
 }))
 const revokePublishAuthorizationMock = mock(async () => {})
 const assertExecutorModuleReadyMock = mock(async () => {})
+const assertAutomationExposureAllowedMock = mock(async () => {})
+
+mock.module('./automationExposure', () => ({
+  assertAutomationExposureAllowed: (...args: unknown[]) => assertAutomationExposureAllowedMock(...args),
+}))
 
 mock.module('../config', () => ({
   getConfigRef: () => null,
@@ -60,6 +65,8 @@ afterEach(() => {
   revokePublishAuthorizationMock.mockClear()
   assertExecutorModuleReadyMock.mockClear()
   assertExecutorModuleReadyMock.mockImplementation(async () => {})
+  assertAutomationExposureAllowedMock.mockClear()
+  assertAutomationExposureAllowedMock.mockImplementation(async () => {})
   ensureExecutorModuleInstalledMock.mockImplementation(async () => ({ status: 'already-installed' }))
 })
 
@@ -151,6 +158,20 @@ describe('enrollPublishAutomation', () => {
     expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
   })
 
+  test('refuses an account over the ETH limit before sending anything', async () => {
+    const { ManagedAccountPublishError } = await import('../errors')
+    assertAutomationExposureAllowedMock.mockImplementationOnce(async () => {
+      throw new ManagedAccountPublishError('over the limit', 'AUTOMATION_ACCOUNT_FUNDED', '0xmanaged')
+    })
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    await expect(
+      enrollPublishAutomation({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession', userWallet, admin }),
+    ).rejects.toMatchObject({ code: 'AUTOMATION_ACCOUNT_FUNDED' })
+    expect(ensureExecutorModuleInstalledMock).not.toHaveBeenCalled()
+    expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
+    expect(attestPublishAuthorizationMock).not.toHaveBeenCalled()
+  })
+
   test('asks for admin only when the executor has to be installed', async () => {
     ensureExecutorModuleInstalledMock.mockImplementationOnce(async (...args: unknown[]) => {
       const getAdmin = args[1] as () => Promise<unknown>
@@ -173,8 +194,8 @@ describe('enrollPublishAutomation', () => {
 })
 
 describe('enrollPublishAutomation expiry', () => {
-  test('defaults to 365 days and gives the session key and the grant the same end', async () => {
-    const { PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS } = await import('@seedprotocol/eas')
+  test('defaults to 90 days and gives the session key and the grant the same end', async () => {
+    const days90 = 90 * 24 * 60 * 60
     const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
     const before = Math.floor(Date.now() / 1000)
     await enrollPublishAutomation({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession', userWallet, admin })
@@ -183,8 +204,8 @@ describe('enrollPublishAutomation expiry', () => {
     const keyArgs = firstArg(ensureAutomationSessionKeyMock)
     const grantArgs = firstArg(attestPublishAuthorizationMock)
     expect(keyArgs.expiresAt).toBe(grantArgs.expiresAt)
-    expect(keyArgs.expiresAt).toBeGreaterThanOrEqual(before + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS)
-    expect(keyArgs.expiresAt).toBeLessThanOrEqual(after + PUBLISH_AUTHORIZATION_DEFAULT_EXPIRATION_SECS)
+    expect(keyArgs.expiresAt).toBeGreaterThanOrEqual(before + days90)
+    expect(keyArgs.expiresAt).toBeLessThanOrEqual(after + days90)
   })
 
   test('passes a given expiresAt to both', async () => {

@@ -59,11 +59,15 @@ const { authorization } = await enrollPublishAutomation({
   managedAddress: userManagedAccountAddress,
   sessionKeyAddress: automationWallet.address,
   appAddress: optionalAppLabelAddress,
-  expiresAt: Math.floor(Date.now() / 1000) + 90 * 24 * 3600, // optional
+  expiresAt: Math.floor(Date.now() / 1000) + 30 * 24 * 3600, // optional; default 90 days
 })
 
 // Persist authorization.uid for later revokePublishAutomation
 ```
+
+`expiresAt` defaults to 90 days and goes to both the session key and the `PublishAuthorization`. Enrolling the same key again moves its end to the new value, and a key with any target besides the Seed executor has its targets replaced. A publish with a key that isn't approved for the executor alone fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent, and an ended key is no longer active.
+
+Accounts with automation keys are meant to be sponsored and hold no ETH. Enroll fails with `AUTOMATION_ACCOUNT_FUNDED`, before sending anything, when the account's balance plus EntryPoint deposit is above `maxAutomationExposureWei` in `initPublish` (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose, such as one paying its own gas with `payment: { gas: 'user' }`. An automation publish over the limit logs a warning and goes ahead.
 
 Without Thirdweb, import `enrollPublishAutomation` from `@seedprotocol/publish` and pass the wallets the `/thirdweb` version takes from the connected in-app wallet. `userWallet` sends as the ManagedAccount and its signer is an admin EOA; enroll refuses one that sends from any other address before it sends anything. `admin` is that admin EOA sending from itself, and is needed only when the executor isn't installed yet.
 
@@ -236,7 +240,8 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - [ ] Generate per-user (or per-app) session keys; never reuse Seed Protocol keys
 - [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected, or pass it as `userWallet`
 - [ ] Store `authorization.uid` + session key securely; rotate by revoke + re-enroll
-- [ ] Set grant `expiresAt` when appropriate
+- [ ] Enroll again before `expiresAt` (default 90 days); that moves the key's end and attests a new `PublishAuthorization`
+- [ ] Keep accounts with automation keys sponsored and free of ETH, and handle `AUTOMATION_ACCOUNT_FUNDED` from enroll
 - [ ] Handle `AUTOMATION_UNSUPPORTED_ACCOUNT` from enroll (Router accounts without the executor extension) and `AUTOMATION_PREFLIGHT_FAILED` from publish
 - [ ] Revoke attestations with the user's wallet, not the automation key
 - [ ] Register content schemas with the owner wallet via `ensureEasSchemasForModels` whenever the owner is present (automation keys cannot register schemas)

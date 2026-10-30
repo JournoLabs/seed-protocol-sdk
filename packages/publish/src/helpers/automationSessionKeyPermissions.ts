@@ -7,7 +7,7 @@ export const PUBLISH_AUTOMATION_SCOPES = 'publish,revoke' as const
 export type AutomationSessionKeyPermissions = {
   approvedTargets: `0x${string}`[]
   nativeTokenLimitPerTransaction: number
-  /** Unix seconds; omit for a key that ends ten years after the grant. */
+  /** Unix seconds the key ends; hashed as 0 when omitted. */
   expiresAt?: number
 }
 

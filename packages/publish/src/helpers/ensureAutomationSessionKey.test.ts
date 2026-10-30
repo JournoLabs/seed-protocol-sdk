@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { Wallet } from 'ethers'
-import { decodeFunctionData, getAddress, recoverTypedDataAddress, type Address, type Hex } from 'viem'
+import { decodeFunctionData, getAddress, recoverTypedDataAddress, zeroAddress, type Address, type Hex } from 'viem'
 import { optimismSepolia } from 'viem/chains'
 import { accountPermissionsAbi, signerPermissionRequestTypes } from './abi/accountPermissions'
 import { brandTxSender, fromEthersWallet, type PublishWallet, type SeedTxRequest } from './seedSigner'
@@ -8,6 +8,8 @@ import { brandTxSender, fromEthersWallet, type PublishWallet, type SeedTxRequest
 const MANAGED = getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
 const SESSION = getAddress('0x5e5510000000000000000000000000000000c0de')
 const EXECUTOR = getAddress('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+const OTHER = getAddress('0xcccccccccccccccccccccccccccccccccccccccc')
+const END = Math.floor(Date.now() / 1000) + 3600
 
 const readIsActiveSignerMock = mock(async () => true)
 const readIsAdminMock = mock(async () => true)
@@ -15,7 +17,7 @@ const readPermissionsForSignerMock = mock(async () => ({
   approvedTargets: [EXECUTOR] as readonly Address[],
   nativeTokenLimitPerTransaction: 0n,
   startTimestamp: 0n,
-  endTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
+  endTimestamp: BigInt(END),
 }))
 const isContractDeployedMock = mock(async () => true)
 const waitForPublishReceiptMock = mock(async () => ({ status: 'success' }))
@@ -99,7 +101,7 @@ afterEach(() => {
     approvedTargets: [EXECUTOR],
     nativeTokenLimitPerTransaction: 0n,
     startTimestamp: 0n,
-    endTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
+    endTimestamp: BigInt(END),
   }))
 })
 
@@ -113,7 +115,7 @@ const noTargets = async () => ({
 describe('ensureAutomationSessionKey', () => {
   test('sends nothing when the key already has the executor and has not ended', async () => {
     const { wallet, sent } = adminWallet()
-    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet })
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
     expect(sent).toHaveLength(0)
     expect(readIsActiveSignerMock).toHaveBeenCalled()
   })
@@ -142,6 +144,66 @@ describe('ensureAutomationSessionKey', () => {
     })
   })
 
+  test('moves the end of an active key to a later time', async () => {
+    const { wallet, sent } = adminWallet()
+    await ensureAutomationSessionKey({
+      managedAddress: MANAGED,
+      sessionKeyAddress: SESSION,
+      expiresAt: END + 86_400,
+      admin: wallet,
+    })
+    expect(sent).toHaveLength(1)
+    const { req } = await decodeGrant(sent[0]!)
+    expect(req).toMatchObject({ permissionEndTimestamp: BigInt(END + 86_400) })
+  })
+
+  test('moves the end of an active key to an earlier time', async () => {
+    const { wallet, sent } = adminWallet()
+    await ensureAutomationSessionKey({
+      managedAddress: MANAGED,
+      sessionKeyAddress: SESSION,
+      expiresAt: END - 60,
+      admin: wallet,
+    })
+    expect(sent).toHaveLength(1)
+    const { req } = await decodeGrant(sent[0]!)
+    expect(req).toMatchObject({ permissionEndTimestamp: BigInt(END - 60) })
+  })
+
+  test('replaces the targets of a key that has more than the executor', async () => {
+    readPermissionsForSignerMock.mockImplementation(async () => ({
+      approvedTargets: [EXECUTOR, MANAGED],
+      nativeTokenLimitPerTransaction: 0n,
+      startTimestamp: 0n,
+      endTimestamp: BigInt(END),
+    }))
+    const { wallet, sent } = adminWallet()
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
+    expect(sent).toHaveLength(1)
+    const { req } = await decodeGrant(sent[0]!)
+    expect(req).toMatchObject({ approvedTargets: [EXECUTOR] })
+  })
+
+  test('a signed grant can be sent for one hour', async () => {
+    readPermissionsForSignerMock.mockImplementation(noTargets)
+    const { wallet, sent } = adminWallet()
+    const before = BigInt(Math.floor(Date.now() / 1000))
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
+    const after = BigInt(Math.floor(Date.now() / 1000))
+    const { req } = await decodeGrant(sent[0]!)
+    expect(req.reqValidityEndTimestamp as bigint).toBeGreaterThanOrEqual(before + 3600n)
+    expect(req.reqValidityEndTimestamp as bigint).toBeLessThanOrEqual(after + 3600n)
+  })
+
+  test('refuses an end that has passed, before sending', async () => {
+    readPermissionsForSignerMock.mockImplementation(noTargets)
+    const { wallet, sent } = adminWallet()
+    await expect(
+      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: 1, admin: wallet }),
+    ).rejects.toMatchObject({ code: 'MODULAR_SIGNER_ACTIVATION_FAILED' })
+    expect(sent).toHaveLength(0)
+  })
+
   test('grants again when the key has ended', async () => {
     readPermissionsForSignerMock.mockImplementation(async () => ({
       approvedTargets: [EXECUTOR],
@@ -150,7 +212,7 @@ describe('ensureAutomationSessionKey', () => {
       endTimestamp: 1n,
     }))
     const { wallet, sent } = adminWallet()
-    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet })
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
     expect(sent).toHaveLength(1)
   })
 
@@ -159,7 +221,7 @@ describe('ensureAutomationSessionKey', () => {
     readIsAdminMock.mockImplementation(async () => false)
     const { owner, wallet, sent } = adminWallet()
     await expect(
-      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet }),
+      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet }),
     ).rejects.toThrow(`${owner.address} signed the session-key request but is not an admin`)
     expect(sent).toHaveLength(0)
   })
@@ -168,7 +230,7 @@ describe('ensureAutomationSessionKey', () => {
     isContractDeployedMock.mockImplementation(async () => false)
     const { wallet, sent } = adminWallet()
     await expect(
-      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet }),
+      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet }),
     ).rejects.toMatchObject({ code: 'MODULAR_SIGNER_ACTIVATION_FAILED' })
     expect(sent).toHaveLength(0)
   })
@@ -181,7 +243,7 @@ describe('ensureAutomationSessionKey', () => {
       deployed = true
       return { status: 'success' }
     })
-    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet })
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
     expect(sent).toHaveLength(1)
     expect(readIsAdminMock).not.toHaveBeenCalled()
   })
@@ -190,7 +252,7 @@ describe('ensureAutomationSessionKey', () => {
     readPermissionsForSignerMock.mockImplementation(noTargets)
     readIsActiveSignerMock.mockImplementationOnce(async () => false)
     const { wallet } = adminWallet()
-    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet })
+    await ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet })
     expect(readIsActiveSignerMock).toHaveBeenCalledTimes(2)
   })
 
@@ -199,7 +261,7 @@ describe('ensureAutomationSessionKey', () => {
     readIsActiveSignerMock.mockImplementation(async () => false)
     const { wallet } = adminWallet()
     await expect(
-      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, admin: wallet }),
+      ensureAutomationSessionKey({ managedAddress: MANAGED, sessionKeyAddress: SESSION, expiresAt: END, admin: wallet }),
     ).rejects.toMatchObject({ code: 'MODULAR_SIGNER_ACTIVATION_FAILED' })
     expect(readIsActiveSignerMock).toHaveBeenCalledTimes(5)
   })
@@ -270,13 +332,29 @@ describe('assertSessionKeyApprovesExecutor', () => {
     await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).resolves.toBeUndefined()
   })
 
-  test('passes a key approved for every target', async () => {
-    withTargets([`0x${'0'.repeat(40)}`])
-    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).resolves.toBeUndefined()
+  test('refuses a key approved for every target', async () => {
+    withTargets([zeroAddress])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).rejects.toMatchObject({
+      code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
+    })
+  })
+
+  test('refuses a key approved for the executor and another target', async () => {
+    withTargets([EXECUTOR, MANAGED])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).rejects.toMatchObject({
+      code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
+    })
+  })
+
+  test('refuses a key with no targets', async () => {
+    withTargets([])
+    await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).rejects.toMatchObject({
+      code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
+    })
   })
 
   test('refuses a key granted for a replaced executor and says how to fix it', async () => {
-    withTargets([getAddress('0xcccccccccccccccccccccccccccccccccccccccc')])
+    withTargets([OTHER])
     await expect(assertSessionKeyApprovesExecutor(MANAGED, SESSION, EXECUTOR)).rejects.toMatchObject({
       code: 'MODULAR_SIGNER_ACTIVATION_FAILED',
       message: expect.stringContaining('enrollPublishAutomation'),

@@ -119,7 +119,7 @@ const txSender = await createManagedAccountTxSender({
   bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
   paymasterUrl: import.meta.env.VITE_PAYMASTER_URL,
 })
-await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, admin: { signer: owner.signer, txSender } })
+await ensureAutomationSessionKey({ managedAddress: txSender.address, sessionKeyAddress, expiresAt, admin: { signer: owner.signer, txSender } })
 ```
 
 Register `{ signer: owner.signer, txSender, kind: 'modular', publisherAddress: txSender.address }` with `setPublishWallet` to publish as the account. With `useModularExecutor`, publish sends `multiPublish` from a wallet whose `txSender.address` is the publishing address and whose `kind` isn't `'eoa'`, without connecting a Thirdweb in-app wallet. Any other wallet still goes through the Thirdweb prep.

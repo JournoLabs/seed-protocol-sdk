@@ -46,7 +46,7 @@ export async function connectManagedAccountWallet(managedAddress: string): Promi
 export async function ensureAutomationSessionKey(params: {
   managedAddress: string
   sessionKeyAddress: string
-  expiresAt?: number
+  expiresAt: number
   admin?: PublishWallet
 }): Promise<void> {
   const admin = params.admin ?? (await connectManagedAccountWallet(params.managedAddress))
