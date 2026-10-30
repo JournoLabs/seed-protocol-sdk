@@ -4,6 +4,7 @@ import { BaseDb, publishProcesses } from '@seedprotocol/sdk'
 import { eq, desc } from 'drizzle-orm'
 import { usePublishProcess } from './usePublishProcess'
 import { useArweaveL1Finalize } from './useArweaveL1Finalize'
+import { describePublishRun } from '~/helpers/publishDisplayHelpers'
 
 export type PublishProcessStatus = 'in_progress' | 'completed' | 'failed' | 'interrupted'
 
@@ -25,6 +26,16 @@ export interface PublishProcessRecord {
   updatedAt?: number
 }
 
+/**
+ * A seed's publish: the live run (if any), its latest `publish_processes` row and its Arweave L1
+ * finalization jobs.
+ *
+ * `isActive` is true while a run is in flight: a publish actor is registered for the seed, or the
+ * latest row is `in_progress`, and the run's value is not terminal (`success`, `failure`,
+ * `stopping`). A run that ends is not active while its final save is still being written. A run
+ * parked on a recoverable error (`describePublishRun(publishValue).awaitingRetry`) stays active:
+ * it still holds the item and continues on `PublishManager.retryAttestations`.
+ */
 export function useItemPublishStatus(seedLocalId: string | undefined) {
   const { publishProcess, value } = usePublishProcess(seedLocalId ?? '')
   const arweaveL1 = useArweaveL1Finalize(seedLocalId)
@@ -45,7 +56,8 @@ export function useItemPublishStatus(seedLocalId: string | undefined) {
   const latestRecords = useLiveQuery(latestProcessRowQuery)
 
   const record = latestRecords?.[0] as PublishProcessRecord | undefined
-  const isActive = !!publishProcess || record?.status === 'in_progress'
+  const isActive =
+    !describePublishRun(value).terminal && (!!publishProcess || record?.status === 'in_progress')
 
   return {
     latestRecord: record,

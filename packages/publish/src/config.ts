@@ -125,8 +125,11 @@ export interface PublishConfig {
    * How non-Thirdweb wallets submit txs. Defaults to `eip7702` when `bundlerUrl` is set, else `eoa`.
    */
   accountMode?: PublishAccountMode
-  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Data items are uploaded to its bundler routes. */
-  uploadApiBaseUrl: string
+  /**
+   * Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Data
+   * items are uploaded to its bundler routes. Required unless `payment.storage` is `'user'`.
+   */
+  uploadApiBaseUrl?: string
   /**
    * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
    * them once at app bootstrap with
@@ -207,6 +210,12 @@ export interface PublishConfig {
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
   /**
+   * How publish writes Arweave links into Html (ADR 0025). `gateway` (default): `https://<public
+   * gateway>/raw/<id>`, which loads anywhere and which Seed readers move onto their own gateways.
+   * `ar`: `ar://<id>`, host-free, but only a Seed reader can load it.
+   */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
+  /**
    * Optional fallback: Signer for DataItem creation. Prefer passing at createPublish time.
    */
   dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
@@ -233,6 +242,26 @@ export interface PublishConfig {
    * send a token to the upload API with the publish's requests. See {@link AuthorizePublish}.
    */
   authorizePublish?: import('./authorization').AuthorizePublish
+  /**
+   * Most ETH, in wei, an account may hold when `enrollPublishAutomation` adds a session key,
+   * counting its balance and its EntryPoint deposit. Default 0.001 ETH: accounts with automation
+   * keys are meant to be sponsored and hold no ETH. Above it enroll fails with
+   * `AUTOMATION_ACCOUNT_FUNDED` and an automation publish logs a warning. Raise it to enroll an
+   * account that holds ETH on purpose, such as one paying its own gas with `payment: { gas: 'user' }`.
+   */
+  maxAutomationExposureWei?: bigint
+  /**
+   * Most a publish may upload, summed over its files, in bytes. Default 100 MiB; `Infinity` turns
+   * the limit off. A larger publish fails with `UploadTooLargeError` before reading any file.
+   */
+  maxUploadBytes?: number
+  /**
+   * Above this many upload bytes (default 25 MiB; `Infinity` never asks) a publish fails with
+   * `UploadNeedsConfirmError` unless it is given `confirmUpload: true`.
+   */
+  confirmUploadAboveBytes?: number
+  /** Uplink speed used for upload time estimates. Default 5 Mbit/s. */
+  uplinkBitsPerSecond?: number
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
@@ -258,6 +287,8 @@ export interface CreatePublishOptions {
    * Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
+  /** Overrides {@link PublishConfig.htmlArweaveRefs} for this publish. */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
   /**
    * Called when this publish run succeeds with the resolved Seed/Version/property UID batch.
    * Overrides {@link PublishConfig.onPublished} when both are set.
@@ -265,6 +296,13 @@ export interface CreatePublishOptions {
   onPublished?: import('./services/publishedBy').OnPublishedCallback
   /** Overrides {@link PublishConfig.authorizePublish} for this publish. */
   authorizePublish?: import('./authorization').AuthorizePublish
+  /** Overrides {@link PublishConfig.maxUploadBytes} for this publish. */
+  maxUploadBytes?: number
+  /**
+   * The user agreed to this publish's upload size: skips `UploadNeedsConfirmError`. It
+   * doesn't lift `maxUploadBytes`.
+   */
+  confirmUpload?: boolean
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */
@@ -353,15 +391,13 @@ export function initPublish(c: PublishConfig): void {
   })
 }
 
-/** Alias for initPublish. Use initPublish for the primary API. */
-export const configurePublish = initPublish
-
 export interface ResolvedPublishConfig extends PublishConfig {
   /**
    * ManagedAccount factory on the publish chain, or undefined when none is known for this chain.
    * Use {@link requireManagedAccountFactoryAddress} where a factory is mandatory.
    */
   thirdwebAccountFactoryAddress: string | undefined
+  /** `''` when unset (user-paid storage). */
   uploadApiBaseUrl: string
   /** Resolved verification origin (defaults to uploadApiBaseUrl). */
   arweaveUploadVerificationBaseUrl: string
@@ -419,8 +455,8 @@ export function getPublishConfig(): ResolvedPublishConfig {
       '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
-  const arweaveUploadVerificationBaseUrl =
-    config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
+  const uploadApiBaseUrl = config.uploadApiBaseUrl ?? ''
+  const arweaveUploadVerificationBaseUrl = config.arweaveUploadVerificationBaseUrl ?? uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
   const useModularExecutor = config.useModularExecutor ?? false
   const chain = config.chain ?? DEFAULT_PUBLISH_CHAIN
@@ -436,6 +472,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
     easChain,
     useDirectEas: config.useDirectEas ?? false,
     useModularExecutor,
+    uploadApiBaseUrl,
     arweaveUploadVerificationBaseUrl,
     arweaveGraphqlUrl,
     autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,

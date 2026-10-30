@@ -8,11 +8,12 @@ import {
 } from '../edgeMapping'
 import {
   isRelationLookupTarget,
-  resolveLookupMapped,
+  resolveLookup,
   sampleValueFromSource,
   shapeLookupValue,
   stripLookup,
   withLookupEntries,
+  withLookupSplit,
 } from '../relationLookup'
 import {
   normalizeMappingFromSourceId,
@@ -22,7 +23,7 @@ import type {
   DeriveSpec,
   FieldMapping,
   LookupEntry,
-  MappingLookups,
+  LookupSeparator,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -101,13 +102,12 @@ export function computeRequiredResolve(
 
 export type PreviewForEdgeOptions = {
   target?: TargetProperty
-  lookups?: MappingLookups
   propertyName?: string
   mapping?: FieldMapping
 }
 
 /**
- * Sync row preview aligned with `applyMapping` / lookup tables.
+ * Sync row preview aligned with `applyMapping`.
  * `extract`/`file` stay descriptive (sync apply skips them).
  * `lookup` shows a stored-entry hit when present; otherwise a pending placeholder.
  * Plain copy shows the coerced value when a target is known.
@@ -134,21 +134,18 @@ export function previewForEdge(
     return `‹file stored from ${truncateSample(source.value, 48)}›`
   }
   if (resolve === 'lookup') {
-    const raw = source.value || source.label
+    const raw = source.value ?? ''
     const mapping = options?.mapping ?? {
       sourceId: source.id,
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
       resolve: 'lookup' as const,
     }
-    const mapped = resolveLookupMapped(mapping, raw, options?.lookups)
-    if (mapped !== undefined) {
-      const shaped = options?.target
-        ? shapeLookupValue(mapped, options.target)
-        : mapped
-      if (Array.isArray(shaped)) {
-        return truncateSample(shaped.join(', '), 80)
-      }
-      return truncateSample(String(shaped), 80)
+    const { refs, unmatched } = resolveLookup(mapping, raw)
+    if (refs.length > 0) {
+      const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
+      const shown = Array.isArray(shaped) ? shaped : [shaped]
+      const missing = unmatched.map((part) => `‹lookup ref for "${truncateSample(part, 48)}"›`)
+      return truncateSample([...shown, ...missing].join(', '), 80)
     }
     return `‹lookup ref for "${truncateSample(source.value, 48)}"›`
   }
@@ -157,7 +154,7 @@ export function previewForEdge(
     return ''
   }
   if (options?.target) {
-    const raw = source.value || source.label
+    const raw = source.value ?? ''
     const coerced = coerceValue(raw, options.target.dataType)
     if (typeof coerced === 'string') return truncateSample(coerced, 80)
     if (typeof coerced === 'number' || typeof coerced === 'boolean') {
@@ -204,7 +201,6 @@ export function rowState(args: {
   requiredResolve: ResolveJob | null
   conflict?: boolean
   sampleValue?: string
-  lookups?: MappingLookups
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
   if (!args.mapping || !isPresentEdge(args.mapping)) return 'empty'
@@ -216,10 +212,7 @@ export function rowState(args: {
   }
   if (actual === 'lookup') {
     const sample = args.sampleValue ?? ''
-    if (
-      !sample ||
-      resolveLookupMapped(args.mapping, sample, args.lookups) === undefined
-    ) {
+    if (!sample || resolveLookup(args.mapping, sample).unmatched.length > 0) {
       return 'needsLookup'
     }
   }
@@ -323,6 +316,24 @@ export function applyDeriveToMappings(
   return next
 }
 
+function updateLookupEdge(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  update: (edge: FieldMapping) => FieldMapping,
+): FieldMapping[] | null {
+  const index =
+    rowKey === 'property'
+      ? mappings.findIndex((m) => m.propertyName === rowId)
+      : edgeIds.indexOf(rowId)
+  const prev = index < 0 ? undefined : mappings[index]
+  if (!prev || prev.resolve !== 'lookup') return null
+  const next = [...mappings]
+  next[index] = update(prev)
+  return next
+}
+
 export function applyLookupEntriesToMappings(
   mappings: FieldMapping[],
   rowKey: 'property' | 'source',
@@ -330,22 +341,17 @@ export function applyLookupEntriesToMappings(
   edgeIds: string[],
   entries: LookupEntry[],
 ): FieldMapping[] | null {
-  if (rowKey === 'property') {
-    const index = mappings.findIndex((m) => m.propertyName === rowId)
-    if (index < 0) return null
-    const prev = mappings[index]!
-    if (prev.resolve !== 'lookup') return null
-    const next = [...mappings]
-    next[index] = withLookupEntries(prev, entries)
-    return next
-  }
-  const edgeIndex = edgeIds.indexOf(rowId)
-  if (edgeIndex < 0) return null
-  const prev = mappings[edgeIndex]
-  if (!prev || prev.resolve !== 'lookup') return null
-  const next = [...mappings]
-  next[edgeIndex] = withLookupEntries(prev, entries)
-  return next
+  return updateLookupEdge(mappings, rowKey, rowId, edgeIds, (edge) => withLookupEntries(edge, entries))
+}
+
+export function applyLookupSplitToMappings(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  separators: LookupSeparator[] | null,
+): FieldMapping[] | null {
+  return updateLookupEdge(mappings, rowKey, rowId, edgeIds, (edge) => withLookupSplit(edge, separators))
 }
 
 export function upsertPropertyMapping(
@@ -357,29 +363,13 @@ export function upsertPropertyMapping(
   return next
 }
 
-export function clearLookupsForProperties(
-  lookups: MappingLookups,
-  propertyNames: string[],
-): MappingLookups | null {
-  if (propertyNames.length === 0) return null
-  let changed = false
-  const next = { ...lookups }
-  for (const name of propertyNames) {
-    if (name in next) {
-      delete next[name]
-      changed = true
-    }
-  }
-  return changed ? next : null
-}
-
 export function connectSourceToProperty(
   mappings: FieldMapping[],
   sources: SourceNode[],
   targets: TargetProperty[],
   sourceId: string,
   propertyName: string,
-): { mappings: FieldMapping[]; clearedLookupProps: string[] } {
+): FieldMapping[] {
   const targetsByName = new Map(targets.map((t) => [t.name, t]))
   let edge = normalizeMappingFromSourceId(sourceId, propertyName)
   edge = attachLookupIfNeeded(edge, targetsByName.get(propertyName))
@@ -394,48 +384,28 @@ export function connectSourceToProperty(
 
   const prev = mappings.find((m) => m.propertyName === propertyName)
   edge = withPreservedExtras(edge, prev)
-  const next = upsertPropertyMapping(mappings, edge)
-  const clearedLookupProps: string[] = []
-  if (prev?.resolve === 'lookup' && edge.resolve !== 'lookup') {
-    clearedLookupProps.push(propertyName)
-  }
-  return { mappings: next, clearedLookupProps }
+  return upsertPropertyMapping(mappings, edge)
 }
 
 export function removeMappingsForSourceId(
   mappings: FieldMapping[],
   sourceId: string,
-): { mappings: FieldMapping[]; clearedLookupProps: string[] } {
+): FieldMapping[] {
   const parsed = parseResolvedSourceId(sourceId)
-  const clearedLookupProps: string[] = []
-  const next = mappings.filter((c) => {
-    let keep: boolean
-    if (parsed) {
-      keep = !(
-        Boolean(c.sourceId) &&
-        c.sourceId === parsed.originId &&
-        c.resolve === parsed.resolve
-      )
-    } else {
-      keep = c.sourceId !== sourceId
-    }
-    if (!keep && c.resolve === 'lookup') {
-      clearedLookupProps.push(c.propertyName)
-    }
-    return keep
+  return mappings.filter((c) => {
+    if (!parsed) return c.sourceId !== sourceId
+    return !(Boolean(c.sourceId) && c.sourceId === parsed.originId && c.resolve === parsed.resolve)
   })
-  return { mappings: next, clearedLookupProps }
 }
 
 export function buildPropertyModeRows(args: {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   sources: SourceNode[]
-  lookups?: MappingLookups
   /** When set, only these property names appear (add-flow extras). */
   visiblePropertyNames?: Set<string> | null
 }): FieldMapperRow[] {
-  const { targets, mappings, sources, lookups } = args
+  const { targets, mappings, sources } = args
   const byName = new Map(mappings.map((m) => [m.propertyName, m]))
   const sourceById = new Map(originSources(sources).map((s) => [s.id, s]))
   // Also index all sources for resolve edges that still point at origin
@@ -455,7 +425,7 @@ export function buildPropertyModeRows(args: {
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
     const sampleValue = sampleValueFromSource(source)
-    const state = rowState({ mapping, requiredResolve, sampleValue, lookups })
+    const state = rowState({ mapping, requiredResolve, sampleValue })
     return {
       id: target.name,
       target,
@@ -464,7 +434,6 @@ export function buildPropertyModeRows(args: {
       sampleValue,
       preview: previewForEdge(source, mapping?.resolve, {
         target,
-        lookups,
         propertyName: target.name,
         mapping,
       }),
@@ -487,9 +456,8 @@ export function buildSourceModeRows(args: {
   drafts: SourceModeDraft[]
   sources: SourceNode[]
   targets: TargetProperty[]
-  lookups?: MappingLookups
 }): { rows: FieldMapperRow[]; conflicts: Set<string> } {
-  const { mappings, edgeIds, drafts, sources, targets, lookups } = args
+  const { mappings, edgeIds, drafts, sources, targets } = args
   const sourceById = new Map(sources.map((s) => [s.id, s]))
   const targetsByName = new Map(targets.map((t) => [t.name, t]))
 
@@ -554,7 +522,6 @@ export function buildSourceModeRows(args: {
       requiredResolve,
       conflict: conflicts.has(r.id),
       sampleValue,
-      lookups,
     })
     // Drafts with only source or only property stay empty
     const effectiveState =
@@ -572,7 +539,6 @@ export function buildSourceModeRows(args: {
       sampleValue,
       preview: previewForEdge(r.source, complete?.resolve, {
         target: r.target,
-        lookups,
         propertyName: complete?.propertyName,
         mapping: complete,
       }),
@@ -588,17 +554,31 @@ export function newRowId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+/**
+ * Row ids for `next`, carried over from `prev` so a row keeps its id (and React key) when others
+ * are added or removed: a mapping object still in the list keeps its id; an edited one (a new
+ * object where an old one went) takes the id of the old one it replaced, in order; any other
+ * gets a new id.
+ */
 export function syncEdgeIds(
-  prev: string[],
-  mappingCount: number,
+  prev: { mappings: readonly FieldMapping[]; ids: readonly string[] },
+  next: readonly FieldMapping[],
 ): string[] {
-  if (prev.length === mappingCount) return prev
-  if (prev.length > mappingCount) return prev.slice(0, mappingCount)
-  const next = [...prev]
-  while (next.length < mappingCount) {
-    next.push(newRowId('edge'))
-  }
-  return next
+  if (prev.mappings === next && prev.ids.length === next.length) return [...prev.ids]
+  const kept = new Map<FieldMapping, number>()
+  prev.mappings.forEach((mapping, index) => {
+    if (prev.ids[index] !== undefined && !kept.has(mapping)) kept.set(mapping, index)
+  })
+  const used = new Set<number>()
+  const ids: (string | undefined)[] = next.map((mapping) => {
+    const index = kept.get(mapping)
+    if (index === undefined || used.has(index)) return undefined
+    used.add(index)
+    return prev.ids[index]
+  })
+  const nextSet = new Set(next)
+  const freed = prev.ids.filter((_, index) => !used.has(index) && !nextSet.has(prev.mappings[index]!))
+  return ids.map((id) => id ?? freed.shift() ?? newRowId('edge'))
 }
 
 export function filterPropertyNames(

@@ -3,7 +3,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { duplexPair } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   readTunnelRequest,
   readTunnelResponse,
@@ -12,6 +12,8 @@ import {
 } from '../src/tunnel/protocol'
 import { proxyTunnelRequest } from '../src/tunnel/proxy'
 import { connectTunnel, serveTunnel } from '../src/index'
+import type { DhtBootstrapNode } from '../src/types'
+import { startTestnet, type LocalTestnet } from './helpers/testnet'
 
 const runDhtTests =
   process.env.GATEWAY_HYPER_TESTS === '1' || process.env.GATEWAY_HYPER_TESTS === 'true'
@@ -60,45 +62,65 @@ describe('gateway-hyper upstream proxy', () => {
   })
 })
 
-describe.runIf(runDhtTests)('gateway-hyper DHT tunnel integration', () => {
-  it('proxies HTTP through serve + connect over HyperDHT', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-hyper-int-'))
-    const keyFile = path.join(tmpDir, 'operator.key.json')
+async function expectInfoThroughTunnel(bootstrap: DhtBootstrapNode[] | undefined) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-hyper-int-'))
+  const keyFile = path.join(tmpDir, 'operator.key.json')
 
-    const upstream = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, via: 'upstream' }))
-    })
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, via: 'upstream' }))
+  })
 
-    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', () => resolve()))
-    const addr = upstream.address()
-    if (!addr || typeof addr === 'string') {
-      throw new Error('upstream address unavailable')
-    }
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', () => resolve()))
+  const addr = upstream.address()
+  if (!addr || typeof addr === 'string') {
+    throw new Error('upstream address unavailable')
+  }
 
-    const operator = await serveTunnel({
-      upstream: `http://127.0.0.1:${addr.port}`,
-      keyFile,
-    })
+  const operator = await serveTunnel({
+    upstream: `http://127.0.0.1:${addr.port}`,
+    keyFile,
+    bootstrap,
+  })
 
-    const client = await connectTunnel({
-      key: operator.key,
-      host: '127.0.0.1',
-      port: 0,
-    })
+  const client = await connectTunnel({
+    key: operator.key,
+    host: '127.0.0.1',
+    port: 0,
+    bootstrap,
+  })
 
-    try {
-      const res = await fetch(`${client.baseUrl}/info`)
-      expect(res.status).toBe(200)
-      const json = (await res.json()) as { ok?: boolean; via?: string }
-      expect(json.ok).toBe(true)
-      expect(json.via).toBe('upstream')
-    } finally {
-      await client.close()
-      await operator.close()
-      await new Promise<void>((resolve) => upstream.close(() => resolve()))
-    }
+  try {
+    const res = await fetch(`${client.baseUrl}/info`)
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { ok?: boolean; via?: string }
+    expect(json.ok).toBe(true)
+    expect(json.via).toBe('upstream')
+  } finally {
+    await client.close()
+    await operator.close()
+    await new Promise<void>((resolve) => upstream.close(() => resolve()))
+  }
+}
+
+describe.runIf(runDhtTests)('gateway-hyper tunnel over the public DHT', () => {
+  it('proxies HTTP through serve + connect', async () => {
+    await expectInfoThroughTunnel(undefined)
   }, 120_000)
+})
+
+describe('gateway-hyper DHT tunnel integration', () => {
+  let testnet: LocalTestnet
+  beforeAll(async () => {
+    testnet = await startTestnet()
+  })
+  afterAll(async () => {
+    await testnet.destroy()
+  })
+
+  it('proxies HTTP through serve + connect over HyperDHT', async () => {
+    await expectInfoThroughTunnel(testnet.bootstrap)
+  }, 30_000)
 
   describe('with a hung upstream', () => {
     const big = Buffer.alloc(20 * 1024 * 1024)
@@ -122,6 +144,7 @@ describe.runIf(runDhtTests)('gateway-hyper DHT tunnel integration', () => {
       const operator = await serveTunnel({
         upstream: `http://127.0.0.1:${addr.port}`,
         keyFile: path.join(tmpDir, 'operator.key.json'),
+        bootstrap: testnet.bootstrap,
         ...serveOpts,
       })
       const client = await connectTunnel({
@@ -129,6 +152,7 @@ describe.runIf(runDhtTests)('gateway-hyper DHT tunnel integration', () => {
         host: '127.0.0.1',
         port: 0,
         requestTimeoutMs,
+        bootstrap: testnet.bootstrap,
       })
       return {
         client,

@@ -24,7 +24,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 testDescribe('typing into a property', () => {
   const schemaName = 'Test Schema Fast Typing'
   const testSchema: SchemaFileFormat = {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: 'test-schema-fast-typing',
     metadata: {

@@ -16,6 +16,7 @@ import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
 import type { IItem, IItemProperty, ItemCreateOptions, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
+import { useHeldEntities } from './useHeldEntities'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
 import { useSeedQueryClient } from './queryClient'
@@ -60,6 +61,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const [, setEasHydrationTick] = useState(0)
   /** Bumped when one of the item's property values changes. */
   const [, setPropertyValuesTick] = useState(0)
+  /** Bumped when one of the item's `IDENTITY_FIELDS` changes. */
+  const [, setIdentityTick] = useState(0)
   const [isMachineBusy, setIsMachineBusy] = useState(false)
   const [machineError, setMachineError] = useState<Error | null>(null)
   const hasSeenIdleRef = useRef(false)
@@ -104,7 +107,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const refetch = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
   }, [queryClient])
-  useHeldItem(item, refetch)
+  useHeldEntities(useMemo(() => (item ? [item] : []), [item]), retainItem, refetch)
 
   useEffect(() => {
     const onEasSynced = () => {
@@ -118,17 +121,26 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }, [queryClient])
 
   // Follow the item: busy after it loaded and its machine left idle (publishing), or a failed load.
+  // Also re-render when its uids or publish state change while it stays idle (sync, another tab,
+  // a publish recorded late, unpublish).
   useEffect(() => {
     hasSeenIdleRef.current = false
     setIsMachineBusy(false)
     setMachineError(null)
     if (!item) return
 
-    const subscription: Subscription = item.getService().subscribe({
+    const service = item.getService()
+    let identity = identityFields(service.getSnapshot()?.context)
+    const subscription: Subscription = service.subscribe({
       // Stopped (unloaded elsewhere, dropped by another tab or a purge): look the item up again
       complete: refetch,
       next: (snapshot: any) => {
         if (!snapshot || typeof snapshot !== 'object' || !('value' in snapshot)) return
+        const nextIdentity = identityFields(snapshot.context)
+        if (IDENTITY_FIELDS.some((_, i) => !Object.is(nextIdentity[i], identity[i]))) {
+          identity = nextIdentity
+          setIdentityTick((n) => n + 1)
+        }
         if (item.status === 'error') {
           setMachineError(new Error('Item service error'))
           setIsMachineBusy(false)
@@ -196,23 +208,24 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }
 }
 
-/**
- * Holds `item` while the component shows it. The release is deferred a tick: a StrictMode remount
- * or a refetch returning the same instance takes its new hold before the old one is dropped, so
- * the count never touches 0 in between. `onStopped` runs when the item can't be held.
- */
-function useHeldItem(item: IItem<any> | undefined, onStopped: () => void): void {
-  useEffect(() => {
-    if (!item) return
-    if (!Item.retain(item)) {
-      onStopped()
-      return
-    }
-    return () => {
-      setTimeout(() => item.unload(), 0)
-    }
-  }, [item, onStopped])
-}
+/** Item context fields that say which seed and version it is and its publish state. */
+const IDENTITY_FIELDS = [
+  'seedUid',
+  'latestVersionUid',
+  'latestVersionLocalId',
+  'lastVersionPublishedAt',
+  'attestationCreatedAt',
+  'revokedAt',
+  'publisher',
+] as const
+
+const identityFields = (context: object | undefined) =>
+  IDENTITY_FIELDS.map((key) => (context as Record<string, unknown> | undefined)?.[key])
+
+/** Item.retain, stable for useHeldEntities. */
+const retainItem = (item: IItem<any>) => Item.retain(item)
+
+const NO_ITEMS: IItem<any>[] = []
 
 type UseItemsReturn = {
   items: IItem<any>[]
@@ -288,6 +301,8 @@ const getItemsQueryKey = (
  * - Schema-backed fields on each `IItem` (e.g. list relation properties) read from the item
  *   machine and may be `undefined` until that property is loaded; normalize for forms
  *   (e.g. `Array.isArray(x) ? x : []`).
+ * - Each mounted hook holds the items it lists and releases one when it leaves the list or the
+ *   hook unmounts, so an item that no hook or caller holds is unloaded.
  */
 export const useItems: UseItems = ({
   modelName,
@@ -345,7 +360,7 @@ export const useItems: UseItems = ({
   }, [queryKey])
 
   const {
-    data: items = [],
+    data: items = NO_ITEMS,
     isLoading,
     isFetching,
     dataUpdatedAt,
@@ -354,7 +369,9 @@ export const useItems: UseItems = ({
     queryKey,
     queryFn: async ({ signal }) => {
       fetchesStartedRef.current++
+      // No hold here: queries are shared by key, so each mounted hook holds what it lists (below).
       const rows = await Item.all(modelName, deleted, {
+        hold: false,
         waitForReady: true,
         includeEas,
         addressFilter,
@@ -369,8 +386,20 @@ export const useItems: UseItems = ({
     // Local SQLite + live invalidation drive freshness; Seed’s default staleTime would keep a
     // mistaken initial [] “fresh” and block refetch when another subscriber mounts.
     staleTime: 0,
+    // Dropped once unused: its items are held only while a hook lists them, so a kept list would
+    // hand the next mount instances that were unloaded since.
+    gcTime: 0,
   })
   itemsRef.current = items
+
+  // One hold per mounted hook on each item it lists. An item that can't be held was stopped
+  // (unloaded, dropped by another tab or a purge): list again.
+  const queryKeyRef = useRef(queryKey)
+  queryKeyRef.current = queryKey
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
+  }, [queryClient])
+  useHeldEntities(items, retainItem, refetch)
 
   // Watch the seeds table for changes
   const db = isClientReady ? BaseDb.getAppDb() : null
@@ -512,8 +541,10 @@ export const useItems: UseItems = ({
 
 export type UseCreateItemReturn = {
   /**
-   * Calls `Item.create({ modelName, ...itemData }, options)`. A call made while another is in
-   * flight returns that call's promise (and its item) instead of creating a second one.
+   * Calls `Item.create({ modelName, ...itemData }, { hold: false, ...options })`: the item takes no
+   * hold, so it unloads after the grace period unless something holds it (a mounted `useItem`, or
+   * `options.hold: true`, released with `item.unload()`). A call made while another is in flight
+   * returns that call's promise (and its item) instead of creating a second one.
    */
   createItem: (
     modelName: string,
@@ -525,11 +556,53 @@ export type UseCreateItemReturn = {
   resetError: () => void
 }
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Arrays and plain objects compare by contents, so values a click handler builds on each click
+ * still match; anything else (a File, a Blob, a class instance) must be the same object.
+ */
+const sameValue = (a: unknown, b: unknown, depth = 0): boolean => {
+  if (Object.is(a, b)) return true
+  // Past this depth (or a cycle) the values count as different, which only costs a second create.
+  if (depth > 20) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((value, i) => sameValue(value, b[i], depth + 1))
+  }
+  if (isPlainObject(a) && isPlainObject(b)) return sameRecord(a, b, depth + 1)
+  return false
+}
+
+/** Same keys, each value the same (`sameValue`): a repeated call, not a new item. */
+const sameRecord = (
+  a: Record<string, unknown> | undefined,
+  b: Record<string, unknown> | undefined,
+  depth = 0,
+): boolean => {
+  const aKeys = Object.keys(a ?? {})
+  const bKeys = Object.keys(b ?? {})
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every((key) => Object.hasOwn(b ?? {}, key) && sameValue(a?.[key], b?.[key], depth))
+  )
+}
+
+type CreateCall = {
+  modelName: string
+  itemData?: Record<string, any>
+  options?: ItemCreateOptions
+  promise: Promise<Item<any> | undefined>
+}
+
 export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
-  // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
-  const inFlightRef = useRef<Promise<Item<any> | undefined> | null>(null)
+  // Refs, not the isLoading state: two calls before a re-render both saw isLoading false.
+  const inFlightRef = useRef<CreateCall[]>([])
 
   const resetError = useCallback(() => setError(null), [])
 
@@ -539,9 +612,16 @@ export const useCreateItem = (): UseCreateItemReturn => {
       itemData?: Record<string, any>,
       options?: ItemCreateOptions,
     ): Promise<Item<any> | undefined> => {
-      if (inFlightRef.current) {
-        logger('[useCreateItem] [createItem] already creating item, returning the in-flight create')
-        return inFlightRef.current
+      // The same call again while it runs (a double click) gets the same item; a different one runs
+      const repeated = inFlightRef.current.find(
+        (call) =>
+          call.modelName === modelName &&
+          sameRecord(call.itemData, itemData) &&
+          sameRecord(call.options as Record<string, unknown> | undefined, options as Record<string, unknown> | undefined),
+      )
+      if (repeated) {
+        logger('[useCreateItem] [createItem] the same create is running, returning it')
+        return repeated.promise
       }
 
       setError(null)
@@ -552,22 +632,28 @@ export const useCreateItem = (): UseCreateItemReturn => {
         try {
           const data = itemData ?? {}
           // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
-          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], options)
+          // No hold unless the caller asks for one: the hook can't release it. The item unloads after
+          // the grace period unless a hook showing it (useItem, useItems) or the caller holds it.
+          const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0], {
+            hold: false,
+            ...options,
+          })
           return (newItem ?? undefined) as Item<any> | undefined
         } catch (err) {
           logger('[useCreateItem] Error creating item:', err)
           setError(err instanceof Error ? err : new Error(String(err)))
           return undefined
         } finally {
-          inFlightRef.current = null
+          inFlightRef.current = inFlightRef.current.filter((c) => c !== call)
           // Defer clearing loading so React can commit the loading=true render first.
           // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
-          queueMicrotask(() => setIsLoading(false))
+          if (inFlightRef.current.length === 0) queueMicrotask(() => setIsLoading(false))
         }
       }
-      const promise = run()
-      inFlightRef.current = promise
-      return promise
+      const call: CreateCall = { modelName, itemData, options, promise: Promise.resolve(undefined) }
+      inFlightRef.current = [...inFlightRef.current, call]
+      call.promise = run()
+      return call.promise
     },
     [],
   )

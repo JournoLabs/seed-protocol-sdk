@@ -1,4 +1,5 @@
 import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from 'xstate'
+import type { DeleteOp } from '@/outbox'
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
@@ -27,6 +28,7 @@ import {
   getMetadataPropertyNamesForQuery,
   listRelationEasPropertyName,
   metadataRowPropertyKey,
+  metadataStorageName,
   metadataStoredNameForms,
 } from '@/helpers/metadataPropertyNames'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
@@ -34,6 +36,7 @@ import { EntityCache } from '@/helpers/entity/entityCache'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   isEntityTornDown,
   onEntityTeardown,
@@ -47,6 +50,7 @@ import { loadProperty } from './loadProperty'
 import { createSessionObjectUrl, isSessionObjectUrl, revokeSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { timed } from '@/helpers/timing'
 import { eventEmitter } from '@/eventBus'
+import { FILES_CHANGED_EVENT } from '@/helpers/tabEvents'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -64,6 +68,7 @@ import {
 } from './propertyWrite'
 import { getPropertyDefinitionsByFileId, propertyDefinitionFromRow } from '@/helpers/propertyDefinition'
 import { addCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
+import { isProduction } from '@/helpers/isProduction'
 import type { PropertyType as PropertyRowType } from '@/seedSchema'
 import {
   ModelPropertyDataTypes,
@@ -179,6 +184,12 @@ const revokeHeldObjectUrls = (service: object) => {
   held.clear()
 }
 
+
+/** Whether two `missingFile` values say the same thing (both found, or missing at the same path). */
+function sameMissingFile(a: { path?: string } | null | undefined, b: { path?: string } | null | undefined): boolean {
+  return !a || !b ? !a === !b : a.path === b.path
+}
+
 /** Thrown by ItemProperty.save() when the value failed validation (enum, pattern, minLength, maxLength). */
 export class ItemPropertySaveValidationError extends Error {
   constructor(
@@ -211,7 +222,18 @@ const STORAGE_SEED_TYPES = new Set(['Image', 'File', 'Html'])
 const FILE_SYSTEM_WAIT_MS = 10_000
 
 /** One assignment's write; `done` resolves once its op settled and the context shows the outcome. */
-type PropertyWrite = { done: Promise<void> }
+/** One assignment: settles when its op applies or fails. `opId` is set once the op is appended. */
+type PropertyWrite = { done: Promise<void>; opId?: string }
+
+/** A `save()` still waiting after this long logs a warning outside production (decision D30). */
+const SLOW_SAVE_WARNING_MS = 10_000
+
+/** A timer that doesn't keep a Node process running. */
+function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const timer = setTimeout(fn, ms)
+  ;(timer as { unref?: () => void }).unref?.()
+  return timer
+}
 
 type ItemPropertyFindProps = {
   propertyName: string
@@ -224,10 +246,12 @@ type ItemPropertyFindProps = {
 
 type ItemPropertyHoldOption = {
   /**
-   * @internal false for SDK code that hands the instance to an owner that takes its own hold (an
-   * Item's property map): no hold is taken, and a new instance is cached with none.
+   * Take a cache hold, released with `unload()`. `create` holds by default; `find` and `all` don't:
+   * a property no one holds unloads after the grace period (`SeedConfig.entityCache.unloadGraceMs`).
+   * SDK code that hands a new instance to an owner taking its own hold (an Item's property map)
+   * creates it with false.
    */
-  hold?: false
+  hold?: boolean
 }
 
 export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
@@ -425,6 +449,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // The file a stored value names: an Image or File shows a session URL (one already minted for
         // the same file is kept), Html and ItemStorage their text
         const fileKind = isImage ? 'image' : isFile ? 'file' : isItemStorage ? 'itemStorage' : isHtml ? 'html' : undefined
+        // Image, File and Html: whether this pass found the file (undefined leaves missingFile as it is)
+        let missingFile: { path?: string } | null | undefined
         if (fileKind && context.refResolvedValue) {
           try {
             let found: boolean
@@ -456,6 +482,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               found = display.renderValue !== undefined
               renderValue = display.renderValue
               if (found && (fileKind === 'image' || fileKind === 'file')) mintedDisplayValue = display.renderValue
+            }
+            if (fileKind !== 'itemStorage') {
+              // Not found while the context still shows content this property resolved before (an
+              // Html body fetched through its transaction, an image's URL during an FS race): that
+              // content stays, so the value isn't missing.
+              const showsResolved =
+                context.renderValue != null && context.renderValue !== '' && context.renderValue !== context.propertyValue
+              missingFile =
+                found || isFileValue || isBlobValue
+                  ? null
+                  : showsResolved
+                    ? (context.missingFile ?? null)
+                    : {
+                        path: BaseFileManager.getFilesPath(
+                          storageSubdir(fileKind, context.localStorageDir),
+                          context.refResolvedValue,
+                        ),
+                      }
             }
             if (!found) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -521,7 +565,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // Update context with renderValue instead of BehaviorSubject
         // The reactive proxy will handle reactivity
         const currentRenderValue = context.renderValue || context.propertyValue
-        if (currentRenderValue === renderValue) {
+        const renderChanged = currentRenderValue !== renderValue
+        const missingChanged = missingFile !== undefined && !sameMissingFile(missingFile, context.missingFile)
+        if (!renderChanged && !missingChanged) {
           return
         }
 
@@ -529,8 +575,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // sent as renderValue alone, the next pass minted another, and so on about 60 times a second.
         this._service.send({
           type: 'updateContext',
-          renderValue,
-          ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
+          ...(renderChanged && {
+            renderValue,
+            ...(mintedDisplayValue ? { refResolvedDisplayValue: mintedDisplayValue } : {}),
+          }),
+          ...(missingChanged && { missingFile }),
         })
       },
     )
@@ -543,6 +592,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       this._subscription?.unsubscribe()
       revokeHeldObjectUrls(this._service)
     })
+
+    // A missing file that lands later (a download, another tab's save) is read again
+    const onFilesChanged = (paths: unknown) => {
+      const missing = this._service.getSnapshot().context.missingFile
+      if (!missing || !Array.isArray(paths)) return
+      const name = missing.path?.split('/').pop()
+      if (name && !paths.some((path) => typeof path === 'string' && path.split('/').pop() === name)) return
+      this._service.send({ type: 'rehydrateFromDb' })
+    }
+    eventEmitter.on(FILES_CHANGED_EVENT, onFilesChanged)
+    onEntityTeardown(this, () => eventEmitter.off(FILES_CHANGED_EVENT, onFilesChanged))
 
     // Set up liveQuery subscription for cross-instance updates
     this._setupLiveQuerySubscription()
@@ -653,11 +713,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // A pending edit settles the conflict when it applies, so an overlaid row shows none.
         // `assignSeq` marks a read begun before an assignment in this tab: it may predate that op,
         // which the context already shows, so the feed drops it.
+        // Sync records a conflict and moves its draft to newest in one transaction, so a row read
+        // before the conflict may be the synced one: read the row again once a conflict shows.
         const readRow = async () => {
           const assignSeq = this._assignSeq
-          const row = await currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+          const read = () =>
+            currentPropertyRow({ seedLocalId, seedUid }, { match: property, propertyName }, { overlay: true, db })
+          let row = await read()
           if (!row) return row
           const conflict = row.overlaid ? null : await getPropertyConflict(row.seedLocalId ?? seedLocalId, propertyName)
+          if (conflict) row = (await read()) ?? row
           return { ...row, conflict, assignSeq }
         }
 
@@ -980,6 +1045,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
     if (cached) {
       if (holds) this.cache.holdInstance(cached)
+      else this.cache.keepUnheld(cached)
       for (const key of [keyByLocal, keyByUid]) this.cache.addKey(cached, key)
       this.syncFromRow(cached, props)
       // On cache hit, do not sync propertyValue: refetches can race with in-memory updates (e.g. save()).
@@ -1122,7 +1188,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return undefined
   }
 
-  /** Takes a hold on the instance it returns: release it with `unload()`. */
+  /**
+   * The property's instance, loaded from its row when it isn't cached. Takes no hold unless
+   * `hold: true` (release it with `unload()`).
+   */
   static async find({
     propertyName,
     seedLocalId,
@@ -1130,7 +1199,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     modelName: modelNameOption,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
-    hold,
+    hold = false,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1151,7 +1220,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const cached = this.cache.peek(keyByLocal) ?? this.cache.peek(keyByUid)
       if (!cached) return undefined
       for (const key of [keyByLocal, keyByUid]) this.cache.addKey(cached, key)
-      if (hold !== false) this.cache.holdInstance(cached)
+      if (hold) this.cache.holdInstance(cached)
+      else this.cache.keepUnheld(cached)
       return cached
     }
     foundProperty = fromCache()
@@ -1213,13 +1283,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   /**
    * Get all ItemProperty instances for an item.
    * Loads property data via getItemProperties, creates instances via create, optionally waits for idle.
-   * Takes a hold on each instance, as `create` does.
+   * Takes no holds unless `hold: true`, as `find`.
    */
   static async all(
     params: { seedLocalId?: string; seedUid?: string },
     options?: { waitForReady?: boolean; readyTimeout?: number } & ItemPropertyHoldOption,
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold = false } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
@@ -1387,9 +1457,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return name
   }
 
-  /** DB / EAS / metadata column name (e.g. authorIdentityIds). Use for storage; prefer `propertyName` for public API. */
+  /**
+   * The name new metadata rows of this property are stored under (`metadataStorageName`): `authorId`
+   * for a single Relation `author`, `authorIdentityIds` for a List of Relation `authors`, the key
+   * otherwise. Use it for storage; `propertyName` is the public name.
+   */
   get storagePropertyName(): string {
-    return this._getSnapshotContext().propertyName || ''
+    const name = this.propertyName
+    return name ? metadataStorageName(name, this._getSnapshotContext().propertyRecordSchema) : ''
   }
 
   get modelName() {
@@ -1436,7 +1511,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return waitForEntityReady(this, options)
   }
 
-  /** Validation errors from last failed save (enum, pattern, minLength, maxLength). Cleared when the next save starts. */
+  /** Validation errors from the last refused write (enum, pattern, minLength, maxLength). Cleared by the next assignment. */
   get saveValidationErrors(): import('@/Schema/validation').ValidationError[] {
     return this._getSnapshotContext()._saveValidationErrors ?? []
   }
@@ -1469,7 +1544,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         seedLocalId,
         propertyName,
         kind: 'delete',
-        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'drafts', propertyNames: [propertyName] } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     }
     await markPropertyConflictsResolved(seedLocalId, propertyName)
@@ -1477,9 +1552,31 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (choice === 'remote') this._service.send({ type: 'rehydrateFromDb' })
   }
 
+  /**
+   * Whether `value` holds an Image, File or Html property's content: `'fetching'` while the property
+   * loads (a load downloads a file that isn't on disk), `'missing'` when the file wasn't found, else
+   * `'resolved'`. While `'missing'`, `value` is undefined and `missingFile` says where the file was
+   * looked for; the property reads it again when that file is saved (a download, another tab).
+   * Other properties are always `'resolved'`.
+   */
+  get valueStatus(): 'resolved' | 'fetching' | 'missing' {
+    const context = this._getSnapshotContext()
+    const kind = storedValueKind(context.propertyRecordSchema, context)
+    if (kind !== 'image' && kind !== 'file' && kind !== 'html') return 'resolved'
+    if (this.status === 'loading') return 'fetching'
+    return context.missingFile ? 'missing' : 'resolved'
+  }
+
+  /** While `valueStatus` is `'missing'`: the file looked for (`path`, when the value names one). Else null. */
+  get missingFile(): { path?: string } | null {
+    return this._getSnapshotContext().missingFile ?? null
+  }
+
   get value() {
     // Use string literal to avoid circular dependency
     const context = this._getSnapshotContext()
+    // The stored value names a file that isn't there: it's a storage seed id or file name, not content
+    if (context.missingFile) return undefined
     const normalizedDataType = normalizeDataType(this._dataType)
     if (normalizedDataType === 'Image') {
       // For Image: prefer renderValue (blob URL from hydrate/save) for display; fallback to refResolvedValue (filename)
@@ -1511,6 +1608,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * any tab, else its stored row.
    */
   setValue(value: any): void {
+    this._assertLoaded('set')
     // An empty Image, File or Html value has nothing to store: it clears the property
     if ((value == null || (typeof value === 'string' && value.trim() === '')) && this._holdsStorageSeed(this._getSnapshotContext())) {
       this._assign(null, { retract: false })
@@ -1528,8 +1626,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    *   Versions stop showing the value too. Revocation is permanent.
    * @throws ClearNotSupportedError for a Boolean or Date property without `retract`: their EAS types
    *   have no empty value.
+   * @throws EntityUnloadedError when this instance was unloaded; nothing is written.
    */
   async clear(options: { retract?: boolean } = {}): Promise<void> {
+    this._assertLoaded('clear')
     const retract = options.retract === true
     const context = this._getSnapshotContext()
     const dataType = normalizeDataType(this._dataType ?? context.propertyRecordSchema?.dataType)
@@ -1652,6 +1752,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const { getOutboxOps, outboxOpResult, startItemOutbox, waitForOutboxOp } = await import('@/outbox')
       startItemOutbox()
       const opId = await appended
+      write.opId = opId
       await waitForOutboxOp(opId)
       const [op] = await getOutboxOps([opId])
       // A newer op of the property, from another tab, replaced it
@@ -1778,8 +1879,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
    * Resolves once the latest assignment's op is applied (ADR 0019). Rejects with its error when it
    * failed (OwnershipError when the item isn't the client's), and with
    * ItemPropertySaveValidationError when the value broke a rule and was not written.
+   *
+   * It waits until a leader tab applies the op, with no limit by default; outside production a save
+   * still waiting after 10 s logs a warning. With `timeoutMs` it rejects with OutboxSaveTimeoutError
+   * after that long. The op stays queued and applies later; the error doesn't mean it was dropped.
    */
-  async save(): Promise<void> {
+  async save(options?: { timeoutMs?: number }): Promise<void> {
+    this._assertLoaded('save')
     const ctx = this._getSnapshotContext()
     const label = `save ${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
     const { assertItemOwned } = await import('@/helpers/ownership')
@@ -1791,10 +1897,47 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
     await timed(`${label} until applied`, async () => {
       // Each await may see a newer assignment start: wait for the latest
-      for (let write = this._latestWrite; write; ) {
-        await write.done
-        if (this._latestWrite === write) break
-        write = this._latestWrite
+      const untilApplied = (async () => {
+        for (let write = this._latestWrite; write; ) {
+          await write.done
+          if (this._latestWrite === write) break
+          write = this._latestWrite
+        }
+      })()
+      const name = `${ctx?.modelName ?? '?'}.${ctx?.propertyName ?? '?'}`
+      const warning = isProduction()
+        ? undefined
+        : unrefTimer(() => {
+            console.warn(
+              `[seed] Saving ${name} has waited ${SLOW_SAVE_WARNING_MS / 1000} s: its write is still queued. ` +
+                'No leader tab may be draining the outbox (a frozen or closed tab). ' +
+                'Pass save({ timeoutMs }) to stop waiting; the write stays queued either way.',
+            )
+          }, SLOW_SAVE_WARNING_MS)
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        const timeoutMs = options?.timeoutMs
+        if (timeoutMs === undefined) {
+          await untilApplied
+          return
+        }
+        const { OutboxSaveTimeoutError } = await import('@/outbox/outbox')
+        await Promise.race([
+          untilApplied,
+          new Promise<never>((_, reject) => {
+            timeout = unrefTimer(() => {
+              reject(
+                new OutboxSaveTimeoutError(
+                  this._latestWrite?.opId,
+                  `Saving ${name} timed out after ${timeoutMs} ms. The write is still queued and applies once a leader tab drains the outbox.`,
+                ),
+              )
+            }, timeoutMs)
+          }),
+        ])
+      } finally {
+        if (warning) clearTimeout(warning)
+        if (timeout) clearTimeout(timeout)
       }
     })
     const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
@@ -1811,11 +1954,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
   }
 
+  /** Throws EntityUnloadedError, naming the property and its item, when this instance was unloaded. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { seedLocalId, seedUid, modelName, propertyName } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} ${modelName ?? '?'}.${propertyName ?? '?'} of item ${seedLocalId ?? seedUid ?? '(no id)'}: ` +
+        'this ItemProperty instance was unloaded. Look the item or property up again, and hold it while you use it.',
+    )
+  }
+
   /**
-   * Every cache key holding this instance: its item's local id and seed uid, and the name it had
-   * before a rename (List of relation). They share one entry.
+   * Releases this caller's hold. Once no one holds the property (its item holds it while the item
+   * is loaded), it unloads after `SeedConfig.entityCache.unloadGraceMs` unless a hold is taken first.
    */
-  /** Releases this caller's hold; the last one stops the property and drops it from the cache. */
   unload() {
     releaseEntity(this, ItemProperty.cache)
   }
@@ -1853,7 +2005,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         seedLocalId,
         propertyName,
         kind: 'delete',
-        value: { mode: 'property', propertyNames: [propertyName] } satisfies import('@/outbox').DeleteOp,
+        value: { mode: 'property', propertyNames: [propertyName] } satisfies DeleteOp,
       }).catch(throwItemWriteError)
     } else if (db) {
       const seedSchemaMod = await import('../seedSchema')

@@ -1,4 +1,4 @@
-import { getArweaveUrlForTransaction } from './arweaveUrl.js'
+import { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 
 /**
  * Adds `arweaveUrl` to an assembled Image seed clone when `storageTransactionId`

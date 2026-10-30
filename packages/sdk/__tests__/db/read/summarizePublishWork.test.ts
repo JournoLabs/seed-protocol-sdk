@@ -6,6 +6,7 @@ import { metadata } from '@/seedSchema'
 import { Item } from '@/Item/Item'
 import {
   estimateDataUriByteLength,
+  summarizePublishUploads,
   summarizePublishWork,
 } from '@/db/read/summarizePublishWork'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
@@ -113,5 +114,12 @@ testDescribe('summarizePublishWork integration', () => {
     const work = await summarizePublishWork(item)
     expect(work.uploadCount).toBeGreaterThanOrEqual(1)
     expect(work.uploadBytes).toBeGreaterThanOrEqual(2048)
+    // The publish size check reads the same sizes without counting attestations
+    expect(await summarizePublishUploads(item)).toEqual({
+      uploadCount: work.uploadCount,
+      uploadBytes: work.uploadBytes,
+      uploadSizes: work.uploadSizes,
+      unpublishedRelatedItems: work.unpublishedRelatedItems,
+    })
   }, 30000)
 })

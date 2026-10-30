@@ -108,7 +108,28 @@ export class OutboxOpRejectedError extends Error {
   }
 }
 
+/**
+ * `save({ timeoutMs })` stopped waiting. Nothing is cancelled: the op stays queued and applies once
+ * a leader tab drains the outbox (decision D30).
+ */
+export class OutboxSaveTimeoutError extends Error {
+  readonly code = 'OUTBOX_SAVE_TIMEOUT'
+  constructor(
+    /** The queued op, when it had been appended. */
+    readonly opId: string | undefined,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'OutboxSaveTimeoutError'
+  }
+}
+
 /** Rejects `waitForOutboxOp` for an op that failed, or that a failed op superseded. */
+/**
+ * A failed outbox op, as `save()`, `Item.create` and deletes reject with it. `errorName` names the
+ * error that failed the op; match on it. For `RelationTargetError` and `StagedValueMissingError`,
+ * `cause` is that error, rebuilt from the op row (its `targets` or `path`).
+ */
 export class OutboxOpFailedError extends Error {
   readonly code = 'OUTBOX_OP_FAILED'
   constructor(
@@ -204,6 +225,9 @@ export function outboxOpResult<T = unknown>(op: Pick<OutboxOp, 'result'>): T | u
 
 let started = false
 let paused = false
+/** Set by stopOutbox (client.stop) until the next startOutbox. */
+let stopped = false
+let stopTabMessages: (() => void) | undefined
 let draining: Promise<void> | undefined
 let drainAgain = false
 let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -217,7 +241,8 @@ const notBefore = new Map<string, number>()
 export function startOutbox(): void {
   if (started) return
   started = true
-  onTabMessage((message) => {
+  stopped = false
+  stopTabMessages = onTabMessage((message) => {
     if (message.type === 'outbox-nudge' && isLeaderTab()) scheduleDrain()
     if (message.type === 'outbox-settled') void recheckWaiters(message.opIds)
   })
@@ -226,7 +251,7 @@ export function startOutbox(): void {
 
 /** Drains soon in this tab (if it leads); calls made while a drain runs make it run once more. */
 function scheduleDrain(): void {
-  if (paused || !isLeaderTab()) return
+  if (paused || stopped || !isLeaderTab()) return
   if (draining) {
     drainAgain = true
     return
@@ -236,7 +261,7 @@ function scheduleDrain(): void {
       do {
         drainAgain = false
         await drainOutbox()
-      } while (drainAgain && !paused)
+      } while (drainAgain && !paused && !stopped)
     } catch (error) {
       logger('drain failed', error)
     } finally {
@@ -571,26 +596,52 @@ export function waitForOutboxOp(opId: string): Promise<void> {
 
 /**
  * Resolves once every op pending when it was called has settled (applied, superseded or failed),
- * so a reader of `metadata` sees every edit made before. Publish waits on this before it reads.
+ * so a reader of `metadata` sees every edit made before. With `seedLocalIds`, only the ops on
+ * those seeds (publish waits for its own graph's, ADR 0019). Resolves true when there were any.
  */
-export async function waitForPendingOutboxOps(): Promise<void> {
+export async function waitForPendingOutboxOps(options?: { seedLocalIds?: readonly string[] }): Promise<boolean> {
   const db = BaseDb.getAppDb()
-  if (!db) return
+  if (!db) return false
+  const seedLocalIds = options?.seedLocalIds
+  if (seedLocalIds && seedLocalIds.length === 0) return false
   const pending: Array<{ opId: string }> = await db
     .select({ opId: pendingWrites.opId })
     .from(pendingWrites)
-    .where(eq(pendingWrites.status, 'pending'))
-  if (pending.length === 0) return
+    .where(
+      seedLocalIds
+        ? and(eq(pendingWrites.status, 'pending'), inArray(pendingWrites.seedLocalId, [...seedLocalIds]))
+        : eq(pendingWrites.status, 'pending'),
+    )
+  if (pending.length === 0) return false
   startOutbox()
   if (isLeaderTab()) scheduleDrain()
   else postTabMessage({ type: 'outbox-nudge' })
   await Promise.allSettled(pending.map(({ opId }) => waitForOutboxOp(opId)))
+  return true
 }
 
 /** The status of each op, by id; ops not found are left out. */
 export async function getOutboxOps(opIds: string[]): Promise<OutboxOp[]> {
   if (opIds.length === 0) return []
   return BaseDb.getAppDb().select().from(pendingWrites).where(inArray(pendingWrites.opId, opIds))
+}
+
+/**
+ * Stops draining in this tab (client.stop): no new drain starts, retries are dropped, and this
+ * resolves once a drain that was running has finished. Ops stay pending in the database; the next
+ * startOutbox (any write after init) resumes them, as after a reload.
+ */
+export async function stopOutbox(): Promise<void> {
+  started = false
+  stopped = true
+  stopTabMessages?.()
+  stopTabMessages = undefined
+  if (retryTimer !== undefined) {
+    clearTimeout(retryTimer)
+    retryTimer = undefined
+  }
+  notBefore.clear()
+  while (draining) await draining
 }
 
 // --- Tests ------------------------------------------------------------------------------------

@@ -80,21 +80,20 @@ describe('connectSourceToProperty', () => {
       'rss-author',
       'author',
     )
-    expect(first.mappings).toEqual([
+    expect(first).toEqual([
       { sourceId: 'rss-author', propertyName: 'author', resolve: 'lookup' },
     ])
 
     const second = connectSourceToProperty(
-      first.mappings,
+      first,
       sources,
       targets,
       'rss-title',
       'author',
     )
-    expect(second.mappings).toEqual([
+    expect(second).toEqual([
       { sourceId: 'rss-title', propertyName: 'author', resolve: 'lookup' },
     ])
-    expect(second.clearedLookupProps).toEqual([])
   })
 
   it('normalizes @extract source ids', () => {
@@ -105,7 +104,7 @@ describe('connectSourceToProperty', () => {
       'rss-link@extract',
       'html',
     )
-    expect(result.mappings).toEqual([
+    expect(result).toEqual([
       { sourceId: 'rss-link', propertyName: 'html', resolve: 'extract' },
     ])
   })
@@ -147,25 +146,6 @@ describe('buildPropertyModeRows', () => {
     expect(html.state).toBe('needsResolve')
   })
 
-  it('shows lookup table hits in preview when lookups provided', () => {
-    const rows = buildPropertyModeRows({
-      targets,
-      sources,
-      mappings: [
-        {
-          sourceId: 'rss-author',
-          propertyName: 'author',
-          resolve: 'lookup',
-        },
-      ],
-      lookups: { author: { Ada: 'seed:identity/ada' } },
-    })
-    const author = rows.find((r) => r.id === 'author')!
-    expect(author.preview).toBe('seed:identity/ada')
-    expect(author.sampleValue).toBe('Ada')
-    expect(author.state).toBe('mapped')
-  })
-
   it('shows edge lookup hits and needsLookup when unassigned', () => {
     const assigned = buildPropertyModeRows({
       targets,
@@ -175,7 +155,7 @@ describe('buildPropertyModeRows', () => {
           sourceId: 'rss-author',
           propertyName: 'author',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Ada', ref: 'seed:identity/ada' }] },
+          lookup: { entries: [{ value: 'Ada', refs: ['seed:identity/ada'] }] },
         },
       ],
     })
@@ -208,6 +188,23 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     )
   })
 
+  it("previews an empty source as its value, not its label, as apply copies it", () => {
+    const empty: SourceNode = { id: 'fm-author', label: 'author', kind: 'frontmatter', value: '' }
+    expect(previewForEdge(empty, undefined, { target: targets[0] })).toBe('')
+    // A lookup entry keyed by the label doesn't match, as it wouldn't at apply.
+    expect(
+      previewForEdge(empty, 'lookup', {
+        target: targets[3],
+        mapping: {
+          sourceId: 'fm-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'author', refs: ['uid-1'] }] },
+        },
+      }),
+    ).toMatch(/‹lookup ref/)
+  })
+
   it('keeps extract/file placeholders', () => {
     expect(previewForEdge(sources[1], 'extract')).toMatch(/‹extract/)
     expect(previewForEdge(sources[1], 'file')).toMatch(/‹file/)
@@ -220,8 +217,12 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     expect(
       previewForEdge(sources[2], 'lookup', {
         target: targets[3],
-        lookups: { author: { Ada: 'uid-1' } },
-        propertyName: 'author',
+        mapping: {
+          sourceId: 'rss-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'Ada', refs: ['uid-1'] }] },
+        },
       }),
     ).toBe('uid-1')
   })
@@ -235,7 +236,7 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
           sourceId: 'rss-author',
           propertyName: 'author',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Ada', ref: 'uid-1' }] },
+          lookup: { entries: [{ value: 'Ada', refs: ['uid-1'] }] },
         },
         {
           sourceId: 'rss-link',
@@ -328,7 +329,7 @@ describe('filterPropertyNames', () => {
 })
 
 describe('findConflicts / syncEdgeIds', () => {
-  it('findConflicts marks later duplicates', () => {
+  it('findConflicts marks every row of a duplicate, the first included', () => {
     const set = findConflicts([
       { id: 'a', propertyName: 'title' },
       { id: 'b', propertyName: 'html' },
@@ -337,10 +338,24 @@ describe('findConflicts / syncEdgeIds', () => {
     expect([...set].sort()).toEqual(['a', 'c'])
   })
 
-  it('syncEdgeIds grows and shrinks', () => {
-    const grown = syncEdgeIds(['e0'], 3)
-    expect(grown).toHaveLength(3)
-    expect(grown[0]).toBe('e0')
-    expect(syncEdgeIds(grown, 1)).toEqual(['e0'])
+  it('syncEdgeIds keeps each row its id when another is added, removed or edited', () => {
+    const a = { sourceId: 's1', propertyName: 'title' }
+    const b = { sourceId: 's2', propertyName: 'html' }
+    const c = { sourceId: 's3', propertyName: 'slug' }
+    const ids = syncEdgeIds({ mappings: [], ids: [] }, [a, b, c])
+    expect(new Set(ids).size).toBe(3)
+
+    // Removing the first row keeps the others' ids (not shifted by position).
+    expect(syncEdgeIds({ mappings: [a, b, c], ids }, [b, c])).toEqual([ids[1], ids[2]])
+
+    // An edited row (a new object in its place) keeps its id.
+    const bEdited = { ...b, propertyName: 'body' }
+    expect(syncEdgeIds({ mappings: [a, b, c], ids }, [a, bEdited, c])).toEqual(ids)
+
+    // An added row gets a new id; the others keep theirs.
+    const d = { sourceId: 's4', propertyName: 'author' }
+    const grown = syncEdgeIds({ mappings: [a, b, c], ids }, [a, b, c, d])
+    expect(grown.slice(0, 3)).toEqual(ids)
+    expect(ids).not.toContain(grown[3])
   })
 })

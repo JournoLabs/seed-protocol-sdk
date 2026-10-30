@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { FileManager, NodeFileManager } from '@/node/helpers/FileManager'
+import { NodeFileManager } from '@/node/helpers/FileManager'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 describe('NodeFileManager', () => {
@@ -26,7 +26,6 @@ describe('NodeFileManager', () => {
     })
 
     it('is registered with BaseFileManager, which records the working dir', async () => {
-      expect(FileManager).toBe(NodeFileManager)
       await BaseFileManager.initializeFileSystem(tmpDir)
       expect(BaseFileManager.getWorkingDir()).toBe(tmpDir)
       expect(BaseFileManager.getFilesPath('images', 'a.jpg')).toBe(`${tmpDir}/images/a.jpg`)
@@ -35,7 +34,7 @@ describe('NodeFileManager', () => {
 
   describe('getContentUrlFromPath', () => {
     it('returns a file:// URL instead of throwing', async () => {
-      const url = await new FileManager().getContentUrlFromPath('/tmp/seed/html/abc.html')
+      const url = await new NodeFileManager().getContentUrlFromPath('/tmp/seed/html/abc.html')
       expect(url).toBe('file:///tmp/seed/html/abc.html')
     })
   })

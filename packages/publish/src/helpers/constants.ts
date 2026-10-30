@@ -1,12 +1,6 @@
 /**
  * Constants for the publish package.
  */
-/**
- * @deprecated OP Stack predeploy; wrong on non-OP chains. Use `getPublishConfig().schemaRegistryAddress`.
- */
-export const SCHEMA_REGISTRY_ADDRESS =
-  '0x4200000000000000000000000000000000000020' as const
-
 /** Schema #1 (Name a Schema) - universal UID for naming attestations */
 export const EAS_SCHEMA_NAME_ATTESTATION_UID =
   '0x44d562ac1d7cd77e232978687fea027ace48f719cf1d58c7888e509663bb87fc' as const
@@ -20,12 +14,6 @@ export const MANAGED_ACCOUNT_FACTORY_ADDRESSES: Readonly<Record<number, `0x${str
 }
 
 /**
- * @deprecated Optimism Sepolia only. Use `getPublishConfig().thirdwebAccountFactoryAddress`.
- */
-export const THIRDWEB_ACCOUNT_FACTORY_ADDRESS =
-  '0x76f47d88bfaf670f5208911181fcdc0e160cb16d' as const
-
-/**
  * @deprecated OP Stack predeploy; wrong on non-OP chains. Use `getPublishConfig().easContractAddress`.
  */
 export const EAS_CONTRACT_ADDRESS =
@@ -37,16 +25,11 @@ export const EAS_CONTRACT_ADDRESS =
  * **Do not use as the transaction `to` for user publishes.** Runtime `multiPublish` targets the
  * publisher’s deployed ManagedAccount (non-modular), `managedAddress` (modular), or is not used
  * when attesting via direct EAS (EOA path).
+ *
+ * @internal Exported for the package's own tests and tooling; not part of the public API.
  */
 export const MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA =
   '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const
-
-/**
- * @deprecated Misleading name: this is the ABI reference deployment, not a shared on-chain router.
- *   Use {@link MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA}.
- */
-export const SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA =
-  MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA
 
 export const PublishMachineStates = {
   SUCCESS: 'success',

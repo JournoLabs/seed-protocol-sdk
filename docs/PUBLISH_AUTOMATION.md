@@ -59,18 +59,36 @@ const { authorization } = await enrollPublishAutomation({
   managedAddress: userManagedAccountAddress,
   sessionKeyAddress: automationWallet.address,
   appAddress: optionalAppLabelAddress,
-  expiresAt: Math.floor(Date.now() / 1000) + 90 * 24 * 3600, // optional
-  // userWallet: fromThirdwebAccount(managedAccount) // or omit to use connected managed in-app wallet
+  expiresAt: Math.floor(Date.now() / 1000) + 30 * 24 * 3600, // optional; default 90 days
 })
 
 // Persist authorization.uid for later revokePublishAutomation
 ```
 
+`expiresAt` defaults to 90 days and goes to both the session key and the `PublishAuthorization`. Enrolling the same key again moves its end to the new value, and a key with any target besides the Seed executor has its targets replaced. A publish with a key that isn't approved for the executor alone fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent, and an ended key is no longer active.
+
+Accounts with automation keys are meant to be sponsored and hold no ETH. Enroll fails with `AUTOMATION_ACCOUNT_FUNDED`, before sending anything, when the account's balance plus EntryPoint deposit is above `maxAutomationExposureWei` in `initPublish` (default 0.001 ETH). Raise it to enroll an account that holds ETH on purpose, such as one paying its own gas with `payment: { gas: 'user' }`. An automation publish over the limit logs a warning and goes ahead.
+
+Without Thirdweb, import `enrollPublishAutomation` from `@seedprotocol/publish` and pass the wallets the `/thirdweb` version takes from the connected in-app wallet. `userWallet` sends as the ManagedAccount and its signer is an admin EOA; enroll refuses one that sends from any other address before it sends anything. `admin` is that admin EOA sending from itself, and is needed only when the executor isn't installed yet.
+
+```ts
+import { createManagedAccountTxSender, enrollPublishAutomation, fromEthersWallet } from '@seedprotocol/publish'
+
+const owner = fromEthersWallet(ownerEthersWallet) // admin EOA of the ManagedAccount
+const txSender = await createManagedAccountTxSender({ signer: owner.signer, bundlerUrl, paymasterUrl })
+await enrollPublishAutomation({
+  managedAddress: txSender.address,
+  sessionKeyAddress: automationWallet.address,
+  userWallet: { signer: owner.signer, txSender, kind: 'modular' },
+  admin: owner,
+})
+```
+
 Steps performed:
 
-1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found.
+1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found. When the factory has replaced the executor, each account installs the new one the same way.
 2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain. After a fresh install this uses the EAS from the install receipt rather than re-reading, since a load-balanced RPC can serve the read from a node that hasn't seen the install yet.
-3. `addSessionKey` with module-only `approvedTargets`.
+3. Grant the session key (`setPermissionsForSigner`, signed by `userWallet`'s admin EOA) with module-only `approvedTargets`.
 4. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 
 ## Server / Node
@@ -163,7 +181,9 @@ const actor = await PublishManager.createPublish(item, managedAddress, onChainWa
 1. Executor module installed and initialized for the ManagedAccount; session key enrolled with module-only `approvedTargets`
 2. The module's `getEAS(account)` already matches publish config (automation keys cannot change it)
 3. `PublishWallet.txSender` can submit ManagedAccount UserOps signed by the session key
-4. EAS schemas for the item’s models and properties are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. While the owner wallet is connected (the same wallet used for `enrollPublishAutomation`), call `ensureEasSchemasForItem(item, userWallet)` once. After those schemas exist, unattended publish only reads the registry. A missing schema fails before the UserOp with `schema "…" is not registered; automation keys can't register schemas`.
+4. EAS schemas for the models automation publishes are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. While the owner wallet is connected (the same wallet used for `enrollPublishAutomation`), call `ensureEasSchemasForModels(['Post'], userWallet, { schemaName })`. It reads the loaded model definitions, needs no item, and registers each model's schema, every property's, those of the storage models (Image, File, Html) and the models that relation and list properties reach (`followRefs`, default true), and `string storage_transaction_id`. A call with everything registered only reads, so call it whenever the owner is present, not only at enrollment: a new schema version can add a property. `{ dryRun: true }` returns the missing definitions without sending. Each missing schema costs two transactions (register, then name it).
+
+   A publish needs a schema only for what it attests: the seed's model and the properties that have a value (or an empty value that removes an earlier attestation). A missing one fails before the UserOp with `EasSchemasNotRegisteredError` (`code: 'EAS_SCHEMAS_NOT_REGISTERED'`), whose `missing` lists every missing definition.
 
 Readers should treat **EAS attester (ManagedAccount)** as authorship. Bind Arweave owners with:
 
@@ -202,23 +222,29 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - `ensurePublishAuthorizationSchema`, `attestPublishAuthorization`, `revokePublishAuthorization`
 - `assessPublishAuthorizationLive`
 - `assertExecutorModuleReadyForAccount` (check an account before offering enrollment), `simulateCallFromAccount`
+- `enrollPublishAutomation`, `revokePublishAutomation` (take `userWallet`, and `admin` when the executor needs installing; see [Enroll](#enroll)), `ensureExecutorModuleInstalled(account, getAdmin, config)`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` (take `admin: PublishWallet`; see below), `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
+
+`admin.signer` signs the session-key grant and must be an admin EOA of the ManagedAccount; a signer that isn't fails with `MODULAR_SIGNER_ACTIVATION_FAILED` before anything is sent. `admin.txSender` sends it. The account applies a grant an admin signed whoever sends it, so the admin EOA can send it and pay the gas, or a relayer can. An undeployed account takes the grant only from a sender that is the account, whose first UserOp deploys it.
 
 ### `@seedprotocol/publish/thirdweb`
 
-- `approvedTargetsForAutomationPublish`, `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
-- `enrollPublishAutomation`, `revokePublishAutomation`
+- `approvedTargetsForAutomationPublish`
+- `ensureAutomationSessionKey`, `removeAutomationSessionKey` with `admin` optional: it defaults to the connected managed in-app wallet, which signs with its admin EOA and sends a sponsored UserOp from the account
+- `enrollPublishAutomation`, `revokePublishAutomation` with `userWallet` defaulting to the connected managed in-app wallet and `admin` to its in-app admin EOA; `ensureExecutorModuleInstalled` with `getAdmin` defaulting to that admin EOA
 - `assertStorageBoundToIdentity`
 - `buildAutomationSessionKeyPermissions`, `hashAutomationSessionKeyPermissions`
 
 ## Integrator checklist
 
 - [ ] Generate per-user (or per-app) session keys; never reuse Seed Protocol keys
-- [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected
+- [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected, or pass it as `userWallet`
 - [ ] Store `authorization.uid` + session key securely; rotate by revoke + re-enroll
-- [ ] Set grant `expiresAt` when appropriate
+- [ ] Enroll again before `expiresAt` (default 90 days); that moves the key's end and attests a new `PublishAuthorization`
+- [ ] Keep accounts with automation keys sponsored and free of ETH, and handle `AUTOMATION_ACCOUNT_FUNDED` from enroll
 - [ ] Handle `AUTOMATION_UNSUPPORTED_ACCOUNT` from enroll (Router accounts without the executor extension) and `AUTOMATION_PREFLIGHT_FAILED` from publish
 - [ ] Revoke attestations with the user's wallet, not the automation key
-- [ ] Register content schemas once with the owner wallet via `ensureEasSchemasForItem` (automation keys cannot register schemas)
+- [ ] Register content schemas with the owner wallet via `ensureEasSchemasForModels` whenever the owner is present (automation keys cannot register schemas)
 - [ ] Use a UserOp-capable `PublishWallet` for on-chain txs; `fromEthersWallet` is fine for DataItem signing only
 - [ ] Use `assertStorageBoundToIdentity` (or equivalent) before treating Arweave owners as the identity
 - [ ] Expose “Disconnect automation” → `revokePublishAutomation`

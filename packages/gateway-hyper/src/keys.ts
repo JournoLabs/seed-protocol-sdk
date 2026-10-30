@@ -70,6 +70,50 @@ export function loadOrCreateOperatorKeypair(keyFile: string): OperatorKeyPair {
   }
 }
 
+/** Check a keypair passed in code and add its z32 key. */
+export function toOperatorKeypair(keyPair: { publicKey: Buffer; secretKey: Buffer }): OperatorKeyPair {
+  const { publicKey, secretKey } = keyPair
+  if (publicKey?.length !== 32 || secretKey?.length !== 64) {
+    throw new Error('Invalid keyPair: expected a 32-byte publicKey and a 64-byte secretKey')
+  }
+  // An Ed25519 secret key in libsodium form is the seed followed by the public key.
+  if (!Buffer.from(secretKey.subarray(32)).equals(Buffer.from(publicKey))) {
+    throw new Error('Invalid keyPair: publicKey does not belong to secretKey')
+  }
+  return { publicKey, secretKey, z32: encodePublicKeyZ32(publicKey) }
+}
+
+/**
+ * The keypair a client presents to the operator: `keyPair` if given, else the one in
+ * `keyFile` (created on first use), else a new one for this run only.
+ */
+export function resolveClientKeypair(options: {
+  keyFile?: string
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+}): OperatorKeyPair {
+  if (options.keyFile && options.keyPair) {
+    throw new Error('Pass keyFile or keyPair, not both')
+  }
+  if (options.keyPair) return toOperatorKeypair(options.keyPair)
+  if (options.keyFile) return loadOrCreateOperatorKeypair(options.keyFile)
+  return createEphemeralClientKeypair()
+}
+
+/**
+ * The operator's keypair: `keyPair` if given, else the one in `keyFile` (`defaultKeyFile` when
+ * unset), created on first use. Passing both throws, as for a client.
+ */
+export function resolveOperatorKeypair(
+  options: { keyFile?: string; keyPair?: { publicKey: Buffer; secretKey: Buffer } },
+  defaultKeyFile: string,
+): OperatorKeyPair {
+  if (options.keyFile && options.keyPair) {
+    throw new Error('Pass keyFile or keyPair, not both')
+  }
+  if (options.keyPair) return toOperatorKeypair(options.keyPair)
+  return loadOrCreateOperatorKeypair(options.keyFile ?? defaultKeyFile)
+}
+
 export function createEphemeralClientKeypair(): OperatorKeyPair {
   const kp = HyperDHT.keyPair()
   return {

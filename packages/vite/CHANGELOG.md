@@ -1,5 +1,52 @@
 # @seedprotocol/vite
 
+## 0.7.13 (2026-10-29)
+
+- `seedVitePlugin`'s doc comment is back on it in `dist/index.d.ts`. Since 0.7.12 it sat on the `KNOWN_OPTIONS` constant, so editors showed no description for the plugin.
+
+### Commits
+
+#### Fixes
+
+- seedVitePlugin's doc comment sits on the function again (96b01666)
+
+## 0.7.12 (2026-10-27)
+
+- `@zenfs/core` (`^2.7.7`) and `@zenfs/dom` (`^1.2.14`) are declared optional peers, the versions the SDK installs. `peerDependenciesMeta` marked them optional with no `peerDependencies` entry, which npm ignores and pnpm reads as optional peers of any version.
+- **Breaking:** `seedVitePlugin` throws on an option it doesn't take. `autoInit`, which was removed, says so; a misspelt option names the ones it takes. Both were ignored silently.
+- `includeNodePolyfills: true` also polyfills `timers` (`timers-browserify`), so `@seedprotocol/mapping`'s `rssXmlToSources` (through `rss-parser`) builds for the browser.
+- `debug: true` skips chunks made only of Seed packages' modules when it reports Node globals. `Buffer` in the SDK's drizzle chunk and `process.cwd` in its Node paths drowned the app's own hits. A chunk that mixes app and Seed code is still scanned.
+
+### Commits
+
+#### Breaking
+
+- reject unknown options (autoInit), polyfill timers, debug skips Seed chunks (e35c61e0)
+
+#### Fixes
+
+- declare @zenfs/core and @zenfs/dom as optional peers (c50cd214)
+
+## 0.7.11 (2026-10-24)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
+## 0.7.9 (2026-10-22)
+
+No user-facing changes; released at the same version as the other packages.
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.6 (2026-10-17)
 
 - **Breaking: `seedVitePlugin()` defaults cut to what the SDK needs.** By default it now sets cross-origin isolation headers, `worker.format: 'es'`, `optimizeDeps.rolldownOptions.output.strictExecutionOrder: true` (drizzle-orm's dev pre-bundle failed with `Cannot read properties of undefined (reading 'Symbol')` when the app imports `@seedprotocol/sdk/drizzle`), and, for Seed packages linked from outside the app, `resolve.dedupe` and `server.fs.allow`. [VITE_RENDERER.md](VITE_RENDERER.md) lists what each setting is for and how that was tested, plus upgrade steps.

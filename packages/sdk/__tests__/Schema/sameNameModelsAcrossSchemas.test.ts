@@ -31,7 +31,7 @@ testDescribe('same-name models across schemas', () => {
   })
 
   const buildSchemaFile = (schemaName: string, postId: string, properties: string[]) => ({
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -165,7 +165,7 @@ testDescribe('same-name models across schemas', () => {
   it('resolves a Relation target in the owning model\'s schema when the name is defined twice', async () => {
     const suffix = generateId()
     const buildAuthorSchema = (schemaName: string) => ({
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

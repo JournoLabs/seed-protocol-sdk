@@ -8,7 +8,7 @@ import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import {
   clearHtmlEmbeddedImageCoPublishRows,
@@ -38,7 +38,7 @@ const SCHEMA_NAME = 'Test Schema relatedDraftHtmlEmbed'
 const DATA_URI = embeddedImageDataUri()
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -84,8 +84,9 @@ const withTxIds = <U extends { seedLocalId: string }>(uploads: U[]) =>
 
 /**
  * Applies each request's propertiesToUpdate the way multiPublish does (SeedPublishLib.setSeedReference):
- * in request order, the request's new seed uid (here: its localId) is written into data[0] of the one
- * attestation with that schema in the target request. Returns what each (target, schema) ends up holding.
+ * the request's new seed uid (here: its localId) is written into data[0] of the one attestation with
+ * that schema in the target request. Also refuses a reference to an earlier request, which direct EAS
+ * can't fill. Returns what each (target, schema) ends up holding.
  */
 const applySeedReferencesLikeContract = (payload: any[]): Map<string, string> => {
   const indexByLocalId = new Map(payload.map((p, i) => [p.localId, i]))
@@ -93,8 +94,8 @@ const applySeedReferencesLikeContract = (payload: any[]): Map<string, string> =>
   payload.forEach((request, i) => {
     for (const pu of request.propertiesToUpdate ?? []) {
       const targetIndex = indexByLocalId.get(pu.publishLocalId)
-      if (targetIndex === undefined) throw new Error(`UnknownPublishLocalId ${pu.publishLocalId}`)
-      if (targetIndex < i) throw new Error(`PublishTargetAlreadyAttested(${i}, ${targetIndex})`)
+      if (targetIndex === undefined) throw new Error(`reference outside the batch: ${pu.publishLocalId}`)
+      if (targetIndex < i) throw new Error(`reference to an earlier request (${i} → ${targetIndex})`)
       const matches = payload[targetIndex].listOfAttestations.filter(
         (a: any) => String(a.schema).toLowerCase() === String(pu.propertySchemaUid).toLowerCase(),
       )
@@ -295,7 +296,7 @@ testDescribe('Html-embedded images of related draft items', () => {
     const error = await getPublishPayload(article as any, []).catch((e) => e)
     expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
     expect(error.unpublishedRelatedItems).toEqual(expected)
-    expect(await getUnpublishedRelatedItems(article as any)).toEqual(expected)
+    expect((await summarizePublishUploads(article as any)).unpublishedRelatedItems).toEqual(expected)
     expect((await summarizePublishWork(article as any)).unpublishedRelatedItems).toEqual(expected)
 
     await clearHtmlEmbeddedImageCoPublishRows(note.seedLocalId)

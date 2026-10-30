@@ -23,6 +23,28 @@ self.onmessage = (event) => {
       else self.postMessage({ type: 'heard', message: e.data })
     }
   }
+  if (type === 'hold-shared') {
+    navigator.locks.request(name, { mode: 'shared' }, () => {
+      self.postMessage({ type: 'holding-shared' })
+      return new Promise((resolve) => (self.releaseShared = resolve))
+    })
+  }
+  if (type === 'hold-file') {
+    // As SQLite's OPFS VFS does: a sync access handle keeps the file from being removed.
+    ;(async () => {
+      let dir = await navigator.storage.getDirectory()
+      const parts = event.data.path.split('/').filter(Boolean)
+      const file = parts.pop()
+      for (const part of parts) dir = await dir.getDirectoryHandle(part)
+      self.heldFile = await (await dir.getFileHandle(file)).createSyncAccessHandle()
+      self.postMessage({ type: 'holding-file' })
+    })()
+  }
+  if (type === 'release-file') {
+    self.heldFile?.close()
+    self.releaseShared?.()
+    self.postMessage({ type: 'released-file' })
+  }
   if (type === 'post') {
     new BroadcastChannel(channel).postMessage(message)
     self.postMessage({ type: 'posted' })

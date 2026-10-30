@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, pendingWrites, seeds } from '@/seedSchema'
 import { Item } from '@/Item/Item'
@@ -9,10 +9,11 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { renamePendingWritesForProperty } from '@/helpers/db'
 import { hardDeleteLocalSeedsByLocalIds } from '@/db/write/removeLocalCopiesForAddresses'
 import { appendOutboxOp, getOutboxOps, startItemOutbox, waitForPendingOutboxOps } from '@/outbox'
-import { outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
+import { OutboxSaveTimeoutError, outboxIdleForTests, pauseOutboxDrainForTests } from '@/outbox/outbox'
 import type { SchemaFileFormat } from '@/types/import'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForIdle } from '../test-utils/waitForIdle'
+import { getPublishGraph } from '@/db/read/publishGraph'
 
 /**
  * Creating and deleting items through the outbox (ADR 0019), and the writers that must know about
@@ -26,7 +27,7 @@ const MODEL = 'LifecyclePost'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -94,6 +95,9 @@ testDescribe('item lifecycle through the outbox', () => {
 
   it('a row that can’t be written fails the whole create, staged files included', async () => {
     const seedsBefore = (await db().select({ localId: seeds.localId }).from(seeds)).length
+    // Other tests share this database and leave failed creates of their own (a dangling relation
+    // is refused): read only the ops this create appends.
+    const [{ lastOpId }] = await db().select({ lastOpId: sql<number>`coalesce(max(${pendingWrites.id}), 0)` }).from(pendingWrites)
     await db().run(
       sql.raw(
         "CREATE TRIGGER fail_body_insert BEFORE INSERT ON metadata WHEN NEW.property_name = 'body' BEGIN SELECT RAISE(ABORT, 'body row refused'); END",
@@ -105,11 +109,12 @@ testDescribe('item lifecycle through the outbox', () => {
       await db().run(sql.raw('DROP TRIGGER fail_body_insert'))
     }
     expect((await db().select({ localId: seeds.localId }).from(seeds)).length).toBe(seedsBefore)
-    const [failed] = await db()
+    const failed = await db()
       .select()
       .from(pendingWrites)
-      .where(and(eq(pendingWrites.kind, 'create'), eq(pendingWrites.status, 'failed')))
-    expect(failed.error).toMatch(/body row refused/)
+      .where(and(gt(pendingWrites.id, lastOpId), eq(pendingWrites.kind, 'create'), eq(pendingWrites.status, 'failed')))
+    expect(failed).toHaveLength(1)
+    expect(failed[0]!.error).toMatch(/body row refused/)
     await vi.waitFor(async () => expect(await stagedFiles()).toEqual([]), { timeout: 5000 })
   }, 30000)
 
@@ -190,4 +195,95 @@ testDescribe('item lifecycle through the outbox', () => {
     expect((await opsFor(post.seedLocalId)).at(-1)?.status).toBe('applied')
     post.unload()
   }, 30000)
+
+  it('waitForPendingOutboxOps({ seedLocalIds }) waits only for those seeds', async () => {
+    const mine = await createPost()
+    const other = await createPost()
+    pauseOutboxDrainForTests(true)
+    try {
+      other.title = 'stuck elsewhere'
+      await vi.waitFor(async () => expect((await opsFor(other.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      expect(await waitForPendingOutboxOps({ seedLocalIds: [mine.seedLocalId] })).toBe(false)
+    } finally {
+      pauseOutboxDrainForTests(false)
+    }
+    await waitForPendingOutboxOps()
+    mine.unload()
+    other.unload()
+  }, 30000)
+
+  it("getPublishGraph waits for its own item's edits, not another item's (ADR 0019)", async () => {
+    const mine = await createPost()
+    const other = await createPost()
+    pauseOutboxDrainForTests(true)
+    try {
+      other.title = 'stuck elsewhere'
+      await vi.waitFor(async () => expect((await opsFor(other.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      const graph = await Promise.race([
+        getPublishGraph(mine),
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+      ])
+      expect(graph).not.toBe('timeout')
+
+      mine.title = 'my edit'
+      await vi.waitFor(async () => expect((await opsFor(mine.seedLocalId)).at(-1)?.status).toBe('pending'), { timeout: 10000 })
+      let built = false
+      const waiting = getPublishGraph(mine).then((g) => {
+        built = true
+        return g
+      })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(built).toBe(false)
+      pauseOutboxDrainForTests(false)
+      const withEdit = await waiting
+      expect(withEdit.root.properties.find((p) => p.key === 'title')?.row?.propertyValue).toBe('my edit')
+    } finally {
+      pauseOutboxDrainForTests(false)
+    }
+    await waitForPendingOutboxOps()
+    mine.unload()
+    other.unload()
+  }, 30000)
+
+  describe('save() while no tab drains the outbox (D30)', () => {
+    const titleOf = (post: Post) => post.properties.find((p) => p.propertyName === 'title')!
+
+    it('save({ timeoutMs }) rejects with OutboxSaveTimeoutError and the op stays queued', async () => {
+      const post = await createPost()
+      pauseOutboxDrainForTests(true)
+      try {
+        post.title = 'queued'
+        const error = await titleOf(post).save({ timeoutMs: 200 }).catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(OutboxSaveTimeoutError)
+        const last = (await opsFor(post.seedLocalId)).at(-1)!
+        expect((error as OutboxSaveTimeoutError).opId).toBe(last.opId)
+        expect(last.status).toBe('pending')
+      } finally {
+        pauseOutboxDrainForTests(false)
+      }
+      await waitForPendingOutboxOps()
+      expect((await opsFor(post.seedLocalId)).at(-1)?.status).toBe('applied')
+      post.unload()
+    }, 30000)
+
+    it('warns when a save has waited 10 s', async () => {
+      const post = await createPost()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      pauseOutboxDrainForTests(true)
+      try {
+        post.title = 'slow'
+        const saving = titleOf(post).save()
+        await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('has waited 10 s')), {
+          timeout: 13000,
+          interval: 250,
+        })
+        pauseOutboxDrainForTests(false)
+        await saving
+      } finally {
+        pauseOutboxDrainForTests(false)
+        warn.mockRestore()
+      }
+      post.unload()
+    }, 30000)
+  })
 })

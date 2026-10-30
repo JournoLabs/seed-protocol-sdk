@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { useLiveQuery } from '@seedprotocol/react'
-import { BaseDb, schemas, models, properties, modelSchemas, modelUids, propertyUids } from '@seedprotocol/sdk'
+import { BaseDb, schemas, models, properties, modelSchemas, modelUids } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { firstValueFrom, take, timeout } from 'rxjs'
@@ -41,7 +41,6 @@ describe('useLiveQuery React Hook Integration Tests', () => {
     if (db) {
       try {
         await db.delete(modelSchemas)
-        await db.delete(propertyUids)
         await db.delete(properties)
         await db.delete(modelUids)
         await db.delete(models)

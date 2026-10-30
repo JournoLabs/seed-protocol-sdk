@@ -30,7 +30,7 @@ const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-items-hooks',
   metadata: {
@@ -210,6 +210,18 @@ function UseItemRenderLog({ seedLocalId, log }: { seedLocalId?: string; log: Ite
   const title = item?.properties.find((p) => p.propertyName === 'title')?.value
   log.push({ requestedId: seedLocalId, itemId: item?.seedLocalId, title, isLoading })
   return <div data-testid="render-log-title">{String(title ?? '')}</div>
+}
+
+/** Shows a Post's uids from useItem. */
+function UseItemIdentity({ seedLocalId }: { seedLocalId: string }) {
+  const { item, isLoading } = useItem({ modelName: 'Post', seedLocalId })
+  return (
+    <div>
+      <div data-testid="item-identity-loading">{isLoading ? 'true' : 'false'}</div>
+      <div data-testid="item-seed-uid">{item?.seedUid ?? ''}</div>
+      <div data-testid="item-latest-version-uid">{String(item?.latestVersionUid ?? '')}</div>
+    </div>
+  )
 }
 
 // Test component for useItems
@@ -1046,6 +1058,27 @@ describe('React Item Hooks Integration Tests', () => {
           )
         })
 
+        // Sync, another tab or a late publish recording updates the uids of an item that stays idle.
+        it.each([
+          ['latestVersionUid', 'item-latest-version-uid'],
+          ['seedUid', 'item-seed-uid'],
+        ] as const)('shows a new %s that arrives while the item is idle', async (field, testId) => {
+          const item = testItem1!
+          const uid = `0x${'ab'.repeat(32)}`
+          render(<UseItemIdentity seedLocalId={item.seedLocalId} />, { container })
+          await waitFor(() => expect(screen.getByTestId('item-identity-loading').textContent).toBe('false'), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+          expect(screen.getByTestId(testId).textContent).not.toBe(uid)
+          await waitForItemIdle(item)
+
+          item.getService().send({ type: 'updateContext', [field]: uid })
+
+          await waitFor(() => expect(screen.getByTestId(testId).textContent).toBe(uid), {
+            timeout: WAIT_TIMEOUT_MS,
+          })
+        })
+
         it('loads an item that is not in the cache, as before', async () => {
           const id = testItem3!.seedLocalId
           Item.dropCachedInstancesForSeedIds([id])
@@ -1064,16 +1097,16 @@ describe('React Item Hooks Integration Tests', () => {
         })
       })
 
-      describe('useItem holds', () => {
-        const refCount = (item: IItem<any> | undefined) =>
-          item ? Item.cache.entryOf(item as Item<any>)?.refCount : undefined
-        /** The deferred release (useHeldItem) runs a tick after unmount. */
-        const afterRelease = () => new Promise((resolve) => setTimeout(resolve, 10))
-        const dropFromCache = (item: Item<any>) => {
-          Item.dropCachedInstancesForSeedIds([item.seedLocalId])
-          return item.seedLocalId
-        }
+      const refCount = (item: IItem<any> | undefined) =>
+        item ? Item.cache.entryOf(item as Item<any>)?.refCount : undefined
+      /** The deferred release (useHeldItems) runs a tick after unmount. */
+      const afterRelease = () => new Promise((resolve) => setTimeout(resolve, 10))
+      const dropFromCache = (item: Item<any>) => {
+        Item.dropCachedInstancesForSeedIds([item.seedLocalId])
+        return item.seedLocalId
+      }
 
+      describe('useItem holds', () => {
         it('unloads an item it loaded once it unmounts', async () => {
           const id = dropFromCache(testItem3!)
           testItem3 = null
@@ -1157,6 +1190,115 @@ describe('React Item Hooks Integration Tests', () => {
             { timeout: 15000 },
           )
           expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 1')
+        })
+      })
+
+      describe('useItems holds', () => {
+        const listed = async (count: number) =>
+          waitFor(
+            () => {
+              expect(screen.getByTestId('items-status').textContent).toBe('loaded')
+              expect(screen.getByTestId('items-count').textContent).toBe(String(count))
+            },
+            { timeout: 15000 },
+          )
+
+        it('holds each listed item once per mounted hook', async () => {
+          const posts = [testItem1!, testItem2!, testItem3!]
+          const { rerender, unmount } = render(<UseItemsTest modelName="Post" />, {
+            container,
+            wrapper: SeedProviderWrapper,
+          })
+          await listed(3)
+          await afterRelease()
+          expect(posts.map(refCount)).toEqual([2, 2, 2])
+
+          // A refetch returning the same instances keeps one hold per item
+          eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
+          await afterRelease()
+          await listed(3)
+          expect(posts.map(refCount)).toEqual([2, 2, 2])
+
+          // A new item is held once it is listed
+          const added = await createTestPost(4)
+          try {
+            await listed(4)
+            await afterRelease()
+            expect(refCount(added)).toBe(2)
+            expect(posts.map(refCount)).toEqual([2, 2, 2])
+
+            // Items that leave the list are released
+            rerender(<UseItemsTest modelName="Article" />)
+            await listed(1)
+            await afterRelease()
+            expect([...posts, added].map(refCount)).toEqual([1, 1, 1, 1])
+            expect(refCount(testArticleItem!)).toBe(2)
+
+            unmount()
+            await afterRelease()
+            expect(refCount(testArticleItem!)).toBe(1)
+          } finally {
+            added.unload()
+          }
+        })
+
+        it('unloads an item only it listed once it unmounts', async () => {
+          const id = dropFromCache(testItem3!)
+          testItem3 = null
+          const { unmount } = render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          await listed(3)
+          const shown = Item.peek(id)
+          expect(refCount(shown)).toBe(1)
+
+          unmount()
+          await afterRelease()
+          expect(Item.peek(id)).toBeUndefined()
+          expect(shown!.getService().getSnapshot().status).toBe('stopped')
+        })
+
+        it('keeps its holds across a StrictMode remount', async () => {
+          const id = dropFromCache(testItem3!)
+          testItem3 = null
+          render(
+            <React.StrictMode>
+              <UseItemsTest modelName="Post" />
+            </React.StrictMode>,
+            { container, wrapper: SeedProviderWrapper },
+          )
+          await listed(3)
+          await afterRelease()
+          const shown = Item.peek(id)
+          expect(shown!.getService().getSnapshot().status).toBe('active')
+          expect(refCount(shown)).toBe(1)
+        })
+
+        it('leaves an item useItem shows loaded when the list unmounts', async () => {
+          const id = dropFromCache(testItem1!)
+          testItem1 = null
+          const list = render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          const detailContainer = document.createElement('div')
+          document.body.appendChild(detailContainer)
+          const detail = render(<UseItemRenderLog seedLocalId={id} log={[]} />, {
+            container: detailContainer,
+            wrapper: SeedProviderWrapper,
+          })
+          await listed(3)
+          await waitFor(() => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 1'), {
+            timeout: 15000,
+          })
+          await afterRelease()
+          const shown = Item.peek(id)
+          expect(refCount(shown)).toBe(2)
+
+          list.unmount()
+          await afterRelease()
+          expect(Item.peek(id)).toBe(shown)
+          expect(shown!.getService().getSnapshot().status).toBe('active')
+          expect(refCount(shown)).toBe(1)
+
+          detail.unmount()
+          await afterRelease()
+          expect(Item.peek(id)).toBeUndefined()
         })
       })
 

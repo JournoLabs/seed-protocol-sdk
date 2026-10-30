@@ -2,37 +2,31 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
-import { resolvePublishPayloadValues, type IItem } from '@seedprotocol/sdk'
+import type { IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
-import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
 import { encodeExecutorMultiPublish, encodeMultiPublish } from '~/helpers/contracts'
 import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
+import { ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
+import { publishGasLimit } from '~/helpers/publishGas'
+import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
-import type { PublishWallet } from '~/helpers/seedSigner'
+import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
 import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
-import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
-import { listCreatedAttestationPairsFromReceipt } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
-import {
-  normalizePublishRequest,
-  applyPropertiesToUpdatePlaceholders,
-  hasCrossPayloadUnresolved,
-  filterPropertiesToUpdateForBatch,
-  toHex32,
-} from './publishRequestNormalize'
+import { normalizePublishRequest } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
 import debug from 'debug'
@@ -40,11 +34,6 @@ import debug from 'debug'
 const logger = debug('seedProtocol:services:publish:actors')
 
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
-
-type ReceiptLike = {
-  blockNumber?: bigint
-  logs?: Array<{ address?: string; data?: string; topics?: unknown[] }>
-}
 
 type PublishRoutingInput = {
   useModularExecutor: boolean
@@ -61,7 +50,8 @@ type PublishRoutingInput = {
 
 type PublishRouting = {
   txTargetAddress: string
-  contractAddressForEvents: string
+  /** The account EAS records as attester: the one the extension runs in or the executor acts for. */
+  attesterAddress: string
 }
 
 function isExecutorModuleAddress(value: string | undefined): value is string {
@@ -89,17 +79,17 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
       }
       return {
         txTargetAddress: module,
-        contractAddressForEvents: module,
+        attesterAddress: managedAddress,
       }
     }
     return {
       txTargetAddress: managedAddress,
-      contractAddressForEvents: module || managedAddress,
+      attesterAddress: managedAddress,
     }
   }
   return {
     txTargetAddress: publisherAddress,
-    contractAddressForEvents: publisherAddress,
+    attesterAddress: publisherAddress,
   }
 }
 
@@ -124,7 +114,7 @@ async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
 ): Promise<CreateAttestationsResult> {
-    const { address, account, wallet } = context
+    const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
@@ -133,10 +123,6 @@ async function executeCreateAttestations(
 
     if (!address || typeof address !== 'string' || !address.trim()) {
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
-    }
-
-    if (!wallet && !account) {
-      throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
     if (!useModularExecutor && !(await isContractDeployed(address))) {
@@ -171,8 +157,6 @@ async function executeCreateAttestations(
     let activeWallet: PublishWallet = resolvePublishWallet(context)
     let routeToExecutorModule = false
 
-    await ensureEasSchemasForItem(item, activeWallet, { managedAddress: address })
-
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
         const tx = arweaveTransaction.transaction as { id?: string }
@@ -190,12 +174,14 @@ async function executeCreateAttestations(
 
     await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
 
+    // The contract creates every seed before it attests any property, so a relation back to an item
+    // this publish creates is filled now rather than left for a later publish.
     const requestData = await (
       item.getPublishPayload as (
         uploads: typeof uploadDataWithTxIds,
-        opts?: { publishMode?: 'patch' | 'new_version' },
+        opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
       ) => ReturnType<typeof item.getPublishPayload>
-    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch' })
+    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
 
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
 
@@ -232,7 +218,22 @@ async function executeCreateAttestations(
         routeToExecutorModule = true
         // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
         await assertExecutorModuleReadyForAccount(address)
+        const { assertSessionKeyApprovesExecutor } = await import('~/helpers/ensureAutomationSessionKey')
+        await assertSessionKeyApprovesExecutor(address, sessionKeyAddress, module)
+        const { warnOnAutomationExposure } = await import('~/helpers/automationExposure')
+        await warnOnAutomationExposure(address)
+      } else if (sendsAsManagedAccount(activeWallet, address)) {
+        // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
+        // publishes as it is: no Thirdweb in-app wallet to connect.
+        routing = resolvePublishRouting({
+          useModularExecutor,
+          publisherAddress: address,
+          modularAccountModuleContract,
+          managedAddress: address,
+        })
+        await ensureManagedAccountEasConfigured(address, activeWallet)
       } else {
+        const { runModularExecutorPublishPrep } = await import('~/helpers/ensureManagedAccountReady')
         const prep = await runModularExecutorPublishPrep()
         if (!prep.ok) {
           throw prep.error
@@ -255,26 +256,36 @@ async function executeCreateAttestations(
       await ensureManagedAccountEasConfigured(address, activeWallet)
     }
 
-    // The executor module takes a different multiPublish struct than the ManagedAccount
-    // extension. Every publish is simulated from the sending account first, so a call that would
-    // revert is never sent and its decoded reason is reported. Automation also refuses to send
-    // when the simulation cannot run; other routes go ahead.
+    // Every publish is simulated from the sending account first, so a call that would revert is
+    // never sent and its decoded reason is reported. Automation also refuses to send when the
+    // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
     const sendPublishTx = async (requests: any[]) => {
       const to = routing.txTargetAddress as Address
-      const tx = routeToExecutorModule
-        ? encodeExecutorMultiPublish(to, requests, 5_000_000n)
-        : encodeMultiPublish(to, requests, 5_000_000n)
+      const unsized = routeToExecutorModule
+        ? encodeExecutorMultiPublish(to, requests)
+        : encodeMultiPublish(to, requests)
+      const from = routeToExecutorModule ? address : activeWallet.txSender.address
+      if (routeToExecutorModule && unsized.value) {
+        throw new ManagedAccountPublishError(
+          `This publish needs ${unsized.value} wei with its attestations, but session keys are granted no native value; nothing was sent.`,
+          'AUTOMATION_PREFLIGHT_FAILED',
+          address,
+        )
+      }
+      // Contracts of another version answer with a Router revert; name the mismatch instead.
+      await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
       await simulateCallFromAccount(
         routeToExecutorModule
-          ? { managedAddress: address, tx, action: 'multiPublish via the executor module' }
+          ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
           : {
-              managedAddress: activeWallet.txSender.address,
-              tx,
+              managedAddress: from,
+              tx: unsized,
               action: 'multiPublish',
               code: 'PUBLISH_PREFLIGHT_FAILED',
               requireSimulation: false,
             },
       )
+      const tx = { ...unsized, gas: await publishGasLimit(from, unsized) }
       try {
         return await activeWallet.txSender.sendTransaction(tx)
       } catch (err) {
@@ -282,111 +293,26 @@ async function executeCreateAttestations(
       }
     }
 
-    const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)
+    // One transaction for the whole graph: the contract creates every seed before it attests any
+    // property, so a reference in any direction is filled with its seed uid (encodeMultiPublish).
+    const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
+    const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
+    const result = await sendPublishTx(payloadForContract)
 
-    let effectiveRequests: any[]
-    let lastAttestationReceipt: ReceiptLike | null = null
-    const batchExtraUids: string[] = []
-
-    if (needsSequential) {
-      let workingPayload = structuredClone(reqs) as any[]
-      const resolvedUids: Record<string, string> = {}
-      const resolvedVersionUids: Record<string, string> = {}
-
-      for (let i = 0; i < workingPayload.length; i++) {
-        workingPayload = await resolvePublishPayloadValues(workingPayload as any, resolvedUids)
-        const rawReq = workingPayload[i]
-        const batchLocalIds = new Set([rawReq.localId])
-        const reqForPublish = {
-          ...rawReq,
-          propertiesToUpdate: filterPropertiesToUpdateForBatch(rawReq.propertiesToUpdate, batchLocalIds),
-        }
-        const normalizedOne = normalizePublishRequest(reqForPublish)
-        const byLocalIdSingle = new Map([[normalizedOne.localId, normalizedOne]])
-        applyPropertiesToUpdatePlaceholders([normalizedOne], byLocalIdSingle)
-
-        const result = await sendPublishTx([normalizedOne])
-
-        const receipt = await waitForPublishReceipt(result.transactionHash)
-        if (!receipt) {
-          throw new Error('Failed to send transaction')
-        }
-
-        lastAttestationReceipt = receipt
-        for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
-          if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
-        }
-        const {
-          requests: [recorded],
-        } = await recordMultiPublishReceipt({
-          receipt,
-          requests: [normalizedOne],
-          rootSeedLocalId: item.seedLocalId,
-          useModularExecutor,
-          contractAddressForEvents: routing.contractAddressForEvents,
-          publisherAddress: address,
-          resolvedSeedUids: resolvedUids,
-        })
-
-        if (recorded?.versionUid && toHex32(recorded.versionUid) !== ZERO_BYTES32) {
-          resolvedVersionUids[rawReq.localId] = recorded.versionUid
-        }
-        const hadZeroSeedUid =
-          !normalizedOne.seedUid || toHex32(normalizedOne.seedUid) === ZERO_BYTES32
-        const seedUidFromTx = hadZeroSeedUid ? recorded?.seedUid : undefined
-        if (seedUidFromTx && toHex32(seedUidFromTx) !== ZERO_BYTES32) {
-          resolvedUids[rawReq.localId] = seedUidFromTx
-          workingPayload[i] = { ...workingPayload[i], seedUid: seedUidFromTx }
-          batchExtraUids.push(seedUidFromTx)
-        }
-      }
-
-      for (const p of workingPayload) {
-        const id = p?.localId
-        const su = p?.seedUid
-        if (id && su && toHex32(su) !== ZERO_BYTES32) {
-          resolvedUids[id] = toHex32(su)
-        }
-      }
-
-      const fullyResolved = await resolvePublishPayloadValues(structuredClone(reqs), resolvedUids)
-      effectiveRequests = fullyResolved.map((r: any) =>
-        normalizePublishRequest({
-          ...r,
-          seedUid: resolvedUids[r.localId] ?? r.seedUid,
-          versionUid: resolvedVersionUids[r.localId] ?? r.versionUid,
-        }),
-      )
-    } else {
-      const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
-
-      const byLocalId = new Map(normalizedRequests.map((r: any) => [r?.localId, r]))
-      applyPropertiesToUpdatePlaceholders(normalizedRequests, byLocalId)
-
-      const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-      const result = await sendPublishTx(payloadForContract)
-
-      const receipt = await waitForPublishReceipt(result.transactionHash)
-      if (!receipt) {
-        throw new Error('Failed to send transaction')
-      }
-
-      lastAttestationReceipt = receipt
-      for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
-        if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
-      }
-      // Every request in the transaction (the item and the related items published with it)
-      // records its own seed, version and property uids.
-      const recorded = await recordMultiPublishReceipt({
-        receipt,
-        requests: payloadForContract,
-        rootSeedLocalId: item.seedLocalId,
-        useModularExecutor,
-        contractAddressForEvents: routing.contractAddressForEvents,
-        publisherAddress: address,
-      })
-      effectiveRequests = recorded.requests
+    const receipt = await waitForPublishReceipt(result.transactionHash)
+    if (!receipt) {
+      throw new Error('Failed to send transaction')
     }
+
+    // Every request in the transaction (the item and the related items published with it)
+    // records its own seed, version and property uids.
+    const { requests: effectiveRequests, attributed } = await recordMultiPublishReceipt({
+      receipt,
+      requests: payloadForContract,
+      rootSeedLocalId: item.seedLocalId,
+      publisherAddress: address,
+      attester: routing.attesterAddress,
+    })
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)
     const itemWithPersist = item as {
@@ -395,9 +321,7 @@ async function executeCreateAttestations(
     const rootRequest = effectiveRequests.find((r) => r?.localId === item.seedLocalId)
     const rootSeedUid = rootRequest?.seedUid
     if (rootSeedUid && rootSeedUid !== ZERO_BYTES32) {
-      const seedAttMs = lastAttestationReceipt
-        ? await attestationMsFromReceipt(lastAttestationReceipt)
-        : undefined
+      const seedAttMs = await attestationMsFromReceipt(receipt)
       await persistSeedUidSafely(itemWithPersist, address, seedAttMs)
     }
 
@@ -418,6 +342,7 @@ async function executeCreateAttestations(
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
     const rootForBatch =
       effectiveRequests.find((r) => r?.localId === item.seedLocalId) ?? effectiveRequests[0]
+    const batchExtraUids = attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid))
     for (const r of effectiveRequests) {
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))

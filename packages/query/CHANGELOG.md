@@ -2,6 +2,80 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Only `bytes32` and `bytes32[]` properties are relations. Since 0.7.13 a property of any type whose EAS name ended in `_id` or `_ids` came back without the suffix (a `string external_id` as `external`, with no `external_id` or `externalId`), in every `relations` mode and in changelog entries; it is back under its own name. Its value was also fetched as a related seed (before 0.7.13 too) and, with `'expand'`, replaced by that seed when one matched. The name rule now applies only to an attestation with no type. `getSeedAttestations` reports `isRelation` by the same rule, so RDF export no longer links a `string external_id` as a related seed. The item cache codes for `'expand'` and `'uids'` changed (`e6`, `e7`), so records cached in the 0.7.13 shape aren't read.
+- `initializeQueryPlatform({ models })` (or `setQueryModels(models)`) takes your schema file's `models`, and List relations come back under their schema keys: `co_author_identity_ids` as `coAuthors` and `featured_portfolio_clip_ids` as `featured`, in every `relations` mode, in changelog entries and in `getSeedAttestations` records. Without models the key is still the EAS name's first word, plural (`cos`, `featureds`): the EAS name doesn't keep where the key ends and the related model starts. Cache keys include the models.
+- `relations` set to anything but `'expand'` or `'uids'`, such as the removed `'urls'` from JavaScript, throws a `TypeError` before any request. `'urls'` fetched related seeds like `'expand'`, returned UIDs like `'uids'` and cached under the key `undefined-h1`.
+- `queryBySchema` results have `listed`: the number of Seeds the listing returned for the page, before Seeds with no Version were left out. Page on while `listed` equals `limit`; a short or empty page with `listed === limit` has more after it. Without it, finding the end took a second listing through `getRemoteQueryDataSource().listSeedsBySchemaName`. Code that builds its own `QueryBySchemaResult` (a mock, say) needs the field.
+- Assembled records leave out a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas) and drop such members from a list; neither is fetched as a related seed. Only `0x…20` was skipped before.
+- New `getSeedAttestations(seedUids, { source, pins })`: each seed's record with the property attestations it is assembled from, as attested (`easName`, `easType`, `value`, `isRelation`, attestation and schema uids, attester, time). A `SeedRecord` keeps neither the EAS type nor the EAS name, which RDF export needs. It reads the same seeds, versions and pins as `getSeeds`, assembles with `relations: 'uids'` and no storage hydration, and doesn't use the query cache.
+
+## 0.7.13 (2026-10-29)
+
+- **Breaking:** `relations: 'urls'` is removed, and `RelationsMode` is `'expand' | 'uids'`. It resolved Html/File relations to URLs like `'expand'` but left other related seeds as UIDs, and it fetched the same related seeds, so it saved no requests. Use `'expand'`, or `'uids'` to skip fetching related seeds.
+- **Breaking:** relation properties come back under their schema key in every `relations` mode and in changelog entries: `author_id` as `author`, a list's `author_identity_ids` as `authors`. With `relations: 'uids'` they kept the EAS name (and its camelCase copy, `authorId`), and with `'expand'` or `'urls'` a relation whose related seed was missing or had no storage transaction kept it too, so one record changed shape with the mode and the data. The item cache's option codes changed, so payloads cached in the old shape aren't read.
+- Body hydration (`hydrateStorage`) treats a gateway's 4xx other than 429, such as a 404 for a body it doesn't have yet, as a miss: it tries the next read gateway and leaves the first one's circuit closed. A 404 opened the circuit, which took that gateway out of every Arweave read, status check and probe in the process for 60 s.
+- Body hydration fetches a `/raw/<id>` link as `{gateway}/raw/<id>` on each gateway. It fetched `{gateway}/<id>`, which on `arweave.net` redirects to a sandbox subdomain and for a manifest returns the manifest's index instead of the manifest.
+- **Breaking:** `queryBySchema`, `queryBySchemaForMonth` and `assembleSeeds` leave out a seed with no Versions from its attester, as `getSeed` and `getSeeds` have since 0.7.12. They returned a record with `versionUid: ''` and no properties. `limit` and `skip` still count listed seeds, so a page can come back shorter than `limit` while later pages have more.
+- `engines.node` is `>=20.18.1`, the range `@seedprotocol/eas` declares. Query declared none.
+
+### Commits
+
+#### Breaking
+
+- return relations under their schema key in every relations mode (bebbbf88)
+
+#### Fixes
+
+- queryBySchema leaves out seeds with no Versions, like getSeed and getSeeds (b78d932e)
+- arweave, feed: export ARWEAVE_GRAPHQL_TIMEOUT_MS, restore status JSDoc, Node engines follow eas (81587295)
+- hydration skips a gateway's 404 without opening its circuit, and keeps /raw/ links raw (ec7ada95)
+
+#### Other
+
+- expand-only relation resolution now that 'urls' is gone (14f23342)
+
+## 0.7.12 (2026-10-27)
+
+- **Breaking:** `getSeed` returns `null` for a seed with no Versions from its attester, and `getSeeds` leaves it out. Both returned a record with `versionUid: ''` and no properties. With `source: 'auto'`, a local seed with no Versions is read from EAS, as a seed the local source doesn't have is.
+- `getSeed` reads the UID in lower case, like `getSeeds`, so `getSeed('0xAB…')` finds the seed. It returned `null`, because EAS matches UIDs case-sensitively. The record's `seedUid` is lower case.
+- `getSeed`, `getSeeds`, `queryBySchema` and `queryBySchemaForMonth` with `source: 'local'` no longer throw `DuplicateEasModuleError` or `DuplicateArweaveModuleError`: a local read uses neither client. `initializeQueryPlatform({ source: 'local' })` skips the checks.
+- `queryBySchema(schemaName, { attesters })` keeps seeds attested by one of the addresses, in any case. On the remote source it is part of the EAS request, before `limit` and `skip`, so the read costs those attesters' seeds rather than the schema's. Entries that aren't addresses are ignored; with none left, no items. Like `uidPrefix`, it skips the collection cache. `normalizeAttesters` is exported.
+- **Breaking:** `QueryDataSource.listSeedsByUidPrefix` is removed. `listSeedsBySchemaName(schemaName, opts)` takes the filters in `opts` (`uidPrefix`, `attesters`; the `SeedListFilter` type) and applies them before `limit` and `skip`. A custom local source implements the one method.
+- **Breaking:** `getArweaveUrlForTransaction`, used for image `arweaveUrl` fields and storage URLs in assembled seeds, is `@seedprotocol/arweave`'s: `{first read gateway}/raw/{id}`. It was `https://{read host}/{id}`. `isArweaveTransactionGatewayUrl` accepts `/raw/{id}` on any host and `/{id}` on a known or configured gateway.
+- Body hydration (`hydrateStorage`) fetches each body from the read gateways in order (`getArweaveReadBaseUrls`, skipping gateways whose circuit is open) instead of the one URL in the field, so a body is still found while that gateway is down.
+- Hydrated bodies have their Arweave links moved onto this reader's first read gateway (ADR 0025), so Html published with `ar.seedprotocol.io` links shows its images while that gateway is down.
+
+### Commits
+
+#### Breaking
+
+- getSeed lowercases its uid, a seed with no Versions is not found, local reads skip the duplicate-module checks (527973ac)
+- eas, sdk: queryBySchema attesters filter (e436bbcd)
+- arweave, sdk, feed: one getArweaveUrlForTransaction; feeds emit public Arweave links (1219b7ec)
+
+#### Features
+
+- hydrate bodies across read gateways and re-host their Arweave links (9d347131)
+- arweave: arweave.net is the default host; public fallbacks behind a sidecar or proxy (18eec823)
+
+## 0.7.11 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- eas, sdk: one store for property schema uids, read by every resolver (0ea6562b)
+
+## 0.7.10 (2026-10-24)
+
+### Commits
+
+#### Fixes
+
+- build: pin @types/bun to 1.4.3 (0dd3ed34)
+
 ## 0.7.9 (2026-10-22)
 
 - On Node, `initializeQueryPlatform` registers `NodeEasClient` when no EAS client is registered, as it already did for the Arweave client. Before, a process that used query without the SDK got `DefaultEasClient`, which doesn't use `NodeEasClient`'s TLS and keep-alive settings, so every new connection to easscan on Node 24.21+ paid the ~1.45 s handshake.
@@ -35,6 +109,10 @@ All notable changes to this package are documented in this file.
 - feed: import query helpers directly, FeedItem type, drop unused deps (a3079128)
 - send the collection change check alongside the seed list (fdb38985)
 - Clear a property: clear() and clear({ retract: true }) (ADR 0021) (fdd7e375)
+
+## 0.7.8 (2026-10-20)
+
+No user-facing changes; released at the same version as the other packages.
 
 ## 0.7.6 (2026-10-17)
 

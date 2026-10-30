@@ -9,7 +9,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
@@ -43,7 +42,7 @@ async function waitForPropertySchema(modelName: string, propertyName: string, sc
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -78,8 +77,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     if (db) {
       // First, nullify refModelId in properties to break self-referential foreign keys
       await db.update(propertiesTable).set({ refModelId: null })
-      // Delete in order: propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
-      await db.delete(propertyUids)
+      // Delete in order: modelUids -> properties -> model_schemas -> models -> schemas
       await db.delete(modelUids)
       await db.delete(propertiesTable)
       await db.delete(modelSchemas)
@@ -1098,20 +1096,23 @@ testDescribe('ModelProperty Integration Tests', () => {
         expect(property.getService().getSnapshot().status).toBe('active')
         expect(ModelProperty.getById(property.id!)).toBe(property)
 
-        // A property only the app holds: stopped once its last holder unloads it.
+        // A property only the app holds: its last unload keeps it cached (definitions stay cached
+        // without holds); evicting its model's properties stops it.
         const appOnly = ModelProperty.create(
           { ...propertyData, name: 'appOnly', id: generateId(), _propertyFileId: undefined } as any,
-          { waitForReady: false },
+          { waitForReady: false, hold: true },
         )
         const appOnlyAgain = ModelProperty.create(
           { ...propertyData, name: 'appOnly', id: appOnly.id, _propertyFileId: undefined } as any,
-          { waitForReady: false },
+          { waitForReady: false, hold: true },
         )
         expect(appOnlyAgain).toBe(appOnly)
         await waitForModelPropertyIdle(appOnly)
         appOnly.unload()
-        expect(appOnly.getService().getSnapshot().status).toBe('active')
         appOnlyAgain.unload()
+        expect(appOnly.getService().getSnapshot().status).toBe('active')
+        expect(ModelProperty.getById(appOnly.id!)).toBe(appOnly)
+        ModelProperty.evictForModels([modelName], schemaName)
         expect(appOnly.getService().getSnapshot().status).toBe('stopped')
       }
     })
@@ -1506,6 +1507,55 @@ testDescribe('ModelProperty Integration Tests', () => {
           expect(dbProperties[0].isEdited).toBe(true)
         }
       }
+    })
+
+    it('a rename to a reserved ABI word fails validation and leaves the row alone', async () => {
+      const schemaName = 'Test Schema Property Reserved Rename'
+      const modelName = 'TestModel Property Reserved Rename'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: { summary: { id: propertyFileId, type: 'Text' } },
+        },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      Model.create(modelName, schemaName, { waitForReady: false })
+      const propertyData = await waitForPropertySchema(modelName, 'summary', schemaName)
+      if (!propertyData) throw new Error('Property data not found')
+      const property = ModelProperty.create(propertyData, { waitForReady: false })
+      await waitForModelPropertyIdle(property)
+
+      property.name = 'view'
+      await waitForModelPropertyIdle(property)
+
+      const { isValid, errors } = await property.validate()
+      expect(isValid).toBe(false)
+      expect(errors).toEqual([
+        expect.objectContaining({
+          field: 'name',
+          code: 'reserved_name',
+          message: expect.stringContaining('Property "view" publishes as "view"'),
+        }),
+      ])
+      const db = BaseDb.getAppDb()
+      const rows = await db
+        .select({ name: propertiesTable.name })
+        .from(propertiesTable)
+        .where(eq(propertiesTable.schemaFileId, propertyFileId))
+      expect(rows).toEqual([{ name: 'summary' }])
+
+      // Renaming to a name that can publish clears the error and writes the row
+      property.name = 'overview'
+      await waitForModelPropertyIdle(property)
+      expect((await property.validate()).isValid).toBe(true)
+      await waitUntilOrThrow(async () => {
+        const [row] = await db
+          .select({ name: propertiesTable.name })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.schemaFileId, propertyFileId))
+        return row?.name === 'overview'
+      })
     })
 
     it('newly created property: first rename persists and survives reload (regression test)', async () => {

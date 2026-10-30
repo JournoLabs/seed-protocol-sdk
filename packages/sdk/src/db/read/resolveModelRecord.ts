@@ -272,35 +272,6 @@ export const resolveItemModelFileId = async (
   return undefined
 }
 
-type ItemScopeContext = {
-  modelFileId?: string
-  schemaName?: string
-  seedLocalId?: string
-  seedUid?: string
-  propertyId?: number
-}
-
-/** ModelScope for an Item (or ItemProperty) instance: its recorded modelFileId (context or seed row) and schemaName. */
-export const getItemModelScope = async (item: {
-  seedLocalId?: string
-  seedUid?: string
-  getService?: () => { getSnapshot: () => { context?: ItemScopeContext } }
-}): Promise<{ modelFileId?: string; schemaName?: string }> => {
-  let context: ItemScopeContext | undefined
-  try {
-    context = item.getService?.().getSnapshot().context
-  } catch {
-    context = undefined
-  }
-  const modelFileId = await resolveItemModelFileId({
-    modelFileId: context?.modelFileId,
-    seedLocalId: item.seedLocalId ?? context?.seedLocalId,
-    seedUid: item.seedUid ?? context?.seedUid,
-    propertyId: context?.propertyId,
-  })
-  return { modelFileId, schemaName: context?.schemaName }
-}
-
 /**
  * Resolve a ref (e.g. a Relation's target model) by name from the schema(s) its owning model belongs
  * to, so "Tag" means the owner schema's Tag rather than any Tag. Falls back to resolveModelRecord.

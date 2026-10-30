@@ -18,9 +18,10 @@ const listOfAttestationsComponents = [
 ] as const
 
 /**
- * `multiPublish` (selector 0x2a29fadc) on SeedProtocolExtension and SeedProtocolExecutor, which take
+ * `multiPublish` (selector 0xa1263421) on SeedProtocolExtension and SeedProtocolExecutor, which take
  * the same `PublishRequestData`: `propertiesToUpdate` names its target by `publishIndex`, the
- * target's position in `requests`.
+ * target's position in `requests`, and with `listElement` the element `elementIndex` of a
+ * `bytes32[]` list. Contracts from before the three-phase multiPublish route 0x2a29fadc instead.
  */
 export const multiPublishAbi = [
   {
@@ -49,6 +50,8 @@ export const multiPublishAbi = [
             components: [
               { name: 'publishIndex', type: 'uint256' },
               { name: 'propertySchemaUid', type: 'bytes32' },
+              { name: 'listElement', type: 'bool' },
+              { name: 'elementIndex', type: 'uint256' },
             ],
           },
         ],
@@ -86,29 +89,5 @@ export const publisherReadWriteAbi = [
     stateMutability: 'view',
     inputs: [{ name: 'signer', type: 'address' }],
     outputs: [{ type: 'bool' }],
-  },
-] as const
-
-/** Extension / ManagedAccount publisher events. */
-export const publisherEventsAbi = [
-  {
-    type: 'event',
-    name: 'CreatedAttestation',
-    inputs: [
-      {
-        name: 'result',
-        type: 'tuple',
-        indexed: false,
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'SeedPublished',
-    inputs: [{ name: 'returnedDataFromEAS', type: 'bytes', indexed: false }],
   },
 ] as const

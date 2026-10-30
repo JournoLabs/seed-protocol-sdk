@@ -15,7 +15,12 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getContentHash, getDeterministicId } from '@/helpers/crypto'
 import { isInternalSchema } from '@/helpers/constants'
-import { ModelPropertyDataTypes, normalizePropertyRecordSchema } from '@/helpers/property'
+import {
+  ModelPropertyDataTypes,
+  isKnownDataType,
+  normalizePropertyRecordSchema,
+  validationRuleProblems,
+} from '@/helpers/property'
 import { refreshCachedProperties } from '@/helpers/cachedPropertyRefresh'
 import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import {
@@ -34,12 +39,12 @@ import type { JsonImportSchema, SchemaFileFormat, SchemaFileInput } from '@/type
 import type { ModelDefinitions, ModelClassType } from '@/types'
 import { and, count, desc, eq, inArray } from 'drizzle-orm'
 import { easName } from '@seedprotocol/eas'
-import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
+import { abiKeywordProblem, easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schemaApply')
 
-export const SCHEMA_FILE_FORMAT = 'https://seedprotocol.org/schemas/data-model/v1'
+export const SCHEMA_FILE_FORMAT = 'https://seedprotocol.io/schemas/data-model/v1'
 
 type Db = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
 
@@ -82,9 +87,14 @@ const stableStringify = (value: unknown): string =>
       : v,
   )
 
-/** Hash of a schema file's content. The metadata timestamps don't count. */
-export const schemaContentHash = (file: SchemaFileFormat): Promise<string> =>
-  getContentHash(stableStringify({ ...file, metadata: { name: file.metadata.name } }))
+/**
+ * Hash of a schema file's content. The metadata timestamps and `$schema` don't count, so a file
+ * stored with the old `https://seedprotocol.org/...` format URL matches the same file today.
+ */
+export const schemaContentHash = (file: SchemaFileFormat): Promise<string> => {
+  const { $schema: _format, ...content } = file
+  return getContentHash(stableStringify({ ...content, metadata: { name: file.metadata.name } }))
+}
 
 /**
  * The id a schema, model or property gets when its file has none and no stored version of the
@@ -161,6 +171,53 @@ export function schemaFilePropertyDefinition(
   )
 }
 
+type SchemaFilePropertyFields = {
+  dataType?: string
+  type?: string
+  refValueType?: string
+  items?: { type?: string }
+  validation?: Record<string, unknown>
+}
+
+/**
+ * A schema file's property problems, as `Model.property: message` lines: unknown type names and
+ * rules that don't apply to the type are errors; ignored rules (`custom`) are warnings.
+ */
+function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
+  errors: string[]
+  warnings: string[]
+} {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const known = Object.values(ModelPropertyDataTypes).join(', ')
+  for (const [modelName, model] of Object.entries(file.models ?? {})) {
+    const modelProblem = abiKeywordProblem('Model', modelName, easName(modelName))
+    if (modelProblem) errors.push(`${modelName}: ${modelProblem}`)
+    for (const [propName, prop] of Object.entries(model?.properties ?? {})) {
+      const raw = (prop ?? {}) as SchemaFilePropertyFields
+      const def = normalizePropertyRecordSchema(raw)
+      const at = `${modelName}.${propName}`
+      const easForm = easPropertyNameForPublish(propName, { ...def, name: propName } as any)
+      const nameProblem = abiKeywordProblem('Property', propName, easForm)
+      if (nameProblem) errors.push(`${at}: ${nameProblem}`)
+      const rawType = raw.dataType ?? raw.type
+      if (rawType && !isKnownDataType(rawType)) {
+        errors.push(`${at}: unknown type "${rawType}". Expected one of: ${known}`)
+        continue
+      }
+      const rawRefValueType = raw.refValueType ?? raw.items?.type
+      if (def.dataType === ModelPropertyDataTypes.List && rawRefValueType && !isKnownDataType(rawRefValueType)) {
+        errors.push(`${at}: unknown refValueType "${rawRefValueType}". Expected one of: ${known}`)
+        continue
+      }
+      for (const problem of validationRuleProblems(def.dataType, def.refValueType, def.validation)) {
+        ;(problem.severity === 'error' ? errors : warnings).push(`${at}: ${problem.message}`)
+      }
+    }
+  }
+  return { errors, warnings }
+}
+
 /**
  * Every model's property definitions ({@link schemaFilePropertyDefinition}), by model name.
  * The property rows' columns are written from these; their `definition` column from the file's
@@ -191,14 +248,12 @@ export async function createModelsForSchemaFile(file: SchemaFileFormat): Promise
   const result: ModelDefinitions = {}
   for (const [modelName, model] of Object.entries(file.models)) {
     const modelFileId = model.id
-    // No hold: a loaded Schema holds its models (loadOrCreateSchema)
     result[modelName] = Model.create(modelName, file.metadata.name, {
       modelFileId,
       id: modelFileId,
       properties: definitions.get(modelName) ?? {},
       waitForReady: false,
       persistedBy: Promise.resolve(),
-      hold: false,
     }) as unknown as ModelClassType
   }
   return result
@@ -301,6 +356,10 @@ export async function applySchemaFile(
   if (!db) throw new Error('Database not found')
 
   const file = toSchemaFile(source)
+  const propertyProblems = schemaFilePropertyProblems(file)
+  if (propertyProblems.errors.length > 0) {
+    throw new Error(`Schema ${file.metadata.name}: ${propertyProblems.errors.join('; ')}`)
+  }
   const internal = isInternalSchema(file.metadata.name, file.id)
   await assignSchemaIds(db, file)
 
@@ -324,6 +383,7 @@ export async function applySchemaFile(
   if (!schemaRecord) {
     warnOnEasNameCollisions(file)
     warnOnInvalidNameMatch(file)
+    for (const warning of propertyProblems.warnings) console.warn(`[seed] schema ${file.metadata.name}: ${warning}`)
     const { addModelsToDb, broadcastSchemasInvalidate } = await import('./db')
     const modelFileIds = new Map(Object.entries(file.models).map(([name, model]) => [name, model.id!]))
     const propertyDefinitions = schemaFilePropertyDefinitions(file)

@@ -2,7 +2,6 @@ import {
   PUBLISHED_BY_SCHEMA_DEF,
   PUBLISHED_BY_SCHEMA_NAME,
   hashPublishedByBatch,
-  type PublishedByDecoded,
 } from '@seedprotocol/eas'
 import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
@@ -164,10 +163,6 @@ export async function attestPublishedBy(
   params: AttestPublishedByParams,
 ): Promise<AttestPublishedByResult> {
   const sender = resolveTxSender(params.wallet)
-  const schemaUid =
-    params.ensureSchema === false
-      ? getPublishedBySchemaUid()
-      : await ensurePublishedBySchema(params.wallet)
 
   let attestationUids: `0x${string}`[] = []
   let batchHash: `0x${string}`
@@ -195,6 +190,12 @@ export async function attestPublishedBy(
   }
 
   const versionUid = normalizeBytes32Hex(params.versionUid ?? ZERO_BYTES32) as `0x${string}`
+  // Register the schema only once the inputs are known good, so a bad call spends no gas.
+  const schemaUid =
+    params.ensureSchema === false
+      ? getPublishedBySchemaUid()
+      : await ensurePublishedBySchema(params.wallet)
+
   const data = encodePublishedByAttestationData({
     seedUid,
     versionUid,
@@ -221,7 +222,7 @@ export async function attestPublishedBy(
     throw new Error('@seedprotocol/publish: attestPublishedBy failed — no receipt')
   }
   const { easContractAddress } = getPublishConfig()
-  const uid = getAttestationUidFromReceipt(receipt, easContractAddress)
+  const uid = getAttestationUidFromReceipt(receipt, easContractAddress, sender.address)
   if (!uid || !isValidEasAttestationUid(uid)) {
     throw new Error('@seedprotocol/publish: attestPublishedBy failed — could not parse attestation UID')
   }
@@ -261,6 +262,4 @@ export async function revokePublishedBy(params: {
   }
 }
 
-export type { PublishedByDecoded }
-
-export { collectPublishedBatch, uidsFromAttestationPairs } from './collectBatchUids'
+export { collectPublishedBatch } from './collectBatchUids'

@@ -22,7 +22,7 @@ failed; attestation failures that wait for `PublishManager.retryAttestations` al
 When using the publish package with `ConnectButton` and its publish flow:
 
 1. **ensureEasSchemasForItem** runs before `getPublishPayload`. It:
-   - Registers EAS schemas for each item property via the SchemaRegistry contract
+   - Registers the EAS schemas the publish attests under via the SchemaRegistry contract: each seed's model, the properties with a value (or an empty value that removes an earlier attestation), and `string storage_transaction_id` for a seed that uploads a file
    - Adds naming attestations so EASSCAN displays schemas with friendly names
    - Populates the SDK's schema map so `getPublishPayload` can resolve schema UIDs
 
@@ -37,9 +37,11 @@ When using the publish package with `ConnectButton` and its publish flow:
    pending edits are written. The payload, uploads (`getPublishUploads`, the publish package's
    `getPublishUploadData`), `summarizePublishWork`, `getUnpublishedRelatedItems`, the Html passes and
    `ensureEasSchemasForItem` read that graph; none of them reads a loaded Item. In a cycle (A ↔ B, or a draft pointing back at the draft
-   being published), an item can only attest the uid of a seed created before it, so the reference
-   back to the item still being walked is left out of this publish; it keeps no attestation uid, and
-   the next publish of its item attests it with the target's uid.
+   being published), a publish through the contract attests both sides, since the contract creates
+   every seed first (`getPublishPayload` option `backReferences: 'link'`). Direct EAS can only attest
+   the uid of a seed created before the item, so there the reference back to the item still being
+   walked is left out of this publish (`'defer'`, the default); it keeps no attestation uid, and the
+   next publish of its item attests it with the target's uid.
 
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
    Direct EAS is used with `useDirectEas`, or when the publisher is an EOA (no bytecode). It
@@ -47,11 +49,17 @@ When using the publish package with `ConnectButton` and its publish flow:
    account that is not deployed yet is refused rather than sent down this path: deploy it first,
    then publish.
 
-   Requests are attested in order, so a link (`propertiesToUpdate`) must target its own request or
-   a later one: the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`,
-   and the direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
-   `PUBLISH_PREFLIGHT_FAILED`) before sending any attestation. `getPublishPayload` orders requests
-   referenced-first, so its payloads never do this.
+   The publish contract takes the whole payload in one transaction. It creates every Seed and
+   Version first, then writes each new Seed uid into the properties that reference it
+   (`propertiesToUpdate`: a relation, or one element of a list), then attests the properties.
+   Before sending, `encodeMultiPublish` puts a placeholder in each of those slots and refuses a
+   payload the contract would revert on, or one that still attests a draft's local id that no
+   reference fills.
+
+   Direct EAS attests requests in order, so a link must target its own request or a later one; it
+   refuses a payload that doesn't (`ManagedAccountPublishError`, `PUBLISH_PREFLIGHT_FAILED`) before
+   sending any attestation. `getPublishPayload` orders requests referenced-first, so its payloads
+   never do this.
 
 4. **Local recording.** Each request records its own seed, version and property attestation uids
    (`updateVersionUid`, `applyPropertyAttestationUidsFromPublish`). A request names the version row
@@ -67,6 +75,10 @@ You do not need to run schema setup yourself when using this flow.
 ## Domain ownership (tool sidecar)
 
 To prove DNS control of a domain and seal a tool-attested EAS claim, see **[DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md)** (`createDomainOwnershipChallenge` → TXT → `verifyAndAttestDomainOwnership`). That flow is separate from Seed/Version publish.
+
+## Wallets
+
+[PUBLISH_WALLETS.md](./PUBLISH_WALLETS.md) covers the wallet adapters, who sends each transaction, and using a ManagedAccount with your own bundler and paymaster.
 
 ## Publish automation (ManagedAccount grants)
 
@@ -101,8 +113,10 @@ Control this with **`publishMode`** when building payloads or starting publish.
 
 Use **`getPublishPendingDiff`** from `@seedprotocol/sdk` with `{ seedLocalId }` / `{ seedUid }` or an **`Item`**. It returns:
 
-- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists, and a **`change`**: `'set'`, `'removed'` or `'retracted'`. An empty value with nothing on chain to remove is not listed. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
+- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists, and a **`change`**: `'set'`, `'removed'` or `'retracted'`. An empty value with nothing on chain to remove is not listed, and neither is a value equal to the last published one: relations compare by the seed they name (a local id equals the seed's uid), lists member by member in order. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
 - **`lastPublishedVersionUid`** / **`lastVersionPublishedAt`** — From the local `versions` table when available.
+
+An edit back to the published value leaves no draft: when the outbox applies it, the property's drafts are deleted and its attested row is current again, so publish leaves it out too ([ADR 0019](./adr/0019-item-writes-through-an-outbox.md)). The comparison is with the latest attested value, so after sync has stored a newer value, going back to the old one is still an edit. Publish records a version uid and its property uids in one transaction, before it reports success, so a read never sees the version published while its properties are not.
 
 Use this to show “what will publish” or badges before calling publish.
 
@@ -202,7 +216,7 @@ EAS schemas must be:
 
 If a schema is registered but has no naming attestation, attestations will work but EASSCAN will not show a friendly name. The publish package's `ensureEasSchemasForItem` handles both steps.
 
-Property `dataType` values are matched case-insensitively (`html` and `Html` both use the `bytes32` schema). Automation session keys cannot register or name schemas. If a schema is missing, unattended publish fails before the UserOp and tells you to call `ensureEasSchemasForItem` once with the owner ManagedAccount wallet. See [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md).
+Property `dataType` values are matched case-insensitively (`html` and `Html` both use the `bytes32` schema). Automation session keys cannot register or name schemas. If a schema is missing, unattended publish fails before the UserOp with `EasSchemasNotRegisteredError`. Register a model's schemas ahead of time, with no item, by calling `ensureEasSchemasForModels` with the owner ManagedAccount wallet. See [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md).
 
 ## Tool PublishedBy sidecar
 

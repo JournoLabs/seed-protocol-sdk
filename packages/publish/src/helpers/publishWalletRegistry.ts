@@ -1,5 +1,5 @@
 import { client as seedClient } from '@seedprotocol/sdk'
-import type { PublishWallet, SeedSigner, SeedTxSender } from './seedSigner'
+import type { PublishWallet } from './seedSigner'
 
 export type PublishWalletSession = PublishWallet & {
   /** Addresses to treat as owned in the Seed SDK (EOA + smart account, etc.). */
@@ -26,8 +26,8 @@ export type PublishWalletSession = PublishWallet & {
 
 /**
  * The data-item signer to default to for this wallet: its own `dataItemSigner`, else its signer
- * when that is an EOA's (`kind: 'eoa'`, or a known EOA admin). Undefined for a smart account with
- * no EOA signer, whose signatures data items can't use.
+ * when that is an EOA's (`kind` other than `'smart'`). Undefined for a smart account with no EOA
+ * signer, whose signatures data items can't use.
  */
 export function defaultDataItemSigner(
   wallet: (Partial<PublishWalletSession> & Pick<PublishWallet, 'signer'>) | null | undefined,
@@ -35,6 +35,22 @@ export function defaultDataItemSigner(
   if (!wallet) return undefined
   if (wallet.dataItemSigner) return wallet.dataItemSigner
   return wallet.kind === 'smart' ? undefined : wallet.signer
+}
+
+/**
+ * The data-item signer for a publish from `wallet` as `publisherAddress` when the caller passed
+ * none: the registered session's `dataItemSigner` when the session publishes as that address,
+ * else {@link defaultDataItemSigner} of the wallet.
+ */
+export function dataItemSignerForPublish(
+  wallet: (Partial<PublishWalletSession> & Pick<PublishWallet, 'signer'>) | null | undefined,
+  publisherAddress: string,
+): import('./seedSigner').SeedSigner | undefined {
+  const sessionPublisher = session?.publisherAddress ?? session?.txSender.address
+  if (session?.dataItemSigner && sessionPublisher?.toLowerCase() === publisherAddress.trim().toLowerCase()) {
+    return session.dataItemSigner
+  }
+  return defaultDataItemSigner(wallet)
 }
 
 let session: PublishWalletSession | null = null
@@ -96,14 +112,4 @@ export async function clearPublishWallet(): Promise<void> {
   } catch (err) {
     console.warn('[publishWalletRegistry] Failed to clear seed client owned addresses:', err)
   }
-}
-
-/** Convenience for callers that only need signing. */
-export function getRegisteredSigner(): SeedSigner | null {
-  return session?.signer ?? null
-}
-
-/** Convenience for callers that only need sending. */
-export function getRegisteredTxSender(): SeedTxSender | null {
-  return session?.txSender ?? null
 }

@@ -1,8 +1,8 @@
-import { checksumAddress } from './utils.js'
+import { checksumAddresses } from './utils.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
-import { GET_SEEDS } from './queries.js'
+import { GET_PUBLISH_AUTHORIZATIONS } from './queries.js'
 import {
   PUBLISH_AUTHORIZATION_SCHEMA_NAME,
   decodePublishAuthorizationData,
@@ -59,25 +59,13 @@ export async function getPublishAuthorizationFromEas(
 
   if (identities?.length) {
     where.attester = {
-      in: identities.map((a) => {
-        try {
-          return checksumAddress(a)
-        } catch {
-          return a
-        }
-      }),
+      in: checksumAddresses(identities),
     }
   }
 
   if (sessionKeys?.length) {
     where.recipient = {
-      in: sessionKeys.map((a) => {
-        try {
-          return checksumAddress(a)
-        } catch {
-          return a
-        }
-      }),
+      in: checksumAddresses(sessionKeys),
     }
   }
 
@@ -88,7 +76,7 @@ export async function getPublishAuthorizationFromEas(
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const { itemSeeds } = (await queryClient.fetchQuery({
+  const { publishAuthorizations } = (await queryClient.fetchQuery({
     queryKey: [
       'getPublishAuthorizationFromEas',
       excludeRevoked,
@@ -98,15 +86,15 @@ export async function getPublishAuthorizationFromEas(
       [...(apps ?? [])].map((a) => a.toLowerCase()).sort(),
     ],
     queryFn: async () =>
-      easClient.request(GET_SEEDS, {
+      easClient.request(GET_PUBLISH_AUTHORIZATIONS, {
         where,
       }),
-  })) as { itemSeeds: Attestation[] }
+  })) as { publishAuthorizations: Attestation[] }
 
-  if (!apps?.length) return itemSeeds
+  if (!apps?.length) return publishAuthorizations
 
   const want = new Set(apps.map((a) => a.toLowerCase()))
-  return itemSeeds.filter((row) => {
+  return publishAuthorizations.filter((row) => {
     try {
       const decoded = decodePublishAuthorizationData(row.decodedDataJson ?? '[]')
       return want.has(decoded.app.toLowerCase())

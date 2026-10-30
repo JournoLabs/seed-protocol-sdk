@@ -2,7 +2,7 @@ import { ModelValues } from '@/types'
 // Dynamic import to break circular dependency: Model -> BaseItem -> createNewItem -> Model
 // import { Model } from '@/Model/Model'
 import { resolveNewSeedFields } from './createSeed'
-import { resolveMetadataSchemaUid } from './createMetadata'
+import { lookupPropertySchemaUid } from '@/helpers/propertySchemaUid'
 import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { generateId } from '@/helpers/generateId'
@@ -73,7 +73,7 @@ export const createNewItem = async ({
         if (!propertyRecordSchema || propertyRecordSchema.storageType === 'ItemStorage') return
         schemaUids.set(
           propertyName,
-          await resolveMetadataSchemaUid(
+          await lookupPropertySchemaUid(
             listRelationEasPropertyName(propertyName, propertyRecordSchema) ?? propertyName,
             propertyRecordSchema,
           ),
@@ -113,7 +113,7 @@ export const createNewItem = async ({
       rows.push({ propertyName, propertyValue, propertyRecordSchema, schemaUid: schemaUids.get(propertyName) })
     }
 
-    const { appendOutboxOpAndWait, startItemOutbox } = await import('@/outbox')
+    const { appendOutboxOpAndWait, startItemOutbox, throwItemWriteError } = await import('@/outbox')
     startItemOutbox()
     const fields = await timed(`${label} seed fields`, () => resolveNewSeedFields(seedType))
     const applied = await timed(
@@ -127,7 +127,7 @@ export const createNewItem = async ({
             seed: { type: seedType, modelFileId, fields },
             rows,
           } satisfies CreateItemOp,
-        }),
+        }).catch(throwItemWriteError),
       () => `(${rows.length} rows)`,
     )
     if (applied.superseded || !applied.result) {

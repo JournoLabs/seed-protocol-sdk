@@ -31,7 +31,7 @@ describe('feed CacheManager', () => {
     await new CacheManager(config).setFeedContent(
       'post',
       'rss',
-      { content: '<rss/>', contentType: 'application/rss+xml', etag: '"abc"', fingerprint: 'f1' },
+      { content: '<rss/>', contentType: 'application/rss+xml', etag: '"abc"', fingerprint: 'f1', siteFingerprint: 's1' },
       { page: 2 },
     )
     const written = await new CacheManager(config).getFeedContent('post', 'rss', { page: 2 })
@@ -54,10 +54,13 @@ describe('feed CacheManager', () => {
       contentType: 'application/rss+xml',
       etag: '"abc"',
       fingerprint: 'f1',
+      siteFingerprint: 's1',
     })
-    expect(await cache.getFeedContent('post', 'rss', undefined, 'f1')).not.toBeNull()
-    expect(await cache.getFeedContent('post', 'rss', undefined, 'f2')).toBeNull()
+    expect(await cache.getFeedContent('post', 'rss', undefined, { fingerprint: 'f1' })).not.toBeNull()
+    expect(await cache.getFeedContent('post', 'rss', undefined, { fingerprint: 'f2' })).toBeNull()
     expect(await cache.getFeedContent('post', 'rss')).not.toBeNull()
+    expect(await cache.getFeedContent('post', 'rss', undefined, { siteFingerprint: 's1' })).not.toBeNull()
+    expect(await cache.getFeedContent('post', 'rss', undefined, { siteFingerprint: 's2' })).toBeNull()
   })
 
   it('caches image metadata when content caching is off', async () => {

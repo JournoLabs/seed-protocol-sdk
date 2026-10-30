@@ -6,7 +6,6 @@ import { PublishConfigContext, usePublishConfig } from "./PublishConfigContext"
 import type { PublishProviderProps } from "./PublishProvider"
 
 export { usePublishConfig }
-export type { PublishProviderProps }
 
 /**
  * Thirdweb-backed PublishProvider (includes ThirdwebProvider).
@@ -14,6 +13,9 @@ export type { PublishProviderProps }
 const PublishProviderThirdweb: FC<PublishProviderProps> = ({
   children,
   config,
+  seedConfig,
+  addresses,
+  onInitError,
   queryClient,
   queryClientRef,
 }) => {
@@ -28,7 +30,13 @@ const PublishProviderThirdweb: FC<PublishProviderProps> = ({
   return (
     <PublishConfigContext.Provider value={config ?? getConfigRef()}>
       <ThirdwebProvider>
-        <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
+        <SeedProvider
+          config={seedConfig}
+          addresses={addresses}
+          onInitError={onInitError}
+          queryClient={queryClient}
+          queryClientRef={queryClientRef}
+        >
           {children}
         </SeedProvider>
       </ThirdwebProvider>

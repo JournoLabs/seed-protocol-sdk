@@ -89,6 +89,8 @@ export interface PublishMachineContext {
    * Per-property `htmlEmbeddedDataUriPolicy` on the schema overrides this. Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy
+  /** How Arweave links are written into Html (ADR 0025). Default: `gateway`. */
+  htmlArweaveRefs?: import('@seedprotocol/sdk').HtmlArweaveRefs
   /** Set during publish after embedded-image prep: Html seeds uploaded in a second pass. */
   htmlEmbeddedDeferredHtmlSeedLocalIds?: string[]
   htmlEmbeddedPhase1PublishUploads?: PublishUpload[]
@@ -106,6 +108,10 @@ export interface PublishMachineContext {
   authorizePublish?: import('./authorization').AuthorizePublish
   /** What `authorizePublish` returned; its token goes to the upload API. Persisted for resume. */
   publishAuthorization?: import('./authorization').PublishAuthorization
+  /** Upload size limits for the checking step: PublishConfig, then CreatePublishOptions. */
+  uploadLimits?: import('./services/publishCost/uploadEstimate').UploadLimits
+  /** CreatePublishOptions.confirmUpload: the user agreed to this publish's upload size. */
+  confirmUpload?: boolean
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown

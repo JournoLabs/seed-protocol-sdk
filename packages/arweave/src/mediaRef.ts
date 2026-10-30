@@ -1,4 +1,5 @@
 import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
+import { getArweaveReadBaseUrls } from './gateway/readBaseUrls.js'
 import { isEasAttestationExplorerUrl } from './easAttestationUrl.js'
 import {
   normalizeRelationPropertyValue,
@@ -189,6 +190,12 @@ export function normalizeFeedItemFields(
   return out
 }
 
+/**
+ * `{first read gateway}/raw/{id}`: the URL this reader loads a transaction from (ADR 0025), which
+ * can be a local sidecar or proxy. For a URL written into published content or a feed, use
+ * `getPublicArweaveRawUrl`.
+ */
 export function getArweaveUrlForTransaction(transactionId: string): string {
-  return `${BaseArweaveClient.getBaseUrl()}/${transactionId}`
+  const base = getArweaveReadBaseUrls()[0] ?? BaseArweaveClient.getBaseUrl()
+  return `${base.replace(/\/+$/, '')}/raw/${transactionId}`
 }

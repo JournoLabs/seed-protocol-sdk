@@ -23,16 +23,10 @@ describe('connectionStrokeForIndex', () => {
     expect(connectionStrokeForIndex(2, ['#aaa', '#bbb'])).toBe('#aaa')
   })
 
-  it('defaults to CSS vars --fm-map-N with --map-N fallback', () => {
-    expect(connectionStrokeForIndex(0)).toBe(
-      'var(--fm-map-1, var(--map-1, currentColor))',
-    )
-    expect(connectionStrokeForIndex(7)).toBe(
-      'var(--fm-map-8, var(--map-8, currentColor))',
-    )
-    expect(connectionStrokeForIndex(8)).toBe(
-      'var(--fm-map-1, var(--map-1, currentColor))',
-    )
+  it('defaults to the --sfm-map-N CSS vars', () => {
+    expect(connectionStrokeForIndex(0)).toBe('var(--sfm-map-1, currentColor)')
+    expect(connectionStrokeForIndex(7)).toBe('var(--sfm-map-8, currentColor)')
+    expect(connectionStrokeForIndex(8)).toBe('var(--sfm-map-1, currentColor)')
   })
 
   it('exposes eight pair slots', () => {
@@ -60,13 +54,11 @@ describe('theme CSS tokens and layer', () => {
     expect(buildThemeCss('structural')).toMatch(/^@layer seed-field-mapper/)
   })
 
-  it('includes --sfm-* tokens and --fm-* aliases in paint CSS', () => {
+  it('defines only --sfm-* tokens in paint CSS: a --fm-* value set by a host would be overwritten', () => {
     expect(PAINT_THEME_CSS).toContain('--sfm-color-ground:')
     expect(PAINT_THEME_CSS).toContain('--sfm-color-ink:')
-    expect(PAINT_THEME_CSS).toContain('--fm-ground: var(--sfm-color-ground)')
-    expect(PAINT_THEME_CSS).toContain('--fm-ink: var(--sfm-color-ink)')
     expect(PAINT_THEME_CSS).toContain('--sfm-map-1:')
-    expect(PAINT_THEME_CSS).toContain('--fm-map-1: var(--sfm-map-1)')
+    expect(PAINT_THEME_CSS).not.toMatch(/--fm-|--map-/)
   })
 
   it('defaults --sfm-font-family to inherit in structural CSS', () => {

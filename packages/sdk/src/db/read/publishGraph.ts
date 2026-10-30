@@ -40,12 +40,13 @@ import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
  * embedded images, then lists. `nodes` is the order nodes finish, so a node comes after the
  * nodes it refers to and the root is last.
  *
- * Cycles: an item can only attest the uid of a seed published before it in the same publish, so a
- * ref back to an item still being walked (one that gets a new seed in this publish) can't be
- * attested. Such a property is deferred: left out of this publish (it keeps no uid, so the next
- * publish of its item attests it, with the target's uid). For A ↔ B reached from A, A attests B's
- * uid and B's relation to A is deferred. A list with a back reference is deferred whole; its other
- * draft members are still published, unlinked.
+ * Cycles: a ref back to an item still being walked (one that gets a new seed in this publish) is a
+ * back reference. With `backReferences: 'link'` (the publish contract, which creates every seed
+ * before it attests any property) it is linked like any other ref. With `'defer'` (the default;
+ * direct EAS, which attests one item after another) it can't be attested: the property is left out
+ * of this publish (it keeps no uid, so the next publish of its item attests it, with the target's
+ * uid). For A ↔ B reached from A, A attests B's uid and B's relation to A is deferred. A list with
+ * a back reference is deferred whole; its other draft members are still published, unlinked.
  */
 
 /** How a property takes part in a publish. */
@@ -146,9 +147,14 @@ export type PublishGraph = {
 
 export type PublishMode = 'patch' | 'new_version'
 
+/** What a publish does with a ref back to an item still being walked: link it, or defer the property. */
+export type PublishBackReferences = 'link' | 'defer'
+
 export type GetPublishGraphOptions = {
   /** `patch` (default): properties with a uid are left out. `new_version`: every property is attested. */
   publishMode?: PublishMode
+  /** `defer` (default) for a route that attests items one after another; `link` for the publish contract. */
+  backReferences?: PublishBackReferences
 }
 
 const STORAGE_SEED_TYPES = new Set<string>([
@@ -269,17 +275,48 @@ export function htmlPropertyForHtmlSeed(node: PublishGraphNode, htmlSeedLocalId:
   )
 }
 
+/** Rebuilds after waiting at most this many times; ops that keep arriving don't hold publish forever. */
+const MAX_GRAPH_OUTBOX_PASSES = 4
+
+/** Every local seed a graph names: its nodes, the unpublished items it refers to, and refs it couldn't follow. */
+function graphSeedLocalIds(graph: PublishGraph): string[] {
+  const ids = new Set<string>([graph.root.seedLocalId])
+  for (const node of graph.nodes) ids.add(node.seedLocalId)
+  for (const item of graph.unpublishedRelatedItems) ids.add(item.seedLocalId)
+  for (const broken of graph.brokenRefs) {
+    const { seedLocalId } = resolveSeedIdsFromRefString(broken.ref)
+    if (seedLocalId) ids.add(seedLocalId)
+  }
+  for (const missing of graph.missingEmbeddedImages) ids.add(missing.imageSeedLocalId)
+  return [...ids]
+}
+
 /**
- * The publish graph of the seed `root` (an Item, or any `{ seedLocalId }`). Waits for pending
- * outbox ops first, so every edit made before publishing is in its row (ADR 0019), then reads rows
- * only.
+ * The publish graph of the seed `root` (an Item, or any `{ seedLocalId }`). Waits for the pending
+ * outbox ops on the seeds in the graph first, so every edit made to them before publishing is in
+ * its row (ADR 0019); ops on other seeds don't hold the publish. Since those ops can change which
+ * seeds the graph reaches, it is read again after any were pending. Reads rows only.
  */
 export async function getPublishGraph(
   root: { seedLocalId: string; modelName?: string },
   options: GetPublishGraphOptions = {},
 ): Promise<PublishGraph> {
   const { waitForPendingOutboxOps } = await import('@/outbox')
-  await waitForPendingOutboxOps()
+  let seedLocalIds = [root.seedLocalId]
+  let graph: PublishGraph | undefined
+  for (let pass = 0; pass < MAX_GRAPH_OUTBOX_PASSES; pass++) {
+    const waited = await waitForPendingOutboxOps({ seedLocalIds })
+    if (graph && !waited) return graph
+    graph = await readPublishGraph(root, options)
+    seedLocalIds = graphSeedLocalIds(graph)
+  }
+  return graph!
+}
+
+async function readPublishGraph(
+  root: { seedLocalId: string; modelName?: string },
+  options: GetPublishGraphOptions,
+): Promise<PublishGraph> {
   const rootNode = await readNode(root.seedLocalId, 'root', root.modelName)
   if (!rootNode) throw new Error(`Cannot publish ${root.seedLocalId}: no local seed with a known model`)
   const republishRevokedSeed = !!rootNode.seedUid && rootNode.newSeed
@@ -332,7 +369,10 @@ export async function getPublishGraph(
     }
     const row = await findRelatedSeedRow({ seedLocalId, seedUid })
     const targetLocalId = row?.seedLocalId ?? seedLocalId
-    if (property.kind !== 'storageSeed' && targetLocalId && inProgress.has(targetLocalId)) return 'backEdge'
+    if (property.kind !== 'storageSeed' && targetLocalId && inProgress.has(targetLocalId)) {
+      if (options.backReferences !== 'link') return 'backEdge'
+      return { ref, seedLocalId: targetLocalId, node: nodes.get(targetLocalId) }
+    }
     if (isUnpublishedSeed(row)) {
       const targetNode = nodes.get(row.seedLocalId)
       noteUnpublished(property.key, targetNode?.modelName ?? relatedModelNameFromDef(property.definition), row)

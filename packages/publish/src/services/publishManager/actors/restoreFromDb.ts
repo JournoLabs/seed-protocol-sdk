@@ -3,7 +3,7 @@ import { createActor, EventObject, fromCallback } from 'xstate'
 import { eq } from 'drizzle-orm'
 import { publishMachine } from '../../publish'
 import { subscribe } from './subscribe'
-import { tryHoldPublishLock } from '../publishLocks'
+import { releasePublishLock, tryHoldPublishLock } from '../publishLocks'
 import { markInProgressPublishInterrupted } from './savePublish'
 import { isRestorableSnapshot, type PersistedSnapshot } from './restorableSnapshot'
 
@@ -132,13 +132,15 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
         if (parsed.status === 'done') continue
         const seedLocalId = parsed.context?.item?.seedLocalId ?? publishProcessRecord.seedLocalId
         if (!seedLocalId) continue
+        // Another open tab is already running this publish; it keeps it. Checked first: a publish
+        // another tab is uploading looks unrestorable here, and must not be marked interrupted.
+        if (!(await tryHoldPublishLock(seedLocalId))) continue
         if (!isRestorableSnapshot(parsed)) {
           // Can't resume: mark it interrupted so it doesn't stay in progress, and can be published again.
           await markInProgressPublishInterrupted(seedLocalId).catch(() => {})
+          releasePublishLock(seedLocalId)
           continue
         }
-        // Another open tab is already running this publish; it keeps it.
-        if (!(await tryHoldPublishLock(seedLocalId))) continue
 
         // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
         patchPublishContextItemForRestore(parsed, seedLocalId, publishProcessRecord)

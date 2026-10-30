@@ -4,8 +4,93 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- **Breaking:** `useItem` holds the Item it shows once per mounted hook and releases it when the hook unmounts or shows another item, so an item no hook or caller holds is unloaded. Before, each lookup that missed the instance cache took a hold that was never released, and no item `useItem` loaded was ever unloaded. Code that keeps an Item from `useItem` after the component unmounts must hold it itself (`Item.find`, then `unload()` when done). `useItems` still holds every item it lists without releasing them.
+- **Breaking:** `SeedProvider` and `SeedClientGate` apply a change to their `addresses` (`initConfig.addresses` for the gate) with `client.setAddresses` instead of running `client.init` again, which now leaves the stored addresses alone. Passing `[]` after a disconnect clears them. A remount runs init again and doesn't change them, so a gate remounted with `addresses: []` keeps the connected wallet's addresses. Leaving the prop out keeps the stored ones. A failed `setAddresses` is logged.
+
+## 0.7.13 (2026-10-29)
+
+- `useGlobalServiceStatus()` returns `stopReason`: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client, `'stop'` for `client.stop()` or `client.unload()`, undefined while the client isn't stopped.
+- `useItemProperty` returns `valueStatus` and re-renders when it changes, so an editor can wait for an Html or Image file instead of a timer.
+- `useItem` re-renders when the item's `seedUid`, `latestVersionUid`, `latestVersionLocalId`, `lastVersionPublishedAt`, `attestationCreatedAt`, `revokedAt` or `publisher` changes while it stays idle (sync, another tab, a publish recorded late, unpublish). It re-rendered only on busy, idle and error transitions, so the component kept showing the draft's uids until something else rendered it.
+
+- `useGlobalServiceStatus()` types `status` as `ClientManagerState | 'stopped'` and `internalStatus` as `ClientManagerState | 'ready' | 'stopped'`. Since 0.7.12 both were `string`, so a `switch` on them lost its exhaustiveness check.
+- `useCreateModelProperty().create` rejects with `ClientNotInitializedError` (`code: 'CLIENT_NOT_INITIALIZED'`) while the database isn't open. It rejected with `No stored schema has the name or schema file id "<id>"`, which read as a typo.
+- `useCreateItem` compares arrays and plain objects in a call's values and options by contents when deciding whether a call repeats one in flight. A double click on a create whose values held an array or object built in the click handler created two items. A `File`, `Blob` or other object still has to be the same object.
+
+### Commits
+
+#### Features
+
+- sdk: client.resetLocalData deletes the local database and files, stopping other tabs (97e82b67)
+
+#### Fixes
+
+- sdk: a file-backed value whose file is missing reads as undefined; add valueStatus (3942b9c7)
+- useCreateItem compares array and object values by contents for repeats (aa73fe2e)
+- useCreateModelProperty rejects with ClientNotInitializedError before the database opens (265fe1f3)
+- useGlobalServiceStatus types status as ClientManagerState | 'stopped' (a49f5b94)
+- useItem re-renders when an idle item's uids or publish state change (b04a1157)
+
+## 0.7.12 (2026-10-27)
+
+- The published `.d.ts` files resolve under `moduleResolution: node16` and `nodenext`: relative imports carry `.js` (or `/index.js`). Without the extensions, `useItems`, `useItem`, `useItemProperty` and `useCreateItem` were missing (TS2305) and named re-exports were typed `any`.
+- `useCreateItem` hands a running create to a second call only when it is the same call (same model, same values, same options), as from a double click. A call with other values or another model returned the first call's item; it now creates its own. `isLoading` stays true until every create has finished.
+- `isClientReadySnapshot` is exported, as the 0.7.9 notes said (the SDK's, re-exported unchanged).
+- **Breaking:** `useModelProperty(schemaId, …)` and `useCreateModelProperty().create(schemaId, …)` no longer cut a trailing `-<n>` off a schema id that no stored schema has as its name or file id. `blog-2` resolved to `blog`, so a typo or a schema not stored yet added the property to another schema. `useModelProperty` now finds nothing for such an id, and `create` rejects naming it.
+- `useCreateModel`, `useCreateModelProperty` and `useCreateItemProperty` report the entity's own load error, as `useCreateSchema` did; they set a generic "Failed to create …" message.
+- `useGlobalServiceStatus()` reports `status` and `internalStatus` `'stopped'` after `client.stop()` until the next init starts. Both read `'idle'`, the stopped client's last state, so a stopped client looked ready.
+- `useItemProperty` re-renders when only the property's `conflict` changes (sync or another tab recording or resolving one). It dropped idle snapshots whose value hadn't changed.
+- `useItemProperties` re-renders after another tab's save. Its refetch returned the same instances, and React Query's structural sharing kept the old array.
+- `SeedHtml` moves the Html's Arweave links onto this reader's first read gateway before calling `sanitize` (ADR 0025), so `ar://` links reach the sanitizer as `https` and Html published with `ar.seedprotocol.io` links shows its images while that gateway is down. When an `img`, `video`, `audio` or `source` in it fails to load, it moves to the same transaction on the next read gateway. New `attachArweaveLoadFailover(container)` adds that failover to a container an app renders itself with the `render` prop.
+
+### Commits
+
+#### Breaking
+
+- no '-<n>' schema-id fallback; create hooks report load errors (e1ad72b3)
+
+#### Features
+
+- SeedHtml re-hosts Arweave links and fails over media loads (bcb63c5f)
+
+#### Fixes
+
+- useCreateItem shares only a repeated call; export isClientReadySnapshot (eb970299)
+- stopped status, conflict re-renders, other-tab saves in useItemProperties (445d59ca)
+
+## 0.7.11 (2026-10-24)
+
+### Commits
+
+#### Breaking
+
+- sdk: drop the unused property_uids table (88635bf0)
+
+#### Fixes
+
+- sdk: fail init the same way in tests as in production (f9343543)
+
+## 0.7.10 (2026-10-24)
+
+- **Breaking:** `useItem` holds the Item it shows once per mounted hook and releases it when the hook unmounts or shows another item, so an item no hook or caller holds is unloaded. Before, each lookup that missed the instance cache took a hold that was never released, and no item `useItem` loaded was ever unloaded. Code that keeps an Item from `useItem` after the component unmounts must hold it itself (`Item.find({ hold: true })` or `Item.retain`, then `unload()` when done).
+- **Breaking:** `useItems` holds each item it lists once per mounted hook and releases it when the item leaves the list or the hook unmounts, so an item shown only by a list is unloaded when the list unmounts. Before, every fetch took one more hold on each listed item and none was released, so no listed item was ever unloaded. Code that keeps an Item from `useItems` after the list unmounts must hold it itself (`Item.find({ hold: true })` or `Item.retain`, then `unload()` when done). With the SDK's grace period (`entityCache.unloadGraceMs`, default 60 s), an item unloads that long after the last hook showing it unmounts. The list's query is dropped as soon as no hook uses it (`gcTime: 0`), and a list that includes a stopped instance, or whose item stops while listed, is fetched again (`useItem` looks its item up again the same way).
+- **Breaking:** `useSchemas`, `useModels`, `useModel` (by id), `useModelProperties` and `useModelProperty` hold what they show once per mounted hook and release it when the hook unmounts or shows something else; `useSchema` and `useAllSchemaVersions` take their hold explicitly (`hold: true`), since SDK lookups no longer take one. A list that includes a stopped instance, or one whose instance stops while shown (destroyed, evicted), is fetched again, and `useModels` no longer keeps a previous list that holds a stopped model. Definitions stay cached without holds, so these holds only count the hook. `useModelProperty` took a hold on every lookup that was never released.
+- **Breaking:** `useCreateModel` and `useCreateModelProperty` create without a cache hold. They held every model and property they created, or looked up, and never released it.
+- **Breaking:** `useCreateItem` and `useCreateItemProperty` create without a cache hold (pass `hold: true` in `useCreateItem`'s options to take one, and `unload()` it when done). They held every instance they created and never released it. A created item that no hook shows unloads after the SDK's grace period (`entityCache.unloadGraceMs`, default 60 s).
 - `useItem` looks the item up again when the instance it shows is stopped (dropped by another tab, a local purge or `destroy`). It kept showing the stopped instance until the next sync.
+
+### Commits
+
+#### Features
+
+- sdk: unload grace period and no-hold lookups by default (504f56dc)
+- sdk: state supported browsers, add checkBrowserSupport() (76447831)
+
+#### Fixes
+
+- definition hooks hold what they show; no leaked create holds (0dbe7b6c)
+- useItems holds its items once per mounted hook (2a0a9492)
+- sdk: load without Iterator helpers (ZenFS 2.7.7) (f88840eb)
+- useItem holds its item once per mounted hook (8e9202d8)
 
 ## 0.7.9 (2026-10-22)
 
@@ -49,7 +134,7 @@ All notable changes to this package are documented in this file.
 - Hooks outside `SeedProvider` share one fallback QueryClient with Seed's defaults (`createSeedQueryClient()`). `useModels` (and so `useModel`) built a bare `new QueryClient()` instead, and `useSchemas`, `useModelProperties`, `useFiles` and `useImageFiles` threw without a provider. Development builds log one `console.warn` when the fallback is used; from 0.8 these hooks will throw without `SeedProvider`.
 - `react-dom` `^18 || ^19` is a peer dependency. The package already imported `flushSync` from it.
 - An input bound to `property.value` from `useItemProperty` keeps every keystroke. The hook re-renders at once when the value changes; before, re-renders were throttled to one per 50 ms while the property saved, and a controlled input that missed one was reset to the old text.
-- `useDebouncedItemProperty` saves through `property.setValue(value, { before })`. When the save is refused (the item isn't owned) or the value breaks a rule, the shown value goes back to what it was before the first keystroke of that edit, and `error` reports the failure: an `OwnershipError`, an `ItemPropertySaveValidationError`, or the save's own error. Before, it skipped the setter, so a property without a loaded record schema failed with `Missing propertyRecordSchema`, nothing rolled back, and `error` only reported a failed lookup.
+- `useDebouncedItemProperty` shows each keystroke with `property.showValue(value)` and saves through `property.setValue(value)`. When the save is refused (the item isn't owned) or the value breaks a rule, the shown value goes back to what it was before the first keystroke of that edit, and `error` reports the failure: an `OwnershipError`, an `ItemPropertySaveValidationError`, or the save's own error. Before, it skipped the setter, so a property without a loaded record schema failed with `Missing propertyRecordSchema`, nothing rolled back, and `error` only reported a failed lookup.
 - `useCreateItem`'s `createItem` takes `ItemCreateOptions` (`validate`, `readyTimeout`, `waitForReady`) as a third argument and passes them to `Item.create`. A call made while another is in flight returns that call's promise and item; it returned `undefined`.
 - `useEasSyncProcesses`, `useEasSyncProcessesState` and `useEasSyncProcessById` can mount before the client is ready; they threw `Db not configured`. They return `undefined` until then, and `useEasSyncProcessById` with an id reports `isLoading: true`.
 - `useResolvedMediaRef` reports `status: 'loading'` and no `href` after `value` changes until the new value resolves. It returned the previous value's `href` for a render or two, sometimes a `blob:` URL it had already revoked.

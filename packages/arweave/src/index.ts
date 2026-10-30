@@ -11,7 +11,7 @@ export * from './ArweaveClient/transactionTagsByIds.js'
 export * from './ArweaveClient/BaseArweaveClient.js'
 export { BaseArweaveClient as ArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
 export type { IArweaveClient } from './ArweaveClient/IArweaveClient.js'
-export { DefaultArweaveClient } from './default/ArweaveClient.js'
+export { ARWEAVE_GRAPHQL_TIMEOUT_MS, DefaultArweaveClient } from './default/ArweaveClient.js'
 export {
   assertSingleArweaveModule,
   DuplicateArweaveModuleError,
@@ -28,3 +28,4 @@ export * from './gateway/seedGatewayConfig.js'
 export * from './gateway/readBaseUrls.js'
 export * from './gateway/transactionStatus.js'
 export * from './content/arweaveContent.js'
+export * from './htmlLinks.js'

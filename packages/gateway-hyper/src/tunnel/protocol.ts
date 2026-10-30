@@ -132,6 +132,20 @@ function writeBuffer(stream: Writable, buf: Buffer): Promise<void> {
   })
 }
 
+/** First four bytes of an HTTP request or response, as a frame length would read them. */
+const HTTP_PREFIXES = ['HTTP', 'GET ', 'POST', 'PUT ', 'HEAD', 'DELE', 'PATC', 'OPTI', 'CONN', 'TRAC'].map((text) =>
+  Buffer.from(text, 'latin1').readUInt32BE(0),
+)
+
+/** A frame header that is really the start of plain HTTP: the other side runs in raw mode. */
+function assertNotRawHttp(header: Buffer): void {
+  if (HTTP_PREFIXES.includes(header.readUInt32BE(0))) {
+    throw new Error(
+      `The other side sent plain HTTP ("${header.toString('latin1')}…"), not a framed tunnel message: it runs in raw mode. Use seed-gateway serve --raw / connect --raw (serveRawTunnel, connectRawTunnel) on both sides, with the raw operator's key.`,
+    )
+  }
+}
+
 function assertFrameSize(length: number): void {
   if (length > MAX_FRAME_BYTES) {
     throw new Error(`Frame too large: ${length} bytes (max ${MAX_FRAME_BYTES})`)
@@ -153,6 +167,7 @@ export async function writeFrame(stream: Writable, payload: Buffer): Promise<voi
 
 export async function readFrame(stream: Readable): Promise<Buffer> {
   const header = await readExact(stream, 4)
+  assertNotRawHttp(header)
   const length = header.readUInt32BE(0)
   if (length === 0) {
     return Buffer.alloc(0)

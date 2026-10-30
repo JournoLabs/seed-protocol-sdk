@@ -27,6 +27,8 @@ export type TabMessage =
   | { type: 'outbox-nudge' }
   /** Outbox ops were applied, superseded or failed: tabs waiting on them re-read their status. */
   | { type: 'outbox-settled'; opIds: string[] }
+  /** `client.resetLocalData()` in another tab: stop the client so the database can be deleted. */
+  | { type: 'close-db' }
 
 /** A message as sent: `from` is the sending tab's TAB_ID, so a tab can drop its own messages. */
 type SentTabMessage = TabMessage & { from?: string }
@@ -49,7 +51,7 @@ let leader = false
 let leaderWaiters: Array<() => void> = []
 const messageHandlers = new Set<(message: TabMessage) => void>()
 
-/** Starts once per page; later calls (re-init) keep the first database. */
+/** Starts once per page until stopTabCoordination; later calls (re-init) keep the first database. */
 export function startTabCoordination({ filesDir, mode = 'coordinate' }: { filesDir: string; mode?: MultiTabMode }): void {
   if (state) return
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
@@ -122,11 +124,70 @@ export function withDbTabLock<T>(scope: string, fn: () => Promise<T>, options?: 
   return state ? withTabLock(`seed:${scope}:${state.dbKey}`, fn, options) : fn()
 }
 
-/** Tests only. Keeps message handlers: modules register theirs once per page. */
-export function resetTabCoordinationForTests(): void {
+/**
+ * Ends this tab's coordination (client.stop): hands leadership to another tab and closes the
+ * channel. The next startTabCoordination starts over, for whatever database init then opens.
+ * Keeps message handlers (modules register theirs once per page) and whenLeaderTab waiters, which
+ * resolve once this tab leads again.
+ */
+export function stopTabCoordination(): void {
   state?.releaseLeadership?.()
   state?.channel?.close()
   state = undefined
   leader = false
+}
+
+/**
+ * Each coordinating tab holds the Web Lock `seed:open:<db>` in shared mode from init until its
+ * database has closed. `client.resetLocalData()` takes it exclusively, so it deletes once every
+ * such tab has let go, and an init in any tab waits until the delete is done.
+ */
+export function dbOpenLockName(filesDir: string): string {
+  return `seed:open:${filesDir}/db/seed.db`
+}
+
+type OpenLockHold = { dbKey: string; cancelled: boolean; release?: () => void }
+let openLockHold: OpenLockHold | undefined
+
+/**
+ * Takes this tab's shared hold on `seed:open:<db>` (see dbOpenLockName) and resolves once it is
+ * granted, which waits out a reset in progress. Does nothing when this tab isn't coordinating or
+ * already holds it.
+ */
+export function holdDbOpenLock(): Promise<void> {
+  if (!state?.coordinating) return Promise.resolve()
+  if (openLockHold?.dbKey === state.dbKey) return Promise.resolve()
+  releaseDbOpenLock()
+  const hold: OpenLockHold = { dbKey: state.dbKey, cancelled: false }
+  openLockHold = hold
+  return new Promise<void>((resolve) => {
+    navigator.locks
+      .request(`seed:open:${hold.dbKey}`, { mode: 'shared' }, () => {
+        resolve()
+        // Released before the grant (the client stopped while waiting): hand it straight back.
+        if (hold.cancelled) return undefined
+        return new Promise<void>((release) => {
+          hold.release = release
+        })
+      })
+      .catch((error) => {
+        logger('open lock request failed', error)
+        resolve()
+      })
+  })
+}
+
+/** Lets go of this tab's hold on `seed:open:<db>`, once its database has closed. */
+export function releaseDbOpenLock(): void {
+  if (!openLockHold) return
+  openLockHold.cancelled = true
+  openLockHold.release?.()
+  openLockHold = undefined
+}
+
+/** Tests only. */
+export function resetTabCoordinationForTests(): void {
+  stopTabCoordination()
+  releaseDbOpenLock()
   leaderWaiters = []
 }

@@ -1,4 +1,4 @@
-import { checksumAddress } from './utils.js'
+import { checksumAddresses } from './utils.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
@@ -44,13 +44,7 @@ export async function getDomainOwnershipFromEas(
   } = params
   if (!toolAddresses.length) return []
 
-  const attesterAddresses = toolAddresses.map((a) => {
-    try {
-      return checksumAddress(a)
-    } catch {
-      return a
-    }
-  })
+  const attesterAddresses = checksumAddresses(toolAddresses)
 
   let where: Record<string, unknown> = {
     attester: { in: attesterAddresses },
@@ -72,13 +66,7 @@ export async function getDomainOwnershipFromEas(
 
   if (claimers?.length) {
     where.recipient = {
-      in: claimers.map((a) => {
-        try {
-          return checksumAddress(a)
-        } catch {
-          return a
-        }
-      }),
+      in: checksumAddresses(claimers),
     }
   }
 

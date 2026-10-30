@@ -223,7 +223,8 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
       resolveSeedIdsFromRefString(normalizeRelationPropertyValue(row.propertyValue) ?? ''),
     )
     if (arweaveTransactionId) entry.arweaveTransactionId = arweaveTransactionId
-    const display = await resolveStorageDisplay(storageKind, row, { fetch })
+    // The bag keeps each Html exactly as published
+    const display = await resolveStorageDisplay(storageKind, row, { fetch, rehostLinks: false })
 
     if (storageKind === 'html') {
       const text = display.filePath ? await BaseFileManager.readFileAsString(display.filePath) : display.renderValue

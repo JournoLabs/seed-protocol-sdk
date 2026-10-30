@@ -45,21 +45,37 @@ import {
   queryBySchema,
 } from '@seedprotocol/query'
 
-await initializeQueryPlatform({ arweaveDomain: 'ar.seedprotocol.io' })
+await initializeQueryPlatform({ arweaveDomain: 'arweave.net' })
 
 const one = await getSeed('0x...')
 console.log(JSON.stringify(one?.data, null, 2))
 
-const { items, limit, skip, etag } = await queryBySchema('post', {
+const { items, limit, skip, listed, etag } = await queryBySchema('post', {
   limit: 20,
   skip: 0,
 })
+// Every page, to the end
+for (let skip = 0; ; skip += 20) {
+  const page = await queryBySchema('post', { limit: 20, skip })
+  // ...page.items
+  if (page.listed < 20) break
+}
 
 // Seeds whose UID starts with a prefix (e.g. the 8-hex-digit trunc in a URL), newest first
 const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', limit: 16 })
+
+// Seeds attested by one of these addresses, newest first
+const { items: owned } = await queryBySchema('publication', {
+  attesters: ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', walletAddress],
+  limit: 100,
+})
 ```
 
+`limit` and `skip` count listed Seeds. A Seed with no Version from its attester is listed and then left out, so a page can be shorter than `limit`, even empty, with more after it. `listed` is how many Seeds the listing returned for the page: fewer than `limit` means the listing has ended.
+
 `uidPrefix` takes at least 4 hex digits, with or without `0x`, in any case (it is lowercased: EAS matches UIDs case-sensitively); anything else returns no items. It filters like a schema listing (schema name, not revoked, seeds whose versions were all revoked left out) in one EAS request, or a `LIKE` on the local source. It never reads or writes the collection cache; matched items are written through to the item cache. `normalizeUidPrefix` is exported for callers that want the same validation.
+
+`attesters` keeps seeds whose Seed attestation (`SeedRecord.attester`) was made by one of the addresses, in any case, with or without `0x`. It applies before `limit` and `skip`, so a page holds that many of those attesters' seeds: on the remote source it is an `attester: { in: [...] }` condition in the EAS request, with each address checksummed (EAS compares attesters case-sensitively in checksummed form). Entries that aren't 20-byte hex addresses are ignored; an empty list, or one with no address in it, returns no items without a request. It combines with `uidPrefix`, and like it never reads or writes the collection cache; matched items are written through to the item cache. `normalizeAttesters` is exported.
 
 `SeedRecord` shape:
 
@@ -76,7 +92,18 @@ const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', 
 
 Options on every API: `relations` (default `'expand'`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass), `source` (default `'remote'`).
 
-`relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'urls'` resolves Html/File relations to URLs and leaves the rest as seed UIDs. `'uids'` leaves every relation as a seed UID under its stored key (`author_id`, `author_ids`) and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
+`relations` sets how relation properties come back. `'expand'` resolves Html/File relations to Arweave URLs and nests other related seeds as objects. `'uids'` leaves every relation as a seed UID and fetches no related seeds, so a listing makes three indexer requests (seeds, versions, properties) instead of up to seven; `hydrateStorage` still reads the requested seeds' own storage fields.
+
+A relation is a `bytes32` or `bytes32[]` property (an attestation with no type counts when its name ends in `_id` or `_ids`); a `string external_id` is not one and keeps its name. In every mode a relation is returned under its schema key, worked out from its EAS name: `author_id` becomes `author`, and a list's `author_identity_ids` becomes `authors`. A list's EAS name is the singular key plus the related model plus `Ids`, which keeps neither where the key ends and the model starts nor whether the key was plural. Without your schema, query takes the first word and makes it plural: `co_author_identity_ids` comes back as `cos`, `featured_portfolio_clip_ids` as `featureds`. Pass your schema file's models to get the keys the schema has:
+
+```ts
+import schema from './schema.json'
+
+await initializeQueryPlatform({ models: schema.models })
+// co_author_identity_ids → coAuthors (and co_authors), featured_portfolio_clip_ids → featured
+```
+
+Query reads each List property's `ref` (or the older `items.model`) and works out the EAS name the SDK publishes it under. The models stay set until `initializeQueryPlatform({ models })` sets others, `{ models: null }` clears them, or `teardownQueryPlatform()`; `setQueryModels(models)` does the same. Lists of models it wasn't given keep the first-word rule. The models are part of the cache key, so records cached without them aren't read with them.
 
 ## Many seeds (`getSeeds`)
 
@@ -176,7 +203,7 @@ Behavior:
 - **Change checks** — every cache hit asks EAS, in one request, for attestations created or revoked since the entry was last checked that touch what it was built from: the seed, its head Version, and the seeds it relates to (and their head Versions). New Versions, property edits on the same Version (the default `patch` publish), and revocations are all seen. Only changed seeds are assembled again; a cached seed that was revoked drops out. The TTL is a backstop for anything a check can't see (e.g. relations of related seeds).
 - **Collection cache** — only for **remote** `queryBySchema` with `skip === 0`, per schema and options fingerprint. Each hit fetches the seed list (shows new and revoked seeds) and, in the same round, checks every cached seed for changes; then it assembles only new or changed ones.
 - **`maxAge`** — off by default. With `maxAge: 60` (or `CACHE_MAX_AGE=60`), a collection checked less than 60 seconds ago in this process is returned with no request, so new, changed and revoked seeds show up to 60 seconds late. The time is kept in memory per schema, options and `limit`.
-- **Item cache** — keyed by `seedUid` + options fingerprint (`relations` / `hydrateStorage` / `include` / changelog filters / `versionUid` / `asOf`). Default latest-only key remains `e1-h1`; `relations` maps to `e1` (`'expand'`), `e0` (`'urls'`) and `e2` (`'uids'`). Filled by remote `getSeed` and `getSeeds` and write-through from collection/month queries; a `getSeed` or `getSeeds` hit is checked for changes first.
+- **Item cache** — keyed by `seedUid` + options fingerprint (`relations` / `hydrateStorage` / `include` / changelog filters / `versionUid` / `asOf`). Default latest-only key is `e3-h1`; `relations` maps to `e3` (`'expand'`) and `e5` (`'uids'`). Filled by remote `getSeed` and `getSeeds` and write-through from collection/month queries; a `getSeed` or `getSeeds` hit is checked for changes first.
 - **ETags** — from content, so they change with any edit (not only a new `versionUid`).
 - **Arweave bodies** — cached in memory by transaction id (their content never changes), whether or not the query cache is enabled.
 - **Read-only results** — records from a cached read are the cache's own objects, shared with every later caller, so `SeedRecord` is typed read-only (`data: SeedData`, `changelog: readonly ChangelogEntry[]`). Outside `NODE_ENV=production`, records are also deep-frozen as they enter the memory cache (stored, or loaded from disk), so a write throws a `TypeError` instead of silently changing what later callers see and leaving the ETag stale. Production skips the freeze. Copy before changing anything, nested values included (copy-on-write, as feed's `applyFeedDefaultsDeep` does). `queryBySchema`'s `items` array is the caller's own. Set `freezeRecords` on the cache config to override.

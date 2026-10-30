@@ -2,13 +2,15 @@ import { createSessionObjectUrl } from '@/helpers/sessionObjectUrls'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import type {
   DownloadAllFilesParams,
+  DownloadAllFilesResult,
   IFileManager,
   ResizeAllImagesParams,
   ResizeImageParams,
 } from '@/helpers/FileManager/IFileManager'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
-import { FileSystemLockedError } from '@/helpers/FileManager/errors'
+import { FileSystemLockedError, UnsupportedBrowserError } from '@/helpers/FileManager/errors'
+import { checkBrowserSupport } from '@/helpers/browserSupport'
 import { isSkippableOpfsEntryError } from './opfsErrors'
 import debug from 'debug'
 
@@ -160,6 +162,10 @@ export class BrowserFileManager implements IFileManager {
   }
 
   async initializeFileSystem(_workingDir?: string): Promise<void> {
+    // Before ZenFS loads: an old browser gets one error naming what it lacks. Isolation headers
+    // are reported by DatabaseNotPersistentError, with hosting advice.
+    const missing = checkBrowserSupport().missing.filter((feature) => feature !== 'cross-origin-isolation')
+    if (missing.length) throw new UnsupportedBrowserError(missing)
 
     const zenfs = await this.getFs()
     const { TolerantWebAccess, TolerantWebAccessFS } = await import('./tolerantWebAccess')
@@ -198,6 +204,17 @@ export class BrowserFileManager implements IFileManager {
         await sleep(MOUNT_RETRY_DELAYS_MS[attempt])
       }
     }
+  }
+
+  /**
+   * Replaces the OPFS mount at `/` with an empty in-memory one, as ZenFS starts out. The OPFS
+   * mount's index (paths, sizes, what `TolerantWebAccessFS` last saw) goes with it.
+   */
+  async unmountFileSystem(): Promise<void> {
+    if (!this.zenfsCache) return
+    const { mounts, umount, mount, InMemory } = this.zenfsCache
+    if (mounts.has('/')) umount('/')
+    mount('/', InMemory.create({ label: 'root' }))
   }
 
   async downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult> {
@@ -679,9 +696,6 @@ class CancelableInterval {
         }
     }
 }
-
-/** @deprecated Prefer BrowserFileManager */
-export const FileManager = BrowserFileManager
 
 BaseFileManager.configure(new BrowserFileManager())
 

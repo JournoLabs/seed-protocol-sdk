@@ -25,7 +25,7 @@ testDescribe('ModelProperty schema name lookup', () => {
     const schemaName = `Schema Name Lookup ${generateId()}`
     const titleId = generateId()
     const schemaFile = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

@@ -8,7 +8,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
@@ -38,7 +37,7 @@ export type CleanupTestSchemaDataOptions = {
  *    their actors (no new writes) and live queries, makes work still running for them drop its result
  *    (evictionLog in helpers/entity/entityCache.ts), and makes the next import build fresh instances
  *    instead of reusing ones bound to deleted rows.
- * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null, property_uids,
+ * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null,
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Waits for writes already running (stopping an actor can't cancel them), then retries briefly on
  *    failure in case a write still lands mid-cleanup. Evicts once more after the deletes, since reads
@@ -125,7 +124,6 @@ async function deleteTestRows(
   await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
   if (testPropertyIds.length > 0) {
     await db.update(metadata).set({ propertyId: null }).where(inArray(metadata.propertyId, testPropertyIds))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, testPropertyIds))
   }
   if (testModelIds.length > 0) {
     await db.delete(modelUids).where(inArray(modelUids.modelId, testModelIds))

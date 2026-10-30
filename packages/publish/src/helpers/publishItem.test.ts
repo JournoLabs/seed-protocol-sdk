@@ -13,6 +13,7 @@ mock.module('./ensureWalletThenPublish', () => ({
 }))
 
 const { publishItem, waitForPublishActor } = await import('./publishItem')
+const { Item } = await import('@seedprotocol/sdk')
 
 /** Stand-in publish actor: starts in `running`, moves on `finish` to the given state. */
 function fakePublishActor(endState: string, context: Record<string, unknown> = {}, final = true) {
@@ -32,7 +33,15 @@ function fakePublishActor(endState: string, context: Record<string, unknown> = {
   return actor
 }
 
-const item = { seedLocalId: 'seed-1' } as any
+/** Stand-in item: a running actor, not in the Item cache. */
+function fakeItem(seedLocalId: string) {
+  const actor = createActor(createMachine({}))
+  actor.start()
+  const instance: any = { seedLocalId, getService: () => actor }
+  instance.unload = () => Item.cache.release(instance)
+  return instance
+}
+const item = fakeItem('seed-1')
 
 afterEach(() => {
   readyMock.mockClear()
@@ -60,11 +69,37 @@ describe('waitForPublishActor', () => {
     await expect(done).rejects.toThrow('Publish of seed-1 failed at uploadingViaBundler: upload refused')
   })
 
+  test('rejects with the upload size errors themselves, so the app can read their estimate', async () => {
+    const { UploadNeedsConfirmError } = await import('../errors')
+    const { estimateUpload } = await import('../services/publishCost/uploadEstimate')
+    const error = new UploadNeedsConfirmError(estimateUpload({ uploadCount: 1, uploadBytes: 30 * 2 ** 20 }))
+    const actor = fakePublishActor('failure', { error, errorStep: 'checking' })
+    const done = waitForPublishActor(actor, 'seed-1')
+    actor.send({ type: 'finish' })
+    await expect(done).rejects.toBe(error)
+  })
+
   test('rejects, pointing at retryAttestations, when attestation waits for a retry', async () => {
     const actor = fakePublishActor('attestationFailureRecoverable', { error: { message: 'nonce too low' } }, false)
     const done = waitForPublishActor(actor, 'seed-1')
     actor.send({ type: 'finish' })
     await expect(done).rejects.toThrow("nonce too low. Uploads are kept; retry with PublishManager.retryAttestations('seed-1')")
+  })
+
+  test('rejects with PublishRetractionError when revoking retracted properties fails', async () => {
+    const machine = createMachine({
+      initial: 'running',
+      context: { error: new Error('revoke reverted') },
+      states: { running: { on: { finish: 'retractionFailureRecoverable' } }, retractionFailureRecoverable: {} },
+    })
+    const actor = createActor(machine)
+    actor.start()
+    const done = waitForPublishActor(actor, 'seed-1')
+    actor.send({ type: 'finish' })
+    const error = await done.catch((e: unknown) => e)
+    expect((error as Error).name).toBe('PublishRetractionError')
+    expect((error as Error).message).toContain('Revoking the retracted properties of seed-1 failed: revoke reverted')
+    actor.stop()
   })
 
   test('rejects when the publish is stopped', async () => {
@@ -96,6 +131,23 @@ describe('publishItem', () => {
     const error = new Error('managed account unavailable')
     ensureResult = { outcome: 'managed_not_ready', error }
     await expect(publishItem(item)).rejects.toBe(error)
+  })
+
+  test('holds a cached item until the publish settles', async () => {
+    const cached = fakeItem('seed-held')
+    Item.cache.add(cached, ['seed-held'], { hold: true })
+    try {
+      const actor = fakePublishActor('success')
+      ensureResult = { outcome: 'started', publish: actor, started: Promise.resolve(actor) }
+      const done = publishItem(cached)
+      await Bun.sleep(0)
+      expect(Item.cache.entryOf(cached)?.refCount).toBe(2)
+      actor.send({ type: 'finish' })
+      await done
+      expect(Item.cache.entryOf(cached)?.refCount).toBe(1)
+    } finally {
+      Item.cache.remove(cached)
+    }
   })
 
   test('rejects when the seed is already publishing', async () => {

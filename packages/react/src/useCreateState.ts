@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { entityLoadError } from '@seedprotocol/sdk'
 
 type CreatedSnapshot = { value: unknown; context: unknown }
 
@@ -32,7 +33,10 @@ export function useCreateState(failureMessage: string) {
     (entity: CreatedEntity) => {
       const apply = (snapshot: CreatedSnapshot) => {
         if (entity.status === 'error') {
-          const err = (snapshot.context as { _loadingError?: { error?: unknown } })?._loadingError?.error
+          // The load's own error, whatever the entity; Schema also keeps it in its context
+          const err =
+            entityLoadError(entity as never) ??
+            (snapshot.context as { _loadingError?: { error?: unknown } })?._loadingError?.error
           setError(err instanceof Error ? err : new Error(failureMessage))
           setIsLoading(false)
         } else if (entity.status === 'ready') {

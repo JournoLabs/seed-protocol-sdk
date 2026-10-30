@@ -17,7 +17,7 @@ const SCHEMA_NAME = 'Test Schema Strict Create'
 function schemaFile(): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name: SCHEMA_NAME, createdAt: now, updatedAt: now },
@@ -70,8 +70,8 @@ testDescribe('Item.create is strict', () => {
     expect(error).toBeInstanceOf(ItemCreateValidationError)
     expect((error as ItemCreateValidationError).problems.map((p) => [p.property, p.code])).toEqual(
       expect.arrayContaining([
-        ['title', expect.any(String)],
-        ['rating', expect.any(String)],
+        ['title', 'max_length_exceeded'],
+        ['rating', 'type'],
         ['colour', 'unknown_property'],
       ]),
     )

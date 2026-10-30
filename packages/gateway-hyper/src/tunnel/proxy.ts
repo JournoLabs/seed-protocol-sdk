@@ -2,16 +2,45 @@ import http from 'node:http'
 import { URL } from 'node:url'
 import { UpstreamTimeoutError } from './errors'
 import { filterResponseHeaders, MAX_FRAME_BYTES } from './protocol'
+import type { UpstreamPhase } from './events'
 import type { TunnelMeta } from '../types'
 
 /** Default idle limit on the operator's upstream socket. */
-export const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000
+/**
+ * Above @seedprotocol/publish's 120 s batch upload, so an upload API that stays quiet while it
+ * stores a large batch answers before the operator gives up on it.
+ */
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 130_000
 
 export type ProxyTunnelRequestOptions = {
   /** Fail with `UpstreamTimeoutError` once the upstream socket is idle this long. 0 disables. */
   timeoutMs?: number
   /** Abort the upstream request, e.g. when the tunnel stream closes. */
   signal?: AbortSignal
+  /** Headers set on the upstream request, replacing any the client sent under the same name. */
+  extraHeaders?: Record<string, string>
+  /** Progress callbacks, for tracing. */
+  observer?: ProxyObserver
+}
+
+export type ProxyObserver = {
+  /** The request moved to `phase`: `send` from the start, `wait` once the body is sent, `body` on headers. */
+  onPhase?: (phase: UpstreamPhase) => void
+  onResponse?: (status: number) => void
+  onDone?: (status: number, bytes: number) => void
+}
+
+function withHeaders(
+  headers: Record<string, string>,
+  extra: Record<string, string> | undefined,
+): Record<string, string> {
+  if (!extra) return headers
+  const names = new Set(Object.keys(extra).map((key) => key.toLowerCase()))
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (!names.has(key.toLowerCase())) out[key] = value
+  }
+  return { ...out, ...extra }
 }
 
 /** Headers that describe one hop and must not be forwarded (RFC 9110 section 7.6.1). */
@@ -63,16 +92,22 @@ export async function proxyTunnelRequest(
   const base = upstreamBase.replace(/\/$/, '')
   const targetUrl = new URL(meta.path, `${base}/`)
   const timeoutMs = options.timeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
+  const { observer } = options
 
   return new Promise((resolve, reject) => {
+    observer?.onPhase?.('send')
     const req = http.request(
       targetUrl,
       {
         method: meta.method,
-        headers: upstreamRequestHeaders(meta.headers),
+        headers: withHeaders(upstreamRequestHeaders(meta.headers), options.extraHeaders),
         signal: options.signal,
       },
       (res) => {
+        if (observer) {
+          observer.onPhase?.('body')
+          observer.onResponse?.(res.statusCode ?? 502)
+        }
         const chunks: Buffer[] = []
         let received = 0
         res.on('data', (chunk: Buffer) => {
@@ -86,6 +121,7 @@ export async function proxyTunnelRequest(
           chunks.push(chunk)
         })
         res.on('end', () => {
+          observer?.onDone?.(res.statusCode ?? 502, received)
           resolve({
             status: res.statusCode ?? 502,
             headers: filterResponseHeaders(res.headers as Record<string, string | string[] | undefined>),
@@ -99,6 +135,7 @@ export async function proxyTunnelRequest(
       req.setTimeout(timeoutMs, () => req.destroy(new UpstreamTimeoutError(timeoutMs)))
     }
     req.on('error', reject)
+    if (observer?.onPhase) req.once('finish', () => observer.onPhase?.('wait'))
     if (body.length > 0) {
       req.end(body)
     } else {

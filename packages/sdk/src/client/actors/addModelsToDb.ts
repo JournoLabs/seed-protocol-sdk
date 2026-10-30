@@ -4,7 +4,6 @@ import { localModelSchemaLookups } from '@/db/read/localModelSchemaLookups'
 import { matchEasModelSchemas } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { loadNameMatchLevels } from '@/db/read/nameMatchLevels'
-import { isTestOrSeedDev } from '@/helpers/environment'
 import { ClientManagerContext } from '@/types/machines'
 import debug from 'debug'
 import { withSeedDbLock } from '@/helpers/tabLocks'
@@ -118,11 +117,7 @@ export async function addModelsToDb(context: ClientManagerContext): Promise<void
           logger('[client/actors] [addModelsToDb] No schemas found from EAS, but continuing')
         }
       } catch (error: any) {
-        if (isTestOrSeedDev()) {
-          logger('[client/actors] [addModelsToDb] Warning: Could not fetch schemas from EAS (background):', error.message)
-        } else {
-          logger('[client/actors] [addModelsToDb] Error fetching schemas (background):', error.message)
-        }
+        logger('[client/actors] [addModelsToDb] Error fetching schemas (background):', error.message)
         // Probably offline: the startup sync waits for this lookup, so try again.
         modelUidsRetry.schedule()
       }
@@ -143,7 +138,6 @@ export async function addModelsToDb(context: ClientManagerContext): Promise<void
     })
   } catch (error) {
     logger('[client/actors] [addModelsToDb] Error:', error)
-    // In test environments, initialization completes anyway
-    if (!isTestOrSeedDev()) throw error
+    throw error
   }
 }

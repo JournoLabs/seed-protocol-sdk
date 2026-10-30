@@ -3,6 +3,7 @@ import { ZERO_BYTES32 } from '../src/constants.js'
 import {
   isPlaceholderUid,
   isValidEasAttestationUid,
+  bytes32FromNumberHex,
   normalizeBytes32Hex,
 } from '../src/easUid.js'
 
@@ -35,5 +36,19 @@ describe('easUid', () => {
     expect(normalizeBytes32Hex(a)).toBe(a)
     expect(normalizeBytes32Hex(b)).toBe(a)
     expect(normalizeBytes32Hex('')).toBe('')
+    expect(normalizeBytes32Hex('a'.repeat(64))).toBe(a)
+  })
+
+  it('normalizeBytes32Hex returns empty for a value that is not 32 bytes of hex', () => {
+    expect(normalizeBytes32Hex('0xabc')).toBe('')
+    expect(normalizeBytes32Hex('0x' + 'g'.repeat(64))).toBe('')
+    expect(normalizeBytes32Hex('0x' + 'a'.repeat(66))).toBe('')
+    expect(isValidEasAttestationUid(normalizeBytes32Hex('0xabc'))).toBe(false)
+  })
+
+  it("bytes32FromNumberHex pads a BigNumber's hex", () => {
+    expect(bytes32FromNumberHex('0x0abc')).toBe('0x' + '0abc'.padStart(64, '0'))
+    expect(bytes32FromNumberHex('0xzz')).toBe('')
+    expect(bytes32FromNumberHex('0x' + 'a'.repeat(65))).toBe('')
   })
 })

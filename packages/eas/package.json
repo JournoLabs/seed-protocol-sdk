@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/eas",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "Read-only Ethereum Attestation Service (EAS) GraphQL client for Seed Protocol: seed, version and property attestation queries plus chain/indexer resolution",
   "keywords": [
     "seed-protocol",
@@ -13,6 +13,9 @@
     "web3"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=20.18.1"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -42,7 +45,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/check-dist-eas-node-undici.js && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js",
     "codegen": "graphql-codegen --config codegen.ts && node ../../scripts/fix-graphql-codegen-imports.js",
@@ -61,7 +64,7 @@
     "@graphql-codegen/cli": "^6.0.1",
     "@graphql-codegen/client-preset": "^5.2.2",
     "@graphql-codegen/introspection": "5.0.0",
-    "@types/bun": "latest",
+    "@types/bun": "1.4.3",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",

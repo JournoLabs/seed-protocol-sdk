@@ -21,6 +21,7 @@ import {
   Model,
   ModelProperty,
   loadAllSchemasFromDb,
+  ClientNotInitializedError,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
@@ -32,7 +33,7 @@ import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'test-schema-properties',
   metadata: {
@@ -78,7 +79,7 @@ const testSchemaWithProperties: SchemaFileFormat = {
 
 // Empty schema with no models for integration test
 const emptyTestSchema: SchemaFileFormat = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'empty-test-schema-props',
   metadata: {
@@ -568,7 +569,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should automatically update when properties change (liveQuery integration)', async () => {
       // Create an empty schema for this test
       const emptySchema: SchemaFileFormat = {
-        $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+        $schema: 'https://seedprotocol.io/schemas/data-model/v1',
         version: 1,
         id: 'livequery-test-schema-props',
         metadata: {
@@ -1075,6 +1076,41 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         created = await result.current.create('props-app-2', 'Note', { name: 'tag', dataType: 'Text' })
       })
       expect(created!.getService().getSnapshot().context._schemaName).toBe('props-app-2')
+    })
+
+    it("refuses a schema id no stored schema has, instead of cutting '-<n>' off it", async () => {
+      // "Test Schema Properties" is stored; "Test Schema Properties-3" is not, and isn't version 3 of it
+      const { result } = renderHook(() => useCreateModelProperty())
+      let thrown: unknown
+      await act(async () => {
+        await result.current
+          .create('Test Schema Properties-3', 'Post', { name: 'misplaced', dataType: 'Text' })
+          .catch((err: unknown) => {
+            thrown = err
+          })
+      })
+      expect(String((thrown as Error)?.message)).toContain('Test Schema Properties-3')
+      expect(result.current.error).toBe(thrown)
+    })
+
+    it('rejects with ClientNotInitializedError while the database is not open', async () => {
+      const { result } = renderHook(() => useCreateModelProperty())
+      const getAppDb = vi.spyOn(BaseDb, 'getAppDb').mockReturnValue(null as never)
+      let thrown: unknown
+      try {
+        await act(async () => {
+          await result.current
+            .create('Test Schema Properties', 'Post', { name: 'tooEarly', dataType: 'Text' })
+            .catch((err: unknown) => {
+              thrown = err
+            })
+        })
+      } finally {
+        getAppDb.mockRestore()
+      }
+      expect(thrown).toBeInstanceOf(ClientNotInitializedError)
+      expect((thrown as ClientNotInitializedError).code).toBe('CLIENT_NOT_INITIALIZED')
+      expect(result.current.error).toBe(thrown)
     })
   })
 

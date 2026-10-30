@@ -59,6 +59,11 @@ export type ResizeImageParams = {
 
 export interface IFileManager {
   initializeFileSystem(workingDir?: string): Promise<void>
+  /**
+   * Drops the mounted file system and everything it cached, so the next initializeFileSystem
+   * mounts again (browser). A no-op where nothing is mounted (Node).
+   */
+  unmountFileSystem(): Promise<void>
   getContentUrlFromPath(path: string): Promise<string | undefined>
   downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult | void>
   resizeImage(params: ResizeImageParams): Promise<void>

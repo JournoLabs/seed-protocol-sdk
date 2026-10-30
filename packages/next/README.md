@@ -10,11 +10,11 @@ Use the SDK only in the browser in a Next.js app: in client components, initiali
 ## Installation
 
 ```bash
-npm install @seedprotocol/sdk @seedprotocol/react @zenfs/core@2.7.7 @zenfs/dom@1.2.14
+npm install @seedprotocol/sdk @seedprotocol/react
 npm install -D @seedprotocol/next
 ```
 
-Pin the ZenFS versions the SDK declares so only one copy is installed. `next` 15.5 or later is a peer dependency.
+`next` 15.5 or later is a peer dependency. ZenFS is needed only with `fsModules`: then also install `@zenfs/core@2.7.7` (and `@zenfs/dom@1.2.14` if your code uses it), the versions the SDK declares, so only one copy is installed.
 
 ## Usage
 
@@ -68,12 +68,13 @@ withSeed(nextConfig, {
 | `isolationHeaders` | `true` | `false` adds no headers; `{ coop, coep, corp }` overrides individual values. |
 | `headersSource` | `'/:path*'` | Path pattern the headers apply to, in `headers()` `source` syntax. |
 | `fsModules` | `[]` | Modules aliased to ZenFS (`@zenfs/core`, or `@zenfs/core/promises` for ids containing "promises") in browser builds, for app code or other dependencies that import `fs` in the browser. The SDK doesn't. For example `['fs', 'fs/promises', 'node:fs', 'node:fs/promises']`. Server builds keep Node's `fs`. |
+| `dir` | `process.cwd()` | The app's directory, where the SDK and `next` are resolved from. Pass `__dirname` (or `import.meta.dirname` in `next.config.mjs`) when Next.js runs from another directory, such as a monorepo root. |
 
 The options type is exported as `SeedNextOptions`.
 
 ## Next.js 15
 
-Next.js 15 works with webpack: `next build`, and `next dev` without `--turbopack`. Remove `--turbopack` from your dev script if `create-next-app` added it. Under Next.js 15's Turbopack, SQLite WASM can't load in the browser (Turbopack starts workers from `blob:` URLs and gives SQLite a WASM URL that can't be resolved there), so the SDK fails to initialize; `withSeed` logs a warning when it detects that setup.
+Next.js 15 works with webpack: `next dev` and `next build` without `--turbopack`. `create-next-app` 15.5 adds `--turbopack` to both the `dev` and `build` scripts; remove it from both. Under Next.js 15's Turbopack, SQLite WASM can't load in the browser (Turbopack starts workers from `blob:` URLs and gives SQLite a WASM URL that can't be resolved there), so the SDK fails to initialize; `withSeed` logs a warning when it detects that setup.
 
 ## Production hosting
 

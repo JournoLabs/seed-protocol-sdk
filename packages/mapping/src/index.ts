@@ -4,8 +4,8 @@ export type {
   TargetProperty,
   FieldMapping,
   LookupEntry,
+  LookupSeparator,
   MappingDocument,
-  MappingLookups,
   PropertyBag,
   ResolveJob,
   DeriveSpec,
@@ -15,6 +15,7 @@ export type {
   ResolveCallback,
   ApplyMappingError,
   ApplyMappingAsyncResult,
+  UnmatchedLookup,
 } from './types'
 
 export { applyMapping, applyMappingAsync, coerceValue } from './applyMapping'
@@ -32,13 +33,19 @@ export type { ApplyMappingAsyncOptions } from './applyMapping'
 export {
   isRelationLookupTarget,
   normalizeLookupKey,
+  lookupKey,
+  collectLookupValues,
   sampleValueFromSource,
   lookupEntriesFromMapping,
-  lookupRefFromEntries,
-  resolveLookupMapped,
+  lookupRefsFromEntries,
+  resolveLookup,
+  splitLookupValue,
+  DEFAULT_LOOKUP_SEPARATORS,
   shapeLookupValue,
   withLookupEntries,
+  withLookupSplit,
 } from './relationLookup'
+export type { LookupResolution } from './relationLookup'
 export { autoMap } from './autoMap'
 export { classifyUrl, looksLikeUrl } from './classifyUrl'
 export type { ClassifyUrlInput } from './classifyUrl'

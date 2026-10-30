@@ -9,7 +9,7 @@ import {
   GET_SEEDS_LEAN,
 } from '@seedprotocol/eas'
 import type { AttestationLike } from '../types.js'
-import type { QueryDataSource } from './types.js'
+import type { QueryDataSource, SeedListFilter } from './types.js'
 
 /** The UTC calendar month as unix seconds: `startTs` inclusive, `endTs` (next month) exclusive. */
 export function monthBoundsUnix(year: number, month: number): { startTs: number; endTs: number } {
@@ -33,22 +33,11 @@ export function createRemoteQueryDataSource(): QueryDataSource {
 
     async listSeedsBySchemaName(
       schemaName: string,
-      opts: { limit: number; skip: number },
-    ): Promise<AttestationLike[]> {
-      return (await getSeedsBySchemaName(
-        schemaName,
-        opts.limit,
-        opts.skip,
-      )) as AttestationLike[]
-    },
-
-    async listSeedsByUidPrefix(
-      schemaName: string,
-      uidPrefix: string,
-      opts: { limit: number; skip: number },
+      opts: { limit: number; skip: number } & SeedListFilter,
     ): Promise<AttestationLike[]> {
       return (await getSeedsBySchemaName(schemaName, opts.limit, opts.skip, {
-        uidPrefix,
+        uidPrefix: opts.uidPrefix,
+        attesters: opts.attesters,
       })) as AttestationLike[]
     },
 
@@ -137,7 +126,3 @@ export function getRemoteQueryDataSource(): QueryDataSource {
   return remoteSingleton
 }
 
-/** Tests only. */
-export function resetRemoteQueryDataSource(): void {
-  remoteSingleton = null
-}

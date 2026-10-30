@@ -1,8 +1,12 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { entryPoint06Address, entryPoint08Address } from 'viem/account-abstraction'
-import { encodeErrorResult } from 'viem'
+import { encodeErrorResult, recoverAddress, type Address, type Hex } from 'viem'
+import { hashAuthorization } from 'viem/utils'
+import { Wallet } from 'ethers'
+import { fromEthersWallet } from '../seedSigner'
 import { seedErrorsAbi } from '../abi/seedErrors'
-import { assertBundlerSupportsEntryPoint08, assertUserOpSucceeded } from './permissionlessTxSender'
+import { assertBundlerSupportsEntryPoint08, authorizationForUserOp } from './permissionlessTxSender'
+import { assertUserOpSucceeded } from './userOps'
 
 let entryPoints: unknown = []
 const server = Bun.serve({
@@ -30,6 +34,34 @@ describe('assertBundlerSupportsEntryPoint08', () => {
     entryPoints = undefined
     await expect(assertBundlerSupportsEntryPoint08(url)).resolves.toBeUndefined()
     await expect(assertBundlerSupportsEntryPoint08('http://127.0.0.1:1')).resolves.toBeUndefined()
+  })
+})
+
+describe('authorizationForUserOp', () => {
+  const delegate = '0xe6Cae83BdE06E4c305530e199D7217f42808555B' as Address
+  const wallet = Wallet.createRandom() as unknown as Wallet
+  const { signer } = fromEthersWallet(wallet)
+  const params = { signer, delegate, chainId: 11155420, getNonce: async () => 7 }
+
+  test('signs a real authorization for an undelegated EOA', async () => {
+    const auth = await authorizationForUserOp({ ...params, isDelegated: async () => false })
+    expect(auth).toMatchObject({ address: delegate, chainId: 11155420, nonce: 7 })
+    const recovered = await recoverAddress({
+      hash: hashAuthorization({ address: delegate, chainId: 11155420, nonce: 7 }),
+      signature: { r: auth!.r as Hex, s: auth!.s as Hex, yParity: auth!.yParity! },
+    })
+    expect(recovered).toBe(wallet.address as Address)
+  })
+
+  test('sends none once the EOA is delegated', async () => {
+    expect(await authorizationForUserOp({ ...params, isDelegated: async () => true })).toBeUndefined()
+  })
+
+  test('explains a signer that cannot authorize, such as a browser wallet', async () => {
+    const browserSigner = { address: wallet.address as Address, signMessage: signer.signMessage }
+    await expect(
+      authorizationForUserOp({ ...params, signer: browserSigner, isDelegated: async () => false }),
+    ).rejects.toThrow(/no signAuthorization/)
   })
 })
 

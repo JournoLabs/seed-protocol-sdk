@@ -6,6 +6,7 @@ import {
   easName,
   isEasEmptyValue,
   isNameMatchLevel,
+  isUnfilledReference,
   matchEasName,
   partitionByRefAttester,
   matchEasModelSchemas,
@@ -103,9 +104,6 @@ const syncedRevokedAt = (
   return stored ?? revokedAtSeconds(attestation) ?? null
 }
 
-const relationValuesToExclude = [
-  '0x0000000000000000000000000000000000000000000000000000000000000020',
-]
 
 
 /** A property attestation revoked while its seed is live: a retraction (ADR 0021), stored as no value. */
@@ -281,7 +279,7 @@ const collectRelatedSeedUids = async (
     if (!resolveSyncedPropertyName(name, value, modelSchema)?.isRelation) continue
     const values = Array.isArray(value) ? value : [value]
     for (const v of values) {
-      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v) && !isEasEmptyValue('bytes32', v)) {
+      if (typeof v === 'string' && v && !isUnfilledReference(v) && !isEasEmptyValue('bytes32', v)) {
         state.relatedSeedUids.add(v)
       }
     }
@@ -942,12 +940,9 @@ const insertSyncedProperties = async ({
     let refSchemaUid
     const schemaUid = property.schemaId
 
-    setSchemaUidForSchemaDefinition({
-      text: propertyNameSnake,
-      schemaUid,
-    })
-
     const easDataType = propertyMetadata.type
+    // A one-field attestation's schema is exactly `<type> <name>`.
+    if (easDataType) setSchemaUidForSchemaDefinition({ text: `${easDataType} ${propertyNameSnake}`, schemaUid })
     const versionUid = property.refUID
     const versionLocalId = versionUidToLocalId.get(versionUid)
     const attestationCreatedAt = property.timeCreated * 1000
@@ -969,8 +964,16 @@ const insertSyncedProperties = async ({
     const refValueType = isRelation && isList ? 'list' : undefined
     if (isList) refSeedType = resolvedName.refSeedType
 
-    if (isRelation && !isList && relationValuesToExclude.includes(propertyMetadata.value as string)) {
+    // A reference slot the publisher's contract call never filled names no seed (isUnfilledReference):
+    // a relation holding one is skipped, and a list keeps its other members.
+    if (isRelation && !isList && isUnfilledReference(propertyMetadata.value)) {
+      console.warn(
+        `[item/events] [syncDbWithEas] EAS property "${propertyNameSnake}" holds an unfilled reference (${propertyMetadata.value}); skipping it`,
+      )
       continue
+    }
+    if (isRelation && isList && Array.isArray(propertyMetadata.value)) {
+      propertyMetadata.value = (propertyMetadata.value as string[]).filter((v) => !isUnfilledReference(v))
     }
 
     // A removal or a retraction (ADR 0021) is stored as no value, so it is the property's newest row

@@ -28,7 +28,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => <SeedProvider>{
 function schemaFile(name: string, models: SchemaFileFormat['models']): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: `${name.replace(/\W/g, '-')}-id`,
     metadata: { name, createdAt: now, updatedAt: now },
@@ -152,7 +152,7 @@ describe('item and query hooks', () => {
     expect(result.current).toEqual({ record: null, isLoading: false })
   })
 
-  it('useCreateItem runs one create when called twice before a re-render', async () => {
+  it('useCreateItem runs one create for the same call made twice before a re-render (a double click)', async () => {
     const name = 'Create Guard Schema'
     const file = schemaFile(name, {
       GuardNote: { id: 'guard-note-model-id', properties: { title: { id: 'guard-note-title-id', type: 'Text' } } },
@@ -162,11 +162,56 @@ describe('item and query hooks', () => {
 
     const [first, second] = await Promise.all([
       result.current.createItem('GuardNote', { schemaName: name, title: 'one' }),
-      result.current.createItem('GuardNote', { schemaName: name, title: 'two' }),
+      result.current.createItem('GuardNote', { schemaName: name, title: 'one' }),
     ])
     expect(first).toBeDefined()
-    // The second call gets the in-flight create's promise: the same item, not undefined.
+    // The second call gets the running create's promise: the same item, not undefined.
     expect(second).toBe(first)
+  })
+
+  it('useCreateItem treats a repeat whose values are arrays or objects built per call as the same create', async () => {
+    const name = 'Create Guard Json Schema'
+    const file = schemaFile(name, {
+      GuardJsonNote: {
+        id: 'guard-json-note-model-id',
+        properties: { meta: { id: 'guard-json-note-meta-id', type: 'Json' } },
+      },
+    })
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useCreateItem(), { wrapper })
+
+    // A click handler builds new values on each click.
+    const click = () =>
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['a', 'b'], n: 1 } })
+    const [first, second] = await Promise.all([click(), click()])
+    expect(first).toBeDefined()
+    expect(second).toBe(first)
+
+    const [a, b] = await Promise.all([
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['a'] } }),
+      result.current.createItem('GuardJsonNote', { schemaName: name, meta: { tags: ['b'] } }),
+    ])
+    expect(b?.seedLocalId).not.toBe(a?.seedLocalId)
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+  })
+
+  it('useCreateItem runs a different create while one runs, instead of handing back the first item', async () => {
+    const name = 'Create Distinct Schema'
+    const file = schemaFile(name, {
+      DistinctNote: { id: 'distinct-note-model-id', properties: { title: { id: 'distinct-note-title-id', type: 'Text' } } },
+    })
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useCreateItem(), { wrapper })
+
+    const [first, second] = await Promise.all([
+      result.current.createItem('DistinctNote', { schemaName: name, title: 'one' }),
+      result.current.createItem('DistinctNote', { schemaName: name, title: 'two' }),
+    ])
+    expect(first?.seedLocalId).toBeTruthy()
+    expect(second?.seedLocalId).toBeTruthy()
+    expect(second?.seedLocalId).not.toBe(first?.seedLocalId)
+    expect((second as any).title).toBe('two')
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
   })
 
   it('useCreateItem passes ItemCreateOptions to Item.create', async () => {

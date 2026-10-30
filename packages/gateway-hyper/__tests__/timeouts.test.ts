@@ -38,6 +38,7 @@ function pairFactory() {
 function sessionFrom(runOnTunnel: TunnelSession['runOnTunnel']): TunnelSession {
   return {
     key: 'test',
+    clientKey: 'test-client',
     runOnTunnel,
     forwardHttp: (meta, body, opts) =>
       runOnTunnel(async (socket) => {
@@ -214,7 +215,7 @@ describe('createTunnelQueue', () => {
 
 /**
  * Opens a fresh in-memory stream pair per call. The operator side answers every request with
- * its path, except `/hang`, which it never answers.
+ * its path, except `/hang`, which it never answers, and `/end`, after which it ends the stream.
  */
 function streamFactory() {
   const clients: Duplex[] = []
@@ -230,6 +231,10 @@ function streamFactory() {
           if (req.meta.path === '/hang') return
           const body = Buffer.from(req.meta.path)
           await writeTunnelResponse(operator, { status: 200, headers: {} }, body)
+          if (req.meta.path === '/end') {
+            operator.end()
+            return
+          }
         }
       } catch {
         /* stream closed */
@@ -302,6 +307,17 @@ describe('createTunnelPool', () => {
 
     // The next request takes the live stream instead of reopening the dead one.
     await session.forwardHttp(get('/next'), Buffer.alloc(0))
+    expect(clients).toHaveLength(2)
+  })
+
+  it('opens a new stream for the next request once the operator ended the last one', async () => {
+    const { openStream, clients } = streamFactory()
+    const session = sessionFrom(createTunnelPool(openStream, opts(1, 0)).runOnTunnel)
+
+    await session.forwardHttp(get('/end'), Buffer.alloc(0))
+    if (!clients[0]!.readableEnded) await new Promise((resolve) => clients[0]!.once('end', resolve))
+    const next = await session.forwardHttp(get('/next'), Buffer.alloc(0))
+    expect(next.body.toString()).toBe('/next')
     expect(clients).toHaveLength(2)
   })
 

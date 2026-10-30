@@ -23,7 +23,7 @@ testDescribe('Schema.destroy removes every version file', () => {
     // Spaces become underscores in the file name: {id}_Destroy_Files_{suffix}_v{n}.json
     const schemaName = `Destroy Files ${generateId()}`
     const schemaFile = (version: number) => ({
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

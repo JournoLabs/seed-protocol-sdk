@@ -1,21 +1,21 @@
 import {
   decodeEasNumber,
   isEasEmptyValue,
+  isUnfilledReference,
   isNumericEasType,
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
   keepAttestationsFromRefAttester,
 } from '@seedprotocol/eas'
-import { getArweaveUrlForTransaction } from './arweaveUrl.js'
+import { getArweaveUrlForTransaction } from '@seedprotocol/arweave'
 import {
-  publicListRelationPropertyKey,
-  stripListRelationStorageAliasesForPublicKey,
+  isRelationProperty,
+  relationPropertyKey,
   tryCoerceJsonStringArray,
 } from './listRelationKey.js'
 import { enrichImageSeedClone } from './imageRelationEnrichment.js'
 import { hydrateArweaveRichTextInItems } from './hydrateArweaveRichText.js'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
-import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import {
   setFieldStorageModel,
   setListElementStorageModels,
@@ -31,23 +31,6 @@ import {
 } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
-
-const relationValuesToExclude = [
-  '0x0000000000000000000000000000000000000000000000000000000000000020',
-]
-
-const RESERVED_KEYS = new Set([
-  'seedUid',
-  'SeedUid',
-  'timeCreated',
-  'attester',
-  'Attester',
-  'storage_transaction_id',
-  'storage_provider_transaction_id',
-  'storageTransactionId',
-  'storageProviderTransactionId',
-  'versionUid',
-])
 
 const toCamelCase = (str: string): string => {
   return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
@@ -69,6 +52,10 @@ type AssembleContext = {
    * relations into, even when it has the requested schema.
    */
   requestedSeedUids: Set<string>
+  /** The property attestations each seed's record is assembled from: its head Version's canonical ones. */
+  headPropertiesBySeedUid: Map<string, AttestationLike[]>
+  /** The keys (snake and camel) each seed's relation properties were stored under; only these expand. */
+  relationKeysBySeedUid: Map<string, Set<string>>
 }
 
 function createAssembleContext(): AssembleContext {
@@ -82,6 +69,8 @@ function createAssembleContext(): AssembleContext {
     latestVersionUidsBySeedUid: new Map(),
     droppedSeedUids: new Set(),
     requestedSeedUids: new Set(),
+    headPropertiesBySeedUid: new Map(),
+    relationKeysBySeedUid: new Map(),
   }
 }
 
@@ -164,41 +153,27 @@ async function processItemProperty(
     return
   }
 
-  const schemaUid = property.schemaId
-  setSchemaUidForSchemaDefinition({
-    text: propertyNameSnake,
-    schemaUid,
-  })
-
   let isRelation = false
   let isList = false
   const easType = metadata.type
+  // A one-field attestation's schema is exactly `<type> <name>`.
+  if (easType) setSchemaUidForSchemaDefinition({ text: `${easType} ${propertyNameSnake}`, schemaUid: property.schemaId })
   // A removed property (ADR 0021): absent from the seed, and a zero uid is no related seed
   if (isEasEmptyValue(easType, metadata.value)) return
-  const isBytes32Relation =
-    (easType === 'bytes32' || easType === 'bytes32[]') &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-  const isNamingConventionRelation =
-    !isBytes32Relation &&
-    (propertyNameSnake.endsWith('_id') || propertyNameSnake.endsWith('_ids')) &&
-    propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-
-  if (isBytes32Relation || isNamingConventionRelation) {
+  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
+  if (isRelationProperty(propertyNameSnake, easType)) {
     isRelation = true
+    isList = Array.isArray(metadata.value)
+    const modelName = seedUidForProperty && ctx.seedUidToModelType.get(seedUidForProperty)
+    propertyNameSnake = relationPropertyKey(propertyNameSnake, isList, modelName || undefined)
+    // A reference slot the publisher's multiPublish never filled names no seed: a relation holding
+    // one is absent, and a list keeps its other members.
     if (Array.isArray(metadata.value)) {
-      isList = true
-      if (isNamingConventionRelation) {
-        const result = parseEasRelationPropertyName(propertyNameSnake)
-        if (result) {
-          propertyNameSnake = result.propertyName
-        }
-      }
-      metadata.value.forEach((value: string) => {
-        if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
-      })
-    } else if (!relationValuesToExclude.includes(metadata.value as string)) {
+      metadata.value = metadata.value.filter((value: unknown) => !isUnfilledReference(value))
+      metadata.value.forEach((value: string) => addRelatedSeedUid(ctx, property, value))
+    } else if (isUnfilledReference(metadata.value)) {
+      return
+    } else {
       addRelatedSeedUid(ctx, property, metadata.value as string)
     }
   }
@@ -212,7 +187,6 @@ async function processItemProperty(
     propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
-  const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)
   if (!seedUidForProperty) {
     return
   }
@@ -224,6 +198,11 @@ async function processItemProperty(
     existingItem[propertyNameCamel] = propertyValue
   }
   ctx.assembledItems.set(seedUidForProperty, existingItem)
+  if (isRelation) {
+    const relationKeys = ctx.relationKeysBySeedUid.get(seedUidForProperty) ?? new Set<string>()
+    relationKeys.add(propertyNameSnake).add(propertyNameCamel)
+    ctx.relationKeysBySeedUid.set(seedUidForProperty, relationKeys)
+  }
 }
 
 /** Pins that name a version or a time, by lowercase seed UID. */
@@ -255,7 +234,8 @@ async function processSeeds(
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
   opts: {
-    dropSeedsWithOnlyRevokedVersions?: boolean
+    /** Leave out seeds with no version from their attester that isn't revoked. */
+    dropUnpublishedSeeds?: boolean
     /**
      * Versions already fetched with `getVersionsForSeeds(…, { includeRevoked: true })` for these
      * seeds (and possibly others, which are ignored), so the request isn't made again.
@@ -295,13 +275,12 @@ async function processSeeds(
   const allVersions = keepAttestationsFromRefAttester(fetchedVersions, seeds)
   const itemVersions = allVersions.filter((v) => v.revoked !== true)
 
-  if (opts.dropSeedsWithOnlyRevokedVersions) {
-    // Like the SDK (latest published version skips revoked ones): every version revoked means
-    // no published version, so the seed is left out. A seed with no version at all is kept.
+  if (opts.dropUnpublishedSeeds) {
+    // Like the SDK (latest published version skips revoked ones): a seed with no version, or
+    // whose versions were all revoked, has no published version and is left out.
     const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
-    for (const version of allVersions) {
-      const seedUid = version.refUID
-      if (seedsWithLiveVersion.has(seedUid) || !requested.has(seedUid)) continue
+    for (const seedUid of seedUids) {
+      if (seedsWithLiveVersion.has(seedUid)) continue
       ctx.assembledItems.delete(seedUid)
       ctx.seedUidToModelType.delete(seedUid)
       ctx.droppedSeedUids.add(seedUid)
@@ -357,16 +336,27 @@ async function processSeeds(
   })
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
+  for (const property of itemProperties) {
+    const seedUid = ctx.versionUidToSeedUid.get(property.refUID)
+    if (!seedUid) continue
+    const head = ctx.headPropertiesBySeedUid.get(seedUid) ?? []
+    head.push(property)
+    ctx.headPropertiesBySeedUid.set(seedUid, head)
+  }
+
   for (let i = 0; i < itemProperties.length; i++) {
     await processItemProperty(ctx, itemProperties[i] as AttestationLike)
   }
 }
 
+/** The seed's relation keys still on its item, already under their schema keys (processItemProperty). */
+function relationKeysOf(ctx: AssembleContext, seedUid: string, item: Record<string, unknown>): string[] {
+  return [...(ctx.relationKeysBySeedUid.get(seedUid) ?? [])].filter((k) => k in item)
+}
+
 function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
-  for (const [, item] of requestedItems(ctx)) {
-    const keysToProcess = Object.keys(item).filter(
-      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
-    )
+  for (const [seedUid, item] of requestedItems(ctx)) {
+    const keysToProcess = relationKeysOf(ctx, seedUid, item)
 
     for (const key of keysToProcess) {
       let value = item[key]
@@ -382,7 +372,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
         const hasRelationUid = uids.some(
           (v) =>
             typeof v === 'string' &&
-            !relationValuesToExclude.includes(v) &&
+            !isUnfilledReference(v) &&
             ctx.assembledItems.has(v),
         )
         if (!hasRelationUid) continue
@@ -391,7 +381,7 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
         const models: string[] = []
         let resolved = false
         for (const uid of uids) {
-          if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+          if (typeof uid !== 'string' || isUnfilledReference(uid)) {
             urls.push(String(uid))
             models.push('unknown')
             continue
@@ -420,18 +410,11 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
           }
         }
         if (resolved) {
-          const outputKey = publicListRelationPropertyKey(key)
-          item[outputKey] = urls
-          setListElementStorageModels(item, outputKey, models)
-          stripListRelationStorageAliasesForPublicKey(item, outputKey)
-          if (outputKey !== key) {
-            delete item[key]
-            const camelKey = toCamelCase(key)
-            if (camelKey !== key) delete item[camelKey]
-          }
+          item[key] = urls
+          setListElementStorageModels(item, key, models)
         }
       } else if (typeof value === 'string') {
-        if (relationValuesToExclude.includes(value)) continue
+        if (isUnfilledReference(value)) continue
         if (!ctx.assembledItems.has(value)) continue
 
         const related = ctx.assembledItems.get(value)
@@ -443,19 +426,8 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
           | undefined
         if (txId && typeof txId === 'string' && txId.trim()) {
           try {
-            const outputKey = key.endsWith('_id') ? key.replace(/_id$/, '') : key
-            item[outputKey] = getArweaveUrlForTransaction(txId)
-            const relatedModel = ctx.seedUidToModelType.get(value) ?? 'unknown'
-            setFieldStorageModel(item, outputKey, relatedModel)
-            const camelOut = toCamelCase(outputKey)
-            if (camelOut !== outputKey) {
-              setFieldStorageModel(item, camelOut, relatedModel)
-            }
-            if (outputKey !== key) {
-              delete item[key]
-              const camelKey = toCamelCase(key)
-              if (camelKey !== key) delete item[camelKey]
-            }
+            item[key] = getArweaveUrlForTransaction(txId)
+            setFieldStorageModel(item, key, ctx.seedUidToModelType.get(value) ?? 'unknown')
           } catch {
             // keep original on error
           }
@@ -466,10 +438,8 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
 }
 
 function expandRelationProperties(ctx: AssembleContext): void {
-  for (const [, item] of requestedItems(ctx)) {
-    const keysToProcess = Object.keys(item).filter(
-      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
-    )
+  for (const [seedUid, item] of requestedItems(ctx)) {
+    const keysToProcess = relationKeysOf(ctx, seedUid, item)
 
     for (const key of keysToProcess) {
       let value = item[key]
@@ -485,7 +455,7 @@ function expandRelationProperties(ctx: AssembleContext): void {
       let didExpand = false
 
       for (const uid of uids) {
-        if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+        if (typeof uid !== 'string' || isUnfilledReference(uid)) {
           expanded.push(uid)
           continue
         }
@@ -520,18 +490,7 @@ function expandRelationProperties(ctx: AssembleContext): void {
       }
 
       if (didExpand) {
-        const outputKey = isList
-          ? publicListRelationPropertyKey(key)
-          : key.endsWith('_id')
-            ? key.replace(/_id$/, '')
-            : key
-        item[outputKey] = isList ? expanded : expanded[0]
-        stripListRelationStorageAliasesForPublicKey(item, outputKey)
-        if (outputKey !== key) {
-          delete item[key]
-          const camelKey = toCamelCase(key)
-          if (camelKey !== key) delete item[camelKey]
-        }
+        item[key] = isList ? expanded : expanded[0]
       }
     }
   }
@@ -631,7 +590,12 @@ export async function assembleSeedRecords(
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
   request: AssembleRequest = {},
-): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
+): Promise<{
+  records: SeedRecord[]
+  dependencies: Map<string, SeedDependencies>
+  /** By seedUid: the property attestations each record was assembled from. */
+  properties: Map<string, AttestationLike[]>
+}> {
   const relations = relationsModeOf(options)
   const hydrateStorage = options?.hydrateStorage !== false
 
@@ -639,7 +603,7 @@ export async function assembleSeedRecords(
   for (const seed of seeds) if (seed) ctx.requestedSeedUids.add(seed.id)
 
   await processSeeds(ctx, seeds, dataSource, {
-    dropSeedsWithOnlyRevokedVersions: true,
+    dropUnpublishedSeeds: true,
     versions: request.versions,
     pins: request.pins && activePins(request.pins),
   })
@@ -657,8 +621,10 @@ export async function assembleSeedRecords(
     await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
-  if (relations !== 'uids') resolveRelationPropertiesToUrls(ctx)
-  if (relations === 'expand') expandRelationProperties(ctx)
+  if (relations === 'expand') {
+    resolveRelationPropertiesToUrls(ctx)
+    expandRelationProperties(ctx)
+  }
 
   const records = toSeedRecords(ctx, request.schemaName)
 
@@ -675,7 +641,10 @@ export async function assembleSeedRecords(
   const dependencies = new Map(
     records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid, withRelated)]),
   )
-  return { records, dependencies }
+  const properties = new Map(
+    records.map((record) => [record.seedUid, ctx.headPropertiesBySeedUid.get(record.seedUid) ?? []]),
+  )
+  return { records, dependencies, properties }
 }
 
 /**

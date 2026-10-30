@@ -1,6 +1,6 @@
 # 0021. A property is cleared by attesting an empty value or by revoking its attestations
 
-- **Status:** Accepted (being implemented)
+- **Status:** Accepted
 - **Date:** 2026-10-21
 - **Scope:** `@seedprotocol/sdk` (ItemProperty, outbox `set` applier, metadata table, publish
   payload, publish summaries, EAS sync, local reads), `@seedprotocol/publish` (revocation after

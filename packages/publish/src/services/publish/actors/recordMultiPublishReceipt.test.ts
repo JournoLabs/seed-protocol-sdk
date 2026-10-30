@@ -1,13 +1,10 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { encodeAbiParameters, encodeEventTopics, zeroAddress } from 'viem'
-import { executorEventsAbi } from '../../../helpers/abi/executor'
-import { publisherEventsAbi } from '../../../helpers/abi/publisher'
 import { easAbi } from '../../../helpers/abi/eas'
 
 /**
  * recordMultiPublishReceipt. Several items published in one multiPublish transaction: each item's
- * property uids are recorded against its own version, from its own events (not the first
- * SeedPublished/version of the batch).
+ * property uids are recorded against its own version, from its own `Attested` events.
  */
 // Loaded before the SDK mock below: config imports the real SDK.
 const realConfig = await import('../../../config')
@@ -17,6 +14,11 @@ const updateVersionUid = mock(async (_: unknown) => {})
 mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish,
   updateVersionUid,
+  // The real one writes both in one transaction; here it hands each to its mock
+  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
+    if (version) await updateVersionUid(version)
+    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  },
   // Related seeds are not recorded here (no item found): this file is about properties and versions.
   Item: { find: async () => undefined },
 }))
@@ -34,20 +36,17 @@ const { recordMultiPublishReceipt } = await import('./recordMultiPublishReceipt'
 const record = (
   receipt: unknown,
   normalizedRequests: any[],
-  useModularExecutor: boolean,
   resolvedSeedUids?: Record<string, string>,
 ) =>
   recordMultiPublishReceipt({
     receipt: receipt as any,
     requests: normalizedRequests,
     rootSeedLocalId: 'postLocal01',
-    useModularExecutor,
-    contractAddressForEvents: MODULE,
     publisherAddress: ATTESTER,
+    attester: ATTESTER,
     ...(resolvedSeedUids ? { resolvedSeedUids } : {}),
   })
 
-const MODULE = '0x00000000000000000000000000000000000000aa' as `0x${string}`
 const ATTESTER = '0x00000000000000000000000000000000000000bb' as `0x${string}`
 const ZERO = `0x${'0'.repeat(64)}`
 const h = (c: string) => `0x${c.repeat(64)}` as `0x${string}`
@@ -67,27 +66,6 @@ const POST_VERSION = h('e')
 const POST_TITLE = h('f')
 const POST_COVER = `0x${'9'.repeat(63)}8` as `0x${string}`
 
-const created = (
-  schemaUid: `0x${string}`,
-  attestationUid: `0x${string}`,
-  abi: typeof executorEventsAbi | typeof publisherEventsAbi = executorEventsAbi,
-) => ({
-  address: MODULE,
-  topics: encodeEventTopics({ abi, eventName: 'CreatedAttestation' }),
-  data: encodeAbiParameters(
-    [
-      {
-        type: 'tuple',
-        components: [
-          { name: 'schemaUid', type: 'bytes32' },
-          { name: 'attestationUid', type: 'bytes32' },
-        ],
-      },
-    ],
-    [{ schemaUid, attestationUid }],
-  ),
-})
-
 const attested = (schemaUID: `0x${string}`, uid: `0x${string}`) => ({
   address: EAS,
   topics: encodeEventTopics({
@@ -96,24 +74,6 @@ const attested = (schemaUID: `0x${string}`, uid: `0x${string}`) => ({
     args: { recipient: zeroAddress, attester: ATTESTER, schemaUID },
   }),
   data: encodeAbiParameters([{ type: 'bytes32' }], [uid]),
-})
-
-const seedPublished = (seedUid: `0x${string}`, versionUid: `0x${string}`) => ({
-  address: MODULE,
-  topics: encodeEventTopics({ abi: executorEventsAbi, eventName: 'SeedPublished' }),
-  data: encodeAbiParameters(
-    [
-      { type: 'bytes32', name: 'seedUid' },
-      { type: 'bytes32', name: 'versionUid' },
-    ],
-    [seedUid, versionUid],
-  ),
-})
-
-const extensionSeedPublished = (uids: `0x${string}`[]) => ({
-  address: MODULE,
-  topics: encodeEventTopics({ abi: publisherEventsAbi, eventName: 'SeedPublished' }),
-  data: encodeAbiParameters([{ type: 'bytes' }], [encodeAbiParameters([{ type: 'bytes32[]' }], [uids])]),
 })
 
 const att = (schema: `0x${string}`, name: string, metadataLocalId?: string) => ({
@@ -171,82 +131,30 @@ const expected = {
   },
 }
 
+/** As multiPublish attests them: every seed and version, then each request's properties. */
+const RECEIPT = {
+  logs: [
+    attested(SCHEMA_IMAGE_SEED, IMAGE_SEED),
+    attested(SCHEMA_VERSION, IMAGE_VERSION),
+    attested(SCHEMA_POST_SEED, POST_SEED),
+    attested(SCHEMA_VERSION, POST_VERSION),
+    attested(SCHEMA_IMAGE_SRC, IMAGE_SRC),
+    attested(SCHEMA_POST_TITLE, POST_TITLE),
+    attested(SCHEMA_POST_COVER, POST_COVER),
+  ],
+}
+
 describe('recordMultiPublishReceipt: properties of several items in one transaction', () => {
-  test('modular executor: each request gets its own version and property uids', async () => {
+  test('each request gets its own version and property uids', async () => {
     applyPropertyAttestationUidsFromPublish.mockClear()
-    // As SeedProtocolExecutor.multiPublish emits them: per request, EAS Attested + CreatedAttestation
-    // for the seed and the version, EAS Attested per property, then SeedPublished(seed, version).
-    const receipt = {
-      logs: [
-        attested(SCHEMA_IMAGE_SEED, IMAGE_SEED),
-        created(SCHEMA_IMAGE_SEED, IMAGE_SEED),
-        attested(SCHEMA_VERSION, IMAGE_VERSION),
-        created(SCHEMA_VERSION, IMAGE_VERSION),
-        attested(SCHEMA_IMAGE_SRC, IMAGE_SRC),
-        seedPublished(IMAGE_SEED, IMAGE_VERSION),
-        attested(SCHEMA_POST_SEED, POST_SEED),
-        created(SCHEMA_POST_SEED, POST_SEED),
-        attested(SCHEMA_VERSION, POST_VERSION),
-        created(SCHEMA_VERSION, POST_VERSION),
-        attested(SCHEMA_POST_TITLE, POST_TITLE),
-        attested(SCHEMA_POST_COVER, POST_COVER),
-        seedPublished(POST_SEED, POST_VERSION),
-      ],
-    }
-    await record(receipt, requests(), true)
-    expect(callsBySeed()).toEqual(expected)
-  })
-
-  test('version uid from SeedPublished: the second item gets the second event, not the first', async () => {
-    applyPropertyAttestationUidsFromPublish.mockClear()
-    // No CreatedAttestation logs: the version uid comes from each request's SeedPublished.
-    const receipt = {
-      logs: [
-        attested(SCHEMA_IMAGE_SEED, IMAGE_SEED),
-        attested(SCHEMA_VERSION, IMAGE_VERSION),
-        attested(SCHEMA_IMAGE_SRC, IMAGE_SRC),
-        seedPublished(IMAGE_SEED, IMAGE_VERSION),
-        attested(SCHEMA_POST_SEED, POST_SEED),
-        attested(SCHEMA_VERSION, POST_VERSION),
-        attested(SCHEMA_POST_TITLE, POST_TITLE),
-        attested(SCHEMA_POST_COVER, POST_COVER),
-        seedPublished(POST_SEED, POST_VERSION),
-      ],
-    }
-    await record(receipt, requests(), true)
-    expect(callsBySeed()).toEqual(expected)
-  })
-
-  test('ManagedAccount extension: each SeedPublished carries its own request property uids', async () => {
-    applyPropertyAttestationUidsFromPublish.mockClear()
-    const receipt = {
-      logs: [
-        created(SCHEMA_IMAGE_SEED, IMAGE_SEED, publisherEventsAbi),
-        created(SCHEMA_VERSION, IMAGE_VERSION, publisherEventsAbi),
-        extensionSeedPublished([IMAGE_SRC]),
-        created(SCHEMA_POST_SEED, POST_SEED, publisherEventsAbi),
-        created(SCHEMA_VERSION, POST_VERSION, publisherEventsAbi),
-        extensionSeedPublished([POST_TITLE, POST_COVER]),
-      ],
-    }
-    await record(receipt, requests(), false)
+    await record(RECEIPT, requests())
     expect(callsBySeed()).toEqual(expected)
   })
 
   test('relation/list values: every seed of this transaction and of earlier ones is passed to resolve', async () => {
     applyPropertyAttestationUidsFromPublish.mockClear()
-    const receipt = {
-      logs: [
-        created(SCHEMA_IMAGE_SEED, IMAGE_SEED, publisherEventsAbi),
-        created(SCHEMA_VERSION, IMAGE_VERSION, publisherEventsAbi),
-        extensionSeedPublished([IMAGE_SRC]),
-        created(SCHEMA_POST_SEED, POST_SEED, publisherEventsAbi),
-        created(SCHEMA_VERSION, POST_VERSION, publisherEventsAbi),
-        extensionSeedPublished([POST_TITLE, POST_COVER]),
-      ],
-    }
     const EARLIER = h('9')
-    await record(receipt, requests(), false, { earlierLocal: EARLIER })
+    await record(RECEIPT, requests(), { earlierLocal: EARLIER })
     const post = applyPropertyAttestationUidsFromPublish.mock.calls
       .map(([a]) => a as { seedLocalId: string; resolvedSeedUids?: Record<string, string> })
       .find((a) => a.seedLocalId === 'postLocal01')
@@ -258,7 +166,7 @@ describe('recordMultiPublishReceipt: properties of several items in one transact
   })
 })
 
-describe('recordMultiPublishReceipt: versions (modular executor)', () => {
+describe('recordMultiPublishReceipt: versions', () => {
   const single = (versionUid: string) => [
     {
       localId: 'seedLocal01',
@@ -269,19 +177,19 @@ describe('recordMultiPublishReceipt: versions (modular executor)', () => {
       listOfAttestations: [att(SCHEMA_IMAGE_SRC, 'storageTransactionId')],
     },
   ]
-  const receipt = { logs: [seedPublished(IMAGE_SEED, IMAGE_VERSION)] }
 
-  // A patch publish attaches to an existing version; its SeedPublished event still reports that
-  // version's uid. It must not be recorded as a new version.
   test('patch publish (request carried the version uid): records no new version', async () => {
     updateVersionUid.mockClear()
-    await record(receipt, single(IMAGE_VERSION), true)
+    await record({ logs: [attested(SCHEMA_IMAGE_SRC, IMAGE_SRC)] }, single(IMAGE_VERSION))
     expect(updateVersionUid).not.toHaveBeenCalled()
   })
 
-  test('new version (request version uid zero): records the SeedPublished version uid', async () => {
+  test('new version (request version uid zero): records the attested version uid', async () => {
     updateVersionUid.mockClear()
-    const { requests: out } = await record(receipt, single(ZERO), true)
+    const { requests: out } = await record(
+      { logs: [attested(SCHEMA_VERSION, IMAGE_VERSION), attested(SCHEMA_IMAGE_SRC, IMAGE_SRC)] },
+      single(ZERO),
+    )
     expect(updateVersionUid).toHaveBeenCalledTimes(1)
     expect(updateVersionUid.mock.calls[0]![0]).toMatchObject({
       seedLocalId: 'seedLocal01',
@@ -292,20 +200,7 @@ describe('recordMultiPublishReceipt: versions (modular executor)', () => {
 
   test('a batch records each request its own new version', async () => {
     updateVersionUid.mockClear()
-    await record(
-      {
-        logs: [
-          created(SCHEMA_IMAGE_SEED, IMAGE_SEED),
-          created(SCHEMA_VERSION, IMAGE_VERSION),
-          seedPublished(IMAGE_SEED, IMAGE_VERSION),
-          created(SCHEMA_POST_SEED, POST_SEED),
-          created(SCHEMA_VERSION, POST_VERSION),
-          seedPublished(POST_SEED, POST_VERSION),
-        ],
-      },
-      requests(),
-      true,
-    )
+    await record(RECEIPT, requests())
     expect(updateVersionUid.mock.calls.map(([a]) => [(a as any).seedLocalId, (a as any).versionUid])).toEqual([
       ['imageLocal1', IMAGE_VERSION],
       ['postLocal01', POST_VERSION],

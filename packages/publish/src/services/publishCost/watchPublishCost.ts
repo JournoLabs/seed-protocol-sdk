@@ -1,6 +1,5 @@
 import type { IItem } from '@seedprotocol/sdk'
-import { combinePublishCostEstimate } from './estimatePublishCost'
-import { estimatePublishCost } from './estimatePublishCost'
+import { estimatePublishCost, repricePublishCostEstimate } from './estimatePublishCost'
 import { getCachedMarketRates } from './marketRates'
 import type { EstimatePublishCostOptions, PublishCostEstimate } from './types'
 
@@ -100,10 +99,7 @@ export function watchPublishCost(
     options?.reprice ??
     (async (prev: PublishCostEstimate) => {
       const rates = await getCachedMarketRates({ forceRefresh: true })
-      return combinePublishCostEstimate(prev.work, rates, {
-        evmUserPays: prev.evm.userPays,
-        arweavePath: prev.arweave.path,
-      })
+      return repricePublishCostEstimate(prev, rates)
     })
 
   let disposed = false

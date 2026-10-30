@@ -6,6 +6,7 @@ import type {
   DownloadFilesParams,
   DownloadResult,
   CreateTransactionOptions,
+  ArweaveTransaction,
 } from '../types/arweave.js'
 
 export interface IArweaveClient {
@@ -19,6 +20,6 @@ export interface IArweaveClient {
   createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions,
-  ): Promise<any>
+  ): Promise<ArweaveTransaction>
   downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]>
 }

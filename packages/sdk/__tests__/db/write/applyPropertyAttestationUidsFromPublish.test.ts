@@ -89,6 +89,30 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     expect(stillPending).toHaveLength(0)
   })
 
+  it('gives each row it records the attester as publisher', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({ title: 'Attester publisher', count: 7 })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const eoa = '0x' + '1'.repeat(40)
+    const smartAccount = '0x' + '2'.repeat(40)
+    const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+    const titleRow = rows.find((r) => r.propertyName === 'title')!
+    await db
+      .update(metadata)
+      .set({ schemaUid: SCHEMA_TITLE, uid: null, publisher: eoa })
+      .where(eq(metadata.localId, titleRow.localId!))
+
+    await applyPropertyAttestationUidsFromPublish({
+      seedLocalId,
+      attestationCreatedAtMs: Date.now(),
+      publisher: smartAccount,
+      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: '0x' + 'a1'.repeat(32), metadataLocalId: titleRow.localId }],
+    })
+
+    const [after] = await db.select().from(metadata).where(eq(metadata.localId, titleRow.localId!))
+    expect(after?.publisher).toBe(smartAccount)
+  })
+
   it('never writes a UID onto a row sync derived from a storage_transaction_id attestation', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'Derived row is no placeholder',

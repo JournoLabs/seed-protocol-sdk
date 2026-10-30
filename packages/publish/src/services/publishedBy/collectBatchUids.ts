@@ -1,9 +1,6 @@
 import { isValidEasAttestationUid, normalizeBytes32Hex } from '@seedprotocol/eas'
 import type { PublishedBatchResult } from './index'
 
-const ZERO =
-  '0x0000000000000000000000000000000000000000000000000000000000000000' as const
-
 function pushUid(out: string[], uid: string | undefined | null) {
   if (!uid) return
   const n = normalizeBytes32Hex(uid)
@@ -65,5 +62,3 @@ export function uidsFromAttestationPairs(
   }
   return out
 }
-
-export { ZERO as ZERO_BYTES32_PUBLISHED_BY }

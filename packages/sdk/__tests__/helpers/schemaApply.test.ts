@@ -62,7 +62,7 @@ testDescribe('applySchemaFile', () => {
     const newName = 'Apply Rename Renamed'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: schemaId,
       metadata: { name: oldName, createdAt: now, updatedAt: now },
@@ -120,6 +120,24 @@ testDescribe('applySchemaFile', () => {
     expect(second).toEqual(first)
   }, 60_000)
 
+  // The format URL moved from seedprotocol.org to seedprotocol.io; stored files keep the old one.
+  it('matches a stored file that has the old $schema URL', async () => {
+    const now = new Date().toISOString()
+    const file: SchemaFileFormat = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: 'apply-format-url-schema',
+      metadata: { name: 'Apply Format URL', createdAt: now, updatedAt: now },
+      models: { FormatNote: { id: 'apply-format-note', properties: { title: { id: 'apply-format-title', type: 'Text' } } } },
+      enums: {},
+      migrations: [],
+    }
+    await applySchemaFile(file)
+
+    const result = await applySchemaFile({ ...file, $schema: 'https://seedprotocol.io/schemas/data-model/v1' })
+    expect(result.skipped).toBe(true)
+  }, 60_000)
+
   it('assigns missing ids once, from the names, and keeps them when the schema changes', async () => {
     const name = 'Apply Stable Ids'
     const base: SchemaFileInput = {
@@ -159,7 +177,7 @@ testDescribe('applySchemaFile', () => {
   it("reads `dataType`, `ref` and storage columns and keeps the file's other fields", async () => {
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: 'apply-shapes',
       metadata: { name: 'Apply Shapes', createdAt: now, updatedAt: now },
@@ -207,7 +225,7 @@ testDescribe('applySchemaFile', () => {
     const schemaName = 'Apply Next Version Fields'
     const now = new Date().toISOString()
     const file: SchemaFileFormat = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: 'apply-next-fields',
       metadata: { name: schemaName, createdAt: now, updatedAt: now },

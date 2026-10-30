@@ -25,6 +25,7 @@ import { sameEntity } from '@/helpers/entity/entityCommon'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   evictEntities,
   isEntityTornDown,
@@ -56,9 +57,18 @@ const TRACKED_PROPERTIES = [
 ] as const
 
 /**
+ * `hold` for Schema lookups. A schema stays cached whether or not anyone holds it (see
+ * `Schema.cache`), so a hold only counts this caller; `unload()` gives it back.
+ */
+export type SchemaHoldOption = {
+  /** Take a cache hold, released with `unload()`. Default false. */
+  hold?: boolean
+}
+
+/**
  * Options for Schema.all() method
  */
-export interface SchemaAllOptions {
+export interface SchemaAllOptions extends SchemaHoldOption {
   /**
    * If true, returns all versions of each schema. If false (default), returns only the latest version of each schema.
    * @default false
@@ -76,14 +86,18 @@ export interface SchemaAllOptions {
   waitForReady?: boolean
   /**
    * Timeout in ms for waiting for each schema to be ready (when waitForReady is true).
-   * @default 5000
+   * @default 15000
    */
   readyTimeout?: number
 }
 
 export class Schema {
-  /** Cached under its file id and its name (ADR 0014). */
-  static readonly cache = new EntityCache<Schema>()
+  /**
+   * Cached under its file id and its name (ADR 0014). A schema stays cached with no holds until it
+   * is destroyed or evicted, or the client stops (`unloadUnheld: false`): sync and name matching
+   * read the cached definitions synchronously.
+   */
+  static readonly cache = new EntityCache<Schema>({ unloadUnheld: false })
 
   protected readonly _service: SchemaService
 
@@ -148,35 +162,14 @@ export class Schema {
 
   /**
    * Returns the cached schema for `schemaName`, or loads it (creating a draft for an unknown name).
-   * Each call takes a hold on the instance; release it with `unload()`.
+   * Takes no hold unless `hold: true`: a schema stays cached without one (see `cache`).
    */
+  static create(schemaName: string, options: { waitForReady: false } & SchemaHoldOption): Schema
   static create(
     schemaName: string,
-    options: {
-      waitForReady: false
-      /** @internal SDK lookups pass false: see the implementation signature */
-      hold?: false
-    },
-  ): Schema
-  static create(
-    schemaName: string,
-    options?: {
-      waitForReady?: true
-      readyTimeout?: number
-      /** @internal SDK lookups pass false: see the implementation signature */
-      hold?: false
-    },
+    options?: { waitForReady?: true; readyTimeout?: number } & SchemaHoldOption,
   ): Promise<Schema>
-  static create(
-    schemaName: string,
-    options?: CreateWaitOptions & {
-      /**
-       * @internal false for SDK code that only looks the schema up: no hold is taken, and a schema
-       * loaded here is cached with none, so its users' last unload still stops it.
-       */
-      hold?: false
-    },
-  ): Schema | Promise<Schema> {
+  static create(schemaName: string, options?: CreateWaitOptions & SchemaHoldOption): Schema | Promise<Schema> {
     if (!schemaName) {
       throw new Error('Schema name is required')
     }
@@ -184,14 +177,14 @@ export class Schema {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
-    const holds = options?.hold === false ? 0 : 1
+    const holds = options?.hold === true
 
     // Cached under this name (or file id)
     const cached = this.cache.peek(schemaName)
     if (cached) {
       if (holds) this.cache.holdInstance(cached)
       if (!waitForReady) return cached
-      return waitForEntityReady(cached, { timeout: readyTimeout }).then(() => cached)
+      return Schema.readyOrRelease(cached, readyTimeout, holds)
     }
 
     // Create new instance
@@ -243,6 +236,7 @@ export class Schema {
         }
       },
       sendUpdate: (instance, prop: string, value: any) => {
+        instance._assertLoaded(`set ${prop} on`)
         // Handle special property updates
         if (prop === 'name') {
           // Update both metadata.name and schemaName
@@ -338,26 +332,43 @@ export class Schema {
       },
     })
     
-    this.cache.add(proxiedInstance, [schemaName], { hold: holds === 1 })
+    this.cache.add(proxiedInstance, [schemaName], { hold: holds })
     void runEntityLoad(proxiedInstance, () => Schema.load(proxiedInstance))
     if (!waitForReady) return proxiedInstance
-    return waitForEntityReady(proxiedInstance, { timeout: readyTimeout }).then(() => proxiedInstance)
+    return Schema.readyOrRelease(proxiedInstance, readyTimeout, holds)
+  }
+
+  /** The schema once ready; a call that took a hold gives it back when the schema isn't ready in time. */
+  private static async readyOrRelease(schema: Schema, timeout: number, held: boolean): Promise<Schema> {
+    try {
+      await waitForEntityReady(schema, { timeout })
+    } catch (error) {
+      if (held) schema.unload()
+      throw error
+    }
+    return schema
   }
 
   /**
-   * Get schema instance by schemaFileId (preferred method)
-   * Returns null if not found in cache
+   * The cached schema with this file id, or null. Takes no hold unless `hold: true`.
    */
-  static getById(schemaFileId: string): Schema | null {
-    return this.cache.hold(schemaFileId) ?? null
+  static getById(schemaFileId: string, options?: SchemaHoldOption): Schema | null {
+    return (options?.hold ? this.cache.hold(schemaFileId) : this.cache.peek(schemaFileId)) ?? null
   }
 
   /**
-   * The cached schema with this file id or name, without taking a hold. For SDK code that reads
-   * the schema and doesn't hand it to a caller; callers that keep it use `create` or `find`.
+   * The cached schema with this file id or name, without taking a hold.
    */
   static peek(schemaFileIdOrName: string): Schema | undefined {
     return this.cache.peek(schemaFileIdOrName)
+  }
+
+  /**
+   * Takes one more hold on a cached, running instance, released with `unload()`. False (and no
+   * hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: Schema): boolean {
+    return instance.getService().getSnapshot().status === 'active' && this.cache.holdInstance(instance)
   }
 
   /** Stop and drop every cached Schema, whoever holds it (test cleanup). */
@@ -369,19 +380,15 @@ export class Schema {
    * Create or get schema instance by schemaFileId
    * Queries the database to find the schema name if not cached
    * @param schemaFileId - The schema file ID
-   * @returns Schema instance, with a hold taken (unless `hold: false`)
+   * @returns Schema instance, with no hold unless `hold: true`
    */
-  static async createById(
-    schemaFileId: string,
-    /** @internal `hold: false` as for `create` */
-    options?: { hold?: false },
-  ): Promise<Schema> {
+  static async createById(schemaFileId: string, options?: SchemaHoldOption): Promise<Schema> {
     if (!schemaFileId) {
       throw new Error('Schema file ID is required')
     }
 
     // First, check if we have an instance cached by ID
-    const cachedInstance = options?.hold === false ? this.peek(schemaFileId) : this.getById(schemaFileId)
+    const cachedInstance = this.getById(schemaFileId, options)
     if (cachedInstance) {
       return cachedInstance
     }
@@ -411,14 +418,14 @@ export class Schema {
     }
 
     // Create schema using the name (this will load from database/file)
-    return this.create(schemaName, options?.hold === false ? { hold: false } : undefined)
+    return this.create(schemaName, options)
   }
 
   /**
    * Find a schema by schemaFileId or by name. Read-only: a name with no schema row gives undefined
    * and creates nothing (`Schema.create` creates a draft for an unknown name). By name, the cached
-   * instance is used, else the stored schema is loaded. Waits for the schema to be fully loaded
-   * (idle state) by default. Takes a hold unless `hold: false`.
+   * instance is used, else the stored schema is loaded. Waits until the schema is ready (`status`
+   * `'ready'`) unless `waitForReady: false`. Takes no hold unless `hold: true`.
    * @returns Schema instance if found, undefined otherwise
    */
   static async find({
@@ -426,13 +433,11 @@ export class Schema {
     schemaName,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
-    hold,
+    hold = false,
   }: {
     waitForReady?: boolean
     readyTimeout?: number
-    /** @internal `hold: false` as for `create` */
-    hold?: false
-  } & ({ schemaFileId: string; schemaName?: undefined } | { schemaName: string; schemaFileId?: undefined })): Promise<
+  } & SchemaHoldOption & ({ schemaFileId: string; schemaName?: undefined } | { schemaName: string; schemaFileId?: undefined })): Promise<
     Schema | undefined
   > {
     if (schemaName) {
@@ -442,22 +447,23 @@ export class Schema {
       return undefined
     }
 
+    let schema: Schema | undefined
     try {
-      const schema =
-        (hold === false ? Schema.peek(schemaFileId) : (Schema.getById(schemaFileId) ?? undefined)) ??
-        (await Schema.createById(schemaFileId, hold === false ? { hold: false } : undefined))
+      schema = await Schema.createById(schemaFileId, { hold })
       if (waitForReady) await waitForEntityReady(schema, { timeout: readyTimeout })
       return schema
     } catch {
+      // Keeps no hold when it returns nothing
+      if (hold) schema?.unload()
       return undefined
     }
   }
 
   private static async findByName(
     schemaName: string,
-    options: { waitForReady: boolean; readyTimeout: number; hold?: false },
+    options: { waitForReady: boolean; readyTimeout: number; hold: boolean },
   ): Promise<Schema | undefined> {
-    const createOptions = { readyTimeout: options.readyTimeout, ...(options.hold === false && { hold: false as const }) }
+    const createOptions = { readyTimeout: options.readyTimeout, hold: options.hold }
     const loadOrCached = () =>
       options.waitForReady
         ? this.create(schemaName, { ...createOptions, waitForReady: true })
@@ -479,7 +485,7 @@ export class Schema {
    * Get instantiated Schema objects for all schemas (from database and files)
    * By default, returns only the latest version of each schema and excludes the internal Seed Protocol schema.
    * Uses loadAllSchemasFromDb() as the single source of truth, which intelligently merges database and file data.
-   * Takes no holds on the instances it returns: a caller that keeps one uses `Schema.create` or `Schema.find`.
+   * Takes no holds unless `hold: true`.
    * 
    * @param options - Configuration options
    * @param options.includeAllVersions - If true, returns all versions of each schema. Default: false
@@ -492,6 +498,7 @@ export class Schema {
       includeInternal = false,
       waitForReady = false,
       readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+      hold = false,
     } = options
     
     // Use loadAllSchemasFromDb as single source of truth
@@ -551,8 +558,7 @@ export class Schema {
       processedSchemaNames.add(schemaName)
       
       // Try to use schemaFileId to ensure we load the correct version
-      // First check if we have a cached instance by schemaFileId. Schema.all takes no holds: it
-      // lists schemas (useSchemas caches the list and never unloads it).
+      // First check if we have a cached instance by schemaFileId
       if (schemaFileId) {
         const cachedById = this.peek(schemaFileId)
         if (cachedById) {
@@ -581,22 +587,34 @@ export class Schema {
       // But to ensure we get the correct version, we'll use createById if we have the schemaFileId
       if (schemaFileId) {
         try {
-          const instance = await this.createById(schemaFileId, { hold: false })
+          const instance = await this.createById(schemaFileId)
           schemaInstances.push(instance)
         } catch {
           // Fallback to creating by name if createById fails
-          schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
+          schemaInstances.push(this.create(schemaName, { waitForReady: false }))
         }
       } else {
-        schemaInstances.push(this.create(schemaName, { waitForReady: false, hold: false }))
+        schemaInstances.push(this.create(schemaName, { waitForReady: false }))
       }
     }
 
     if (waitForReady && schemaInstances.length > 0) {
       await Promise.all(schemaInstances.map((schema) => waitForEntityReady(schema, { timeout: readyTimeout })))
     }
+    // Once nothing can throw, so a failed call keeps no holds
+    if (hold) for (const schema of schemaInstances) this.cache.holdInstance(schema)
 
     return schemaInstances
+  }
+
+  /** Throws EntityUnloadedError, naming the schema, when this instance was destroyed or evicted. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { schemaName, metadata, id } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} schema ${metadata?.name ?? schemaName ?? '?'} (${id ?? 'no id'}): this Schema instance was ` +
+        'destroyed or evicted. Look the schema up again (Schema.find).',
+    )
   }
 
   getService(): SchemaService {
@@ -829,6 +847,7 @@ export class Schema {
    * @returns The file path of the new schema version
    */
   async saveNewVersion(): Promise<string> {
+    this._assertLoaded('save a new version of')
     // Check for conflicts before saving
     const conflictCheck = await this._checkForConflicts()
     if (conflictCheck.hasConflict) {
@@ -866,7 +885,7 @@ export class Schema {
     
     const currentSchema: SchemaFileFormat = {
       id: context.id,
-      $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: context.$schema || 'https://seedprotocol.io/schemas/data-model/v1',
       version: context.version || 1,
       metadata: context.metadata || {
         name: this.schemaName,
@@ -915,7 +934,7 @@ export class Schema {
       },
     )
     // Clear edited flags on the cached ModelProperty instances of the edited keys, then on the rows
-    // (schema, those properties, the schema's models) in one transaction.
+    // (schema, the edited keys' properties, the schema's models) in one transaction.
     const { ModelProperty } = await import('../ModelProperty/ModelProperty')
     const thisSchemaName = this.schemaName
     const clearedKeys: Array<{ modelName: string; propertyName: string }> = []
@@ -931,8 +950,8 @@ export class Schema {
           (!ctx._schemaName || ctx._schemaName === thisSchemaName)
         )
       })
-      if (!cachedInstance) continue
-      cachedInstance.getService().send({ type: 'clearEdited' })
+      // The row's flag clears too when no instance is cached: a load reads it back as an edit
+      cachedInstance?.getService().send({ type: 'clearEdited' })
       clearedKeys.push({ modelName, propertyName })
     }
 
@@ -1030,6 +1049,7 @@ export class Schema {
    * This refreshes the actor context with the latest data from the database
    */
   async reload(): Promise<void> {
+    this._assertLoaded('reload')
     logger(`Reloading schema ${this.schemaName} from database`)
     
     await runEntityLoad(this, () => Schema.load(this))
@@ -1158,7 +1178,7 @@ export class Schema {
       // Model instances are the source of truth for model data
       const modelsFromInstances = await this._buildModelsFromInstances()
       const currentSchema: SchemaFileFormat = {
-        $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
+        $schema: context.$schema || 'https://seedprotocol.io/schemas/data-model/v1',
         version: context.version || 1,
         id: finalSchemaFileId,
         metadata: currentMetadata,
@@ -1214,8 +1234,8 @@ export class Schema {
   }
 
   /**
-   * Release this caller's hold. With the last one the schema is stopped, leaves the cache, and
-   * releases its hold on each of its models.
+   * Release this caller's hold, if it took one. The schema stays cached (see `Schema.cache`); only
+   * `destroy`, eviction or client stop stop it.
    */
   unload(): void {
     releaseEntity(this, Schema.cache)
@@ -1365,7 +1385,7 @@ export class Schema {
         // One at a time: an eviction of this schema part way through stops the rest
         const since = evictionLog.now()
         for (const id of ids) {
-          await Model.createById(id, { since, hold: false })
+          await Model.createById(id, { since })
         }
       },
       queryInitialData: async (schemaId) => {

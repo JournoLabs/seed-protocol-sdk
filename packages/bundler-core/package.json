@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/bundler-core",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "private": true,
   "description": "Internal: settings shared by @seedprotocol/vite and @seedprotocol/next. Inlined into both at build time; never published.",
   "type": "module",
@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default"
   },
   "devDependencies": {

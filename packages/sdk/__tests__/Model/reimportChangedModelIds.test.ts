@@ -15,7 +15,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const MODEL_NAME = 'ReimportIdPost'
 
 const buildSchemaFile = (schemaName: string) => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

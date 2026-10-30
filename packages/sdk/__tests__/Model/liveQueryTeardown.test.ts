@@ -4,6 +4,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { importJsonSchema } from '@/imports/json'
 import { Model } from '@/Model/Model'
+import { evictEntities } from '@/helpers/entity/entityLifecycle'
 import { Schema } from '@/Schema/Schema'
 import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
@@ -24,7 +25,7 @@ const MODEL_SQL = /FROM\s+properties\s+WHERE\s+model_id/
 function schemaFile(name: string, modelFileId: string): SchemaFileFormat {
   const now = new Date().toISOString()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: { name, createdAt: now, updatedAt: now },
@@ -79,7 +80,7 @@ describe.skipIf(typeof window === 'undefined')('Model liveQuery teardown', () =>
     expect(liveQueries.active(filter), `still open: ${JSON.stringify(liveQueries.activeSql(filter))}`).toBe(0)
   }
 
-  it('the last unload closes the liveQuery of a runtime model', async () => {
+  it('evicting a runtime model closes its liveQuery; unload does not', async () => {
     const schemaName = `Model Teardown Unload ${generateId()}`
     const { filter: schemaModelFilter } = await importWatchedModel(schemaName)
     const model = await Model.create(`Runtime${generateId().slice(0, 6)}`, schemaName, {
@@ -96,7 +97,10 @@ describe.skipIf(typeof window === 'undefined')('Model liveQuery teardown', () =>
     await waitUntilOrThrow(() => liveQueries.active(filter) > 0, "the model's liveQuery to be subscribed")
 
     model.unload()
+    expect(model.getService().getSnapshot().status).toBe('active')
+    expect(liveQueries.active(filter)).toBeGreaterThan(0)
 
+    evictEntities(Model.cache, (cached) => cached === model)
     expect(model.getService().getSnapshot().status).toBe('stopped')
     expectClosed(filter)
     expect(liveQueries.active(schemaModelFilter)).toBeGreaterThan(0)

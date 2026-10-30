@@ -38,6 +38,26 @@ const targets: TargetProperty[] = [
   { name: 'html', dataType: 'Html' },
 ]
 
+describe('the package lookup editor', () => {
+  const render = (lookups: 'section' | false) =>
+    renderToStaticMarkup(
+      React.createElement(FieldMapper, {
+        sources,
+        targets,
+        mappings: [{ sourceId: 'rss-author', propertyName: 'authors', resolve: 'lookup' }],
+        onChange: () => {},
+        theme: 'none',
+        defaultRows: 'all',
+        slots: { lookups },
+      }),
+    )
+
+  it('shows without renderLookup, and slots.lookups false hides it', () => {
+    expect(render('section')).toContain('Relation lookups')
+    expect(render(false)).not.toContain('Relation lookups')
+  })
+})
+
 describe('renderLookup', () => {
   it('calls the host slot only on lookup rows and writes entries via onLookupChange', () => {
     const mappings: FieldMapping[] = [
@@ -74,7 +94,7 @@ describe('renderLookup', () => {
               className: 'host-lookup',
               onClick: () =>
                 row.onLookupChange([
-                  { value: row.sampleValue, ref: 'local_1' },
+                  { value: row.sampleValue, refs: ['local_1'] },
                 ]),
             },
             'Select an identity…',
@@ -93,13 +113,13 @@ describe('renderLookup', () => {
     expect(seen[0]?.target?.ref).toBe('Identity')
     expect(seen.some((r) => r.id === 'title' || r.id === 'html')).toBe(false)
 
-    seen[0]?.onLookupChange([{ value: 'Mira Chen', ref: 'local_1' }])
+    seen[0]?.onLookupChange([{ value: 'Mira Chen', refs: ['local_1'] }])
     expect(nextMappings).toEqual([
       {
         sourceId: 'rss-author',
         propertyName: 'authors',
         resolve: 'lookup',
-        lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
+        lookup: { entries: [{ value: 'Mira Chen', refs: ['local_1'] }] },
       },
       { sourceId: 'rss-title', propertyName: 'title' },
       { sourceId: 'rss-link', propertyName: 'html', resolve: 'extract' },

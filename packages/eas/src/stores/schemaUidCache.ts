@@ -2,10 +2,8 @@ import { BaseEasClient } from '../EasClient/BaseEasClient.js'
 import { getEasEndpoint } from '../easEndpoint.js'
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 import { GET_SCHEMA_BY_NAME } from '../queries.js'
-import { toSnakeCase } from '../utils.js'
 import { easName } from '../easNames.js'
 
-const schemaUidForSchemaDefinition = new Map<string, string>()
 const schemaUidForModel = new Map<string, string>()
 
 /**
@@ -16,8 +14,13 @@ const schemaUidForModel = new Map<string, string>()
  */
 export const SCHEMA_LOOKUP_MISS_TTL_MS = 5 * 60 * 1000
 
-/** Found UIDs from exact-definition lookups (createMetadata / updateMetadata), by endpoint and definition. */
-const schemaUidForExactDefinition = new Map<string, string>()
+/**
+ * Property schema UIDs by endpoint and exact definition (`string title`): the ones publish
+ * registered or found, sync read off attestations, and lookups found on EAS. Every property
+ * schema resolver reads this map first, so a schema registered here is known before the indexer
+ * has it.
+ */
+const schemaUidForDefinition = new Map<string, string>()
 /** Lookup key → time its cached miss expires. */
 const lookupMissExpiresAt = new Map<string, number>()
 const lookupsInFlight = new Map<string, Promise<string | undefined>>()
@@ -105,12 +108,12 @@ const definitionAnswers = (definition: string) => (key: string) => key === `defi
 
 /** Clears every schema UID cache in this module (found UIDs and misses). For tests. */
 export const resetSchemaUidCaches = (): void => {
-  schemaUidForSchemaDefinition.clear()
   schemaUidForModel.clear()
-  schemaUidForExactDefinition.clear()
+  schemaUidForDefinition.clear()
   clearSchemaLookupMisses()
 }
 
+/** Records the UID of the schema whose exact definition is `text` (`string title`). */
 export const setSchemaUidForSchemaDefinition = ({
   text,
   schemaUid,
@@ -118,7 +121,7 @@ export const setSchemaUidForSchemaDefinition = ({
   text: string
   schemaUid: string
 }): void => {
-  schemaUidForSchemaDefinition.set(toSnakeCase(text), schemaUid)
+  schemaUidForDefinition.set(scopeToEndpoint(text), schemaUid)
   // A miss for this definition may now be found.
   forgetMisses(definitionAnswers(text))
 }
@@ -139,13 +142,12 @@ export const setSchemaUidForModel = ({
 export const getSchemaUidForModelFromCache = (modelName: string): string | undefined =>
   schemaUidForModel.get(modelName.toLowerCase())
 
-/** UID cached for `text` by {@link setSchemaUidForSchemaDefinition} or an earlier lookup; no request. */
+/** UID recorded for the exact definition `text` by {@link setSchemaUidForSchemaDefinition} or a lookup; no request. */
 export const getSchemaUidForSchemaDefinitionFromCache = (text: string): string | undefined =>
-  schemaUidForSchemaDefinition.get(toSnakeCase(text))
+  schemaUidForDefinition.get(scopeToEndpoint(text))
 
 /**
- * UID for a property schema definition (`string title`): the one {@link setSchemaUidForSchemaDefinition}
- * cached, else {@link getEasSchemaUidForExactDefinition}'s. Undefined when EAS has none or the
+ * {@link getEasSchemaUidForExactDefinition}, returning undefined instead of throwing when the
  * request fails.
  */
 export const getEasSchemaUidForSchemaDefinition = async ({
@@ -153,33 +155,28 @@ export const getEasSchemaUidForSchemaDefinition = async ({
 }: {
   schemaText: string
 }): Promise<string | undefined> => {
-  const textSnakeCase = toSnakeCase(schemaText)
-  const cached = schemaUidForSchemaDefinition.get(textSnakeCase)
-  if (cached) return cached
-  let schemaUid: string | undefined
   try {
-    schemaUid = await getEasSchemaUidForExactDefinition(schemaText)
+    return await getEasSchemaUidForExactDefinition(schemaText)
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
       console.warn(`Failed to fetch schema for definition ${schemaText}:`, error)
     }
     return undefined
   }
-  // Found on EAS, not newly registered: no cached misses to clear.
-  if (schemaUid) schemaUidForSchemaDefinition.set(textSnakeCase, schemaUid)
-  return schemaUid
 }
 
 /**
  * UID of the EAS schema whose definition is exactly `schemaDefinition` (e.g. `string title`), or
- * undefined when EAS has none or the EAS clients aren't configured. Found UIDs and misses are
- * cached (see SCHEMA_LOOKUP_MISS_TTL_MS). Throws when the request fails.
+ * undefined when EAS has none or the EAS clients aren't configured. A UID already recorded
+ * ({@link setSchemaUidForSchemaDefinition}, e.g. by publish after registering the schema) answers
+ * without a request. Found UIDs and misses are cached (see SCHEMA_LOOKUP_MISS_TTL_MS). Throws when
+ * the request fails.
  */
 export const getEasSchemaUidForExactDefinition = async (
   schemaDefinition: string,
 ): Promise<string | undefined> => {
   const key = scopeToEndpoint(schemaDefinition)
-  const cached = schemaUidForExactDefinition.get(key)
+  const cached = schemaUidForDefinition.get(key)
   if (cached) return cached
 
   const queryClient = BaseQueryClient.getQueryClient()
@@ -200,6 +197,7 @@ export const getEasSchemaUidForExactDefinition = async (
       (queryResult as { data?: { schemas?: Array<{ id: string }> } })?.data?.schemas
     return Array.isArray(schemas) && schemas.length > 0 ? schemas[0]!.id : undefined
   })
-  if (schemaUid) schemaUidForExactDefinition.set(key, schemaUid)
+  // Found on EAS, not newly registered: no cached misses to forget.
+  if (schemaUid) schemaUidForDefinition.set(key, schemaUid)
   return schemaUid
 }

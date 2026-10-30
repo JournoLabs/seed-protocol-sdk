@@ -11,11 +11,11 @@ export function generateETag(value: string): string {
 
 /**
  * Check if an ETag matches the provided value
- * Handles both quoted and unquoted ETags
+ * Handles quoted, unquoted and weak (`W/"…"`) ETags. If-None-Match uses the weak comparison
+ * (RFC 9110 §13.1.2), and proxies that compress a response mark its ETag weak.
  */
 export function etagMatches(etag1: string, etag2: string): boolean {
-  // Remove quotes if present
-  const normalize = (etag: string) => etag.replace(/^"|"$/g, '');
+  const normalize = (etag: string) => etag.replace(/^W\//, '').replace(/^"|"$/g, '');
   return normalize(etag1) === normalize(etag2);
 }
 

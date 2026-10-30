@@ -2,7 +2,7 @@ import type {
   DeriveSpec,
   FieldMapping,
   LookupEntry,
-  MappingLookups,
+  LookupSeparator,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -56,6 +56,7 @@ export type FieldMapperRow = {
 
 export type FieldMapperLookupRow = FieldMapperRow & {
   onLookupChange: (entries: LookupEntry[]) => void
+  onSplitChange: (separators: LookupSeparator[] | null) => void
 }
 
 export type FieldMapperTransformOptions = (
@@ -74,15 +75,6 @@ export type UseFieldMapperArgs = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   onChange: (mappings: FieldMapping[]) => void
-  /**
-   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback for preview.
-   */
-  lookups?: MappingLookups
-  /**
-   * @deprecated Prefer `setLookupEntries` / `renderLookup`. Still clears the
-   * document-level table when a lookup edge is removed.
-   */
-  onLookupsChange?: (lookups: MappingLookups) => void
   rowKey?: FieldMapperRowKey
   onAutoMap?: () => FieldMapping[]
 }
@@ -93,13 +85,15 @@ export type UseFieldMapperResult = {
   propertyOptions: FieldMapperOption[]
   addableProperties: TargetProperty[]
   coverage: FieldMapperCoverage
-  /** Row ids whose property is already filled by an earlier row. Empty in property mode. */
+  /** Ids of rows that map the same property as another row, the first such row included. Empty in property mode. */
   conflicts: Set<string>
   setSource: (rowId: string, sourceId: string | null) => void
   setProperty: (rowId: string, propertyName: string) => void
   setTransform: (rowId: string, resolve: ResolveJob | null) => void
   /** Write `lookup.entries` on the edge for this row. Empty list omits `lookup`. */
   setLookupEntries: (rowId: string, entries: LookupEntry[]) => void
+  /** Write `split` on the lookup edge for this row; `null` or `[]` looks up whole values only. */
+  setLookupSplit: (rowId: string, separators: LookupSeparator[] | null) => void
   /** Write `assemble.blocks` on an assemble edge. */
   setAssembleBlocks: (rowId: string, blocks: string[]) => void
   /** Write or clear `derive` on the edge. Creates a derive-only edge in property mode when missing. */

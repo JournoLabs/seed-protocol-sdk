@@ -1,12 +1,13 @@
 import type { Duplex } from 'node:stream'
 import HyperDHT from 'hyperdht'
-import { createEphemeralClientKeypair, decodePublicKey } from '../keys'
-import type { TunnelMeta, TunnelResponseMeta } from '../types'
+import { decodePublicKey, resolveClientKeypair } from '../keys'
+import type { DhtBootstrapNode, TunnelMeta, TunnelResponseMeta } from '../types'
 import { TunnelConnectTimeoutError, TunnelTimeoutError } from './errors'
 import { readTunnelResponse, writeTunnelRequest } from './protocol'
 
 /** Default idle limit for one request on the tunnel stream. */
-export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+/** Above the operator's default upstream timeout (130 s), so the operator's own 504 arrives first. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 150_000
 
 /** Default limit for opening the HyperDHT connection. */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
@@ -22,12 +23,19 @@ export const DEFAULT_MAX_STREAMS = 4
 export type TunnelSessionOptions = {
   /** Operator public key (z32 or hex) */
   key: string
-  /** Optional store path for DHT client state */
-  storePath?: string
+  /**
+   * Keypair file (created on first run if missing) for the key this client presents to the
+   * operator. Without `keyFile` or `keyPair`, each session uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the stream has sent and received nothing for this long, then
    * reconnect for the next request. Counts from when the request gets a stream.
-   * Default 60 000; 0 disables.
+   * Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
@@ -48,6 +56,8 @@ export type TunnelRequestOptions = {
 
 export type TunnelSession = {
   key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
   runOnTunnel: <T>(
     fn: (socket: Duplex) => Promise<T>,
     options?: TunnelRequestOptions,
@@ -201,12 +211,16 @@ export function createTunnelPool(
   const waiting: PoolWaiter[] = []
   let closed = false
 
+  // A stream the operator ended (after a 403, say) can't carry another response.
+  const isLive = (socket: Duplex | null): socket is Duplex =>
+    socket !== null && !socket.destroyed && !socket.readableEnded
+
   const addSlot = (): PoolSlot => {
     const slot: PoolSlot = { run: null as never, socket: null, busy: false }
     // The slot runs one request at a time, so there is never a second open in progress.
     slot.run = createTunnelQueue(async () => {
       if (closed) throw closedError()
-      if (slot.socket && !slot.socket.destroyed) return slot.socket
+      if (isLive(slot.socket)) return slot.socket
       const socket = await openStream()
       if (closed) {
         socket.destroy()
@@ -223,7 +237,7 @@ export function createTunnelPool(
     const idle = slots.filter((slot) => !slot.busy)
     // An idle slot whose stream died reopens it, same as a new slot would.
     const slot =
-      idle.find((s) => s.socket !== null && !s.socket.destroyed) ??
+      idle.find((s) => isLive(s.socket)) ??
       idle[0] ??
       (slots.length < maxStreams ? addSlot() : undefined)
     if (!slot) return null
@@ -285,6 +299,13 @@ export function createTunnelPool(
   }
 }
 
+/** Whether the operator sent `connection: close`. Upstream `connection` headers never reach the client. */
+function closesStream(meta: TunnelResponseMeta): boolean {
+  return Object.entries(meta.headers).some(
+    ([key, value]) => key.toLowerCase() === 'connection' && /(^|,)\s*close\s*(,|$)/i.test(String(value)),
+  )
+}
+
 /**
  * Dial the operator HyperDHT key and expose a request/response forwarder.
  *
@@ -295,10 +316,10 @@ export function createTunnelPool(
  */
 export async function createTunnelSession(options: TunnelSessionOptions): Promise<TunnelSession> {
   const remotePublicKey = decodePublicKey(options.key)
-  const clientKey = createEphemeralClientKeypair()
+  const clientKey = resolveClientKeypair(options)
   const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
 
-  const dht = new HyperDHT()
+  const dht = new HyperDHT(options.bootstrap ? { bootstrap: options.bootstrap } : {})
 
   // Without a `pool` option, each connect is its own handshake and encrypted stream.
   const openStream = () =>
@@ -328,6 +349,9 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
       // the frame reader sees errors through its own listener.
       socket.on('error', (err: Error) => fail(err))
       socket.once('close', () => fail(new Error('Tunnel connection closed before it opened')))
+      // The operator ends a stream after answering a request it refused; the pool opens a new
+      // one for the next request.
+      socket.once('end', () => socket.destroy())
       socket.once('open', onReady)
       socket.once('connect', onReady)
     })
@@ -345,12 +369,16 @@ export async function createTunnelSession(options: TunnelSessionOptions): Promis
   ): Promise<{ meta: TunnelResponseMeta; body: Buffer }> => {
     return runOnTunnel(async (socket) => {
       await writeTunnelRequest(socket, meta, body)
-      return readTunnelResponse(socket)
+      const response = await readTunnelResponse(socket)
+      // The operator is ending this stream, so the next request opens a new one.
+      if (closesStream(response.meta)) socket.destroy()
+      return response
     }, opts)
   }
 
   return {
     key: options.key,
+    clientKey: clientKey.z32,
     runOnTunnel,
     forwardHttp,
     close: async () => {

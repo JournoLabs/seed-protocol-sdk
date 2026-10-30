@@ -1,3 +1,4 @@
+import { keepAttestationsFromRefAttester } from '@seedprotocol/eas'
 import { initializeQueryPlatform } from './bootstrap.js'
 import {
   assembleSeedRecords,
@@ -23,7 +24,12 @@ import {
   resolveQuerySource,
   getRemoteQueryDataSource,
 } from './source/index.js'
-import type { QueryDataSource } from './source/types.js'
+import type { QueryDataSource, SeedListFilter } from './source/types.js'
+import {
+  toSeedPropertyAttestation,
+  type SeedAttestations,
+  type SeedPropertyAttestation,
+} from './seedAttestations.js'
 import type {
   AssembleOptions,
   GetSeedOptions,
@@ -60,28 +66,30 @@ type Assembled = {
   dependencies: Map<string, SeedDependencies>
 }
 
+/** A page's records and how many Seeds the listing returned for it. */
+type ListedAssembled = Assembled & { listed: number }
+
 async function fetchAndAssemble(
   schemaName: string,
   limit: number,
   skip: number,
+  filter: SeedListFilter,
   options: AssembleOptions | undefined,
   dataSource: QueryDataSource,
-): Promise<Assembled> {
-  const seeds = await dataSource.listSeedsBySchemaName(schemaName, {
-    limit,
-    skip,
-  })
-  return assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
+): Promise<ListedAssembled> {
+  const seeds = await dataSource.listSeedsBySchemaName(schemaName, { limit, skip, ...filter })
+  const assembled = await assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)
+  return { ...assembled, listed: seeds.length }
 }
 
 /**
  * For `source: 'auto'`: try local first; if empty/miss, fall back to remote.
  */
-async function withAutoFallbackForCollection(
+async function withAutoFallbackForCollection<T extends Assembled>(
   mode: ReturnType<typeof normalizeSourceMode>,
   dataSource: QueryDataSource,
-  run: (ds: QueryDataSource) => Promise<Assembled>,
-): Promise<{ assembled: Assembled; dataSource: QueryDataSource; useQueryCache: boolean }> {
+  run: (ds: QueryDataSource) => Promise<T>,
+): Promise<{ assembled: T; dataSource: QueryDataSource; useQueryCache: boolean }> {
   const assembled = await run(dataSource)
   if (mode !== 'auto' || dataSource.kind !== 'local') {
     return {
@@ -199,7 +207,7 @@ async function refreshCollection(
     items.length === cached.items.length &&
     items.every((item, i) => item === cached.items[i])
   if (cached && unchanged && !checkWindowAged(cached, startedAt)) {
-    return { items, limit, skip: 0, etag: cached.etag }
+    return { items, limit, skip: 0, listed: listed.length, etag: cached.etag }
   }
   if (cached) cache.recordRefresh()
 
@@ -212,7 +220,13 @@ async function refreshCollection(
   })
   await writeThroughAssembled(fresh, optionsKey, startedAt, seenChangeKeys)
   // The cached records (frozen outside production), so a fresh result behaves like a cache hit.
-  return { items: stored ? [...stored.items] : items, limit, skip: 0, etag: stored?.etag }
+  return {
+    items: stored ? [...stored.items] : items,
+    limit,
+    skip: 0,
+    listed: listed.length,
+    etag: stored?.etag,
+  }
 }
 
 /** Hex digits a uid prefix needs, so a stray short value can't list most of a schema. */
@@ -229,32 +243,56 @@ export function normalizeUidPrefix(prefix: string): string | null {
   return `0x${hex}`
 }
 
+/**
+ * Lowercase `0x` + 40 hex for each entry that is an address (with or without `0x`, any case),
+ * without duplicates. Null when none is.
+ */
+export function normalizeAttesters(attesters: readonly string[]): string[] | null {
+  const out = new Set<string>()
+  for (const attester of attesters) {
+    const hex = attester.trim().toLowerCase().replace(/^0x/, '')
+    if (/^[0-9a-f]{40}$/.test(hex)) out.add(`0x${hex}`)
+  }
+  return out.size > 0 ? [...out] : null
+}
+
+/**
+ * The schema's Seeds as SeedRecords. Like `getSeed` and `getSeeds`, a Seed with no
+ * Version from its attester, or whose Versions were all revoked, is left out; `limit` and `skip`
+ * count listed Seeds, so a page can come back shorter than `limit`, even empty, with more after
+ * it. `listed` is the number of Seeds listed for the page: page on (`skip += limit`) while it
+ * equals `limit`.
+ */
 export async function queryBySchema(
   schemaName: string,
   options?: QueryBySchemaOptions,
 ): Promise<QueryBySchemaResult> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
 
-  let uidPrefix: string | null = null
+  const filter: SeedListFilter = {}
   if (options?.uidPrefix !== undefined) {
-    uidPrefix = normalizeUidPrefix(options.uidPrefix)
-    if (!uidPrefix) return { items: [], limit, skip }
+    const uidPrefix = normalizeUidPrefix(options.uidPrefix)
+    if (!uidPrefix) return { items: [], limit, skip, listed: 0 }
+    filter.uidPrefix = uidPrefix
   }
-
-  const runAssemble = async (ds: QueryDataSource): Promise<Assembled> => {
-    if (!uidPrefix) return fetchAndAssemble(schemaName, limit, skip, options, ds)
-    const seeds = await ds.listSeedsByUidPrefix(schemaName, uidPrefix, { limit, skip })
-    return assembleSeedsWithDependencies(schemaName, seeds, options, ds)
+  if (options?.attesters !== undefined) {
+    const attesters = normalizeAttesters(options.attesters)
+    if (!attesters) return { items: [], limit, skip, listed: 0 }
+    filter.attesters = attesters
   }
+  const filtered = filter.uidPrefix !== undefined || filter.attesters !== undefined
 
-  // Collection cache only for remote + skip=0 working set (a uid-prefix match isn't one)
+  const runAssemble = (ds: QueryDataSource): Promise<ListedAssembled> =>
+    fetchAndAssemble(schemaName, limit, skip, filter, options, ds)
+
+  // Collection cache only for the remote, skip=0 working set (a filtered listing isn't one)
   if (
-    !uidPrefix &&
+    !filtered &&
     shouldUseCache(options, resolved.useQueryCache) &&
     skip === 0 &&
     resolved.dataSource.kind === 'remote'
@@ -265,7 +303,10 @@ export async function queryBySchema(
     return cache.withRefreshLock(lockKey, async () => {
       if (maxAge > 0) {
         const recent = await cache.getCheckedCollection(lockKey, schemaName, optionsKey, maxAge)
-        if (recent) return { items: [...recent.items], limit, skip: 0, etag: recent.etag }
+        if (recent) {
+          const { collection, listed } = recent
+          return { items: [...collection.items], limit, skip: 0, listed, etag: collection.etag }
+        }
       }
       const result = await refreshCollection(
         schemaName,
@@ -274,7 +315,7 @@ export async function queryBySchema(
         optionsKey,
         resolved.dataSource,
       )
-      if (result.etag) cache.markCollectionChecked(lockKey, result.etag)
+      if (result.etag) cache.markCollectionChecked(lockKey, result.etag, result.listed)
       return result
     })
   }
@@ -291,7 +332,7 @@ export async function queryBySchema(
   if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
     await writeThroughAssembled(assembled, optionsKey, startedAt)
   }
-  return { items: assembled.records, limit, skip }
+  return { items: assembled.records, limit, skip, listed: assembled.listed }
 }
 
 /**
@@ -344,6 +385,16 @@ async function getUnchangedCachedItem(
   return hits.get(seedUid) ?? null
 }
 
+/**
+ * UIDs (lowercase) of `seeds` that have a Version from the seed's attester, revoked ones included.
+ * A seed without one has never been published: getSeed and getSeeds treat it as not found.
+ */
+function seedUidsWithVersions(seeds: AttestationLike[], versions: AttestationLike[]): Set<string> {
+  return new Set(
+    keepAttestationsFromRefAttester(versions, seeds).map((version) => version.refUID.toLowerCase()),
+  )
+}
+
 /** The pin in `options`, if it names a version or a time. */
 function pinOf(options: VersionPin | undefined): VersionPin | undefined {
   if (options?.versionUid === undefined && options?.asOf === undefined) return undefined
@@ -354,12 +405,13 @@ export async function getSeed(
   seedUid: string,
   options?: GetSeedOptions,
 ): Promise<GetSeedResult | null> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   if (!seedUid || typeof seedUid !== 'string' || seedUid.trim() === '') {
     return null
   }
 
-  const trimmed = seedUid.trim()
+  // Read lowercase, like getSeeds (EAS indexes UIDs lowercase and matches them case-sensitively).
+  const trimmed = seedUid.trim().toLowerCase()
   const include = options?.include ?? 'data'
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
@@ -381,10 +433,17 @@ export async function getSeed(
       ds.getVersionsForSeeds([trimmed], { includeRevoked: true }),
     ])
 
-  const startedAt = nowSeconds()
-  let [seed, versions] = await fetchSeedAndVersions(dataSource)
+  /** The seed, or null when the source doesn't have it or it has no Versions. */
+  const fetchPublishedSeed = async (ds: QueryDataSource) => {
+    const [found, foundVersions] = await fetchSeedAndVersions(ds)
+    const published = found && seedUidsWithVersions([found], foundVersions).has(trimmed)
+    return [published ? found : null, foundVersions] as const
+  }
 
-  // auto: local miss → remote
+  const startedAt = nowSeconds()
+  let [seed, versions] = await fetchPublishedSeed(dataSource)
+
+  // auto: local miss (or a local seed with no Versions) → remote
   if (!seed && mode === 'auto' && dataSource.kind === 'local') {
     dataSource = getRemoteQueryDataSource()
     allowCache = true
@@ -392,7 +451,7 @@ export async function getSeed(
       const cached = await getUnchangedCachedItem(trimmed, optionsKey, dataSource)
       if (cached) return cached
     }
-    ;[seed, versions] = await fetchSeedAndVersions(dataSource)
+    ;[seed, versions] = await fetchPublishedSeed(dataSource)
   }
 
   if (!seed) return null
@@ -478,7 +537,7 @@ export async function getSeeds(
   seedUids: readonly string[],
   options?: GetSeedsOptions,
 ): Promise<Map<string, SeedRecord>> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
 
   // Read lowercase (EAS indexes UIDs lowercase and matches them case-sensitively); keyed as given.
   const givenByUid = new Map<string, string>()
@@ -525,7 +584,11 @@ export async function getSeeds(
       dataSource.getSeedsByUids(toFetch),
       dataSource.getVersionsForSeeds(toFetch, { includeRevoked: true }),
     ])
-    const seedByUid = new Map(seeds.map((seed) => [seed.id.toLowerCase(), seed]))
+    // Like getSeed: a seed with no Versions counts as missing.
+    const published = seedUidsWithVersions(seeds, versions)
+    const seedByUid = new Map(
+      seeds.filter((seed) => published.has(seed.id.toLowerCase())).map((seed) => [seed.id.toLowerCase(), seed]),
+    )
     const missing = toFetch.filter((uid) => !seedByUid.has(uid))
     // Like getSeed: a seed without a schema name isn't assembled.
     const toAssemble = toFetch
@@ -573,6 +636,80 @@ export async function getSeeds(
 }
 
 /**
+ * Each seed's record with the property attestations it is assembled from, as attested: EAS field
+ * name, type and value. For exports that need the on-chain types (`@seedprotocol/rdf`), which a
+ * `SeedRecord` doesn't keep. Same seeds, versions and pins as getSeeds; records are assembled with
+ * `relations: 'uids'`, without storage hydration, and never read from or written to the query cache.
+ * Keyed as given; seeds that aren't found are left out.
+ */
+export async function getSeedAttestations(
+  seedUids: readonly string[],
+  options?: Pick<GetSeedsOptions, 'source' | 'pins'>,
+): Promise<Map<string, SeedAttestations>> {
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
+
+  const givenByUid = new Map<string, string>()
+  for (const given of seedUids) {
+    if (typeof given !== 'string' || given.trim() === '') continue
+    const uid = given.trim().toLowerCase()
+    if (!givenByUid.has(uid)) givenByUid.set(uid, given.trim())
+  }
+  const requested = [...givenByUid.keys()]
+  if (requested.length === 0) return new Map()
+
+  const pins = new Map<string, VersionPin>()
+  for (const [uid, pin] of options?.pins ?? []) {
+    const active = pinOf(pin)
+    if (active) pins.set(uid.trim().toLowerCase(), active)
+  }
+
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
+  const found = new Map<string, SeedAttestations>()
+
+  /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
+  const readFrom = async (dataSource: QueryDataSource, uids: string[]): Promise<string[]> => {
+    const [seeds, versions] = await Promise.all([
+      dataSource.getSeedsByUids(uids),
+      dataSource.getVersionsForSeeds(uids, { includeRevoked: true }),
+    ])
+    const published = seedUidsWithVersions(seeds, versions)
+    const seedByUid = new Map(
+      seeds.filter((seed) => published.has(seed.id.toLowerCase())).map((seed) => [seed.id.toLowerCase(), seed]),
+    )
+    const toAssemble = uids
+      .map((uid) => seedByUid.get(uid))
+      .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
+    const assembled = await assembleSeedRecords(
+      toAssemble,
+      { relations: 'uids', hydrateStorage: false },
+      dataSource,
+      { versions, pins },
+    )
+    for (const record of assembled.records) {
+      const properties = (assembled.properties.get(record.seedUid) ?? [])
+        .map(toSeedPropertyAttestation)
+        .filter((p): p is SeedPropertyAttestation => p !== null)
+      found.set(record.seedUid.toLowerCase(), { record, properties })
+    }
+    return uids.filter((uid) => !seedByUid.has(uid))
+  }
+
+  const missing = await readFrom(resolved.dataSource, requested)
+  // auto: seeds the local source doesn't have → remote
+  if (missing.length > 0 && mode === 'auto' && resolved.dataSource.kind === 'local') {
+    await readFrom(getRemoteQueryDataSource(), missing)
+  }
+
+  const result = new Map<string, SeedAttestations>()
+  for (const [uid, given] of givenByUid) {
+    const entry = found.get(uid)
+    if (entry) result.set(given, entry)
+  }
+  return result
+}
+
+/**
  * Query seeds of a schema created within a calendar month, in UTC.
  * No collection cache; may write-through to item cache when remote.
  */
@@ -582,7 +719,7 @@ export async function queryBySchemaForMonth(
   month: number,
   options?: AssembleOptions,
 ): Promise<SeedRecord[]> {
-  await initializeQueryPlatform()
+  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
 

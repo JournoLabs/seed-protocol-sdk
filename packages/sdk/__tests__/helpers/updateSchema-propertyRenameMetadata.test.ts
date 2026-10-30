@@ -18,7 +18,7 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 function createTestSchema(name: string, models: Record<string, any>): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -58,9 +58,7 @@ testDescribe('Property Rename Metadata Migration', () => {
       await db.delete(versions)
       await db.delete(seeds)
       await db.update(properties).set({ refModelId: null })
-      const { propertyUids } = await import('@/seedSchema/PropertyUidSchema')
       const { modelUids } = await import('@/seedSchema/ModelUidSchema')
-      await db.delete(propertyUids)
       await db.delete(modelUids)
       await db.delete(properties)
       await db.delete(modelSchemas)

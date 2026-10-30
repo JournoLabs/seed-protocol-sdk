@@ -10,7 +10,7 @@ import {
   validateItemForPublish,
 } from '@/db/read/getPublishPayload'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
@@ -99,7 +99,7 @@ describe.sequential('publish with relations to unpublished items', () => {
     const summary = await summarizePublishWork(post)
     expect(summary.unpublishedRelatedItems).toEqual(error.unpublishedRelatedItems)
     // What the publish package's checking step runs before registering schemas or uploading.
-    expect(await getUnpublishedRelatedItems(post)).toEqual(error.unpublishedRelatedItems)
+    expect((await summarizePublishUploads(post)).unpublishedRelatedItems).toEqual(error.unpublishedRelatedItems)
   }, 60000)
 
   it('list member that is revoked: names the list property', async () => {
@@ -175,7 +175,7 @@ describe.sequential('publish with relations to unpublished items', () => {
     expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
     expect(error.unpublishedRelatedItems).toEqual(expected)
     expect((await summarizePublishWork(post)).unpublishedRelatedItems).toEqual(expected)
-    expect(await getUnpublishedRelatedItems(post)).toEqual(expected)
+    expect((await summarizePublishUploads(post)).unpublishedRelatedItems).toEqual(expected)
   }, 60000)
 
   it('relation to a live published item: unchanged, attests its uid', async () => {

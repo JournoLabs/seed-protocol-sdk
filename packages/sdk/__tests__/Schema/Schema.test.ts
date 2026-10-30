@@ -9,7 +9,6 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { properties, models } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { eq, desc } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
@@ -42,7 +41,7 @@ async function waitForModelPersisted(model: Model, propertyNames: string[] = [],
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -86,7 +85,6 @@ testDescribe('Schema Integration Tests', () => {
     const db = BaseDb.getAppDb()
     if (db) {
       try {
-        await db.delete(propertyUids)
       } catch {
         // ignore
       }
@@ -123,9 +121,8 @@ testDescribe('Schema Integration Tests', () => {
     // Delete in correct order to respect foreign key constraints
     const db = BaseDb.getAppDb()
     if (db) {
-      // Delete in order: property_uids -> model_uids -> properties -> model_schemas -> models -> schemas
+      // Delete in order: model_uids -> properties -> model_schemas -> models -> schemas
       try {
-        await db.delete(propertyUids)
       } catch {
         // Ignore errors if table doesn't exist or is empty
       }
@@ -1031,7 +1028,7 @@ testDescribe('Schema Integration Tests', () => {
     })
 
     describe('unload()', () => {
-      it('should unload schema and clean up resources', async () => {
+      it('unload keeps the schema running; eviction stops it', async () => {
         const schemaName = 'Test Schema Unload'
         const testSchema = createTestSchema(schemaName)
 
@@ -1044,12 +1041,12 @@ testDescribe('Schema Integration Tests', () => {
         const snapshotBefore = schema.getService().getSnapshot()
         expect(snapshotBefore.status).toBe('active')
         
-        // Unload
+        // A definition stays cached without holds: unload only gives back a hold
         schema.unload()
-        
-        // Verify service is stopped
-        const snapshotAfter = schema.getService().getSnapshot()
-        expect(snapshotAfter.status).toBe('stopped')
+        expect(schema.getService().getSnapshot().status).toBe('active')
+
+        Schema.evict(schemaName)
+        expect(schema.getService().getSnapshot().status).toBe('stopped')
       })
     })
   })

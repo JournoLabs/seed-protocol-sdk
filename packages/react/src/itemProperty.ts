@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Subscription } from 'xstate'
 import debug from 'debug'
-import { ItemProperty, ItemPropertySaveValidationError } from '@seedprotocol/sdk'
+import { ItemProperty, ItemPropertySaveValidationError, entityLoadError } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import type { ChangeWatch, IItemProperty } from '@seedprotocol/sdk'
 import { useEntityRowsState } from './entityRows'
@@ -22,6 +22,8 @@ type UseItemPropertyReturn = {
   property: IItemProperty | undefined
   isLoading: boolean
   error: Error | null
+  /** The property's `valueStatus`; re-renders when it changes (an Image, File or Html file found or missing). */
+  valueStatus: IItemProperty['valueStatus'] | undefined
 }
 
 /** Query key for one item property: `useItemProperty`'s query. */
@@ -168,6 +170,8 @@ export function useItemProperty(
     const initialContext = (property.getService().getSnapshot() as any)?.context
     let lastRenderValue: unknown = initialContext?.renderValue
     let lastPropertyValue: unknown = initialContext?.propertyValue
+    let lastConflict: unknown = initialContext?.conflict
+    let lastMissingFile: unknown = initialContext?.missingFile
     let wasIdle = false
     let lastVersionAt = 0
     let trailing: ReturnType<typeof setTimeout> | undefined
@@ -176,9 +180,18 @@ export function useItemProperty(
       const ctx = snapshot?.context ?? {}
       // A value change re-renders at once: a controlled input bound to property.value that
       // skipped a render was reset to the old value, and the next keystroke built on it.
-      if (!Object.is(ctx.renderValue, lastRenderValue) || !Object.is(ctx.propertyValue, lastPropertyValue)) {
+      // So does a conflict arriving or clearing (sync, another tab), which comes on an idle snapshot,
+      // and a file the value names being found or missed (valueStatus).
+      if (
+        !Object.is(ctx.renderValue, lastRenderValue) ||
+        !Object.is(ctx.propertyValue, lastPropertyValue) ||
+        !Object.is(ctx.conflict ?? null, lastConflict ?? null) ||
+        !Object.is(ctx.missingFile ?? null, lastMissingFile ?? null)
+      ) {
         lastRenderValue = ctx.renderValue
         lastPropertyValue = ctx.propertyValue
+        lastConflict = ctx.conflict
+        lastMissingFile = ctx.missingFile
         wasIdle = snapshot.value === 'idle' && ctx._status === 'ready'
         lastVersionAt = Date.now()
         clearTimeout(trailing)
@@ -224,6 +237,7 @@ export function useItemProperty(
     property,
     isLoading: !!lookupMode && query.isPending,
     error: query.error as Error | null,
+    valueStatus: property?.valueStatus,
   }
 }
 
@@ -557,6 +571,9 @@ export function useItemProperties(
     // The instances are held only while a hook shows them: a list kept after unmount could hold
     // stopped ones.
     gcTime: 0,
+    // A refetch after another tab's save returns the same instances with new values; structural
+    // sharing would keep the old array, and the hook wouldn't re-render.
+    structuralSharing: false,
   })
   useHeldItemProperties(properties)
 
@@ -735,7 +752,9 @@ export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
     subscriptionRef.current?.unsubscribe()
     subscriptionRef.current = undefined
 
-    const instance = ItemProperty.create(props, { waitForReady: false })
+    // No hold: the hook can't release one. The property unloads after the grace period unless a
+    // hook showing it (useItemProperty) or the caller holds it.
+    const instance = ItemProperty.create(props, { waitForReady: false, hold: false })
     if (!instance) {
       setError(new Error('Failed to create item property'))
       setIsLoading(false)
@@ -744,7 +763,8 @@ export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
 
     const subscription = instance.getService().subscribe(() => {
       if (instance.status === 'error') {
-        setError(new Error('Failed to create item property'))
+        const loadError = entityLoadError(instance as never)
+        setError(loadError instanceof Error ? loadError : new Error('Failed to create item property'))
         setIsLoading(false)
       }
       if (instance.status === 'ready') {

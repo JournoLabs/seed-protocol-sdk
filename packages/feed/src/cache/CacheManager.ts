@@ -28,14 +28,15 @@ export class CacheManager {
   }
 
   /**
-   * The cached body for this key, unexpired. With `fingerprint`, only an entry built from the same
-   * inputs (see CachedFeedContent.fingerprint); without, any entry (e.g. a stale fallback).
+   * The cached body for this key, unexpired. With `match.fingerprint`, only an entry built from the
+   * same inputs (see CachedFeedContent.fingerprint); with `match.siteFingerprint`, only one built for
+   * the same site (e.g. a stale fallback); without either, any entry.
    */
   async getFeedContent(
     schemaName: string,
     format: FeedFormat,
     contentKeyOptions?: CacheContentKeyOptions,
-    fingerprint?: string,
+    match?: { fingerprint?: string; siteFingerprint?: string },
   ): Promise<CachedFeedContent | null> {
     if (!this.config.enabled) {
       return null;
@@ -48,7 +49,10 @@ export class CacheManager {
         if (cached) this.memoryCache.putFeedContent(schemaName, format, cached, contentKeyOptions);
       }
       if (!cached) return null;
-      if (fingerprint !== undefined && cached.fingerprint !== fingerprint) return null;
+      if (match?.fingerprint !== undefined && cached.fingerprint !== match.fingerprint) return null;
+      if (match?.siteFingerprint !== undefined && cached.siteFingerprint !== match.siteFingerprint) {
+        return null;
+      }
       return cached;
     } catch (error) {
       console.error(
@@ -63,7 +67,13 @@ export class CacheManager {
   async setFeedContent(
     schemaName: string,
     format: FeedFormat,
-    body: { content: string; contentType: string; etag: string; fingerprint: string },
+    body: {
+      content: string;
+      contentType: string;
+      etag: string;
+      fingerprint: string;
+      siteFingerprint: string;
+    },
     contentKeyOptions?: CacheContentKeyOptions,
   ): Promise<CachedFeedContent | null> {
     if (!this.config.enabled) {

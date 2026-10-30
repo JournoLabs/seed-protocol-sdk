@@ -1,19 +1,19 @@
 import {
   isRelationLookupTarget,
   normalizeLookupKey,
-  resolveLookupMapped,
+  resolveLookup,
   shapeLookupValue,
 } from './relationLookup'
 import { resolveMappingSource } from './resolvedSources'
 import type {
   ApplyMappingAsyncResult,
   FieldMapping,
-  MappingLookups,
   PropertyBag,
   ResolveCallback,
   ResolveContext,
   SourceNode,
   TargetProperty,
+  UnmatchedLookup,
   UrlMediaClass,
 } from './types'
 
@@ -25,11 +25,8 @@ export function coerceValue(rawValue: string, dataType: string): unknown {
     return parseFloat(String(rawValue)) || 0
   }
   if (dataType === 'Boolean') {
-    return (
-      rawValue === 'true' ||
-      rawValue === '1' ||
-      String(rawValue).toLowerCase() === 'yes'
-    )
+    const v = String(rawValue).trim().toLowerCase()
+    return v === 'true' || v === '1' || v === 'yes'
   }
   if (dataType === 'Json') {
     try {
@@ -69,7 +66,8 @@ function urlFromSource(source: SourceNode): string {
   if (typeof source.meta?.url === 'string' && source.meta.url.trim()) {
     return source.meta.url.trim()
   }
-  return (source.value || source.label).trim()
+  // The value only, as for copies: an empty field's url is '', not its label (the field's name).
+  return (source.value ?? '').trim()
 }
 
 function contentTypeFromSource(source: SourceNode): string | undefined {
@@ -91,18 +89,25 @@ function classFromSource(source: SourceNode): UrlMediaClass | undefined {
   return undefined
 }
 
+/**
+ * A lookup edge's value (absent when nothing matched) and the misses to report. An empty source
+ * value is no lookup: no value and no misses. A split value that is partly known keeps the known
+ * parts' refs and reports each unknown part.
+ */
 function applyLookupEdge(
   mapping: FieldMapping,
   source: SourceNode,
   target: TargetProperty,
-  lookups: MappingLookups | undefined,
-): { value: string | string[] } | { unmatched: string } {
-  const rawValue = normalizeLookupKey(source.value || source.label)
-  const mapped = resolveLookupMapped(mapping, rawValue, lookups)
-  if (mapped === undefined) {
-    return { unmatched: rawValue }
-  }
-  return { value: shapeLookupValue(mapped, target) }
+): { value?: string | string[]; misses: UnmatchedLookup[] } {
+  const rawValue = normalizeLookupKey(source.value ?? '')
+  const { refs, unmatched, split } = resolveLookup(mapping, rawValue)
+  const misses = unmatched.map((value) => ({
+    sourceId: source.id,
+    propertyName: mapping.propertyName,
+    value,
+    ...(split ? { splitFrom: rawValue } : {}),
+  }))
+  return refs.length > 0 ? { value: shapeLookupValue(refs, target), misses } : { misses }
 }
 
 /**
@@ -110,13 +115,14 @@ function applyLookupEdge(
  * Missing sources or unknown target properties are skipped (no throw).
  * `resolve: 'extract' | 'file' | 'derive' | 'assemble'` edges are skipped.
  * Use `applyMappingAsync` for extract/file. Derive/assemble stay host-applied.
- * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups).
+ * `resolve: 'lookup'` is applied from stored entries. A value
+ * with no entry is left out and reported to `onUnmatched`; an empty value is no lookup.
  */
 export function applyMapping(
   sources: SourceNode[],
   mappings: FieldMapping[],
   targets: TargetProperty[],
-  options?: { lookups?: MappingLookups },
+  options?: { onUnmatched?: (miss: UnmatchedLookup) => void },
 ): PropertyBag {
   const byId = new Map(sources.map((s) => [s.id, s]))
   const byName = new Map(targets.map((t) => [t.name, t]))
@@ -130,18 +136,17 @@ export function applyMapping(
     if (!source || !target) continue
 
     if (mapping.resolve === 'lookup') {
-      const result = applyLookupEdge(mapping, source, target, options?.lookups)
-      if ('value' in result) {
-        properties[mapping.propertyName] = result.value
-      }
+      const { value, misses } = applyLookupEdge(mapping, source, target)
+      if (value !== undefined) properties[mapping.propertyName] = value
+      for (const miss of misses) options?.onUnmatched?.(miss)
       continue
     }
 
     // Never copy a raw string onto relation / list-of-relation targets.
     if (isRelationLookupTarget(target)) continue
 
-    const raw = source.value || source.label
-    properties[mapping.propertyName] = coerceValue(raw, target.dataType)
+    // The value only: an empty field copies as empty, not as its label (the field's name).
+    properties[mapping.propertyName] = coerceValue(source.value ?? '', target.dataType)
   }
 
   return properties
@@ -150,11 +155,6 @@ export function applyMapping(
 export type ApplyMappingAsyncOptions = {
   /** Required for extract/file edges. Not called for lookup. */
   resolve?: ResolveCallback
-  /**
-   * String → seed uid dictionaries keyed by property name.
-   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback only.
-   */
-  lookups?: MappingLookups
 }
 
 /**
@@ -187,8 +187,7 @@ export async function applyMappingAsync(
         : undefined
       if (!source) continue
       if (isRelationLookupTarget(target)) continue
-      const raw = source.value || source.label
-      properties[mapping.propertyName] = coerceValue(raw, target.dataType)
+      properties[mapping.propertyName] = coerceValue(source.value ?? '', target.dataType)
       continue
     }
 
@@ -206,15 +205,16 @@ export async function applyMappingAsync(
         continue
       }
 
-      const result = applyLookupEdge(mapping, source, target, options.lookups)
-      if ('value' in result) {
-        properties[mapping.propertyName] = result.value
-      } else {
+      const { value, misses } = applyLookupEdge(mapping, source, target)
+      if (value !== undefined) properties[mapping.propertyName] = value
+      for (const miss of misses) {
         errors.push({
           sourceId: mapping.sourceId,
           propertyName: mapping.propertyName,
           resolve: 'lookup',
-          message: `No lookup entry for "${result.unmatched}"`,
+          message: miss.splitFrom
+            ? `No lookup entry for "${miss.value}" (split from "${miss.splitFrom}")`
+            : `No lookup entry for "${miss.value}"`,
         })
       }
       continue

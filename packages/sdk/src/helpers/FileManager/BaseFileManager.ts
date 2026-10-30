@@ -43,8 +43,22 @@ export abstract class BaseFileManager {
     this.workingDir = undefined
   }
 
+  /**
+   * Unmounts the file system and clears the init flags, so the next initializeFileSystem mounts
+   * from scratch. `stop()` keeps the mount; `client.resetLocalData()` calls this, since the mount's
+   * index still lists the files it deleted. Waits for an initialization in progress first.
+   */
+  static async unmountFileSystem(): Promise<void> {
+    await this.initializePromise?.catch(() => {})
+    await this._impl?.unmountFileSystem()
+    this.resetInitializationState()
+  }
+
   static initializeFileSystem(workingDir?: string): Promise<void> {
     if (this.fileSystemInitialized) {
+      // The mount doesn't depend on the directory. An init after stop() with another filesDir
+      // still has to move the root, or schema files and saves go to the first one.
+      if (workingDir) this.workingDir = workingDir
       return Promise.resolve()
     }
     if (this.initializePromise) {

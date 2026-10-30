@@ -58,6 +58,11 @@ mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
+  // The real one writes both in one transaction; here it hands each to its mock
+  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
+    if (version) await updateVersionUid(version)
+    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  },
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))
@@ -89,7 +94,8 @@ mock.module('../../../helpers/chainClient', () => ({
 mock.module('../helpers/receiptAttestationMs', () => ({
   attestationMsFromReceipt: async (receipt: { hash: string }) => receiptMs.get(receipt.hash) ?? 0,
 }))
-mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem: async () => {} }))
+const ensureEasSchemasForItem = mock(async () => {})
+mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem }))
 mock.module('../helpers/verifyArweaveTransactionsExist', () => ({
   verifyArweaveTransactionsExist: async () => {},
 }))
@@ -245,5 +251,34 @@ describe('createAttestationsDirectToEas: related items published with the item',
     expect(relatedImage.persistSeedUid.mock.calls[0]).toEqual([PUBLISHER, 1_700_000_001_000])
     expect(item.seedUid).toBeUndefined()
     expect(item.persistSeedUid).not.toHaveBeenCalled()
+  })
+})
+
+describe('createAttestationsDirectToEas: EAS schemas', () => {
+  test('does not look up EAS schemas again: the checking state already ensured them', async () => {
+    ensureEasSchemasForItem.mockClear()
+    const item = {
+      seedLocalId: 'postLocalD1',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const actor = createActor(createAttestationsDirectToEas, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item,
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    await toPromise(actor)
+    expect(ensureEasSchemasForItem).not.toHaveBeenCalled()
   })
 })

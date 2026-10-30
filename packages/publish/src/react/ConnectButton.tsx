@@ -17,19 +17,20 @@ import {
   getSmartWalletAddressForAdmin,
   getWalletsForConnectButton,
   syncPublishInAppAuthToken,
+  markPublishWalletConnected,
+  userChosePublishWalletDisconnect,
 } from "../helpers/thirdweb"
 import { fromThirdwebAccount } from "../helpers/adapters/thirdwebAccount"
-import { setPublishWallet, clearPublishWallet } from "../helpers/publishWalletRegistry"
+import { setPublishWallet } from "../helpers/publishWalletRegistry"
 import { usePublishConfig } from "./PublishConfigContext"
 import { getPublishConfig } from "../config"
 import type { Account, Wallet } from "thirdweb/wallets"
 import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
+import { getManagedAccountAdminWallet } from "../helpers/managedAccountAdmin"
 import { PublishManager } from "../services/publishManager"
+import { endPublishSession } from "./endPublishSession"
 import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
-
-/** Session flag so we do not force autoConnect after an explicit UI disconnect (survives reload). */
-const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
 
 function reportWalletSetupWarning(err: unknown) {
   // Expected when managed-wallet autoConnect is still catching up; publish prep retries.
@@ -71,7 +72,7 @@ async function ensureExecutorModulesForConnect(
       if (!ma) {
         return
       }
-      await ensureExecutorModuleInstalled(managedAddress, ma, config)
+      await ensureExecutorModuleInstalled(managedAddress, () => getManagedAccountAdminWallet(managedAddress), config)
     } catch {
       /* managed wallet session may lag modular connect; publish prep retries module install */
     }
@@ -79,7 +80,11 @@ async function ensureExecutorModulesForConnect(
   }
 
   try {
-    await ensureExecutorModuleInstalled(modularAccount.address, modularAccount, config)
+    await ensureExecutorModuleInstalled(
+      modularAccount.address,
+      () => getManagedAccountAdminWallet(modularAccount.address),
+      config,
+    )
   } catch (err) {
     reportWalletSetupWarning(err)
   }
@@ -119,14 +124,7 @@ const ConnectButton: FC = () => {
     }
     if (navType !== "reload") return
 
-    let userChoseDisconnect = false
-    try {
-      userChoseDisconnect =
-        sessionStorage.getItem(USER_DISCONNECTED_SESSION_KEY) === "1"
-    } catch {
-      userChoseDisconnect = false
-    }
-    if (userChoseDisconnect) return
+    if (userChosePublishWalletDisconnect()) return
 
     if (!prev || isAutoConnecting || connectionStatus !== "disconnected") return
     if (reloadAutoConnectRetried.current) return
@@ -185,12 +183,15 @@ const ConnectButton: FC = () => {
       lastSyncedOwnedKey.current = ownedKey
       try {
         const adminAddress = activeWallet.getAdminAccount?.()?.address
-        // A wallet with a separate admin account, or the modular executor's ManagedAccount, is a
-        // smart account; otherwise the connected account is a plain key (in-app or injected).
+        // With the modular executor the connected account is an in-app EOA publishing as the
+        // ManagedAccount. A wallet with a separate admin account is a smart account; otherwise the
+        // connected account is a plain key (in-app or injected).
         const isSmart =
           !!managedAddress ||
           (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
-        const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
+        const publishWallet = fromThirdwebAccount(account, {
+          kind: managedAddress ? "modular" : isSmart ? "smart" : "eoa",
+        })
         // Data items need an ECDSA signer. With the modular executor the connected account is an
         // EOA (or EIP-7702 on one) acting for the ManagedAccount; otherwise a smart wallet's admin
         // EOA signs them.
@@ -259,23 +260,13 @@ const ConnectButton: FC = () => {
   ])
 
   const handleDisconnect = () => {
-    try {
-      sessionStorage.setItem(USER_DISCONNECTED_SESSION_KEY, "1")
-    } catch {
-      /* private mode / SSR */
-    }
-    void clearPublishWallet()
-    PublishManager.stopAll()
+    void endPublishSession()
   }
 
   const handleConnect = async (activeWallet: Wallet, _allConnectedWallets: Wallet[]) => {
     const account = activeWallet.getAccount()
     if (!account) return
-    try {
-      sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
-    } catch {
-      /* ignore */
-    }
+    markPublishWalletConnected()
     console.log('[ConnectButton] Connected', account.address)
     try {
       await syncActiveWalletToSeed(activeWallet)

@@ -1,4 +1,4 @@
-export type { QueryDataSource } from './types.js'
+export type { QueryDataSource, SeedListFilter } from './types.js'
 export {
   registerLocalQuerySource,
   clearLocalQuerySource,
@@ -8,7 +8,6 @@ export {
 export {
   createRemoteQueryDataSource,
   getRemoteQueryDataSource,
-  resetRemoteQueryDataSource,
 } from './remote.js'
 export {
   resolveQuerySource,

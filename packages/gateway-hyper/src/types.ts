@@ -1,3 +1,10 @@
+import type { AllowlistOptions } from './tunnel/allowlist'
+import type {
+  RawClientEventListener,
+  RawTunnelEventListener,
+  TunnelEventListener,
+} from './tunnel/events'
+
 export type TunnelMeta = {
   method: string
   path: string
@@ -9,18 +16,46 @@ export type TunnelResponseMeta = {
   headers: Record<string, string>
 }
 
+/** A HyperDHT bootstrap node. */
+export type DhtBootstrapNode = { host: string; port: number }
+
 export type ServeTunnelOptions = {
-  /** Upstream HTTP origin (e.g. http://127.0.0.1:80) */
+  /**
+   * Upstream HTTP origin (e.g. http://127.0.0.1:80). `https://` is refused: the framed tunnel
+   * speaks plain HTTP to its upstream; use `serveRawTunnel` to carry TLS end to end.
+   */
   upstream: string
   /** Operator Ed25519 keypair file (JSON) — created on first run if missing */
   keyFile?: string
-  /** Directory for DHT state (optional, in-memory if unset) */
-  storePath?: string
+  /** The operator keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Answer 504 once the upstream socket has been idle this long, waiting for headers or
-   * body. Default 30 000; 0 disables.
+   * body. Default 130 000 (above publish's 120 s upload); 0 disables.
    */
   upstreamTimeoutMs?: number
+  /**
+   * Clients that may connect, by public key (z32 or hex) or by IP or CIDR range. A client
+   * listed in either is let in; with both empty or unset, every client is. Invalid entries
+   * throw. See `createAllowlist` for which address is checked.
+   */
+  allowlist?: AllowlistOptions
+  /**
+   * Receives an event at each step of each stream and request (see `TunnelEvent`), for
+   * logging or tracing. Called synchronously; a throw is dropped. Unset, no tracing state is
+   * kept.
+   */
+  onEvent?: TunnelEventListener
+  /**
+   * Send each request's id upstream under this header (e.g. `x-seed-tunnel-request-id`), so
+   * upstream logs can be matched to `onEvent` events. Replaces any value the client sent.
+   */
+  requestIdHeader?: string
 }
 
 export type ServeTunnelResult = {
@@ -33,16 +68,27 @@ export type ServeTunnelResult = {
 export type ConnectTunnelOptions = {
   /** Operator public key (z32 or hex) */
   key: string
+  /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
   /** Local HTTP bind host */
   host?: string
   /** Local HTTP bind port */
   port?: number
-  /** Optional store path for DHT client state */
-  storePath?: string
+  /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
   /**
    * Abandon a request once the tunnel stream has sent and received nothing for this long,
    * answer 504, and reconnect for the next request. Keep it above the operator's
-   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
@@ -56,9 +102,71 @@ export type ConnectTunnelOptions = {
 
 export type ConnectTunnelResult = {
   key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
   host: string
   port: number
   baseUrl: string
+  close: () => Promise<void>
+}
+
+export type ServeRawTunnelOptions = {
+  /** Upstream TCP address: `http://host:port`, `https://host` (port 443) or `host:port` */
+  upstream: string
+  /**
+   * Operator keypair file (JSON), created on first run if missing. Default
+   * `.seed/gateway-tunnel/raw-operator.key.json`, apart from the framed tunnel's key.
+   */
+  keyFile?: string
+  /** The operator keypair itself. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /** Clients that may connect; same rules as `serveTunnel`'s `allowlist`. */
+  allowlist?: AllowlistOptions
+  /** Receives connection events; see `RawTunnelEvent`. */
+  onEvent?: RawTunnelEventListener
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
+  /** How long a side may stay open after the other closed cleanly. Default 30 000. */
+  closeGraceMs?: number
+}
+
+export type ServeRawTunnelResult = {
+  /** Operator public key (z32) */
+  key: string
+  /** Upstream as `host:port` */
+  upstream: string
+  close: () => Promise<void>
+}
+
+export type ConnectRawTunnelOptions = {
+  /** Raw operator public key (z32 or hex) */
+  key: string
+  /** Local TCP bind host. Default 127.0.0.1. */
+  host?: string
+  /** Local TCP bind port. Default 1985; 0 picks a free port. */
+  port?: number
+  /** Client keypair file, as on `connectTunnel`. Without it or `keyPair`, each run gets a new key. */
+  keyFile?: string
+  /** The client keypair itself. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /** Most TCP connections open at once; further ones are closed at once. Default 64. */
+  maxConnections?: number
+  /** Destroy a connection whose HyperDHT stream hasn't opened after this long. Default 30 000; 0 disables. */
+  connectTimeoutMs?: number
+  /** Receives connection events; see `RawClientEvent`. */
+  onEvent?: RawClientEventListener
+  /** HyperDHT bootstrap nodes. Defaults to the public network. */
+  bootstrap?: DhtBootstrapNode[]
+  /** How long a side may stay open after the other closed cleanly. Default 30 000. */
+  closeGraceMs?: number
+}
+
+export type ConnectRawTunnelResult = {
+  key: string
+  /** The public key (z32) this client presents to the operator */
+  clientKey: string
+  host: string
+  port: number
   close: () => Promise<void>
 }
 
@@ -75,18 +183,29 @@ export type CreateGatewayProxyOptions = {
    */
   key?: string
   /**
+   * Keypair file (JSON, created on first run if missing) for the key this client presents to
+   * the operator. A fixed key can go on the operator's key allowlist. Without `keyFile` or
+   * `keyPair`, each run uses a new key.
+   */
+  keyFile?: string
+  /** The client keypair itself, e.g. decoded from an env var. Exclusive with `keyFile`. */
+  keyPair?: { publicKey: Buffer; secretKey: Buffer }
+  /**
    * URL path prefix the app mounts the proxy on (stripped before tunneling).
    * Default `/api/seed-gateway`.
    */
   mountPath?: string
-  /** Optional DHT client state directory */
-  storePath?: string
+  /**
+   * HyperDHT bootstrap nodes. Defaults to the public network; set it to join a private or
+   * local one (e.g. `hyperdht/testnet` in tests).
+   */
+  bootstrap?: DhtBootstrapNode[]
   /** Start the Hyper session immediately (default: lazy on first request) */
   eager?: boolean
   /**
    * Abandon a request once the tunnel stream has sent and received nothing for this long,
    * answer 504, and reconnect for the next request. Keep it above the operator's
-   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 150 000; 0 disables.
    */
   requestTimeoutMs?: number
   /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */

@@ -23,20 +23,18 @@ testDescribe('Schema load', () => {
     expect(schema.status).toBe('ready')
     expect(schema.schemaName).toBe(schemaName)
     expect(schema.id).toBeDefined()
-    schema.unload()
   })
 
   it('loads an existing schema in a new instance', async () => {
     const schemaName = `test-existing-${Date.now()}`
     const first = await Schema.create(schemaName)
     const schemaFileId = first.id
-    first.unload()
+    Schema.evict(schemaName)
 
     const second = await Schema.create(schemaName)
     expect(second).not.toBe(first)
     expect(second.status).toBe('ready')
     expect(second.id).toBe(schemaFileId)
     expect(second.getService().getSnapshot().context._dbId).toBeDefined()
-    second.unload()
   })
 })

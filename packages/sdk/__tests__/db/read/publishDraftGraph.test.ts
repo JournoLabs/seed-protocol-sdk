@@ -7,7 +7,7 @@ import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { getPublishGraph, type PublishGraph } from '@/db/read/publishGraph'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -35,7 +35,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const SCHEMA_NAME = 'Test Schema publishDraftGraph'
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
@@ -111,21 +111,44 @@ const attestedNames = (payload: any[], localId: string) =>
 const linksOf = (payload: any[], localId: string) =>
   payload.find((p) => p.localId === localId).propertiesToUpdate.map((u: any) => u.publishLocalId)
 
+/** The list element each of a request's references fills (undefined for a single relation). */
+const elementsOf = (payload: any[], localId: string) =>
+  payload.find((p) => p.localId === localId).propertiesToUpdate.map((u: any) => (u.listElement ? u.elementIndex : undefined))
+
 const indexOf = (payload: any[], localId: string) => payload.findIndex((p) => p.localId === localId)
 
-/** No attestation encodes the local id of a seed that this publish doesn't create. */
-const expectNoDanglingLocalRefs = (payload: any[]) => {
+/**
+ * No attestation encodes the local id of a seed that this publish doesn't create, and each one it
+ * does create is filled by a reference from that seed's request (encodeMultiPublish refuses one
+ * that isn't).
+ */
+const expectNoDanglingLocalRefs = (payload: any[], { linksBackward = false } = {}) => {
   const inBatch = new Set(payload.map((p) => p.localId))
+  const filledBy = (source: string, target: any, schema: string, elementIndex?: number) =>
+    payload
+      .find((p) => p.localId === source)
+      .propertiesToUpdate.some(
+        (u: any) =>
+          u.publishLocalId === target.localId &&
+          u.propertySchemaUid.toLowerCase() === schema.toLowerCase() &&
+          (elementIndex === undefined ? !u.listElement : u.listElement && u.elementIndex === elementIndex),
+      )
   for (const p of payload) {
     for (const a of p.listOfAttestations) {
-      if (a._unresolvedValue) expect(inBatch.has(a._unresolvedValue)).toBe(true)
-      for (const id of a._rawListIdsForResolve ?? []) {
-        if (!String(id).startsWith('0x')) expect(inBatch.has(id)).toBe(true)
+      if (a._unresolvedValue) {
+        expect(inBatch.has(a._unresolvedValue)).toBe(true)
+        expect(filledBy(a._unresolvedValue, p, a.schema)).toBe(true)
       }
+      ;(a._rawListIdsForResolve ?? []).forEach((id: string, k: number) => {
+        if (String(id).startsWith('0x')) return
+        expect(inBatch.has(id)).toBe(true)
+        expect(filledBy(id, p, a.schema, k)).toBe(true)
+      })
     }
   }
-  // Requests are attested in order: a link (propertiesToUpdate) never targets an earlier request
-  // (the contract reverts with PublishTargetAlreadyAttested; the direct-to-EAS path refuses it).
+  // Direct EAS attests requests in order: a link (propertiesToUpdate) never targets an earlier
+  // request (that route refuses it). With linked back references (the contract) one may.
+  if (linksBackward) return
   payload.forEach((p, i) => {
     for (const u of p.propertiesToUpdate ?? []) {
       expect(indexOf(payload, u.publishLocalId)).toBeGreaterThanOrEqual(i)
@@ -167,6 +190,9 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(indexOf(payload, b.seedLocalId)).toBeLessThan(indexOf(payload, a.seedLocalId))
     expect(indexOf(payload, a.seedLocalId)).toBeLessThan(indexOf(payload, root.seedLocalId))
     expectNoDanglingLocalRefs(payload)
+    // The encoder tells a relation slot from data by this type
+    const types = new Set(payload.flatMap((r: any) => r.listOfAttestations.map((a: any) => a._easType)))
+    expect(types).toContain('bytes32')
 
     // B's Html is uploaded with the root's publish.
     const bHtmlSeed = (b.allProperties.body!.getService().getSnapshot() as any).context.propertyValue
@@ -201,6 +227,10 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(payload.map((p) => p.localId).filter((id) => [a1, b1, a2, b2, root].some((i) => i.seedLocalId === id))).toEqual(
       [b1, a1, b2, a2, root].map((i) => i.seedLocalId),
     )
+    // Each list member fills its own element; a single relation fills the whole property.
+    expect(elementsOf(payload, a1.seedLocalId)).toEqual([0])
+    expect(elementsOf(payload, a2.seedLocalId)).toEqual([1])
+    expect(elementsOf(payload, b1.seedLocalId)).toEqual([undefined])
     expectNoDanglingLocalRefs(payload)
 
     const b2HtmlSeed = (b2.allProperties.body!.getService().getSnapshot() as any).context.propertyValue
@@ -211,6 +241,25 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(draftsOf(graph)).toEqual([b1, a1, b2, a2].map((i) => i.seedLocalId))
     // root, A1, B1, A2, B2 and B2's Html seed
     expect((await summarizePublishWork(root as any)).newSeedCount).toBe(6)
+  }, 90000)
+
+  it('a draft listed twice after a published member fills both of its elements', async () => {
+    const published = await node('published')
+    const publishedUid = await markPublished(published)
+    const a = await node('A')
+    const root = await createItem({
+      modelName: 'DraftGraphRoot',
+      title: 'repeats',
+      nodes: [published.seedLocalId, a.seedLocalId, a.seedLocalId],
+    })
+
+    const payload = (await getPublishPayload(root as any, [])) as any[]
+    expect(payload.map((p) => p.localId)).not.toContain(published.seedLocalId)
+    expect(linksOf(payload, a.seedLocalId)).toEqual([root.seedLocalId, root.seedLocalId])
+    expect(elementsOf(payload, a.seedLocalId)).toEqual([1, 2])
+    const list = payload.find((p) => p.localId === root.seedLocalId).listOfAttestations.find((x: any) => x._propertyName === 'nodes')
+    expect(list._rawListIdsForResolve).toEqual([publishedUid, a.seedLocalId, a.seedLocalId])
+    expectNoDanglingLocalRefs(payload)
   }, 90000)
 
   it('a cycle (A ↔ B) is walked once; the back reference is left for a later publish', async () => {
@@ -238,6 +287,35 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(summary.attestationCount).toBe(totalAttestations(payload))
   }, 90000)
 
+  it('with linked back references, both sides of a cycle (A ↔ B) are attested and filled', async () => {
+    const b = await node('linked cycle B')
+    const a = await node('linked cycle A', { next: b.seedLocalId })
+    await setValue(b, 'next', a.seedLocalId)
+    const root = await createItem({ modelName: 'DraftGraphRoot', title: 'linked cycle', first: a.seedLocalId })
+
+    const payload = (await getPublishPayload(root as any, [], { backReferences: 'link' })) as any[]
+    expect(payload.map((p) => p.localId).sort()).toEqual([b.seedLocalId, a.seedLocalId, root.seedLocalId].sort())
+    expect(attestedNames(payload, a.seedLocalId)).toEqual(['label', 'next'])
+    expect(attestedNames(payload, b.seedLocalId)).toEqual(['label', 'next'])
+    expect(linksOf(payload, a.seedLocalId).sort()).toEqual([root.seedLocalId, b.seedLocalId].sort())
+    expect(linksOf(payload, b.seedLocalId)).toEqual([a.seedLocalId])
+    expectNoDanglingLocalRefs(payload, { linksBackward: true })
+
+    const graph = await getPublishGraph(root as any, { backReferences: 'link' })
+    expect(graph.nodes.some((n) => n.properties.some((p) => p.deferred))).toBe(false)
+  }, 90000)
+
+  it('with linked back references, a draft referring back to the root fills it in this publish', async () => {
+    const a = await node('linked back to root')
+    const root = await createItem({ modelName: 'DraftGraphRoot', title: 'linked root cycle', first: a.seedLocalId })
+    await setValue(a, 'next', root.seedLocalId)
+
+    const payload = (await getPublishPayload(root as any, [], { backReferences: 'link' })) as any[]
+    expect(attestedNames(payload, a.seedLocalId)).toEqual(['label', 'next'])
+    expect(linksOf(payload, root.seedLocalId)).toEqual([a.seedLocalId])
+    expectNoDanglingLocalRefs(payload, { linksBackward: true })
+  }, 90000)
+
   it('a draft referring back to the draft being published leaves that reference for later', async () => {
     const a = await node('back to root')
     const root = await createItem({ modelName: 'DraftGraphRoot', title: 'root cycle', first: a.seedLocalId })
@@ -262,7 +340,7 @@ testDescribe('publish carries the full graph of related drafts', () => {
     expect(attestedNames(payload, a.seedLocalId)).toEqual(['label'])
     expectNoDanglingLocalRefs(payload)
 
-    expect(await getUnpublishedRelatedItems(root as any)).toEqual([])
+    expect((await summarizePublishUploads(root as any)).unpublishedRelatedItems).toEqual([])
     const summary = await summarizePublishWork(root as any)
     expect(summary.unpublishedRelatedItems).toEqual([])
     expect(summary.attestationCount).toBe(totalAttestations(payload))
@@ -298,7 +376,7 @@ testDescribe('publish carries the full graph of related drafts', () => {
     const error = await getPublishPayload(root as any, []).catch((e) => e)
     expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
     expect(error.unpublishedRelatedItems).toEqual(expected)
-    expect(await getUnpublishedRelatedItems(root as any)).toEqual(expected)
+    expect((await summarizePublishUploads(root as any)).unpublishedRelatedItems).toEqual(expected)
     expect((await summarizePublishWork(root as any)).unpublishedRelatedItems).toEqual(expected)
   }, 90000)
 })

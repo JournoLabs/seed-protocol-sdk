@@ -1,6 +1,3 @@
-import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
-import { ZERO_BYTES32 } from './utils'
-
 const BYTES32_LEN = 64
 
 export const toHex32 = (v: unknown): string => {
@@ -32,23 +29,6 @@ export const toBytesHex = (v: unknown): string => {
   return '0x'
 }
 
-/** True when an attestation still references another seed in this batch by localId (needs client-side resolution between txs). */
-export function hasCrossPayloadUnresolved(reqs: unknown[]): boolean {
-  const localIds = new Set(
-    reqs.map((r) => (r as { localId?: string })?.localId).filter((id): id is string => !!id),
-  )
-  return reqs.some((req) =>
-    ((req as { listOfAttestations?: unknown[] })?.listOfAttestations ?? []).some((a) => {
-      const att = a as { _unresolvedValue?: string; _rawListIdsForResolve?: string[] }
-      if (att._unresolvedValue && localIds.has(att._unresolvedValue)) return true
-      if (Array.isArray(att._rawListIdsForResolve)) {
-        return att._rawListIdsForResolve.some((id) => id && localIds.has(String(id).trim()))
-      }
-      return false
-    }),
-  )
-}
-
 export type PropertiesToUpdateOrderViolation = {
   /** Index of the request whose propertiesToUpdate entry points backwards. */
   requestIndex: number
@@ -60,11 +40,11 @@ export type PropertiesToUpdateOrderViolation = {
 }
 
 /**
- * The first propertiesToUpdate entry that targets an earlier request of `requests` (sent in this
- * order). Its seed uid can never be written into that request, whose attestations are already
- * made; the publish contract reverts with PublishTargetAlreadyAttested(requestIndex, targetIndex)
- * (SeedPublishLib.setSeedReference). Targeting the request itself or a later one is fine; a
- * target outside the batch is not this check's concern.
+ * The first propertiesToUpdate entry that targets an earlier request of `requests`, for the
+ * direct-to-EAS route, which attests one request after another: its seed uid can never be written
+ * into that request, whose attestations are already made. Targeting the request itself or a later
+ * one is fine; a target outside the batch is not this check's concern. (The contract routes create
+ * every seed first and accept references in any direction.)
  */
 export function findPropertiesToUpdateTargetingEarlierRequest(
   requests: Array<{
@@ -93,25 +73,6 @@ export function findPropertiesToUpdateTargetingEarlierRequest(
   return undefined
 }
 
-/** Keep only propertiesToUpdate whose target is in the same multiPublish batch (same tx). */
-export function filterPropertiesToUpdateForBatch<T extends { publishLocalId?: string }>(
-  propertiesToUpdate: T[] | undefined,
-  batchLocalIds: Set<string>,
-): T[] {
-  return (propertiesToUpdate ?? []).filter(
-    (pu) => pu.publishLocalId && batchLocalIds.has(pu.publishLocalId),
-  )
-}
-
-const placeholderData = {
-  recipient: ZERO_ADDRESS,
-  expirationTime: BigInt(0),
-  revocable: true,
-  refUID: ZERO_BYTES32,
-  data: ZERO_BYTES32 as `0x${string}`,
-  value: BigInt(0),
-}
-
 /** Normalize one publish request for SeedProtocol multiPublish (same rules as createAttestations). */
 export function normalizePublishRequest(req: any): any {
   const listOfAttestations = (req?.listOfAttestations ?? []).map((att: any) => {
@@ -125,6 +86,7 @@ export function normalizePublishRequest(req: any): any {
         expirationTime: d?.expirationTime != null ? BigInt(d.expirationTime) : BigInt(0),
         value: d?.value != null ? BigInt(d.value) : BigInt(0),
       })),
+      ...(typeof att?._easType === 'string' ? { _easType: att._easType } : {}),
       ...(typeof att?._propertyName === 'string' && att._propertyName !== ''
         ? { _propertyName: att._propertyName }
         : {}),
@@ -149,28 +111,5 @@ export function normalizePublishRequest(req: any): any {
     versionSchemaUid: toHex32(req?.versionSchemaUid),
     listOfAttestations,
     propertiesToUpdate,
-  }
-}
-
-/** Ensure placeholder attestation data for contract injection targets (full batch). */
-export function applyPropertiesToUpdatePlaceholders(
-  normalizedRequests: any[],
-  byLocalId: Map<string, any>,
-): void {
-  for (const req of normalizedRequests) {
-    for (const pu of req?.propertiesToUpdate ?? []) {
-      const targetId = pu?.publishLocalId
-      const schemaUid = toHex32(pu?.propertySchemaUid)
-      if (!targetId || !schemaUid) continue
-      const targetReq = byLocalId.get(targetId)
-      if (!targetReq?.listOfAttestations) continue
-      const att = targetReq.listOfAttestations.find(
-        (a: any) => toHex32(a?.schema)?.toLowerCase() === schemaUid?.toLowerCase(),
-      )
-      if (!att) continue
-      if (!Array.isArray(att.data) || att.data.length === 0) {
-        att.data = [{ ...placeholderData, refUID: ZERO_BYTES32 }]
-      }
-    }
   }
 }

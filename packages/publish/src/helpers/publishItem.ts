@@ -1,9 +1,10 @@
-import type { IItem, ItemPublishOptions } from '@seedprotocol/sdk'
+import { Item, type IItem, type ItemPublishOptions } from '@seedprotocol/sdk'
 import type { ActorRef } from 'xstate'
 import type { CreatePublishOptions } from '../config'
 import { PublishManager } from '../services/publishManager'
 import { PublishMachineStates } from './constants'
 import { ensureWalletThenPublish } from './ensureWalletThenPublish'
+import { PublishRetractionError, UploadNeedsConfirmError, UploadTooLargeError } from '../errors'
 
 /**
  * States where attestation failed but the actor stays alive waiting for a `retry`
@@ -55,8 +56,22 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
       if (value === PublishMachineStates.SUCCESS) {
         finish()
       } else if (value === PublishMachineStates.FAILURE) {
+        // Passed through as-is, so the app can check instanceof and show the estimate they carry
+        if (cause instanceof UploadTooLargeError || cause instanceof UploadNeedsConfirmError) {
+          finish(cause)
+          return
+        }
         const step = snapshot.context?.errorStep ? ` at ${snapshot.context.errorStep}` : ''
         finish(new Error(`Publish of ${seedLocalId} failed${step}: ${detail ?? 'unknown error'}`, { cause }))
+      } else if (value === 'retractionFailureRecoverable') {
+        finish(
+          new PublishRetractionError(
+            `Revoking the retracted properties of ${seedLocalId} failed: ${detail ?? 'unknown error'}. ` +
+              `The new attestations are in place; retry with PublishManager.retryAttestations('${seedLocalId}') ` +
+              'to send the revocation again.',
+            { cause },
+          ),
+        )
       } else if (RECOVERABLE_FAILURE_STATES.has(value)) {
         finish(
           new Error(
@@ -93,6 +108,17 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
  * publish fails.
  */
 export async function publishItem(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
+  // Held until the publish settles: an item the caller looked up without a hold would otherwise
+  // unload after the grace period, mid-upload
+  const held = Item.retain(item)
+  try {
+    await runPublishItem(item, options)
+  } finally {
+    if (held) item.unload()
+  }
+}
+
+async function runPublishItem(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
   // Node does not auto-start the manager; createPublish waits for it to be active.
   await PublishManager.ready()
   const result = await ensureWalletThenPublish(item as any, options as CreatePublishOptions | undefined)

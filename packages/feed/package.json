@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "RSS 2.0, Atom and JSON Feed generation for Seed Protocol items, with HTTP handlers, ETag caching and RFC 5005 archives",
   "keywords": [
     "seed-protocol",
@@ -13,6 +13,9 @@
     "arweave"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=20.18.1"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -32,7 +35,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
@@ -47,7 +50,7 @@
     "xmlbuilder2": "^4.0.3"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.3",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
   },

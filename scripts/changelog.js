@@ -4,6 +4,11 @@
  * A release section is the package's hand-written `## Unreleased` notes, if any, followed by
  * the commits since the last release that touched the package, grouped by conventional-commit
  * type. test/ci/chore commits are left out: they don't change what the package does.
+ * Every package is released at one version, so a package with neither still gets a heading.
+ *
+ * A commit is Breaking when its subject has `!` or its body a `BREAKING CHANGE:` footer, in the
+ * packages its scope names (`fix(sdk,react)!:`), or in every package it touches when it has no
+ * scope. Elsewhere it is listed under its type.
  *
  * `bun run release -- --retry` moves a release tag past the release commit; it merges the
  * commits it adds (and any new Unreleased notes) into that version's existing section.
@@ -33,6 +38,22 @@ export function parseCommitSubject(subject) {
   return { type: type.toLowerCase(), scope: scope || null, breaking: !!bang, description }
 }
 
+/** The release section's body when a package has no notes and no listable commits. */
+export const NO_CHANGES = 'No user-facing changes; released at the same version as the other packages.'
+
+/**
+ * Whether a commit breaks `packageDir`: `!` or a `BREAKING CHANGE:` footer, and a scope that names
+ * the package or no scope at all.
+ * @param {{ subject: string, body?: string }} commit
+ * @param {string} packageDir
+ */
+export function breaksPackage({ subject, body = '' }, packageDir) {
+  const parsed = parseCommitSubject(subject)
+  if (!parsed.breaking && !/^BREAKING[ -]CHANGE:/m.test(body)) return false
+  if (!parsed.scope) return true
+  return parsed.scope.split(',').map((s) => s.trim()).includes(packageDir)
+}
+
 /** Release and version-bump commits ("chore: release 0.7.3", "v0.7.1", "bump workspace packages to 0.5.3"). */
 export function isVersionBump(subject) {
   return (
@@ -43,21 +64,34 @@ export function isVersionBump(subject) {
 }
 
 /**
- * Markdown for one package's commits, grouped. Empty string when nothing is worth listing.
- * @param {{ sha: string, subject: string }[]} commits newest first, as git log gives them
+ * One package's commit lines by group key ('breaking', 'feat', 'fix', 'other').
+ * @param {{ sha: string, subject: string, body?: string }[]} commits newest first, as git log gives them
  * @param {string} packageDir e.g. 'publish'; a scope naming it is dropped as redundant
+ * @returns {Map<string, string[]>}
  */
-export function formatCommitGroups(commits, packageDir) {
+export function groupCommits(commits, packageDir) {
   const groups = new Map(GROUPS.map(([key]) => [key, []]))
-  for (const { sha, subject } of commits) {
+  for (const commit of commits) {
+    const { sha, subject } = commit
     if (isVersionBump(subject)) continue
     const parsed = parseCommitSubject(subject)
-    if (!parsed.breaking && HIDDEN_TYPES.has(parsed.type)) continue
-    const key = parsed.breaking ? 'breaking' : parsed.type === 'feat' || parsed.type === 'fix' ? parsed.type : 'other'
+    const breaking = breaksPackage(commit, packageDir)
+    if (!breaking && HIDDEN_TYPES.has(parsed.type)) continue
+    const key = breaking ? 'breaking' : parsed.type === 'feat' || parsed.type === 'fix' ? parsed.type : 'other'
     const scopes = (parsed.scope ?? '').split(',').map((s) => s.trim()).filter((s) => s && s !== packageDir)
     const prefix = scopes.length > 0 ? `${scopes.join(', ')}: ` : ''
     groups.get(key).push(`- ${prefix}${parsed.description} (${sha.slice(0, 8)})`)
   }
+  return groups
+}
+
+/**
+ * Markdown for one package's commits, grouped. Empty string when nothing is worth listing.
+ * @param {{ sha: string, subject: string, body?: string }[]} commits newest first
+ * @param {string} packageDir
+ * @param {Map<string, string[]>} [groups] groupCommits' result, when the caller has it
+ */
+export function formatCommitGroups(commits, packageDir, groups = groupCommits(commits, packageDir)) {
   const blocks = []
   for (const [key, title] of GROUPS) {
     const lines = groups.get(key)
@@ -88,15 +122,15 @@ export function splitChangelog(text) {
 
 /**
  * The CHANGELOG text with a new `## version (date)` section on top: the Unreleased notes, then
- * the commit groups. Returns the text unchanged when there is nothing to add.
+ * the commit groups, or NO_CHANGES when there are neither.
  * @param {string} text existing CHANGELOG ('' when the package has none)
  * @param {{ version: string, date: string, commitGroups: string }} release
  */
 export function addReleaseSection(text, { version, date, commitGroups }) {
   const { header, unreleased, rest } = splitChangelog(text)
-  if (!unreleased && !commitGroups) return text
   const parts = [`## ${version} (${date})`]
   if (unreleased) parts.push(unreleased)
+  if (!unreleased && !commitGroups) parts.push(NO_CHANGES)
   if (commitGroups) parts.push(`### Commits\n\n${commitGroups}`)
   const top = header.trim() ? header.trimEnd() + '\n' : HEADER
   return `${top}\n${parts.join('\n\n')}\n${rest ? `\n${rest.trimEnd()}\n` : ''}`
@@ -198,15 +232,19 @@ export function extendReleaseSection(text, { version, date, commitGroups }) {
  * @param {string} range
  */
 export function packageCommits(rootDir, dir, range) {
-  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x09%s', range, '--', `packages/${dir}`, `:(exclude)packages/${dir}/CHANGELOG.md`], {
+  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', range, '--', `packages/${dir}`, `:(exclude)packages/${dir}/CHANGELOG.md`], {
     cwd: rootDir,
     encoding: 'utf-8',
   }).trim()
   if (!out) return []
-  return out.split('\n').map((line) => {
-    const [sha, ...subject] = line.split('\t')
-    return { sha, subject: subject.join('\t') }
-  })
+  return out
+    .split('\x1e')
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [sha, subject, body = ''] = record.split('\x1f')
+      return { sha, subject, body }
+    })
 }
 
 /**
@@ -214,14 +252,17 @@ export function packageCommits(rootDir, dir, range) {
  * file changes, with the commit lines it lists. `extend` (a retry) merges into the existing
  * `## version` section instead of adding a new one.
  * @param {{ rootDir: string, packages: string[], version: string, date: string, range: string, extend?: boolean }} options
- * @returns {{ path: string, file: string, text: string, commitLines: string[], movesUnreleased: boolean }[]}
+ * `notableLines` are its Breaking and Features commit lines, which release.js wants notes for.
+ * @returns {{ path: string, file: string, text: string, commitLines: string[], notableLines: string[], movesUnreleased: boolean }[]}
  */
 export function planReleaseChangelogs({ rootDir, packages, version, date, range, extend = false }) {
   const plan = []
   for (const dir of packages) {
     const file = join(rootDir, 'packages', dir, 'CHANGELOG.md')
     const before = existsSync(file) ? readFileSync(file, 'utf-8') : ''
-    const commitGroups = formatCommitGroups(packageCommits(rootDir, dir, range), dir)
+    const commits = packageCommits(rootDir, dir, range)
+    const groups = groupCommits(commits, dir)
+    const commitGroups = formatCommitGroups(commits, dir, groups)
     const after = (extend ? extendReleaseSection : addReleaseSection)(before, { version, date, commitGroups })
     if (after === before) continue
     plan.push({
@@ -229,6 +270,7 @@ export function planReleaseChangelogs({ rootDir, packages, version, date, range,
       file,
       text: after,
       commitLines: commitGroups.split('\n').filter((l) => l.startsWith('- ')),
+      notableLines: [...groups.get('breaking'), ...groups.get('feat')],
       movesUnreleased: !!splitChangelog(before).unreleased,
     })
   }

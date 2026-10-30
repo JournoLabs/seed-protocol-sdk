@@ -23,7 +23,7 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const SCHEMA_NAME = 'Test Schema relationImageSave'
 
 const schemaFile = () => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

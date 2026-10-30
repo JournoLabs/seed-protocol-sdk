@@ -5,7 +5,7 @@ const models = { Post: { properties: { title: { type: 'Text' } } } }
 
 describe('parseJsonImportContent', () => {
   it('reads metadata.name from a complete schema file', () => {
-    const content = JSON.stringify({ $schema: 'https://seedprotocol.org/schemas/data-model/v1', metadata: { name: 'blog' }, models })
+    const content = JSON.stringify({ $schema: 'https://seedprotocol.io/schemas/data-model/v1', metadata: { name: 'blog' }, models })
     expect(parseJsonImportContent(content).name).toBe('blog')
   })
 

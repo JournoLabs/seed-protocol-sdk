@@ -1,4 +1,4 @@
-import { checksumAddress } from './utils.js'
+import { checksumAddresses } from './utils.js'
 import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanonical.js'
 import { keepAttestationsFromRefAttester } from './easRefAttester.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
@@ -133,13 +133,7 @@ export const getSeedsFromSchemaUids = async ({
   addresses: string[]
   excludeRevoked?: boolean
 }) => {
-  const attesterAddresses = addresses.map((a) => {
-    try {
-      return checksumAddress(a)
-    } catch {
-      return a
-    }
-  })
+  const attesterAddresses = checksumAddresses(addresses)
   let where: Record<string, unknown> = {
     attester: {
       in: attesterAddresses,
@@ -175,19 +169,24 @@ export const getSeedsFromSchemaUids = async ({
 /**
  * Seeds of the schema named `schemaName`, newest first, revoked ones left out. With `uidPrefix`,
  * only seeds whose UID starts with it; easscan matches it case-sensitively, so pass it lowercase
- * with `0x`.
+ * with `0x`. With `attesters`, only seeds attested by one of them, in any case; values that
+ * aren't addresses are ignored, and if none is left there are no seeds. Both apply before
+ * `limit` and `skip`.
  */
 export const getSeedsBySchemaName = async (
   schemaName: string,
   limit: number = 10,
   skip?: number,
-  options?: { uidPrefix?: string },
+  options?: { uidPrefix?: string; attesters?: readonly string[] },
 ) => {
   const skipVal = skip ?? 0
   const uidPrefix = options?.uidPrefix
+  const attesters = options?.attesters ? checksumAddresses(options.attesters).sort() : undefined
+  if (attesters?.length === 0) return []
   const variables = {
     where: withExcludeRevokedFilter({
       ...(uidPrefix !== undefined ? { id: { startsWith: uidPrefix } } : {}),
+      ...(attesters ? { attester: { in: attesters } } : {}),
       schema: {
         is: {
           schemaNames: {
@@ -208,7 +207,14 @@ export const getSeedsBySchemaName = async (
   const easClient = BaseEasClient.getEasClient()
 
   const { itemSeeds } = (await timedFetchQuery(queryClient, {
-    queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal, uidPrefix ?? null],
+    queryKey: [
+      `getSeedsBySchemaName`,
+      schemaName,
+      limit,
+      skipVal,
+      uidPrefix ?? null,
+      attesters ?? null,
+    ],
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, variables),
   })) as { itemSeeds: Attestation[] }
 

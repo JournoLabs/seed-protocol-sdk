@@ -18,8 +18,9 @@ import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { INTERNAL_DATA_TYPES, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
-import { easName, getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
+import { easName, setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'
 import { waitForIdle, type HasService, waitForModelIdle } from './waitForIdle'
+import seedProtocolSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
 const SCHEMA_NAME_OPTIONAL_AUTHOR = 'Test Schema getPublishPayload Optional Author'
@@ -62,7 +63,7 @@ export function getGetPublishPayloadTestSchema(): SchemaFileFormat {
   const tagId = generateId()
   const postId = generateId()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -154,15 +155,19 @@ export async function ensureModelUidsForGetPublishPayloadTest(
 }
 
 /**
- * Cache a schema UID for every property schema definition of the test models that EAS doesn't have.
+ * Cache a schema UID for every property schema definition of the test models and of the SDK's own
+ * Image, File and Html models (SEEDPROTOCOL_Seed_Protocol_v1.json).
  * getPublishPayload fails a property whose schema isn't registered (the publish package registers
  * them in ensureEasSchemasForItem, which these tests don't run). Covers both name forms a property
- * can attest under (schema key, Id-suffixed, List-of-relation storage name).
+ * can attest under (schema key, Id-suffixed, List-of-relation storage name). Each UID is the one
+ * the schema registry derives for the definition (zero resolver, revocable), as registering it
+ * would give, so nothing waits on the EAS indexer or depends on what it holds.
  */
 export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: SchemaFileFormat): Promise<void> {
   const zeroAddress = '0x0000000000000000000000000000000000000000' as `0x${string}`
   const texts = new Set<string>()
-  for (const model of Object.values(schema.models ?? {})) {
+  const models = [...Object.values(schema.models ?? {}), ...Object.values(seedProtocolSchema.models)]
+  for (const model of models) {
     for (const [key, def] of Object.entries((model as { properties?: Record<string, any> }).properties ?? {})) {
       const dataType = normalizeDataType(def.type ?? def.dataType)
       const eas = (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[dataType]?.eas
@@ -173,13 +178,9 @@ export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: S
       for (const name of names) texts.add(`${eas} ${easName(name)}`)
     }
   }
-  // One EAS request per definition, all at once: in turn they took ~3 s of a setup hook.
-  await Promise.all(
-    [...texts].map(async (text) => {
-      if (await getEasSchemaUidForSchemaDefinition({ schemaText: text })) return
-      setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
-    }),
-  )
+  for (const text of texts) {
+    setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
+  }
 }
 
 /**
@@ -196,7 +197,7 @@ export function getGetPublishPayloadTestSchemaOptionalAuthor(): SchemaFileFormat
   const tagId = generateId()
   const postId = generateId()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -239,7 +240,7 @@ export function getGetPublishPayloadTestSchemaOptionalAuthor(): SchemaFileFormat
 export function getGetPublishPayloadTestSchemaWithEnum(): SchemaFileFormat {
   const articleId = generateId()
   return {
-    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    $schema: 'https://seedprotocol.io/schemas/data-model/v1',
     version: 1,
     id: generateId(),
     metadata: {
@@ -425,6 +426,30 @@ export async function createItemWithRelation(
   await waitForItemIdle(postItem)
   await waitForPropertyInstances(postItem)
   return { authorItem, postItem }
+}
+
+/**
+ * A Post whose author Relation names a local seed that no longer exists: the author is created and
+ * related, then its local copy is removed. Item.create refuses a missing relation target, so this is
+ * how a test gets one (a local purge or another tab's delete leaves the same state).
+ */
+export async function createItemWithDanglingRelation(options: {
+  postModelName?: string
+  schemaName?: string
+  title?: string
+} = {}): Promise<{ postItem: ItemClass<any>; missingAuthorLocalId: string }> {
+  const { postModelName = 'Post', schemaName = SCHEMA_NAME, title = 'Post with a missing author' } = options
+  const author = await Item.create({ modelName: 'Author', schemaName, name: 'Removed Author' })
+  await waitForItemIdle(author)
+  const postItem = await Item.create({ modelName: postModelName, schemaName, title, author: author.seedLocalId })
+  await waitForItemIdle(postItem)
+  await waitForPropertyInstances(postItem)
+  const missingAuthorLocalId = author.seedLocalId
+  author.unload()
+  const { hardDeleteLocalSeedsByLocalIds } = await import('@/db/write/removeLocalCopiesForAddresses')
+  await hardDeleteLocalSeedsByLocalIds([missingAuthorLocalId])
+  Item.dropCachedInstancesForSeedIds([missingAuthorLocalId])
+  return { postItem, missingAuthorLocalId }
 }
 
 export type CreateItemWithListOptions = {
@@ -694,9 +719,18 @@ export async function markPublished(item: ItemClass<any>, related: ItemClass<any
   await db.update(versions).set({ uid: versionUid, seedUid }).where(eq(versions.seedLocalId, item.seedLocalId!))
   const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, item.seedLocalId!))
   for (const row of rows) {
+    // A published row records its schema's uid. Saves only get one when the EAS indexer already
+    // has the schema, which these tests don't rely on.
     await db
       .update(metadata)
-      .set({ uid: randomUid(), seedUid, versionUid, attestationCreatedAt: attestedAt, createdAt: attestedAt })
+      .set({
+        uid: randomUid(),
+        schemaUid: row.schemaUid ?? randomUid(),
+        seedUid,
+        versionUid,
+        attestationCreatedAt: attestedAt,
+        createdAt: attestedAt,
+      })
       .where(eq(metadata.localId, row.localId!))
   }
   item.getService().send({ type: 'updateContext', seedUid, latestVersionUid: versionUid })

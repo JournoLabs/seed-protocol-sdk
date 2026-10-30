@@ -10,8 +10,9 @@ import { createSingleConnectionTransactions } from './singleConnectionTransactio
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from '@/seedSchema'
-import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
-import { recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
+import { Observable, Subject, interval, switchMap, distinctUntilChanged, startWith, takeUntil } from 'rxjs'
+import { ENTITY_CHANGES_PRUNE_EVERY_MS, pruneEntityChanges } from '@/db/entityChangesPrune'
+import { recreateBackupPath, recreateIfOlderThanMinimumUpgradeVersion } from '@/db/minimumUpgradeVersion'
 
 const logger = debug('seedSdk:node:db:Db')
 
@@ -97,7 +98,6 @@ function copyDirRecursive(sourceDir: string, targetDir: string) {
   }
 }
 
-
 /** The file a local libsql `file:` URL opens; undefined for `:memory:` and remote URLs. */
 const localDbFilePath = (dbUrl: string): string | undefined => {
   if (!dbUrl.startsWith('file:')) return undefined
@@ -108,7 +108,13 @@ const localDbFilePath = (dbUrl: string): string | undefined => {
 
 export class NodeDb implements IDb {
   db: any
-
+  private client: ReturnType<typeof createClient> | undefined
+  /** Bumped by close(), so a prepareDb that was running closes what it opened instead of keeping it. */
+  private openGeneration = 0
+  /** Emits when the database closes: open live queries complete instead of polling a closed client. */
+  private closed$ = new Subject<void>()
+  /** Prunes entity_changes while the database is open; Node runs no change feed to do it (ADR 0020). */
+  private pruneTimer: ReturnType<typeof setInterval> | undefined
 
   getAppDb() {
     return this.db
@@ -162,20 +168,58 @@ export class NodeDb implements IDb {
       fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
     }
 
+    const generation = this.openGeneration
+    this.closeOpenDb()
     const client = createClient({ url: dbUrl })
+    this.client = client
     // One connection for everything, transactions included (see singleConnectionTransactions)
     this.transactions = createSingleConnectionTransactions(client, schema)
     // Readers in other processes (a CLI on the same file) don't block a commit in WAL
     if (localDbFilePath(dbUrl)) await client.execute('PRAGMA journal_mode = WAL')
     const db = drizzle(client, { schema })
 
-    await recreateIfOlderThanMinimumUpgradeVersion(db)
+    await recreateIfOlderThanMinimumUpgradeVersion(db, {
+      backupPath: dbFilePath ? recreateBackupPath(dbFilePath) : undefined,
+    })
     logger('[Db.prepareDb] running migrations from %s', outDir)
     await migrate(db, { migrationsFolder: outDir })
+    if (generation !== this.openGeneration) {
+      if (this.client === client) this.closeOpenDb()
+      else client.close()
+      throw new Error('The database was closed while it was being opened')
+    }
 
     this.db = db
+    this.startPruningEntityChanges(db)
 
     return this.db
+  }
+
+  /** Prunes entity_changes now and every ENTITY_CHANGES_PRUNE_EVERY_MS until close. Never throws. */
+  private startPruningEntityChanges(db: any): void {
+    const prune = () =>
+      pruneEntityChanges(db).catch((error: unknown) => logger('[Db] pruning entity_changes failed', error))
+    void prune()
+    this.pruneTimer = setInterval(() => void prune(), ENTITY_CHANGES_PRUNE_EVERY_MS)
+    // Doesn't keep the process running
+    this.pruneTimer.unref?.()
+  }
+
+  async close(): Promise<void> {
+    this.openGeneration++
+    this.closeOpenDb()
+  }
+
+  /** Closes the libsql client and forgets the database; open live queries complete. */
+  private closeOpenDb(): void {
+    const client = this.client
+    if (this.pruneTimer) clearInterval(this.pruneTimer)
+    this.pruneTimer = undefined
+    this.closed$.next()
+    this.db = undefined
+    this.transactions = undefined
+    this.client = undefined
+    if (client && !client.closed) client.close()
   }
 
   async connectToDb(_pathToDir: string) {
@@ -185,43 +229,20 @@ export class NodeDb implements IDb {
   }
 
   async migrate(pathToDbDir: string, _dbName: string, _dbId: string) {
-    try {
-      if (!this.db) {
-        throw new Error('Database not initialized. Call prepareDb first.')
-      }
-
-      await migrate(this.db, { migrationsFolder: pathToDbDir })
-      const queryResult = await this.db.select().from(appState)
-      logger('queryResult', queryResult)
-    } catch (error: any) {
-      const errorMessage = error.message || String(error) || ''
-      const errorString = String(error)
-      const isMigrationError =
-        errorMessage.includes("Can't find meta/_journal.json") ||
-        errorMessage.includes('_journal.json') ||
-        errorMessage.includes("Cannot read properties of undefined") ||
-        errorMessage.includes("reading 'dialect'") ||
-        errorMessage.includes('undefined is not an object') ||
-        errorString.includes('dialect') ||
-        errorString.includes('undefined is not an object')
-
-      if (isMigrationError) {
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
-          logger(
-            'Warning: Migration failed, but continuing in test environment:',
-            errorMessage || errorString,
-          )
-          return this.db
-        }
-      }
-      throw error
+    if (!this.db) {
+      throw new Error('Database not initialized. Call prepareDb first.')
     }
+
+    await migrate(this.db, { migrationsFolder: pathToDbDir })
+    const queryResult = await this.db.select().from(appState)
+    logger('queryResult', queryResult)
 
     return this.db
   }
 
   /**
-   * Polling-based liveQuery stub for Node. Prefer browser reactive queries in UI apps.
+   * Polling-based liveQuery stub for Node. Prefer browser reactive queries in UI apps. Completes
+   * when the database closes (`close()`, `client.stop()`).
    */
   liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
     if (!this.db) {
@@ -252,12 +273,10 @@ export class NodeDb implements IDb {
       distinctUntilChanged((prev, curr) => {
         return JSON.stringify(prev) === JSON.stringify(curr)
       }),
+      takeUntil(this.closed$),
     )
   }
 }
-
-/** @deprecated Prefer NodeDb */
-export const Db = NodeDb
 
 BaseDb.configure(new NodeDb())
 

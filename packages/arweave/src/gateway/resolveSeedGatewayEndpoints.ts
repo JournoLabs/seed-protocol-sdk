@@ -12,6 +12,8 @@ import type {
 } from '../types/gateway.js'
 
 const PROBE_TTL_MS = 3 * 60 * 1000
+/** A failed probe is retried sooner, like the read gateway selector's unhealthy result. */
+const PROBE_FAILURE_TTL_MS = 60 * 1000
 
 let sidecarProbeCache: { healthy: boolean; expiresAt: number } | null = null
 const proxyProbeCache = new Map<string, { healthy: boolean; expiresAt: number }>()
@@ -23,7 +25,8 @@ export function invalidateSidecarProbeCache(): void {
 }
 
 function parseGatewayHost(input: string | undefined): { host: string; protocol: 'http' | 'https' } {
-  const raw = (input ?? DEFAULT_ARWEAVE_HOST).trim()
+  // An empty arweaveDomain means the default, not `https://`
+  const raw = input?.trim() || DEFAULT_ARWEAVE_HOST
   if (raw.startsWith('http://')) {
     return { protocol: 'http', host: raw.slice(7).replace(/\/$/, '') }
   }
@@ -38,7 +41,11 @@ function publicArweaveBaseUrl(config: SeedGatewayConfig): string {
   return `${protocol}://${host}`
 }
 
-function sidecarOrigin(config: SeedGatewayConfig): {
+/**
+ * The local Hyper sidecar's address from `hyper.localSidecarHost` and `hyper.localSidecarPort`,
+ * else the defaults. `host` leaves out port 80 and 443; `baseUrl` always has the port.
+ */
+export function resolveSidecarOrigin(config: SeedGatewayConfig): {
   host: string
   port: number
   baseUrl: string
@@ -90,34 +97,33 @@ export function resolveProxyBaseUrl(
   return `https://${raw.replace(/\/$/, '')}`
 }
 
+/**
+ * Probes `baseUrl`, cached per `cacheKey`: a healthy result for 3 minutes, a failure for 60 s. A
+ * probe cut short by `signal` (the caller or the resolve's `timeoutMs`) is not cached.
+ */
 async function probeUrlHealthy(
   baseUrl: string,
   cacheKey: 'sidecar' | string,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const now = Date.now()
-  if (cacheKey === 'sidecar') {
-    if (sidecarProbeCache && now < sidecarProbeCache.expiresAt) {
-      return sidecarProbeCache.healthy
-    }
-    const healthy = await probeGateway(baseUrl, signal)
-    sidecarProbeCache = { healthy, expiresAt: now + PROBE_TTL_MS }
-    return healthy
-  }
-
-  const cached = proxyProbeCache.get(cacheKey)
+  const cached = cacheKey === 'sidecar' ? sidecarProbeCache : proxyProbeCache.get(cacheKey)
   if (cached && now < cached.expiresAt) {
     return cached.healthy
   }
-  const healthy = await probeGateway(baseUrl, signal)
-  proxyProbeCache.set(cacheKey, { healthy, expiresAt: now + PROBE_TTL_MS })
+  const healthy = await probeGateway(baseUrl, { signal })
+  if (!healthy && signal?.aborted) return false
+  const entry = { healthy, expiresAt: now + (healthy ? PROBE_TTL_MS : PROBE_FAILURE_TTL_MS) }
+  if (cacheKey === 'sidecar') sidecarProbeCache = entry
+  else proxyProbeCache.set(cacheKey, entry)
   return healthy
 }
 
 function buildHttpEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpoints {
   const { host, protocol } = parseGatewayHost(config.arweaveDomain)
   const baseUrl = `${protocol}://${host}`
-  const uploadApiBaseUrl = config.uploadApiBaseUrl?.trim() || baseUrl
+  // A public gateway doesn't serve the upload API: unset stays unset (''), not the gateway's URL.
+  const uploadApiBaseUrl = config.uploadApiBaseUrl?.trim() ?? ''
   return {
     mode: config.transport ?? 'http-gateway',
     arweaveHost: host,
@@ -132,7 +138,7 @@ function buildHttpEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpo
 }
 
 function buildHyperEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndpoints {
-  const sidecar = sidecarOrigin(config)
+  const sidecar = resolveSidecarOrigin(config)
   const key = config.hyper?.gatewayHyperKey?.trim()
   return {
     mode: 'hyper',
@@ -170,8 +176,37 @@ function buildProxyEndpoints(
   }
 }
 
+function shouldProbeProxy(config: SeedGatewayConfig): boolean {
+  return (config.hyper?.probeProxy ?? config.hyper?.probeSidecar) !== false
+}
+
+const LOOPBACK_HOSTNAME = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$|\.localhost$/i
+
+/**
+ * Whether `hybrid` may try the local sidecar here: outside a browser, from a loopback page, or
+ * with `hyper.probeSidecarFromBrowser`.
+ */
+function sidecarReachableFromHere(config: SeedGatewayConfig, origin: string | undefined): boolean {
+  if (config.hyper?.probeSidecarFromBrowser) return true
+  const browserWindow = (globalThis as { window?: { location?: { origin?: string } } }).window
+  if (!browserWindow) return true
+  const pageOrigin = origin ?? browserWindow.location?.origin
+  if (!pageOrigin) return true
+  try {
+    return LOOPBACK_HOSTNAME.test(new URL(pageOrigin).hostname)
+  } catch {
+    return false
+  }
+}
+
 export type ResolveSeedGatewayEndpointsOptions = {
   signal?: AbortSignal
+  /**
+   * Time allowed for all of this resolve's probes together. A probe still running when it runs out
+   * counts as unreachable for this resolve only: it isn't cached or recorded in the circuit breaker.
+   * Each probe also times out on its own after 5 s.
+   */
+  timeoutMs?: number
   /** Skip cache and probe sidecar / proxy again. */
   forceSidecarProbe?: boolean
   /**
@@ -189,8 +224,7 @@ async function tryProxyEndpoints(
   if (!raw) return null
 
   const absolute = resolveProxyBaseUrl(raw, { origin: options?.origin })
-  const shouldProbe = config.hyper?.probeSidecar !== false
-  if (shouldProbe) {
+  if (shouldProbeProxy(config)) {
     const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
     if (!ok) return null
   }
@@ -210,6 +244,26 @@ export async function resolveSeedGatewayEndpoints(
   if (options?.forceSidecarProbe) {
     invalidateSidecarProbeCache()
   }
+  if (options?.timeoutMs === undefined) return resolveEndpoints(config, options)
+
+  const budget = new AbortController()
+  const timer = setTimeout(() => budget.abort(), options.timeoutMs)
+  const callerSignal = options.signal
+  const onAbort = () => budget.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) onAbort()
+  else callerSignal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await resolveEndpoints(config, { ...options, signal: budget.signal })
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', onAbort)
+  }
+}
+
+async function resolveEndpoints(
+  config: SeedGatewayConfig,
+  options?: ResolveSeedGatewayEndpointsOptions,
+): Promise<ResolvedSeedGatewayEndpoints> {
 
   const mode: SeedGatewayTransportMode = config.transport ?? 'http-gateway'
   const shouldProbe = config.hyper?.probeSidecar !== false
@@ -217,7 +271,7 @@ export async function resolveSeedGatewayEndpoints(
   if (mode === 'http-gateway') {
     if (config.proxyBaseUrl?.trim()) {
       const absolute = resolveProxyBaseUrl(config.proxyBaseUrl, { origin: options?.origin })
-      if (shouldProbe) {
+      if (shouldProbeProxy(config)) {
         const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
         if (!ok) {
           throw new Error(
@@ -248,12 +302,16 @@ export async function resolveSeedGatewayEndpoints(
     return hyperEndpoints
   }
 
-  // hybrid: proxy → sidecar → public HTTP
+  // hybrid: proxy → sidecar → public HTTP. The sidecar is skipped on a public web page.
   const proxy = await tryProxyEndpoints({ ...config, transport: mode }, options)
   if (proxy) return proxy
 
-  const sidecar = sidecarOrigin(config)
-  if (shouldProbe && (await probeUrlHealthy(sidecar.baseUrl, 'sidecar', options?.signal))) {
+  const sidecar = resolveSidecarOrigin(config)
+  if (
+    shouldProbe &&
+    sidecarReachableFromHere(config, options?.origin) &&
+    (await probeUrlHealthy(sidecar.baseUrl, 'sidecar', options?.signal))
+  ) {
     return buildHyperEndpoints({ ...config, transport: 'hyper' })
   }
 
@@ -265,13 +323,22 @@ export async function resolveSeedGatewayEndpoints(
   }
 }
 
-/** Build ordered gateway host list for read fallback (sidecar/proxy first when active). */
+/**
+ * Ordered read gateways. With a sidecar or proxy active it comes first, as its base URL, followed by
+ * the public gateway and the default list as `https://` URLs, so reads (and links re-hosted for
+ * this reader, ADR 0025) still have public fallbacks when it is down. Otherwise hosts without a
+ * scheme, the active one first.
+ */
 export function getReadGatewayHostsForConfig(
   resolved: ResolvedSeedGatewayEndpoints,
   _defaults?: readonly string[],
 ): string[] {
   if (resolved.activePath === 'hyper-sidecar' || resolved.activePath === 'http-proxy') {
-    return [resolved.arweaveHost]
+    const publicBase = new URL(resolved.publicArweaveBaseUrl)
+    const publicHosts = getArweaveReadGatewayHostsForPrimary(publicBase.host).map((host, index) =>
+      index === 0 ? `${publicBase.protocol}//${host}` : `https://${host}`,
+    )
+    return [resolved.arweaveBaseUrl, ...publicHosts]
   }
   return getArweaveReadGatewayHostsForPrimary(resolved.arweaveHost)
 }

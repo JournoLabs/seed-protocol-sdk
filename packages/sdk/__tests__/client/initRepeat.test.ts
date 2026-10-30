@@ -4,7 +4,7 @@ import { INIT_CONFIG_CONFLICT_MESSAGE } from '@/client/ClientManager'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 /**
- * client.init after the client is ready: the same config resolves and applies new addresses,
+ * client.init after the client is ready: the same config resolves and keeps the stored addresses,
  * a different config throws, and onReady fires for late subscribers.
  */
 describe('client.init called again', () => {
@@ -25,12 +25,19 @@ describe('client.init called again', () => {
     expect(client.isInitialized()).toBe(true)
   })
 
-  it('resolves with the same config and applies changed addresses', async () => {
+  it('resolves with the same config and leaves the stored addresses alone', async () => {
+    // A host inits with [] before the wallet connects, adds the wallet's addresses, then remounts
+    // its gate, which calls init again: neither an empty nor a different set changes them.
     const owned = '0x' + 'a'.repeat(40)
-    await client.init({ ...options, config: structuredClone(options.config), addresses: { owned: [owned] } })
+    await client.setAddresses({ owned: [owned] })
+
+    await client.init({ ...options, config: structuredClone(options.config), addresses: [] })
     expect(await client.getAddresses()).toEqual({ owned: [owned], watched: [] })
 
-    await client.init({ ...options, addresses: [] })
+    await client.init({ ...options, addresses: { owned: ['0x' + 'b'.repeat(40)] } })
+    expect(await client.getAddresses()).toEqual({ owned: [owned], watched: [] })
+
+    await client.setAddresses([])
     expect(await client.getAddresses()).toEqual({ owned: [], watched: [] })
   })
 

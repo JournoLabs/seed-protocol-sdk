@@ -8,15 +8,41 @@ export { Item } from '../Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from '../ItemProperty/ItemProperty'
 export type { IItem, IItemProperty } from '../interfaces'
 
-// Errors
+// Errors. Every error class the main entry exports that Node code can throw is exported here too
+// (__tests__/node/nodeEntryErrors.test.ts checks).
 export { AmbiguousModelError } from '../Model/errors'
-export { ItemCreateValidationError, UnknownModelError, type ItemCreateProblem } from '../Item/errors'
+export {
+  ItemCreateError,
+  ItemCreateValidationError,
+  UnknownModelError,
+  type ItemCreateErrorCode,
+  type ItemCreateProblem,
+} from '../Item/errors'
 export { ConflictError, type ConflictResult } from '../Schema/errors'
 export { OwnershipError, assertItemOwned, isItemOwned } from '../helpers/ownership'
+export { EntityUnloadedError, entityLoadError } from '../helpers/entity/entityLifecycle'
+export { TabLockTimeoutError } from '../helpers/tabLocks'
+export { ClientNotInitializedError, ResetLocalDataBrowserOnlyError } from '../client/errors'
+export { OutboxOpFailedError, OutboxSaveTimeoutError } from '../outbox/outbox'
+export { RelationTargetError } from '../outbox/itemAppliers'
+export { StagedValueMissingError } from '../storageValue/stage'
+export { PublishValidationFailedError, type PublishValidationError } from '../db/read/getPublishPayload'
+export { RelatedItemUnpublishedError, RELATED_ITEM_UNPUBLISHED_CODE } from '../db/read/publishErrors'
+export { HtmlEmbeddedDataUriLimitError, HtmlSeedPropertyRefError } from '../helpers/htmlEmbeddedDataUriPublish'
+
+// Archive export
+export {
+  ArchiveExportError,
+  exportArchive,
+  type ArchiveExportErrorCode,
+  type ArchiveOmission,
+  type ExportArchiveOptions,
+  type ExportArchiveResult,
+} from '../archive/exportArchive'
 
 // Node.js specific exports
-export { FileManager } from './helpers/FileManager'
-export { Db, resolveSdkDrizzleMigrationsDir } from './db/Db'
+export { NodeFileManager } from './helpers/FileManager'
+export { NodeDb, resolveSdkDrizzleMigrationsDir } from './db/Db'
 
 // Schema exports
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'

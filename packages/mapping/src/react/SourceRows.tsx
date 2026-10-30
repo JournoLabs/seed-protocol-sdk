@@ -1,7 +1,6 @@
 import React, { useMemo, useState, type ReactNode } from 'react'
 import type {
   FieldMapping,
-  MappingLookups,
   ResolveJob,
   SourceNode,
   TargetProperty,
@@ -40,8 +39,6 @@ export type SourceRowsProps = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   mapper: UseFieldMapperResult
-  lookups?: MappingLookups
-  onLookupsChange?: (lookups: MappingLookups) => void
   slots: ResolvedFieldMapperSlots
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
@@ -56,7 +53,6 @@ export function SourceRows({
   targets,
   mappings,
   mapper,
-  onLookupsChange,
   slots,
   classNames,
   ui = {
@@ -93,12 +89,8 @@ export function SourceRows({
 
   const jsonPreview = showJsonPreview(slots.preview)
   const rowPreview = showRowPreview(slots.preview)
-  const showRowLookups =
-    slots.lookups === 'row' && (Boolean(renderLookup) || Boolean(onLookupsChange))
-  const showSectionLookups =
-    slots.lookups === 'section' &&
-    !renderLookup &&
-    Boolean(onLookupsChange)
+  const showRowLookups = slots.lookups === 'row'
+  const showSectionLookups = slots.lookups === 'section' && !renderLookup
 
   return (
     <>
@@ -234,7 +226,7 @@ export function SourceRows({
               {row.state === 'conflict' && (
                 <div
                   className={slotClass('validation', classNames)}
-                  style={{ color: 'var(--fm-danger)' }}
+                  style={{ color: 'var(--sfm-color-danger)' }}
                 >
                   property already mapped by another row
                 </div>
@@ -249,6 +241,8 @@ export function SourceRows({
                       sampleValue: row.sampleValue ?? '',
                       onLookupChange: (entries) =>
                         mapper.setLookupEntries(row.id, entries),
+                      onSplitChange: (separators) =>
+                        mapper.setLookupSplit(row.id, separators),
                     })}
                   </div>
                 ) : (

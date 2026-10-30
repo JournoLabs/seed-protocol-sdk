@@ -33,6 +33,7 @@ export const rewritingHtmlEmbedded = fromPromise(
       context.item.seedLocalId,
       pairs,
       context.htmlEmbeddedDeferredHtmlSeedLocalIds,
+      { htmlArweaveRefs: context.htmlArweaveRefs },
     )
   },
 )

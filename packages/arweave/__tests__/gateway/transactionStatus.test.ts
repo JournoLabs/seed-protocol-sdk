@@ -5,7 +5,11 @@ import {
   resetGatewayCircuitBreakerForTests,
 } from '../../src/gateway/gatewayCircuitBreaker.js'
 import { setPreferredArweaveReadBaseUrls, setResolvedSeedGatewayEndpoints } from '../../src/gateway/gatewayState.js'
-import { fetchTransactionStatusAcrossGateways } from '../../src/gateway/transactionStatus.js'
+import {
+  fetchTransactionStatusAcrossGateways,
+  MIN_TRANSACTION_STATUS_ATTEMPT_MS,
+} from '../../src/gateway/transactionStatus.js'
+import type { TransactionStatus } from '../../src/types/arweave.js'
 
 const TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 const A = 'https://a.example'
@@ -76,25 +80,67 @@ describe('fetchTransactionStatusAcrossGateways', () => {
     expect((await fetchTransactionStatusAcrossGateways(TX, { baseUrls: [A, B] })).status).toBe(404)
   })
 
-  it('times a hung gateway out and asks the next one', async () => {
-    stubGateways({ [A]: 'hang', [B]: 200 })
-    const started = Date.now()
-    const status = await fetchTransactionStatusAcrossGateways(TX, { baseUrls: [A, B], timeoutMs: 50 })
-    expect(status.status).toBe(200)
-    expect(Date.now() - started).toBeLessThan(1000)
-  })
-
-  it('stops at the total budget and reports 504 when the last attempt timed out', async () => {
-    const calls = stubGateways({ [A]: 'hang', [B]: 'hang', [C]: 'hang' })
-    const started = Date.now()
-    const status = await fetchTransactionStatusAcrossGateways(TX, {
-      baseUrls: [A, B, C],
-      timeoutMs: 60,
-      totalTimeoutMs: 100,
+  describe('timeouts', () => {
+    // Fake clock: the deadline arithmetic must not depend on how promptly the runner fires timers.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
     })
-    expect(status).toEqual({ status: 504, confirmed: null })
-    expect(calls).toHaveLength(2)
-    expect(Date.now() - started).toBeLessThan(1000)
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    /** Advances the fake clock by `ms` and fails if the status check hasn't settled by then. */
+    async function settleAfter(ms: number, run: Promise<TransactionStatus>) {
+      let settled = false
+      void run.finally(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(ms)
+      expect(settled).toBe(true)
+      return run
+    }
+
+    it('times a hung gateway out and asks the next one', async () => {
+      const calls = stubGateways({ [A]: 'hang', [B]: 200 })
+      const status = await settleAfter(50, fetchTransactionStatusAcrossGateways(TX, { baseUrls: [A, B], timeoutMs: 50 }))
+      expect(status.status).toBe(200)
+      expect(calls).toHaveLength(2)
+    })
+
+    it('cuts the last attempt short at the total budget and reports 504 when it timed out', async () => {
+      const calls = stubGateways({ [A]: 'hang', [B]: 'hang', [C]: 'hang' })
+      const run = fetchTransactionStatusAcrossGateways(TX, {
+        baseUrls: [A, B, C],
+        timeoutMs: 2000,
+        totalTimeoutMs: 3000,
+      })
+      await vi.advanceTimersByTimeAsync(2999)
+      expect(calls).toHaveLength(2)
+      expect(await settleAfter(1, run)).toEqual({ status: 504, confirmed: null })
+      expect(calls).toHaveLength(2)
+    })
+
+    it('does not start another attempt with less budget left than the attempt floor', async () => {
+      const calls = stubGateways({ [A]: 'hang', [B]: 200 })
+      const status = await settleAfter(
+        2000,
+        fetchTransactionStatusAcrossGateways(TX, {
+          baseUrls: [A, B],
+          timeoutMs: 2000,
+          totalTimeoutMs: 2000 + MIN_TRANSACTION_STATUS_ATTEMPT_MS - 1,
+        }),
+      )
+      expect(status).toEqual({ status: 504, confirmed: null })
+      expect(calls).toEqual([`${A}/${TX}`])
+    })
+
+    it('always asks the first gateway, even when the budget is under the attempt floor', async () => {
+      const calls = stubGateways({ [A]: 200 })
+      const status = await settleAfter(0, fetchTransactionStatusAcrossGateways(TX, { baseUrls: [A], totalTimeoutMs: 10 }))
+      expect(status.status).toBe(200)
+      expect(calls).toHaveLength(1)
+    })
   })
 
   it('reports the last failure when every gateway fails', async () => {

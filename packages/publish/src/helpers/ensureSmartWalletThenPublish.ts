@@ -78,21 +78,27 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    const wallet = fromThirdwebAccount(modularAccount, { kind: 'smart' })
+    // The in-app EOA publishes as the ManagedAccount. createPublish signs data items with the
+    // registered session's dataItemSigner, else this EOA.
+    const wallet = fromThirdwebAccount(modularAccount, { kind: 'modular' })
     return startPublish(item, managedAddress, wallet, {
       ...options,
-      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
+      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner),
     })
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
     const wallet = fromThirdwebAccount(resolved.account, { kind: 'smart' })
+    // The smart account can't sign data items. ConnectButton registers its admin EOA for that;
+    // without a session, an account that is the admin EOA (its smart wallet derived) signs them.
+    const accountIsAdmin = resolved.address.toLowerCase() !== resolved.account.address.toLowerCase()
     return startPublish(item, resolved.address, wallet, {
       ...options,
-      // The smart account can't sign data items; ConnectButton registers its admin EOA for that.
       dataItemSigner:
-        coerceDataItemSigner(options?.dataItemSigner) ?? getPublishWallet()?.dataItemSigner,
+        coerceDataItemSigner(options?.dataItemSigner) ??
+        getPublishWallet()?.dataItemSigner ??
+        (accountIsAdmin ? fromThirdwebAccount(resolved.account, { kind: 'eoa' }).signer : undefined),
     })
   }
   return { outcome: 'needs_deploy' }

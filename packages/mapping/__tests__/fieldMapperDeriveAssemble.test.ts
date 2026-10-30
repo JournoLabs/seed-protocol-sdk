@@ -91,7 +91,7 @@ function session(initial: FieldMapping[] = []) {
         sourceId,
         propertyName,
       )
-      mappings = result.mappings
+      mappings = result
     },
   }
 }
@@ -103,6 +103,14 @@ describe('derive / assemble persist', () => {
       propertyName: 'slug',
       derive: { from: 'title', fallback: true },
     }
+    const lookup: FieldMapping = {
+      sourceId: 'x',
+      propertyName: 'authors',
+      resolve: 'lookup',
+      lookup: { entries: [{ value: 'Ada', refs: ['uid-1'] }] },
+      split: { separators: ['and'] },
+    }
+    expect(applyResolveToEdge(lookup, 'lookup')).toEqual(lookup)
     expect(applyResolveToEdge(derive, 'derive')).toEqual({
       sourceId: 'rss-slug',
       propertyName: 'slug',
@@ -204,7 +212,7 @@ describe('derive / assemble persist', () => {
       'rss-link',
       'html',
     )
-    expect(html.mappings).toEqual([
+    expect(html).toEqual([
       {
         sourceId: 'rss-link',
         propertyName: 'html',

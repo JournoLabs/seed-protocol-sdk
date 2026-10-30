@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/query",
-  "version": "0.7.9",
+  "version": "0.7.13",
   "description": "Read canonical Seed Protocol JSON (seeds, collections, changelogs) from EAS attestations or a local SQLite source, with memory and disk caching",
   "keywords": [
     "seed-protocol",
@@ -13,6 +13,9 @@
     "web3"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=20.18.1"
+  },
   "main": "./dist/index.node.js",
   "types": "./dist/index.node.d.ts",
   "browser": "./dist/index.js",
@@ -47,7 +50,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
@@ -55,11 +58,10 @@
     "@noble/hashes": "^1.8.0",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
-    "graphql-request": "^7.3.5",
     "pluralize": "^8.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.3",
     "@types/pluralize": "^0.0.33",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",

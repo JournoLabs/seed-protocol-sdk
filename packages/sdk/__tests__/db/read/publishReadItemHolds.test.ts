@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishUploadData, itemHasPublishUploadCandidates } from '@/db/read/getPublishUploads'
 import { getPublishGraph } from '@/db/read/publishGraph'
-import { getUnpublishedRelatedItems, summarizePublishWork } from '@/db/read/summarizePublishWork'
+import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { Item } from '@/Item/Item'
 import type { IItem } from '@/interfaces'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
@@ -78,7 +78,7 @@ testDescribe('publish reads release the Item holds they take', () => {
     const summary = await summarizePublishWork(postItem)
     expect(summary.newSeedCount).toBe(2)
     expect(refCount(authorId)).toBeUndefined()
-    await getUnpublishedRelatedItems(postItem)
+    await summarizePublishUploads(postItem)
     expect(refCount(authorId)).toBeUndefined()
     postItem.unload()
   }, 60_000)

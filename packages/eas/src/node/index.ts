@@ -3,7 +3,7 @@ import { NodeQueryClient } from './QueryClient.js'
 import { BaseEasClient } from '../EasClient/BaseEasClient.js'
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 
-export { EasClient, NodeEasClient } from './EasClient.js'
+export { NodeEasClient } from './EasClient.js'
 export type { NodeEasClientOptions } from './EasClient.js'
 export {
   createEasNodeDispatcher,
@@ -11,7 +11,7 @@ export {
   EAS_NODE_KEEP_ALIVE_TIMEOUT_MS,
 } from './easDispatcher.js'
 export type { EasNodeDispatcherOptions } from './easDispatcher.js'
-export { QueryClient, NodeQueryClient } from './QueryClient.js'
+export { NodeQueryClient } from './QueryClient.js'
 
 /**
  * Register Node.js EAS + query client implementations. `easClient` options go to

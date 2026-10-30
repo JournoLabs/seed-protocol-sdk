@@ -11,7 +11,7 @@ const SCHEMA_NAME = 'Reimport Properties Schema'
 
 // A fresh model id each import, as when a schema file is regenerated and imported again.
 const reimportSchema = (): SchemaFileFormat => ({
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: 'reimport-properties-schema',
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

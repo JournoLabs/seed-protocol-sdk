@@ -105,4 +105,32 @@ describe('feed content cache keyed on query', () => {
     expect(stale.headers.get('X-Cache')).toBe('STALE')
     expect(await stale.text()).toContain('First')
   })
+
+  it('serves the stale body only to the site it was built for', async () => {
+    mockFetchFeedItems.mockResolvedValueOnce({ items: [post('First')], etag: '"q1"' })
+    await handleFeedRequest('posts', 'rss', null, undefined, 1, { title: 'Site A' })
+
+    mockFetchFeedItems.mockRejectedValue(new Error('indexer down'))
+    const other = await handleFeedRequest('posts', 'rss', null, undefined, 1, { title: 'Site B' })
+    expect(other.status).toBe(500)
+
+    const same = await handleFeedRequest('posts', 'rss', null, undefined, 1, { title: 'Site A' })
+    expect(same.headers.get('X-Cache')).toBe('STALE')
+    expect(await same.text()).toContain('Site A')
+  })
+
+  it('answers a weak If-None-Match for the current body with 304', async () => {
+    mockFetchFeedItems.mockResolvedValue({ items: [post('First')], etag: '"q1"' })
+    const first = await handleFeedRequest('posts', 'rss')
+    const notModified = await handleFeedRequest('posts', 'rss', `W/${first.headers.get('ETag')}`)
+    expect(notModified.status).toBe(304)
+  })
+
+  it('returns 400 for a NaN archive year or month without reading items', async () => {
+    const badYear = await handleArchiveFeedRequest('posts', Number.NaN, 9, 'rss')
+    const badMonth = await handleArchiveFeedRequest('posts', 2026, Number('x'), 'rss')
+    expect(badYear.status).toBe(400)
+    expect(badMonth.status).toBe(400)
+    expect(mockGetMonthItems).not.toHaveBeenCalled()
+  })
 })

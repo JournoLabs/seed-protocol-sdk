@@ -2,6 +2,7 @@ import imageResize from './imageResize'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
 import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
 import debug from 'debug'
+import type { ResizeAllImagesParams, ResizeImageParams } from '@/helpers/FileManager/IFileManager'
 
 const logger = debug('seedSdk:browser:workers:ImageResizer')
 

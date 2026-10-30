@@ -5,7 +5,6 @@
 
 import {
   BaseDb,
-  DEFAULT_ARWEAVE_HOST,
   schemas,
   SEED_PROTOCOL_SCHEMA_NAME,
   models as modelsTable,
@@ -202,15 +201,11 @@ export function createTestConfig(
   overrides: Partial<SeedConstructorOptions> = {}
 ): SeedConstructorOptions {
   const isNodeEnv = typeof window === 'undefined'
+  // Everything else takes client.init's defaults; see createTestConfig in the SDK's test utils.
   const defaultFilesDir = isNodeEnv ? '.seed' : '/app-files'
   const defaultConfig: SeedConstructorOptions = {
     config: {
       models: {},
-      endpoints: {
-        filePaths: '/api/seed/migrations',
-        files: defaultFilesDir,
-      },
-      arweaveDomain: DEFAULT_ARWEAVE_HOST,
       filesDir: defaultFilesDir,
     },
   }
@@ -221,16 +216,13 @@ export function createTestConfig(
   if (overrides.config?.endpoints?.files) {
     mergedConfig.filesDir = overrides.config.endpoints.files
   } else if (!mergedConfig.filesDir) {
-    mergedConfig.filesDir = mergedConfig.endpoints.files
+    mergedConfig.filesDir = mergedConfig.endpoints?.files
   }
   return {
     config: mergedConfig,
     ...(overrides.addresses ? { addresses: overrides.addresses } : {}),
   }
 }
-
-let originalCwd: string | undefined
-let testProjectPathForCleanup: string | undefined
 
 export async function setupTestEnvironment(options: {
   configOverrides?: Partial<SeedConstructorOptions>
@@ -243,7 +235,6 @@ export async function setupTestEnvironment(options: {
   let testProjectPath: string | undefined
 
   if (isNodeEnv) {
-    originalCwd = process.cwd()
     testProjectPath = options.projectPath || (await getTestProjectPath())
     const fs = await import('fs')
     if (!fs.existsSync(testProjectPath)) {
@@ -269,37 +260,5 @@ export async function setupTestEnvironment(options: {
 
   await initializeTestClient({ config, timeout: options.timeout })
 
-  if (isNodeEnv && testProjectPath && !options.projectPath) {
-    const os = await import('os')
-    const tmpDir = os.tmpdir()
-    if (testProjectPath.startsWith(tmpDir)) {
-      testProjectPathForCleanup = testProjectPath
-    }
-  }
-
   return testProjectPath
-}
-
-export async function teardownTestEnvironment(): Promise<void> {
-  if (typeof window === 'undefined') {
-    if (originalCwd) {
-      process.chdir(originalCwd)
-      originalCwd = undefined
-    }
-    if (testProjectPathForCleanup) {
-      const fs = await import('fs')
-      const os = await import('os')
-      const tmpDir = os.tmpdir()
-      if (testProjectPathForCleanup.startsWith(tmpDir)) {
-        try {
-          if (fs.existsSync(testProjectPathForCleanup)) {
-            fs.rmSync(testProjectPathForCleanup, { recursive: true, force: true })
-          }
-        } catch {
-          // ignore
-        }
-      }
-      testProjectPathForCleanup = undefined
-    }
-  }
 }

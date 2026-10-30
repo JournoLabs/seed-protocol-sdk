@@ -27,7 +27,7 @@ type CreateMetadataOptions = {
   skipValidation?: boolean
   /**
    * The database or transaction to write and read; the app database by default. With one, the EAS
-   * schema uid isn't looked up: set `schemaUid` (resolveMetadataSchemaUid) beforehand.
+   * schema uid isn't looked up: set `schemaUid` (lookupPropertySchemaUid) beforehand.
    */
   db?: ReturnType<typeof BaseDb.getAppDb>
   /** schemaFileId of the item's models row; otherwise read from the seed (seeds.model_file_id). */
@@ -39,18 +39,6 @@ type CreateMetadata = (
   propertyRecordSchema?: PropertyType | undefined,
   options?: CreateMetadataOptions,
 ) => Promise<MetadataType>
-
-/**
- * The EAS schema uid a metadata row of this property takes, from the property's data type and EAS
- * name. Undefined for a data type with no EAS type or when the lookup fails. May call EAS, so run
- * it before a transaction, not inside one.
- */
-/** The property's EAS schema UID from the shared lookup cache (lookupPropertySchemaUid). */
-export const resolveMetadataSchemaUid = async (
-  propertyName: string,
-  propertyRecordSchema: PropertyType | undefined,
-): Promise<string | undefined> =>
-  lookupPropertySchemaUid(propertyName, propertyRecordSchema as Parameters<typeof lookupPropertySchemaUid>[1])
 
 export const createMetadata: CreateMetadata = async (
   metadataValues,
@@ -149,7 +137,7 @@ export const createMetadata: CreateMetadata = async (
   // With a given db (a transaction), the caller resolves schemaUid first: the lookup may call EAS.
   // Without one it isn't required for metadata insertion, so a failed lookup leaves it unset.
   if (!options?.db && !isItemStorage && !metadataValues.schemaUid && metadataValues.propertyName) {
-    const schemaUid = await resolveMetadataSchemaUid(metadataValues.propertyName, propertyRecordSchema)
+    const schemaUid = await lookupPropertySchemaUid(metadataValues.propertyName, propertyRecordSchema)
     if (schemaUid) metadataValues.schemaUid = schemaUid
   }
 

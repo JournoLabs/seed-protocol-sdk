@@ -1,6 +1,7 @@
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { GET_SCHEMAS } from './queries.js'
+import { timedFetchQuery } from './easTiming.js'
 import type { Schema as EASSchema } from './graphql/gql/graphql.js'
 import {
   compareNameMatchTiers,
@@ -61,7 +62,7 @@ export const fetchEasModelSchemas = async (models: readonly ModelSchemaLookup[])
     for (const easSchemaName of easNamesToFetch(name, level)) definitions.add(`${BYTES32_PREFIX}${easSchemaName}`)
   }
   const sorted = [...definitions].sort()
-  const result = (await queryClient.fetchQuery({
+  const result = (await timedFetchQuery(queryClient, {
     queryKey: ['fetchEasModelSchemas', sorted],
     queryFn: async () => easClient.request(GET_SCHEMAS, { where: { schema: { in: sorted } } }),
   })) as { schemas?: EASSchema[] } | undefined

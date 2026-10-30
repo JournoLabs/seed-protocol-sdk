@@ -22,12 +22,16 @@ export {
   wallets,
   ExternalWalletsForDeploy,
   getSharedPublishInAppWalletStorage,
+  disconnectPublishWallet,
+  markPublishWalletConnected,
+  clearInAppPublishSession,
   useActiveSmartWalletContract,
   useLocalWalletAccount,
 } from './helpers/thirdweb'
 
 export { getPublishThirdwebChain } from './helpers/thirdwebChain'
-export { seedPaymaster, CALL_GAS_HEADROOM_BPS } from './helpers/seedPaymaster'
+export { seedPaymaster } from './helpers/seedPaymaster'
+export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
 
 export { default as ConnectButton } from './react/ConnectButton'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider.thirdweb'
@@ -37,10 +41,8 @@ export {
   ensureSmartWalletThenPublish,
   type EnsureSmartWalletResult,
 } from './helpers/ensureSmartWalletThenPublish'
-export {
-  ensureExecutorModuleInstalled,
-  type EnsureExecutorModuleResult,
-} from './helpers/ensureExecutorModule'
+export { ensureExecutorModuleInstalled } from './helpers/thirdwebAutomation'
+export type { EnsureExecutorModuleResult } from './helpers/ensureExecutorModule'
 export {
   ensureManagedAccountReady,
   tryDeployManagedAccount,
@@ -49,29 +51,26 @@ export {
   type ModularExecutorPublishPrepResult,
 } from './helpers/ensureManagedAccountReady'
 export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702ModularAccountReady'
-export { ensureManagedSignerSessionKey } from './helpers/ensureManagedSignerSessionKey'
 export { ensureModularPublishBootstrap } from './helpers/ensureModularPublishBootstrap'
-export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'
 export { approvedTargetsForAutomationPublish } from './helpers/approvedTargetsForAutomationPublish'
 export {
   ensureAutomationSessionKey,
   removeAutomationSessionKey,
-  isAutomationSessionActive,
-} from './helpers/ensureAutomationSessionKey'
+} from './helpers/thirdwebAutomation'
+export { isAutomationSessionActive } from './helpers/ensureAutomationSessionKey'
 export {
   PUBLISH_AUTOMATION_SCOPES,
   buildAutomationSessionKeyPermissions,
   hashAutomationSessionKeyPermissions,
-  toThirdwebSessionKeyPermissions,
   type AutomationSessionKeyPermissions,
 } from './helpers/automationSessionKeyPermissions'
 export {
   enrollPublishAutomation,
   revokePublishAutomation,
   type EnrollPublishAutomationParams,
-  type EnrollPublishAutomationResult,
   type RevokePublishAutomationParams,
-} from './helpers/enrollPublishAutomation'
+} from './helpers/thirdwebAutomation'
+export type { EnrollPublishAutomationResult } from './helpers/enrollPublishAutomation'
 export {
   assertStorageBoundToIdentity,
   type AssertStorageBoundToIdentityParams,

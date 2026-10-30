@@ -24,7 +24,7 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 const SCHEMA_NAME = 'Test Schema number publish encoding'
 
 const schema = {
-  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  $schema: 'https://seedprotocol.io/schemas/data-model/v1',
   version: 1,
   id: generateId(),
   metadata: { name: SCHEMA_NAME, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

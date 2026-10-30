@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '../src/easValues.js'
+import { decodeEasNumber, isEasEmptyValue, isNumericEasType, isUnfilledReference } from '../src/easValues.js'
 
 describe('decodeEasNumber', () => {
   it.each([
@@ -63,5 +63,23 @@ describe('isEasEmptyValue (ADR 0021)', () => {
     ['uint256', 0],
   ])('%s %j is a value', (type, value) => {
     expect(isEasEmptyValue(type, value)).toBe(false)
+  })
+})
+
+describe('isUnfilledReference', () => {
+  const word = (hex: string) => '0x' + hex.padStart(64, '0')
+
+  it.each([word('1'), word('20'), word('ffffffff')])('%s is a placeholder no reference filled', (value) => {
+    expect(isUnfilledReference(value)).toBe(true)
+  })
+
+  it.each([
+    ['zero, a removal', word('0')],
+    ['2^32', word('100000000')],
+    ['a seed uid', '0x' + 'ab'.repeat(32)],
+    ['not 32 bytes', '0x01'],
+    ['not a string', 1],
+  ])('%s is not', (_, value) => {
+    expect(isUnfilledReference(value)).toBe(false)
   })
 })

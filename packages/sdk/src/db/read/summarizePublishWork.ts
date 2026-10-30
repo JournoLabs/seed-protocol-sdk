@@ -92,16 +92,37 @@ async function propertyWork(
   return clear.retract ? { attestations: 0, revocations: clear.retractScope.length } : { attestations: 1, revocations: 0 }
 }
 
+export type PublishUploadSummary = Pick<
+  PublishWorkSummary,
+  'uploadCount' | 'uploadBytes' | 'uploadSizes' | 'unpublishedRelatedItems'
+>
+
+async function summarizeUploads(sources: PublishUploadSource[]): Promise<Pick<PublishWorkSummary, 'uploadCount' | 'uploadBytes' | 'uploadSizes'>> {
+  const acc = { uploadCount: 0, uploadBytes: 0, uploadSizes: [] as number[] }
+  for (const source of sources) {
+    const bytes = await sourceBytes(source)
+    if (bytes <= 0) continue
+    acc.uploadCount += 1
+    acc.uploadBytes += bytes
+    acc.uploadSizes.push(bytes)
+  }
+  return acc
+}
+
 /**
- * References a publish of `item` would attest to items whose seed was unpublished (revoked), the
- * same ones getPublishPayload rejects with RelatedItemUnpublishedError. Local reads only: the
- * publish package checks this before registering schemas or uploading anything.
+ * What a publish of `item` would upload, by file size, and the references it would attest to
+ * items whose seed was unpublished (revoked), the same ones getPublishPayload rejects with
+ * RelatedItemUnpublishedError. Local reads only, and no file is read: the publish package checks
+ * both before registering schemas or uploading anything.
  */
-export const getUnpublishedRelatedItems = async (
+export const summarizePublishUploads = async (
   item: { seedLocalId: string; modelName?: string },
   options?: SummarizePublishWorkOptions,
-): Promise<UnpublishedRelatedItem[]> =>
-  (await getPublishGraph(item, { publishMode: options?.publishMode })).unpublishedRelatedItems
+): Promise<PublishUploadSummary> => {
+  const graph = await getPublishGraph(item, { publishMode: options?.publishMode ?? 'patch' })
+  const uploads = await summarizeUploads(await getPublishUploadSources(graph))
+  return { ...uploads, unpublishedRelatedItems: graph.unpublishedRelatedItems }
+}
 
 /**
  * Local measurement of what a publish would do: seed/version/attestation counts
@@ -121,17 +142,8 @@ export const summarizePublishWork = async (
     newVersionCount: 0,
     attestationCount: 0,
     revocationCount: 0,
-    uploadCount: 0,
-    uploadBytes: 0,
-    uploadSizes: [],
+    ...(await summarizeUploads(sources)),
     unpublishedRelatedItems: graph.unpublishedRelatedItems,
-  }
-  for (const source of sources) {
-    const bytes = await sourceBytes(source)
-    if (bytes <= 0) continue
-    acc.uploadCount += 1
-    acc.uploadBytes += bytes
-    acc.uploadSizes.push(bytes)
   }
   for (const node of graph.nodes) {
     if (node.newSeed) acc.newSeedCount += 1

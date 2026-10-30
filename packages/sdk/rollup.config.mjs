@@ -236,7 +236,6 @@ const config = [
         '@zenfs/core',
         '@zenfs/dom',
         'arweave',
-        'tslib',
         'better-sqlite3',
         'react',
         'react-dom',

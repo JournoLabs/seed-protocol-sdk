@@ -2,6 +2,7 @@ import React, { FC, useRef } from "react"
 import type { MutableRefObject } from "react"
 import type { QueryClient } from "@tanstack/react-query"
 import { SeedProvider } from '@seedprotocol/react'
+import type { SeedConfig, SeedConstructorOptions } from '@seedprotocol/sdk'
 import { initPublish, getConfigRef, type PublishConfig } from "../config"
 import { PublishConfigContext, usePublishConfig } from "./PublishConfigContext"
 
@@ -15,6 +16,15 @@ export interface PublishProviderProps {
    * Otherwise, assumes initPublish was already called elsewhere.
    */
   config?: PublishConfig
+  /**
+   * The Seed client config, passed to `SeedProvider` as its `config`: with it, the provider
+   * initializes the client. `config` above is the publish config.
+   */
+  seedConfig?: SeedConfig
+  /** Owned and watched addresses for the client's init, passed to `SeedProvider`. */
+  addresses?: SeedConstructorOptions['addresses']
+  /** Called when client init fails, passed to `SeedProvider`. */
+  onInitError?: (err: unknown) => void
   /** Optional: use your own QueryClient for Seed hooks. If not provided, SeedProvider creates one. */
   queryClient?: QueryClient
   /** Optional: ref to receive the QueryClient instance (e.g. for tests). */
@@ -28,6 +38,9 @@ export interface PublishProviderProps {
 const PublishProvider: FC<PublishProviderProps> = ({
   children,
   config,
+  seedConfig,
+  addresses,
+  onInitError,
   queryClient,
   queryClientRef,
 }) => {
@@ -41,7 +54,13 @@ const PublishProvider: FC<PublishProviderProps> = ({
 
   return (
     <PublishConfigContext.Provider value={config ?? getConfigRef()}>
-      <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
+      <SeedProvider
+        config={seedConfig}
+        addresses={addresses}
+        onInitError={onInitError}
+        queryClient={queryClient}
+        queryClientRef={queryClientRef}
+      >
         {children}
       </SeedProvider>
     </PublishConfigContext.Provider>

@@ -23,9 +23,11 @@ import { EntityCache, evictionLog } from '@/helpers/entity/entityCache'
 import {
   DEFAULT_READY_TIMEOUT_MS,
   destroyEntity,
+  EntityUnloadedError,
   entityStatus,
   evictEntities,
   holdChild,
+  isEntityTornDown,
   onEntityTeardown,
   releaseEntity,
   runEntityLoad,
@@ -66,10 +68,10 @@ const TPropertyKeys = [
 
 export class ModelProperty {
   /**
-   * Cached under its id (schemaFileId) and `modelName:name` (ADR 0014). Its model holds it (see
-   * holdForModel), so app holders' unloads don't stop a model's property.
+   * Cached under its id (schemaFileId) and `modelName:name` (ADR 0014). Stays cached with no holds
+   * until it is destroyed or evicted (`unloadUnheld: false`), as Schema and Model do.
    */
-  static readonly cache = new EntityCache<ModelProperty>()
+  static readonly cache = new EntityCache<ModelProperty>({ unloadUnheld: false })
 
   // Pending writes tracking
   private static pendingWrites = new Map<string, {
@@ -391,10 +393,7 @@ export class ModelProperty {
         try {
           // An eviction of the model's schema since this instance was built (it may already be
           // stopped) must not re-create the model.
-          model = await Model.getByNameAsync(property.modelName, undefined, {
-            since: this._since,
-            hold: false,
-          })
+          model = await Model.getByNameAsync(property.modelName, undefined, { since: this._since })
         } catch {
           model = undefined
         }
@@ -559,8 +558,8 @@ export class ModelProperty {
     options: {
       waitForReady: false
       schemaName?: string
-      /** @internal false for the SDK's own loads (a model's properties): no hold is taken */
-      hold?: false
+      /** Take a cache hold, released with `unload()`. Default false: a property stays cached without one. */
+      hold?: boolean
     },
   ): ModelProperty
   static create(
@@ -569,13 +568,13 @@ export class ModelProperty {
       waitForReady?: true
       readyTimeout?: number
       schemaName?: string
-      /** @internal false for the SDK's own loads (a model's properties): no hold is taken */
-      hold?: false
+      /** Take a cache hold, released with `unload()`. Default false: a property stays cached without one. */
+      hold?: boolean
     },
   ): Promise<ModelProperty>
   static create(
     property: Static<typeof TProperty>,
-    options?: CreateWaitOptions & { schemaName?: string; hold?: false },
+    options?: CreateWaitOptions & { schemaName?: string; hold?: boolean },
   ): ModelProperty | Promise<ModelProperty> {
     if (!property) {
       throw new Error('Property is required')
@@ -584,7 +583,7 @@ export class ModelProperty {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
     const schemaName = options?.schemaName
-    const hold = options?.hold !== false
+    const hold = options?.hold === true
     // An id the caller passed (not one generated below): the cache may have that property
     const givenId =
       typeof property.id === 'string' ? property.id : ((property as { _propertyFileId?: string })._propertyFileId ?? undefined)
@@ -676,7 +675,7 @@ export class ModelProperty {
       
       if (hold) this.cache.holdInstance(instance)
       if (!waitForReady) return instance
-      return waitForEntityReady(instance, { timeout: readyTimeout }).then(() => instance)
+      return ModelProperty.readyOrRelease(instance, readyTimeout, hold)
     }
 
     const newInstance = new this(propertyWithId)
@@ -699,6 +698,7 @@ export class ModelProperty {
         return context
       },
       sendUpdate: (instance, prop: string, value: any) => {
+        instance._assertLoaded(`set ${prop} on`)
         const currentContext = instance._getSnapshotContext()
         if ((currentContext as Record<string, unknown>)[prop] === value) return // No-op, avoid triggering machine
         instance._service.send({
@@ -748,7 +748,18 @@ export class ModelProperty {
     })
 
     if (!waitForReady) return proxiedInstance
-    return waitForEntityReady(proxiedInstance, { timeout: readyTimeout }).then(() => proxiedInstance)
+    return ModelProperty.readyOrRelease(proxiedInstance, readyTimeout, hold)
+  }
+
+  /** The property once ready; a call that took a hold gives it back when it isn't ready in time. */
+  private static async readyOrRelease(property: ModelProperty, timeout: number, held: boolean): Promise<ModelProperty> {
+    try {
+      await waitForEntityReady(property, { timeout })
+    } catch (error) {
+      if (held) property.unload()
+      throw error
+    }
+    return property
   }
 
   /**
@@ -843,18 +854,29 @@ export class ModelProperty {
     if (owner) holdChild(owner, instance, this.cache)
   }
 
-  /** The cached ModelProperty with this propertyFileId, without taking a hold. */
-  static getById(propertyFileId: string): ModelProperty | undefined {
-    return this.cache.peek(propertyFileId)
+  /** The cached ModelProperty with this propertyFileId. Takes no hold unless `hold: true`. */
+  static getById(propertyFileId: string, options?: { hold?: boolean }): ModelProperty | undefined {
+    return options?.hold ? this.cache.hold(propertyFileId) : this.cache.peek(propertyFileId)
+  }
+
+  /**
+   * Takes one more hold on a cached, running instance, released with `unload()`. False (and no
+   * hold) when the instance isn't cached or was stopped.
+   */
+  static retain(instance: ModelProperty): boolean {
+    return instance.getService().getSnapshot().status === 'active' && this.cache.holdInstance(instance)
   }
 
   /**
    * Create or get ModelProperty instance by propertyFileId
-   * Queries the database to find the property if not cached
+   * Queries the database to find the property if not cached. Takes no hold unless `hold: true`
+   * (its model holds it either way).
    */
   static async createById(
     propertyFileId: string,
     options?: {
+      /** Take a cache hold, released with `unload()`. Default false. */
+      hold?: boolean
       /**
        * evictionLog.now() from when the caller's work started. An eviction of the property's model
        * or schema since then makes this return undefined instead of re-creating it. Defaults to now.
@@ -867,7 +889,7 @@ export class ModelProperty {
     }
 
     // Cached (an app may have created it before its model's load got here): its model holds it too
-    const cachedInstance = this.getById(propertyFileId)
+    const cachedInstance = this.getById(propertyFileId, options)
     if (cachedInstance) {
       this.holdForModel(cachedInstance)
       return cachedInstance
@@ -939,7 +961,7 @@ export class ModelProperty {
     }
 
     // Create ModelProperty instance (sync for createById so we can send updateContext)
-    const instance = this.create(propertyData, { waitForReady: false, hold: false })
+    const instance = this.create(propertyData, { waitForReady: false, hold: options?.hold })
     // Loaded for its model (Model's property list), not held by a caller
     this.holdForModel(instance)
     
@@ -1032,7 +1054,8 @@ export class ModelProperty {
 
   /**
    * Find ModelProperty instance by propertyFileId
-   * Waits for the property to be fully loaded (idle state) by default
+   * Waits for the property to be fully loaded (idle state) by default. Takes no hold unless
+   * `hold: true`; a call that throws keeps none.
    * @param options - Find options including propertyFileId and wait configuration
    * @returns ModelProperty instance if found, undefined otherwise
    */
@@ -1040,29 +1063,32 @@ export class ModelProperty {
     propertyFileId,
     waitForReady = true,
     readyTimeout = DEFAULT_READY_TIMEOUT_MS,
+    hold = false,
   }: {
     propertyFileId: string
     waitForReady?: boolean
     readyTimeout?: number
+    hold?: boolean
   }): Promise<ModelProperty | undefined> {
     if (!propertyFileId) {
       return undefined
     }
 
-    const property = ModelProperty.getById(propertyFileId) ?? (await ModelProperty.createById(propertyFileId))
-    if (property && waitForReady) await waitForEntityReady(property, { timeout: readyTimeout })
+    const property = await ModelProperty.createById(propertyFileId, { hold })
+    if (property && waitForReady) await ModelProperty.readyOrRelease(property, readyTimeout, hold)
     return property
   }
 
   /**
    * Get all ModelProperty instances for a model.
    * Loads property rows from DB for the given modelFileId, creates instances via createById, optionally waits for idle.
+   * Takes no holds unless `hold: true`.
    */
   static async all(
     modelFileId: string,
-    options?: { waitForReady?: boolean; readyTimeout?: number },
+    options?: { waitForReady?: boolean; readyTimeout?: number; hold?: boolean },
   ): Promise<ModelProperty[]> {
-    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS, hold = false } = options ?? {}
     if (!modelFileId) {
       return []
     }
@@ -1082,6 +1108,8 @@ export class ModelProperty {
     if (waitForReady && instances.length > 0) {
       await Promise.all(instances.map((property) => waitForEntityReady(property, { timeout: readyTimeout })))
     }
+    // Once nothing can throw, so a failed call keeps no holds
+    if (hold) for (const property of instances) this.cache.holdInstance(property)
 
     return instances
   }
@@ -1146,6 +1174,16 @@ export class ModelProperty {
    */
   static getPendingModelId(propertyFileId: string): number | undefined {
     return this.pendingWrites.get(propertyFileId)?.modelId
+  }
+
+  /** Throws EntityUnloadedError, naming the property, when this instance was destroyed or evicted. */
+  private _assertLoaded(action: string): void {
+    if (!isEntityTornDown(this)) return
+    const { modelName, name, id } = this._getSnapshotContext()
+    throw new EntityUnloadedError(
+      `Cannot ${action} property ${modelName ?? '?'}.${name ?? '?'} (${id ?? 'no id'}): this ModelProperty instance ` +
+        'was destroyed or evicted. Look the property up again (ModelProperty.find).',
+    )
   }
 
   getService(): ModelPropertyService {
@@ -1216,6 +1254,7 @@ export class ModelProperty {
   }
 
   save(): void {
+    this._assertLoaded('save')
     const snapshot = this._service.getSnapshot()
     const isAlreadySaving =
       typeof snapshot.value === 'object' && snapshot.value !== null && 'saveToSchema' in snapshot.value
@@ -1276,8 +1315,8 @@ export class ModelProperty {
   }
 
   /**
-   * Releases this caller's hold. The instance is shared: it keeps running while other callers hold
-   * it, or while its model holds it. An instance nobody else holds is stopped and leaves the cache.
+   * Releases this caller's hold, if it took one. The property stays cached (see
+   * `ModelProperty.cache`); only `destroy`, eviction or client stop stop it.
    */
   unload(): void {
     releaseEntity(this, ModelProperty.cache)
@@ -1311,7 +1350,7 @@ export class ModelProperty {
       // Resolve schema name from DB when _schemaName is missing (e.g. destroy ran before _setSchemaName finished)
       const schemaName = context._schemaName ?? (db ? await this._resolveSchemaNameForDestroy(db, context) : undefined)
       if (!schemaName) return
-      const schema = await Schema.find({ schemaName, waitForReady: false, hold: false })
+      const schema = await Schema.find({ schemaName, waitForReady: false })
       const schemaContext = schema?.getService().getSnapshot().context
       if (schema && schemaContext?.models?.[modelName]?.properties?.[propertyName]) {
         const updatedModels = { ...schemaContext.models }

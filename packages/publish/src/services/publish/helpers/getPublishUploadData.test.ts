@@ -9,6 +9,7 @@ import {
 } from '../../../../../sdk/__tests__/test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
+  createItemWithDanglingRelation,
   waitForPropertyInstances,
 } from '../../../../../sdk/__tests__/test-utils/getPublishPayloadIntegrationHelpers'
 
@@ -41,19 +42,14 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
   }, 30000)
 
   it('still throws for a local id with no local item', async () => {
-    const postItem = await Item.create({
-      modelName: 'Post',
-      title: 'Post with broken author',
-      author: '0000000000',
-    } as any)
-    await waitForPropertyInstances(postItem)
-    await expect(getPublishUploadData(postItem)).rejects.toThrow('No relatedItem found for author')
+    const { postItem } = await createItemWithDanglingRelation({ title: 'Post with broken author' })
+    await expect(getPublishUploadData(postItem as any)).rejects.toThrow('No relatedItem found for author')
   }, 30000)
 
   it('walks every related draft: through lists, relations of drafts, and cycles', async () => {
     const schemaName = 'Test Schema publishUploadDataGraph'
     const schema = {
-      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      $schema: 'https://seedprotocol.io/schemas/data-model/v1',
       version: 1,
       id: generateId(),
       metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },

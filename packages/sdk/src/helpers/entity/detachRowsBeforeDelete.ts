@@ -1,20 +1,18 @@
 import { inArray } from 'drizzle-orm'
 import type { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, modelUids, properties, propertyUids } from '@/seedSchema'
+import { metadata, modelUids, properties } from '@/seedSchema'
 
 type AppDb = NonNullable<ReturnType<typeof BaseDb.getAppDb>>
 
 /**
  * Before deleting property rows: unlink stored item values (metadata.property_id → NULL; the
- * values stay, keyed by property name) and drop the properties' EAS uid mappings. Without this,
- * Node (libsql enforces foreign keys) fails the delete as soon as an item has a value, and the
- * browser leaves rows pointing at deleted ids.
+ * values stay, keyed by property name). Without this, Node (libsql enforces foreign keys) fails
+ * the delete as soon as an item has a value, and the browser leaves rows pointing at deleted ids.
  */
 export async function detachPropertyRows(db: AppDb, propertyIds: readonly number[]): Promise<void> {
   if (propertyIds.length === 0) return
   const ids = [...propertyIds]
   await db.update(metadata).set({ propertyId: null }).where(inArray(metadata.propertyId, ids))
-  await db.delete(propertyUids).where(inArray(propertyUids.propertyId, ids))
 }
 
 /**

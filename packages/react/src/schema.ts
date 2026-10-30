@@ -13,6 +13,7 @@ import type { SchemaType as DbSchemaType } from '@seedprotocol/sdk'
 import { useQuery } from "@tanstack/react-query"
 import { useSeedQueryClient } from "./queryClient"
 import { useCreateState } from "./useCreateState"
+import { useHeldEntities } from "./useHeldEntities"
 
 const logger = debug('seedSdk:react:schema')
 
@@ -31,7 +32,7 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
   const [error, setError] = useState<Error | null>(null)
   const isClientReady = useIsClientReady()
 
-  // Each load takes a hold on the cached instance (Schema.create); the load's cleanup releases it.
+  // Each load takes a hold on the instance it shows (Schema.create with hold); its cleanup releases it.
   const loadSchema = useCallback(async (identifier: string, load: SchemaLoad) => {
     setIsLoading(true)
     setError(null)
@@ -47,6 +48,7 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
       if (!load.current) return
       const schemaInstance = Schema.create(identifier, {
         waitForReady: false,
+        hold: true,
       }) as Schema
       load.instance = schemaInstance
       setSchema(schemaInstance)
@@ -132,6 +134,9 @@ async function schemaExists(identifier: string): Promise<boolean> {
 }
 
 const SEED_SCHEMAS_QUERY_KEY = ['seed', 'schemas'] as const
+const NO_SCHEMAS: Schema[] = []
+/** Schema.retain, stable for useHeldEntities. */
+const retainSchema = (schema: Schema) => Schema.retain(schema)
 
 export const useSchemas = () => {
   const isClientReady = useIsClientReady()
@@ -140,7 +145,7 @@ export const useSchemas = () => {
   const schemasRef = useRef<Schema[]>([])
 
   const {
-    data: schemas = [],
+    data: schemas = NO_SCHEMAS,
     isLoading,
     error: queryError,
   } = useQuery({
@@ -149,6 +154,13 @@ export const useSchemas = () => {
     enabled: isClientReady,
   }, queryClient)
   schemasRef.current = schemas
+
+  // One hold per mounted hook on each schema it lists. A schema that can't be held, or stops while
+  // listed (destroyed, evicted, client stop), is listed again.
+  const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: SEED_SCHEMAS_QUERY_KEY })
+  }, [queryClient])
+  useHeldEntities(schemas, retainSchema, refetch)
 
   // Watch the schemas table for changes and invalidate so useQuery refetches
   const db = isClientReady ? BaseDb.getAppDb() : null
@@ -331,8 +343,10 @@ export const useAllSchemaVersions = () => {
           currentInstances.set(schemaName, existingInstance)
         } else {
           // Create new instance
+          // Held until it leaves the list or the hook unmounts (below)
           const schema = Schema.create(schemaName, {
             waitForReady: false,
+            hold: true,
           }) as Schema
           currentInstances.set(schemaName, schema)
         }

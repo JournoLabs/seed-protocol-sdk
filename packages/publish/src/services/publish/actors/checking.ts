@@ -8,15 +8,16 @@ import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import {
   assertLocalDbChain,
-  getUnpublishedRelatedItems,
   isItemOwned,
   RelatedItemUnpublishedError,
+  summarizePublishUploads,
   validateItemForPublish,
 } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
-import { ManagedAccountPublishError } from '../../../errors'
+import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
+import { estimateUpload } from '../../publishCost/uploadEstimate'
 
 const activePublishProcesses = new Set<string>()
 
@@ -75,7 +76,7 @@ function deployerFor(publisherAddress: string): (() => Promise<void>) | undefine
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
   ({ sendBack, input: { context } }) => {
-    const { item, account, wallet, publishMode, address } = context
+    const { item, account, wallet, publishMode, address, uploadLimits, confirmUpload } = context
 
     const _check = async () => {
       const owned = await isItemOwned(item)
@@ -99,11 +100,11 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         // RPC chain id and contract deployments; cached after the first success.
         await verifyPublishChain()
 
-        // References to unpublished (revoked) items fail the publish before schemas are
-        // registered or anything is uploaded; validateItemForPublish below reports the same.
-        const unpublishedRelatedItems = await getUnpublishedRelatedItems(item, {
-          publishMode: publishMode ?? 'patch',
-        })
+        // References to unpublished (revoked) items and the upload size limits fail the publish
+        // before schemas are registered or any file is read; validateItemForPublish below
+        // reports the references too.
+        const uploads = await summarizePublishUploads(item, { publishMode: publishMode ?? 'patch' })
+        const { unpublishedRelatedItems } = uploads
         if (unpublishedRelatedItems.length > 0) {
           activePublishProcesses.delete(item.seedLocalId)
           sendBack({
@@ -113,33 +114,16 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           return
         }
 
-        const publishWallet = wallet ?? account
-        if (publishWallet) {
-          await ensureEasSchemasForItem(
-            item,
-            publishWallet as import('~/helpers/seedSigner').PublishWallet,
-            { managedAddress: typeof address === 'string' ? address : undefined },
-          )
-        }
-
-        const validation = await (validateItemForPublish as any)(item, [], {
-          publishMode: publishMode ?? 'patch',
-        })
-        if (!validation.isValid) {
+        const upload = estimateUpload(uploads, uploadLimits)
+        const uploadRefusal = upload.tooLarge
+          ? new UploadTooLargeError(upload)
+          : upload.requiresConfirm && !confirmUpload
+            ? new UploadNeedsConfirmError(upload)
+            : null
+        if (uploadRefusal) {
           activePublishProcesses.delete(item.seedLocalId)
-          sendBack({ type: 'validationFailed', errors: validation.errors })
+          sendBack({ type: 'checkingFailed', error: uploadRefusal })
           return
-        }
-
-        // ADR 0021: retracted properties are revoked after attesting, from the attester. Fail now,
-        // before anything is attested, when this wallet can't revoke.
-        if (item.seedUid) {
-          const { getPendingRetractions } = await import('@seedprotocol/sdk')
-          const retractions = await getPendingRetractions({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
-          if (retractions.length > 0) {
-            const { assertCanRevokeSeedAttestations } = await import('../../revoke/revokeAttestations')
-            await assertCanRevokeSeedAttestations({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
-          }
         }
 
         if (!address || typeof address !== 'string' || !address.trim()) {
@@ -150,6 +134,33 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           })
           return
         }
+
+        // ADR 0021: retracted properties are revoked after attesting, from the attester. Fail now,
+        // before anything is attested and before EAS schemas are registered (which costs
+        // transactions), when this wallet can't revoke.
+        if (item.seedUid) {
+          const { getPendingRetractions } = await import('@seedprotocol/sdk')
+          const retractions = await getPendingRetractions({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          if (retractions.length > 0) {
+            const { assertCanRevokeSeedAttestations } = await import('../../revoke/revokeAttestations')
+            await assertCanRevokeSeedAttestations({ seedLocalId: item.seedLocalId, seedUid: item.seedUid })
+          }
+        }
+
+        // The attestation steps take the registered wallet when the run has none, so the schema
+        // check does too. With no wallet at all, nothing can attest: stop before any upload.
+        const publishWallet = (wallet ?? account ?? getPublishWallet()) as
+          | import('~/helpers/seedSigner').PublishWallet
+          | null
+          | undefined
+        if (!publishWallet) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'checkingFailed', error: new PublishWalletMissingError() })
+          return
+        }
+        await ensureEasSchemasForItem(item, publishWallet, {
+          managedAddress: typeof address === 'string' ? address : undefined,
+        })
 
         let attestationStrategy: 'multiPublish' | 'directEas'
         try {
@@ -166,10 +177,22 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           return
         }
 
+        // Validate the payload the route will build: the contract links back references, direct
+        // EAS defers them. Before an undeployed smart account is deployed below, so an invalid item
+        // costs no transaction.
+        const validate = async (): Promise<boolean> => {
+          const validation = await (validateItemForPublish as any)(item, [], {
+            publishMode: publishMode ?? 'patch',
+            backReferences: attestationStrategy === 'multiPublish' ? 'link' : 'defer',
+          })
+          if (validation.isValid) return true
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'validationFailed', errors: validation.errors })
+          return false
+        }
+        if (!(await validate())) return
+
         if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
-          const publishWallet = (wallet ?? account) as
-            | Partial<import('~/helpers/seedSigner').PublishWallet>
-            | undefined
           const { directEasProblem } = await import('../helpers/undeployedSmartAccount')
           let problem = directEasProblem(address.trim(), publishWallet)
           // An undeployed smart account: deploy it (one transaction), then publish through it.
@@ -185,6 +208,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
               if (codeKind === 'contract') {
                 attestationStrategy = 'multiPublish'
                 problem = null
+                if (!(await validate())) return
               }
             }
           }

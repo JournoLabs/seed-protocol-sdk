@@ -143,6 +143,22 @@ describe('applyMappingAsync', () => {
     },
   ]
 
+  it("passes an empty field's value, not its name, as the url", async () => {
+    const urls: string[] = []
+    await applyMappingAsync(
+      [{ id: 'fm-link', label: 'link', kind: 'frontmatter', value: '' }],
+      [{ sourceId: 'fm-link', propertyName: 'html', resolve: 'extract' }],
+      [{ name: 'html', dataType: 'Html' }],
+      {
+        resolve: async (ctx) => {
+          urls.push(ctx.url)
+          return ''
+        },
+      },
+    )
+    expect(urls).toEqual([''])
+  })
+
   it('resolves extract and file via host callback', async () => {
     const result = await applyMappingAsync(
       linkSources,
@@ -229,39 +245,10 @@ describe('applyMappingAsync', () => {
           sourceId: 'rss-author',
           propertyName: 'authors',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Jane Doe', ref: 'identity-uid-1' }] },
+          lookup: { entries: [{ value: 'Jane Doe', refs: ['identity-uid-1'] }] },
         },
       ],
       [authorsTarget],
-    )
-    expect(result.errors).toEqual([])
-    expect(result.properties.authors).toEqual(['identity-uid-1'])
-  })
-
-  it('falls back to deprecated document lookups', async () => {
-    const authorSources: SourceNode[] = [
-      {
-        id: 'rss-author',
-        label: 'author',
-        kind: 'rssField',
-        value: '  Jane Doe  ',
-      },
-    ]
-    const result = await applyMappingAsync(
-      authorSources,
-      [
-        {
-          sourceId: 'rss-author',
-          propertyName: 'authors',
-          resolve: 'lookup',
-        },
-      ],
-      [authorsTarget],
-      {
-        lookups: {
-          authors: { 'Jane Doe': 'identity-uid-1' },
-        },
-      },
     )
     expect(result.errors).toEqual([])
     expect(result.properties.authors).toEqual(['identity-uid-1'])
@@ -340,7 +327,7 @@ describe('applyMappingAsync', () => {
           sourceId: 'rss-author',
           propertyName: 'authors',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
+          lookup: { entries: [{ value: 'Mira Chen', refs: ['local_1'] }] },
         },
         { sourceId: 'rss-author', propertyName: 'byline' },
       ],
@@ -365,12 +352,27 @@ describe('applyMappingAsync', () => {
           sourceId: 'rss-author',
           propertyName: 'authors',
           resolve: 'lookup',
-          lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
+          lookup: { entries: [{ value: 'Mira Chen', refs: ['local_1'] }] },
         },
       ],
       [authorsTarget],
     )
     expect(bag).toEqual({})
     expect(bag.authors).toBeUndefined()
+  })
+})
+
+describe('Boolean and empty values', () => {
+  it('reads true, 1 and yes in any case', () => {
+    for (const raw of ['true', 'TRUE', 'True', ' yes ', 'YES', '1']) expect(coerceValue(raw, 'Boolean')).toBe(true)
+    for (const raw of ['false', 'no', '0', '']) expect(coerceValue(raw, 'Boolean')).toBe(false)
+  })
+
+  it("copies an empty field as empty, not as its label", async () => {
+    const empty = [{ id: 'fm-subtitle', label: 'subtitle', kind: 'frontmatter' as const, value: '' }]
+    const targetsEmpty = [{ name: 'subtitle', dataType: 'Text' }]
+    const mappingsEmpty = [{ sourceId: 'fm-subtitle', propertyName: 'subtitle' }]
+    expect(applyMapping(empty, mappingsEmpty, targetsEmpty)).toEqual({ subtitle: '' })
+    expect((await applyMappingAsync(empty, mappingsEmpty, targetsEmpty)).properties).toEqual({ subtitle: '' })
   })
 })
