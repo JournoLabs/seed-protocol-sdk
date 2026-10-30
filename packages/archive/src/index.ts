@@ -12,6 +12,15 @@ export {
   type CreateBagOptions,
 } from './bag'
 export { validateBag, type BagValidation } from './validateBag'
+export {
+  readBagInfo,
+  verifyArchive,
+  verifyInstructions,
+  type ArchiveCheck,
+  type ArchiveVerification,
+  type VerifyArchiveOptions,
+  type VerifyInstructions,
+} from './verifyArchive'
 export { BAG_ALGORITHMS, digestHex, type BagAlgorithm } from './bytes'
 export { ArchiveError, type ArchiveErrorCode } from './errors'
 export { findHtmlUrls, rewriteHtmlAttributes, rewriteHtmlUrls } from './html'

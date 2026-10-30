@@ -75,6 +75,10 @@ export {
   type ExportArchiveOptions,
   type ExportArchiveResult,
 } from './archive/exportArchive'
+export {
+  verifyArchiveAgainstChain,
+  type ArchiveChainVerification,
+} from './archive/verifyArchiveAgainstChain'
 export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {

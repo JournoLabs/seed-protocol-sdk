@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { digestHex, getBagFile, validateBag, type Bag } from '@seedprotocol/archive'
+import { createBag, digestHex, getBagFile, readBagInfo, validateBag, type Bag } from '@seedprotocol/archive'
 import { writeBagDirectory } from '@seedprotocol/archive/node'
 import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
 import { Item } from '@/Item/Item'
@@ -14,6 +14,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds, versions } from '@/seedSchema'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { ArchiveExportError, exportArchive } from '@/archive/exportArchive'
+import { verifyArchiveAgainstChain } from '@/archive/verifyArchiveAgainstChain'
 import { rewriteHtmlEmbeddedImagesOnDisk } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { waitForPendingOutboxOps } from '@/outbox'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
@@ -377,6 +378,48 @@ testDescribe('exportArchive', () => {
       await fakeChain(post, { olderVersion: 'revoked', newerRevokedVersion: true })
       const after = await exportArchive(post, { fetch: false, reproducible: true })
       expect(text(after.bag, 'tagmanifest-sha256.txt')).toBe(text(before.bag, 'tagmanifest-sha256.txt'))
+    }, 120000)
+
+    it('verifies a bag by rebuilding it from the chain, and names what a forged one changed', async () => {
+      const post = await createPublishedPost()
+      await fakeChain(post)
+      const { bag } = await exportArchive(post, { fetch: false, reproducible: true })
+      expect(text(bag, 'VERIFY.txt')).toContain('shasum -a 256 -c manifest-sha256.txt')
+      expect(validateBag(bag)).toEqual({ valid: true, errors: [] })
+
+      const good = await verifyArchiveAgainstChain(bag, post)
+      expect(good.fixity.status).toBe('passed')
+      expect(good.rebuilt.status).toBe('passed')
+      expect(good.differingFiles).toEqual([])
+
+      // Consistent manifests, so only the rebuild can catch it.
+      const source = bag.files.filter((f) => f.path.startsWith('data/')).map((f) => ({
+        path: f.path.slice('data/'.length),
+        bytes: f.path === 'data/index.html' ? new TextEncoder().encode('<p>forged</p>') : f.bytes,
+      }))
+      const tagFiles = bag.files.filter((f) => f.path === 'VERIFY.txt' || f.path.startsWith('metadata/'))
+      const forged = createBag({
+        payload: source,
+        tagFiles,
+        info: ['Seed-Uid', 'Seed-Version-Uid', 'Seed-Bag-Format'].map((l) => [l, readBagInfo(bag).get(l)!]),
+      })
+      const result = await verifyArchiveAgainstChain(forged, post)
+      expect(result.fixity.status).toBe('passed')
+      expect(result.rebuilt.status).toBe('failed')
+      expect(result.differingFiles).toContain('data/index.html')
+    }, 120000)
+
+    it('reports a bag it cannot rebuild as not checked', async () => {
+      const post = await createPublishedPost()
+      const ordinary = await exportArchive(post, { fetch: false })
+      expect((await verifyArchiveAgainstChain(ordinary.bag, post)).rebuilt.status).toBe('not_checked')
+
+      await fakeChain(post)
+      const { bag } = await exportArchive(post, { fetch: false, reproducible: true })
+      await fakeChain(post, { newerVersion: true })
+      const behind = await verifyArchiveAgainstChain(bag, post)
+      expect(behind.rebuilt).toMatchObject({ status: 'not_checked' })
+      expect(behind.rebuilt.detail).toContain('not_synced')
     }, 120000)
 
     it('types a file by its bytes, whatever this device named it', async () => {

@@ -5,6 +5,7 @@ import {
   parseArchiveDocument,
   premisXml,
   rewriteHtmlUrls,
+  verifyInstructions,
   type Bag,
   type BagFile,
   type BagInfoEntry,
@@ -98,7 +99,7 @@ export class ArchiveExportError extends Error {
  */
 export type ArchiveClockSource = 'chain-block' | 'local-record' | 'export-device'
 
-type ExportableItem = {
+export type ExportableItem = {
   seedLocalId: string
   modelName?: string
   getService?: () => { getSnapshot: () => { context: { schemaName?: string } } }
@@ -540,6 +541,12 @@ export async function exportArchive(item: ExportableItem, options: ExportArchive
     tagFiles: [
       { path: 'metadata/dc.xml', bytes: encoder.encode(dc) },
       { path: 'metadata/premis.xml', bytes: encoder.encode(premis) },
+      {
+        path: 'VERIFY.txt',
+        bytes: encoder.encode(
+          verifyInstructions({ seedUid, versionUid: version.uid, explorerUrl: explorerUrl(version.uid), reproducible }),
+        ),
+      },
     ],
     info,
     baggingDate: new Date(bagStamp.iso),

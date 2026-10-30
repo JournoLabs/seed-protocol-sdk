@@ -26,6 +26,7 @@ manifest-sha256.txt           payload checksums
 manifest-sha512.txt
 metadata/dc.xml               Dublin Core (oai_dc)
 metadata/premis.xml           PREMIS 3.0 objects, events and agents
+VERIFY.txt                    the commands to check the bag by hand
 tagmanifest-sha256.txt        checksums of every file above
 tagmanifest-sha512.txt
 data/index.html               the Html, with references to bagged files made relative
@@ -94,6 +95,31 @@ synced and reads it with the same schema. This is the bag to anchor, sign or pub
 
 An ordinary export reads local rows only, works offline (with `fetch: false`), and can differ from
 device to device.
+
+## Verifying a bag
+
+`verifyArchive(bag, { expectedTagmanifestSha256 })` from `@seedprotocol/archive` needs no Seed code
+or network. `fixity` checks the bag against its own manifests. `anchor` compares the SHA-256 of
+`tagmanifest-sha256.txt` with a hash from outside the bag, and stays `not_checked` without one.
+Each check is reported on its own, because anyone who changes a file can rewrite the manifests too:
+`fixity` alone says the bag is intact, and not that it's the bag you expect.
+
+`verifyArchiveAgainstChain(bag, item)` from `@seedprotocol/sdk` adds `rebuilt`: it makes a
+reproducible export of the item from EAS and compares the two bags, listing what differs in
+`differingFiles`.
+
+```ts
+import { verifyArchiveAgainstChain } from '@seedprotocol/sdk'
+
+const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag, post)
+```
+
+`rebuilt` is `not_checked`, with the reason in `detail`, for an ordinary export, a bag of another
+seed, a bag of an older Version (only the current Version can be rebuilt), a bag in another
+`Seed-Bag-Format`, or an export that refuses. EAS doesn't record a bag's hash yet, so this rebuild is the
+SDK's only hash source.
+
+Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
 
 ## What an attestation proves
 

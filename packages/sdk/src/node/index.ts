@@ -39,6 +39,10 @@ export {
   type ExportArchiveOptions,
   type ExportArchiveResult,
 } from '../archive/exportArchive'
+export {
+  verifyArchiveAgainstChain,
+  type ArchiveChainVerification,
+} from '../archive/verifyArchiveAgainstChain'
 
 // Node.js specific exports
 export { NodeFileManager } from './helpers/FileManager'

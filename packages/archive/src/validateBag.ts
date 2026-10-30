@@ -10,7 +10,7 @@ export type BagValidation = {
 const MANIFEST = /^(tag)?manifest-([a-z0-9]+)\.txt$/
 
 /** `label: value` pairs of a tag file, with indented continuation lines folded back in. */
-const parseTagLines = (text: string): [string, string][] => {
+export const parseTagLines = (text: string): [string, string][] => {
   const entries: [string, string][] = []
   for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
     if (line === '') continue

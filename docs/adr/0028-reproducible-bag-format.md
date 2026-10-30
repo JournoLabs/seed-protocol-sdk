@@ -7,8 +7,8 @@
 ## Context
 
 `exportArchive(item, { reproducible: true })` builds a BagIt bag whose
-`tagmanifest-sha256.txt` hash is the same on every client. Phase 2 of the archive plan anchors that
-hash in the Version's EAS record and Phase 5 signs it. Once a hash is on chain, any change to the
+`tagmanifest-sha256.txt` hash is the same on every client. That hash is meant to be anchored in the
+Version's EAS record and signed. Once a hash is on chain, any change to the
 bytes makes old bags impossible to reproduce and check, so the rules need to be fixed and changes
 to them visible.
 
@@ -20,7 +20,7 @@ A reproducible bag is a function of these inputs and no others:
   attestations on that Version, all as EAS reports them.
 - The bytes of the files those attestations name.
 - The schema, which decides the model and property names in the bag.
-- The chain id and the rules of the format version.
+- The chain id and the rules of the format version, including the text of `VERIFY.txt`.
 
 So the following never reach the bytes: the export time, device clocks, local file names, local
 seed ids, the configured gateway, `sourceOrganization`, and revocations of other Versions. Relations
