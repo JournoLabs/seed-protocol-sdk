@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `parseRssString` adds `creatorList` and `authorList` to an item, keeping a repeated `dc:creator` or `author` that `creator` and `author` collapse to the first.
+
 ## 0.8.0 (2026-10-30)
 
 - Atom: a present `null` in an item's `updated` or `links` keeps the default (the pubDate, or the item's link). `{ updated: null }` gave an entry with no `<updated>`, which RFC 4287 requires.

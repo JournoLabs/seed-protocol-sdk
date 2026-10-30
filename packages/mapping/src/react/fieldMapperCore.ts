@@ -8,7 +8,8 @@ import {
 } from '../edgeMapping'
 import {
   isRelationLookupTarget,
-  resolveLookup,
+  resolveSourceLookup,
+  lookupValuesFromSource,
   sampleValueFromSource,
   shapeLookupValue,
   stripLookup,
@@ -134,19 +135,19 @@ export function previewForEdge(
     return `‹file stored from ${truncateSample(source.value, 48)}›`
   }
   if (resolve === 'lookup') {
-    const raw = source.value ?? ''
     const mapping = options?.mapping ?? {
       sourceId: source.id,
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
       resolve: 'lookup' as const,
     }
-    const { refs, unmatched } = resolveLookup(mapping, raw)
+    const { refs, misses } = resolveSourceLookup(mapping, source)
+    const missing = misses.map(({ value }) => `‹lookup ref for "${truncateSample(value, 48)}"›`)
     if (refs.length > 0) {
       const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
       const shown = Array.isArray(shaped) ? shaped : [shaped]
-      const missing = unmatched.map((part) => `‹lookup ref for "${truncateSample(part, 48)}"›`)
       return truncateSample([...shown, ...missing].join(', '), 80)
     }
+    if (source.values?.length) return truncateSample(missing.join(', '), 80)
     return `‹lookup ref for "${truncateSample(source.value, 48)}"›`
   }
   // Sync apply skips plain copies onto relation targets.
@@ -200,7 +201,7 @@ export function rowState(args: {
   mapping?: FieldMapping
   requiredResolve: ResolveJob | null
   conflict?: boolean
-  sampleValue?: string
+  source?: SourceNode
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
   if (!args.mapping || !isPresentEdge(args.mapping)) return 'empty'
@@ -211,8 +212,10 @@ export function rowState(args: {
     }
   }
   if (actual === 'lookup') {
-    const sample = args.sampleValue ?? ''
-    if (!sample || resolveLookup(args.mapping, sample).unmatched.length > 0) {
+    if (
+      lookupValuesFromSource(args.source).length === 0 ||
+      resolveSourceLookup(args.mapping, args.source).misses.length > 0
+    ) {
       return 'needsLookup'
     }
   }
@@ -425,7 +428,7 @@ export function buildPropertyModeRows(args: {
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
     const sampleValue = sampleValueFromSource(source)
-    const state = rowState({ mapping, requiredResolve, sampleValue })
+    const state = rowState({ mapping, requiredResolve, source })
     return {
       id: target.name,
       target,
@@ -521,7 +524,7 @@ export function buildSourceModeRows(args: {
       mapping: complete,
       requiredResolve,
       conflict: conflicts.has(r.id),
-      sampleValue,
+      source: r.source,
     })
     // Drafts with only source or only property stay empty
     const effectiveState =

@@ -21,6 +21,15 @@ const MINIMAL_RSS = `<?xml version="1.0" encoding="UTF-8"?>
 </rss>`
 
 describe('parseRssString', () => {
+  it('keeps every repeated dc:creator for the mapping adapter', async () => {
+    const parsed = await parseRssString(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>t</title>
+<item><dc:creator>Mira Chen</dc:creator><dc:creator>Sam Ortiz</dc:creator></item>
+</channel></rss>`)
+    expect(parsed.items[0]!['creator']).toBe('Mira Chen')
+    expect(parsed.items[0]!['creatorList']).toEqual(['Mira Chen', 'Sam Ortiz'])
+  })
+
   it('parses channel and items', async () => {
     const parsed = await parseRssString(MINIMAL_RSS)
     expect(parsed.title).toBe('Test Channel')

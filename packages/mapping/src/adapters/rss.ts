@@ -1,5 +1,6 @@
 import Parser from 'rss-parser'
 import { classifyUrl } from '../classifyUrl'
+import { lookupKey } from '../relationLookup'
 import type { SourceNode } from '../types'
 
 export type ParsedRssChannel = {
@@ -33,6 +34,8 @@ const parser = new Parser({
       'SeedUid',
       ['media:content', 'mediaContent'],
       ['media:thumbnail', 'mediaThumbnail'],
+      ['dc:creator', 'creatorList', { keepArray: true }],
+      ['author', 'authorList', { keepArray: true }],
     ],
   },
 })
@@ -166,9 +169,40 @@ function pushMediaNode(
   })
 }
 
+/** The lists the parser keeps for repeated elements, by the fields it collapses to the first. */
+const REPEATED_LISTS: Record<string, readonly string[]> = {
+  creator: ['creatorList', 'authorList'],
+  'dc:creator': ['creatorList'],
+  author: ['authorList'],
+}
+
+const REPEATED_LIST_KEYS = new Set(Object.values(REPEATED_LISTS).flat())
+
+/** A repeated element's text. An Atom `<author>` parses to `{ name: [text] }`. */
+function repeatedElementValue(raw: unknown): string | null {
+  const name = (raw as { name?: unknown } | null)?.name
+  return coerceFieldValue(Array.isArray(name) ? name[0] : raw)
+}
+
+/** A field's distinct values when its element repeats, in document order. */
+function repeatedValues(
+  item: Record<string, unknown>,
+  key: string,
+): string[] | undefined {
+  const lists = REPEATED_LISTS[key] ?? []
+  const list = lists.map((k) => item[k]).find(Array.isArray) ?? []
+  const byKey = new Map<string, string>()
+  for (const raw of list) {
+    const value = repeatedElementValue(raw)
+    if (value && !byKey.has(lookupKey(value))) byKey.set(lookupKey(value), value)
+  }
+  return byKey.size > 1 ? [...byKey.values()] : undefined
+}
+
 /**
  * Flatten a parsed RSS/Atom item into SourceNodes (one per string-coercible key).
  * Enclosure / media:content become url + type in `meta` (not stringified objects).
+ * A repeated `dc:creator` or `author` keeps its first value in `value` and all of them in `values`.
  * Stable ids: `rss-{key}`, `rss-enclosure-0`, …
  */
 export function rssItemToSources(item: Record<string, unknown>): SourceNode[] {
@@ -178,6 +212,7 @@ export function rssItemToSources(item: Record<string, unknown>): SourceNode[] {
   let enclosureIndex = 0
   for (const [key, raw] of Object.entries(item)) {
     if (key === 'items' || key.startsWith('$')) continue
+    if (REPEATED_LIST_KEYS.has(key) && Array.isArray(raw)) continue
 
     if (MEDIA_KEYS.has(key)) {
       const entries = mediaEntriesFromValue(raw)
@@ -207,6 +242,9 @@ export function rssItemToSources(item: Record<string, unknown>): SourceNode[] {
       kind: 'rssField',
       value,
     }
+
+    const values = repeatedValues(item, key)
+    if (values) node.values = values
 
     // Feature image URLs: attach class hint when value looks like a URL
     if (
