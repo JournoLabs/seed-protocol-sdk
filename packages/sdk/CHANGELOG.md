@@ -4,6 +4,16 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `exportArchive` returns `arweaveTransactions`: with `reproducible`, each bag path whose bytes a published transaction already holds, for `buildPathManifest`.
+- `exportArchive` takes `reproducible`: every client with the same schema gets the same bytes and the same tagmanifest hash for a seed at one time. Values, times and the attester come from EAS and file bytes from their Arweave transactions, with no rows read, so `item` can be `{ seedUid, modelName, schemaName }` on a device that holds nothing for the seed. `asOf` (unix seconds) pins the time: a later patch, Version, retraction or revocation doesn't change that bag. It throws `not_synced`, `chain_unavailable`, `incomplete` or `invalid_options` instead of writing a bag another client couldn't reproduce. Files are typed by their bytes, and bag-info.txt carries `Seed-Bag-Format` and `Seed-Bag-As-Of`. Every time in a bag, reproducible or not, now says whose clock it came from (`chain-block`, `local-record`, `export-device`), in PREMIS event details, `item.json` and `bag-info.txt`.
+- New `verifyArchiveAgainstChain(bag, item)` checks a bag against a fresh reproducible export of the item at the time the bag covers, on top of `verifyArchive`'s checks. Every bag from `exportArchive` now carries `VERIFY.txt`.
+- `exportArchive` writes each Html to `data/source/` byte for byte. It decoded and encoded the text again, which dropped a BOM and replaced invalid UTF-8.
+- `exportArchive` records a published Relation or List of relations in `item.json` as seed uids. It wrote `null` for them. A related seed with no uid stays as its local id and is listed in `omitted`.
+- **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`; `updateSeedUid` takes `{ db }`.
+- `client.stop()`, `client.unload()` and `client.resetLocalData()` end a running EAS sync before closing the database. Network waits end at once, a database write in progress finishes first, and a pending `client.syncFromEas()` rejects with `EAS sync stopped: the client stopped`. The sync used to keep running, and a queued one started, against a closed or deleted database.
+
+## 0.8.0 (2026-10-30)
+
 - EAS sync skips a relation whose value is an unfilled reference (`isUnfilledReference` in @seedprotocol/eas), drops such members from a list, and doesn't fetch them as related seeds. Only `0x…20` was skipped before; other small values were stored as relations to seeds that don't exist.
 - New `getPublishPayload` / `validateItemForPublish` / `getPublishGraph` option `backReferences` (`PublishBackReferences`): `'link'` attests a relation back to an item the publish is still creating (both sides of A ↔ B) and fills it with a reference; `'defer'`, the default, leaves it for a later publish as before.
 - `getPublishPayload` gives a reference into a list property `listElement: true` and the `elementIndex` it fills, one entry per position where the list holds the draft, so a draft listed twice fills both (see the @seedprotocol/publish changelog).
@@ -17,6 +27,30 @@ All notable changes to this package are documented in this file.
 - `client.resetLocalData()` in Node throws `ResetLocalDataBrowserOnlyError` (`code: 'RESET_LOCAL_DATA_BROWSER_ONLY'`, decision D36), exported from both entries. It threw a plain `Error` with the same message.
 - `UpdateVersionUidProps`, the type of `recordPublishRequest`'s `version`, is exported from the main entry.
 - `ItemPublishOptions` documents `confirmUpload` and `maxUploadBytes` (see the @seedprotocol/publish changelog).
+
+### Commits
+
+#### Breaking
+
+- a repeat client.init leaves the stored addresses alone (0417ee9f)
+
+#### Features
+
+- eas, query: readers treat an unfilled reference as no related seed (de73cdfc)
+- publish: decode the three-phase multiPublish's reference errors (1c8bb4e8)
+- publish: a contract publish attests both sides of a draft cycle (22e657e4)
+- publish: publish the whole graph in one multiPublish transaction (1d1c3188)
+- a publish reference into a list names the element it fills (69f3e11a)
+- publish: upload size limit, confirm step and upload estimate (68a833f1)
+
+#### Fixes
+
+- publish: drop the stale-executor migration, refuse unfilled placeholders, name PublishValueMismatch (2d39289f)
+- a property rename to a reserved word fails validation (d645694a)
+- Model.create refuses a name that can't publish and leaves no model (adecfe08)
+- typed errors for getPublishModels and Node resetLocalData; export UpdateVersionUidProps (89939f2d)
+- OPFS stat of a just-removed file fails with ENOENT (243b9552)
+- use seedprotocol.io for the schema file $schema URL (ea2d96e3)
 
 ## 0.7.13 (2026-10-29)
 

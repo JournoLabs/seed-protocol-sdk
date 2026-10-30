@@ -74,11 +74,27 @@ schemas there, in most SDK tests. Adding a host needs a reason in that file.
 To fix a blocked request, mock it at the network boundary: stub `fetch`, configure a mock client
 (`MockArweaveClient`), or start a local server.
 
+### Arweave tests
+
+`ArweaveClient.arlocal.test.ts` and `integration/ArweaveFlows.test.ts` run the real Node Arweave
+client against a local Arweave node ([arlocal](https://github.com/textury/arlocal), started on a
+free port by `__tests__/test-utils/arlocal.ts`), so it makes HTTP requests the way it would against
+a gateway and needs no network. arlocal 1.1.66 has no `/raw/<id>` route, so the fixture puts a small
+server in front of it that answers `/raw/<id>` from `/<id>`.
+
+Use `startLocalArweave()` from that file in other tests that need an Arweave node, and
+`pinArweaveClientTo(node)` to pin reads to it with `ARWEAVE_READ_GATEWAYS`. `postTransaction` signs,
+posts and mines a transaction so it is readable at once (`{ mine: false }` leaves it unmined), and
+`failRawRead(id, status)` makes `/raw/<id>` answer with a gateway error.
+
 ### Live network tests
 
 Files named `*.live.test.ts` call real services and are skipped unless `SEED_LIVE_NETWORK_TESTS=1`,
-which also turns the guards off, so a slow or unreachable gateway can't fail `bun run test`. `ArweaveClient.live.test.ts` reads from
-arweave.net, asking the Hyper gateway first when `SEED_GATEWAY_HYPER_KEY` is set:
+which also turns the guards off, so a slow or unreachable gateway can't fail `bun run test`.
+`ArweaveClient.live.test.ts` probes arweave.net, zigza.xyz and vilenarios.com, logs each one's
+`/info` and known-transaction status, and runs the client against the first that serves the
+transaction; status checks fall back across all three. It fails only when none of them does. With
+`SEED_GATEWAY_HYPER_KEY` set, status checks ask the Hyper gateway first:
 
 ```bash
 SEED_LIVE_NETWORK_TESTS=1 bunx vitest run --project NodeJS packages/sdk/__tests__/helpers/ArweaveClient/ArweaveClient.live.test.ts

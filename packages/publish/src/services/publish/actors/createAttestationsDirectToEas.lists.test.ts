@@ -62,6 +62,7 @@ mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish: async (args: ApplyArgs) => {
     applyCalls.push(structuredClone(args))
   },
+  recordPublishRequests: async () => {},
   Item: { find: async () => undefined },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))

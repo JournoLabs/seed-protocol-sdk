@@ -8,6 +8,15 @@ export type HtmlEmbeddedDataUriPolicy = import('@seedprotocol/sdk').HtmlEmbedded
 import type { SeedSigner, PublishWallet } from './helpers/seedSigner'
 import type { ethers } from 'ethers'
 
+/** A `multiPublish` transaction that landed, with what is needed to record it from its receipt. */
+export type UnrecordedAttestation = {
+  transactionHash: import('viem').Hex
+  /** The normalized requests, in the order they were sent. */
+  requests: unknown[]
+  /** The account that attested. */
+  attester: string
+}
+
 /** Upload data for a single publish property (storage seed). */
 export type PublishUpload = {
   itemPropertyName: string
@@ -112,6 +121,8 @@ export interface PublishMachineContext {
   uploadLimits?: import('./services/publishCost/uploadEstimate').UploadLimits
   /** CreatePublishOptions.confirmUpload: the user agreed to this publish's upload size. */
   confirmUpload?: boolean
+  /** A `multiPublish` that landed and failed to record: a retry records it instead of sending. */
+  unrecordedAttestation?: UnrecordedAttestation
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown

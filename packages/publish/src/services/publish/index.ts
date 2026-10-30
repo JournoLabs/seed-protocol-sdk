@@ -20,6 +20,7 @@ import {
   PublishMachineStates,
 } from '~/helpers/constants'
 import { getPublishConfig } from '~/config'
+import { AttestationRecordError } from '~/errors'
 
 
 const {
@@ -102,6 +103,10 @@ export const publishMachine = setup({
     assignErrorCreatingAttestations : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingAttestations',
+      unrecordedAttestation : ( { context, event, }, ) => {
+        const err = getErrorFromEvent(event,)
+        return err instanceof AttestationRecordError ? err.unrecorded : context.unrecordedAttestation
+      },
     },),
     assignErrorCreatingAttestationsDirectToEas : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -411,6 +416,7 @@ export const publishMachine = setup({
             publishedBatch : ( { event, }, ) =>
               (event.output as { publishedBatch?: PublishMachineContext['publishedBatch'] })
                 ?.publishedBatch ?? null,
+            unrecordedAttestation : () => undefined,
           },),
         },
         onError : {

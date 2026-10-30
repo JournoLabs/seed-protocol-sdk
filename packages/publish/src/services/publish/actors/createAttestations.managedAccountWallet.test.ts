@@ -35,7 +35,7 @@ const RECEIPT = {
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
-  recordPublishRequest: async () => {},
+  recordPublishRequests: async () => {},
   Item: { find: async () => undefined },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))

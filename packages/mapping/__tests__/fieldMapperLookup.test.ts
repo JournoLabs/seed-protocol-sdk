@@ -1,8 +1,9 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { FieldMapping, SourceNode, TargetProperty } from '../src/types'
+import type { FieldMapping, LookupEntry, SourceNode, TargetProperty } from '../src/types'
 import { FieldMapper } from '../src/react/FieldMapper'
+import { previewForEdge, rowState } from '../src/react/fieldMapperCore'
 import type { FieldMapperLookupRow } from '../src/react/fieldMapperTypes'
 
 const sources: SourceNode[] = [
@@ -55,6 +56,52 @@ describe('the package lookup editor', () => {
   it('shows without renderLookup, and slots.lookups false hides it', () => {
     expect(render('section')).toContain('Relation lookups')
     expect(render(false)).not.toContain('Relation lookups')
+  })
+})
+
+describe('a source that repeats', () => {
+  const byline: SourceNode = {
+    id: 'rss-author',
+    label: 'author',
+    kind: 'rssField',
+    value: 'Mira Chen',
+    values: ['Mira Chen', 'Sam Ortiz'],
+  }
+  const mapping = (entries: LookupEntry[]): FieldMapping => ({
+    sourceId: 'rss-author',
+    propertyName: 'authors',
+    resolve: 'lookup',
+    lookup: { entries },
+  })
+
+  it('gives the fallback editor a row for each value', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(FieldMapper, {
+        sources: [byline],
+        targets,
+        mappings: [mapping([])],
+        onChange: () => {},
+        theme: 'none',
+        defaultRows: 'all',
+        slots: { lookups: 'section' },
+      }),
+    )
+    expect(html).toContain('Mira Chen')
+    expect(html).toContain('Sam Ortiz')
+  })
+
+  it('needs a lookup until every value has an entry', () => {
+    const state = (entries: LookupEntry[]) =>
+      rowState({ mapping: mapping(entries), requiredResolve: 'lookup', source: byline })
+    expect(state([{ value: 'Mira Chen', refs: ['mira'] }])).toBe('needsLookup')
+    expect(state([{ value: 'Mira Chen', refs: ['mira'] }, { value: 'Sam Ortiz', refs: ['sam'] }])).toBe('mapped')
+  })
+
+  it('previews every value', () => {
+    const preview = (entries: LookupEntry[]) =>
+      previewForEdge(byline, 'lookup', { mapping: mapping(entries), target: targets[0] })
+    expect(preview([])).toBe('‹lookup ref for "Mira Chen"›, ‹lookup ref for "Sam Ortiz"›')
+    expect(preview([{ value: 'Mira Chen', refs: ['mira'] }])).toBe('mira, ‹lookup ref for "Sam Ortiz"›')
   })
 })
 

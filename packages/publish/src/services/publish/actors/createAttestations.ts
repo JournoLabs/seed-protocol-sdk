@@ -1,7 +1,7 @@
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
-import type { PublishUpload } from '../../../types'
+import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import type { IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
@@ -12,7 +12,7 @@ import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
-import { ManagedAccountPublishError } from '~/errors'
+import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { publishGasLimit } from '~/helpers/publishGas'
 import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
@@ -20,7 +20,7 @@ import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
-import type { Address } from 'viem'
+import type { Address, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
@@ -115,7 +115,7 @@ async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
 ): Promise<CreateAttestationsResult> {
-    const { address, account, wallet } = context
+    const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
@@ -124,10 +124,6 @@ async function executeCreateAttestations(
 
     if (!address || typeof address !== 'string' || !address.trim()) {
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
-    }
-
-    if (!wallet && !account) {
-      throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
     if (!useModularExecutor && !(await isContractDeployed(address))) {
@@ -145,6 +141,14 @@ async function executeCreateAttestations(
     if (waitForItemUsed) {
       item = await waitForItem(item.seedLocalId)
       loaded.push(item)
+    }
+
+    // The transaction landed and recording it failed: repeat the record from its receipt. A retry
+    // that reached the send would attest everything a second time.
+    const unrecorded = context.unrecordedAttestation
+    if (unrecorded) {
+      const receipt = await waitForPublishReceipt(unrecorded.transactionHash)
+      return recordAttested(context, item, receipt, unrecorded, unrecorded.requests)
     }
 
     const txCount = arweaveTransactions.length
@@ -310,14 +314,34 @@ async function executeCreateAttestations(
       throw new Error('Failed to send transaction')
     }
 
+    const landed: UnrecordedAttestation = {
+      transactionHash: result.transactionHash,
+      requests: payloadForContract,
+      attester: routing.attesterAddress,
+    }
+    return recordAttested(context, item, receipt, landed, requestData)
+}
+
+/** Records a landed `multiPublish`, from its receipt, and finishes the publish. */
+async function recordAttested(
+  context: PublishMachineContext,
+  item: IItem<any>,
+  receipt: TransactionReceipt,
+  landed: UnrecordedAttestation,
+  easPayload: unknown,
+): Promise<CreateAttestationsResult> {
+    const address = context.address as string
+
     // Every request in the transaction (the item and the related items published with it)
     // records its own seed, version and property uids.
     const { requests: effectiveRequests, attributed } = await recordMultiPublishReceipt({
       receipt,
-      requests: payloadForContract,
+      requests: landed.requests as Parameters<typeof recordMultiPublishReceipt>[0]['requests'],
       rootSeedLocalId: item.seedLocalId,
       publisherAddress: address,
-      attester: routing.attesterAddress,
+      attester: landed.attester,
+    }).catch((err) => {
+      throw new AttestationRecordError(landed, err)
     })
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)
@@ -331,7 +355,7 @@ async function executeCreateAttestations(
       await persistSeedUidSafely(itemWithPersist, address, seedAttMs)
     }
 
-    logger('requestData', requestData)
+    logger('easPayload', easPayload)
 
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
 
@@ -361,5 +385,5 @@ async function executeCreateAttestations(
         })
       : null
 
-    return { easPayload: requestData, publishedBatch }
+    return { easPayload, publishedBatch }
 }

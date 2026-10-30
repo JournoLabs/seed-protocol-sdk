@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { VERSION_SCHEMA_UID } from '../src/constants.js'
+import { keccak256Hex } from '../src/keccak.js'
+import {
+  ARCHIVE_ANCHOR_SCHEMA_DEF,
+  ARCHIVE_ANCHOR_SCHEMA_UID,
+  VERSION_SCHEMA_DEF,
+  VERSION_SCHEMA_UID,
+} from '../src/constants.js'
 
 /**
  * Versions are the attestations under VERSION_SCHEMA_UID whose refUID is the seed. Other
@@ -28,7 +34,8 @@ const version = att(versionUid, seedUid, VERSION_SCHEMA_UID, 2)
 // Newer than the version, same attester as the seed.
 const sidecar = att(sidecarUid, seedUid, sidecarSchema, 3)
 const properties = [att('mine', versionUid, titleSchema, 4), att('on-sidecar', sidecarUid, titleSchema, 5)]
-const all = [seed, version, sidecar, ...properties]
+const anchor = att('anchor', versionUid, ARCHIVE_ANCHOR_SCHEMA_UID, 6)
+const all = [seed, version, sidecar, ...properties, anchor]
 
 /** Evaluates the where shapes these helpers send; unknown keys fail. */
 const matches = (a: Record<string, any>, where: Record<string, any>): boolean =>
@@ -36,6 +43,7 @@ const matches = (a: Record<string, any>, where: Record<string, any>): boolean =>
     if (key === 'AND') return (cond as Record<string, any>[]).every((c) => matches(a, c))
     if ('equals' in cond) return a[key] === cond.equals
     if ('in' in cond) return cond.in.includes(a[key])
+    if ('notIn' in cond) return !cond.notIn.includes(a[key])
     throw new Error(`unsupported where ${key}`)
   })
 
@@ -83,5 +91,24 @@ describe('version schema filter', () => {
     const { getCanonicalItemPropertiesFromEas } = await import('../src/api.js')
     const canonical = await getCanonicalItemPropertiesFromEas({ versionUids: [versionUid, sidecarUid] })
     expect(canonical.map((p) => p.id)).toEqual(['mine'])
+  })
+
+  it('leaves bag anchors out of property reads', async () => {
+    await configure()
+    const { getCanonicalItemPropertiesFromEas, getItemPropertiesFromEas } = await import('../src/api.js')
+    for (const excludeRevoked of [true, false]) {
+      const properties = await getItemPropertiesFromEas({ versionUids: [versionUid], excludeRevoked })
+      expect(properties.map((p) => p.id)).toEqual(['mine'])
+    }
+    const canonical = await getCanonicalItemPropertiesFromEas({ versionUids: [versionUid] })
+    expect(canonical.map((p) => p.id)).toEqual(['mine'])
+  })
+
+  it('pins the schema UIDs to their definitions', () => {
+    // SchemaRegistry._getUID: keccak256(abi.encodePacked(schema, resolver, revocable))
+    const schemaUid = (definition: string) =>
+      `0x${keccak256Hex(new Uint8Array([...new TextEncoder().encode(definition), ...new Uint8Array(20), 1]))}`
+    expect(schemaUid(VERSION_SCHEMA_DEF)).toBe(VERSION_SCHEMA_UID)
+    expect(schemaUid(ARCHIVE_ANCHOR_SCHEMA_DEF)).toBe(ARCHIVE_ANCHOR_SCHEMA_UID)
   })
 })

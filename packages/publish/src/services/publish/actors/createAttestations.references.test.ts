@@ -71,7 +71,7 @@ const identity = {
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
-  recordPublishRequest: async () => {},
+  recordPublishRequests: async () => {},
   Item: { find: async (q: { seedLocalId?: string }) => (q.seedLocalId === IDENTITY ? identity : undefined) },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))

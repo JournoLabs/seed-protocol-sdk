@@ -42,6 +42,13 @@ export function sampleValueFromSource(source: SourceNode | undefined): string {
   return normalizeLookupKey(source.value ?? '')
 }
 
+/** The normalized values a lookup reads from a source: each of `values`, else `value`. Empty ones are left out. */
+export function lookupValuesFromSource(source: SourceNode | undefined): string[] {
+  if (!source) return []
+  const raw = source.values?.length ? source.values : [source.value ?? '']
+  return raw.map(normalizeLookupKey).filter(Boolean)
+}
+
 /**
  * Shape a looked-up uid value for the target dataType.
  * Relation → single string; List → string[].
@@ -158,6 +165,31 @@ export function resolveLookup(
   return { refs: [...new Set(refs)], unmatched, split: true }
 }
 
+/** What a lookup edge resolved a source to, across all its values. */
+export type SourceLookupResolution = {
+  /** Refs in the order the source names them, without repeats. */
+  refs: string[]
+  /** Values with no entry. `splitFrom` is the value a missed part was split from. */
+  misses: { value: string; splitFrom?: string }[]
+}
+
+/** Run {@link resolveLookup} on each of the source's values ({@link lookupValuesFromSource}). */
+export function resolveSourceLookup(
+  mapping: FieldMapping,
+  source: SourceNode | undefined,
+): SourceLookupResolution {
+  const refs: string[] = []
+  const misses: SourceLookupResolution['misses'] = []
+  for (const rawValue of lookupValuesFromSource(source)) {
+    const resolved = resolveLookup(mapping, rawValue)
+    refs.push(...resolved.refs)
+    for (const value of resolved.unmatched) {
+      misses.push({ value, ...(resolved.split ? { splitFrom: rawValue } : {}) })
+    }
+  }
+  return { refs: [...new Set(refs)], misses }
+}
+
 export function withLookupEntries(
   edge: FieldMapping,
   entries: LookupEntry[],
@@ -180,11 +212,12 @@ export function collectLookupValues(items: SourceNode[][], mapping: FieldMapping
   const values: string[] = []
   if (!mapping.sourceId) return values
   for (const sources of items) {
-    const value = normalizeLookupKey(sources.find((s) => s.id === mapping.sourceId)?.value ?? '')
-    const key = lookupKey(value)
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    values.push(value)
+    for (const value of lookupValuesFromSource(sources.find((s) => s.id === mapping.sourceId))) {
+      const key = lookupKey(value)
+      if (seen.has(key)) continue
+      seen.add(key)
+      values.push(value)
+    }
   }
   return values
 }

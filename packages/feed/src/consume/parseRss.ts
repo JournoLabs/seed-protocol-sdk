@@ -25,6 +25,8 @@ const parser = new Parser({
       'content:encoded',
       'seedUid',
       'SeedUid',
+      ['dc:creator', 'creatorList', { keepArray: true }],
+      ['author', 'authorList', { keepArray: true }],
     ],
   },
 })

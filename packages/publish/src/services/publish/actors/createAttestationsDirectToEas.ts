@@ -4,6 +4,7 @@ import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import {
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
+  recordPublishRequests,
   resolvePublishPayloadValues,
   type IItem,
 } from '@seedprotocol/sdk'
@@ -159,17 +160,13 @@ async function executeCreateAttestationsDirectToEas(
   context: PublishMachineContext,
   loaded: IItem<any>[],
 ): Promise<CreateAttestationsDirectToEasResult> {
-    const { address, account, wallet } = context
+    const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
 
     if (!address || typeof address !== 'string' || !address.trim()) {
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
-    }
-
-    if (!wallet && !account) {
-      throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
     if (!item?.seedLocalId) {
@@ -316,6 +313,9 @@ async function executeCreateAttestationsDirectToEas(
       persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
     }
     const persistCreatedSeed = async (seedLocalId: string, seedUid: string, attestationMs: number) => {
+      await recordPublishRequests([
+        { seed: { seedLocalId, seedUid, publisher: address, attestationCreatedAt: attestationMs } },
+      ])
       if (seedLocalId === item.seedLocalId) {
         itemWithPersist.seedUid = seedUid
         await persistSeedUidSafely(itemWithPersist, address, attestationMs)

@@ -55,6 +55,14 @@ const RECEIPT = {
 
 const updateVersionUid = mock(async (_: unknown) => {})
 const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
+// The real one writes them in one transaction; here it hands each to its mock
+const recordPublishRequests = mock(async (records: Array<{ version?: unknown; properties?: unknown }>) => {
+  for (const { version, properties } of records) {
+    if (version) await updateVersionUid(version)
+    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
+  }
+})
+const sendTransaction = mock(async () => ({ transactionHash: '0x01' }))
 const relatedImage = {
   seedLocalId: 'imageLocal2',
   seedUid: undefined as string | undefined,
@@ -74,11 +82,7 @@ mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
-  // The real one writes both in one transaction; here it hands each to its mock
-  recordPublishRequest: async ({ version, properties }: { version?: unknown; properties?: unknown }) => {
-    if (version) await updateVersionUid(version)
-    if (properties) await applyPropertyAttestationUidsFromPublish(properties)
-  },
+  recordPublishRequests,
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))
@@ -109,7 +113,7 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
 }))
 mock.module('../../../helpers/resolvePublishWallet', () => ({
   resolvePublishWallet: () => ({
-    txSender: { address: PUBLISHER, sendTransaction: async () => ({ transactionHash: '0x01' }) },
+    txSender: { address: PUBLISHER, sendTransaction },
   }),
 }))
 mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
@@ -119,7 +123,8 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 }))
 
 const { createAttestations } = await import('./createAttestations')
-const { createActor, toPromise } = await import('xstate')
+const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
+const { publishMachine } = await import('../index')
 
 const attestation = (schema: string, name: string) => ({
   schema,
@@ -254,6 +259,90 @@ describe('createAttestations: related items published in the same transaction', 
       throw new Error('payload failed')
     })
     expect(result).toEqual({ outcome: 'failed', unloads: 1 })
+  })
+})
+
+describe('createAttestations: recording failed after the transaction landed', () => {
+  const machine = publishMachine.provide({
+    actors: { revokeRetractedProperties: fromPromise(async () => {}) },
+  })
+  const failedAttestation = () => {
+    const item = {
+      seedLocalId: 'postLocal02',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const context = {
+      address: PUBLISHER,
+      item,
+      arweaveTransactions: [],
+      publishUploads: [],
+      publishMode: 'patch',
+    }
+    const snapshot = machine.resolveState({ value: 'attestationFailureRecoverable', context: context as any })
+    return { item, context, actor: createActor(machine, { snapshot }) }
+  }
+  const atRest = (value: string) => (s: { value: unknown }) => s.value === value
+
+  test('a retry records from the receipt and sends nothing', async () => {
+    const { item, actor } = failedAttestation()
+    actor.start()
+    sendTransaction.mockClear()
+    recordPublishRequests.mockImplementationOnce(async () => {
+      throw new Error('disk full')
+    })
+
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, (s) => (s.context as any).unrecordedAttestation !== undefined)
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, atRest('success'))
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+    expect(item.seedUid).toBe(POST_SEED)
+    expect(actor.getSnapshot().context.unrecordedAttestation).toBeUndefined()
+  })
+
+  test('survives a saved snapshot, and a second failed record keeps the transaction', async () => {
+    const { actor } = failedAttestation()
+    actor.start()
+    sendTransaction.mockClear()
+    recordPublishRequests.mockImplementationOnce(async () => {
+      throw new Error('disk full')
+    })
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, (s) => (s.context as any).unrecordedAttestation !== undefined)
+
+    const { unrecordedAttestation } = actor.getSnapshot().context
+    expect(unrecordedAttestation?.transactionHash).toBe('0x01')
+
+    recordPublishRequests.mockImplementationOnce(async () => {
+      throw new Error('still full')
+    })
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, (s) => (s.context as any).error?.cause?.message === 'still full')
+    expect(actor.getSnapshot().context.unrecordedAttestation).toEqual(unrecordedAttestation)
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+    actor.stop()
+
+    // As savePublish writes it and restoreFromDb reads it back: bigints come back as strings.
+    const saved = JSON.parse(
+      JSON.stringify(unrecordedAttestation, (_key, v) => (typeof v === 'bigint' ? v.toString() : v)),
+    )
+    const { item, context } = failedAttestation()
+    const restored = createActor(machine, {
+      snapshot: machine.resolveState({
+        value: 'attestationFailureRecoverable',
+        context: { ...context, unrecordedAttestation: saved } as any,
+      }),
+    })
+    restored.start()
+    restored.send({ type: 'retry' } as any)
+    await waitFor(restored, atRest('success'))
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+    expect(item.seedUid).toBe(POST_SEED)
   })
 })
 

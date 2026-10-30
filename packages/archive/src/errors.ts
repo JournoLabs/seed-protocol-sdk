@@ -1,4 +1,4 @@
-export type ArchiveErrorCode = 'invalid_path' | 'duplicate_path' | 'invalid_bag_info'
+export type ArchiveErrorCode = 'invalid_path' | 'duplicate_path' | 'invalid_bag_info' | 'invalid_manifest' | 'missing_file'
 
 /** A bag that can't be built as asked. `code` says why; the message names the file or field. */
 export class ArchiveError extends Error {

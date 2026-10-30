@@ -1,5 +1,9 @@
 # @seedprotocol/vite
 
+## 0.8.0 (2026-10-30)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.7.13 (2026-10-29)
 
 - `seedVitePlugin`'s doc comment is back on it in `dist/index.d.ts`. Since 0.7.12 it sat on the `KNOWN_OPTIONS` constant, so editors showed no description for the plugin.

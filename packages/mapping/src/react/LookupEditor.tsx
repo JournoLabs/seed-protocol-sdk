@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { lookupEntriesFromMapping, lookupKey, normalizeLookupKey, sampleValueFromSource } from '../relationLookup'
+import { lookupEntriesFromMapping, lookupKey, lookupValuesFromSource, normalizeLookupKey } from '../relationLookup'
 import type {
   FieldMapping,
   LookupEntry,
@@ -53,15 +53,16 @@ function LookupBlock({
   compact?: boolean
 }) {
   const source = sources.find((s) => s.id === mapping.sourceId)
-  const sampleKey = sampleValueFromSource(source)
   const entries = lookupEntriesFromMapping(mapping)
-  // One row per lookupKey, shown as its entry spells it (else as the sample does)
+  // One row per lookupKey, shown as its entry spells it (else as the source does)
   const shownByKey = new Map<string, string>()
   for (const e of entries) {
     const shown = normalizeLookupKey(e.value)
     if (shown && !shownByKey.has(lookupKey(shown))) shownByKey.set(lookupKey(shown), shown)
   }
-  if (sampleKey && !shownByKey.has(lookupKey(sampleKey))) shownByKey.set(lookupKey(sampleKey), sampleKey)
+  for (const value of lookupValuesFromSource(source)) {
+    if (!shownByKey.has(lookupKey(value))) shownByKey.set(lookupKey(value), value)
+  }
   const keyList = [...shownByKey.values()]
   const target = targetsByName.get(mapping.propertyName)
   const refsByKey = new Map(entries.map((e) => [lookupKey(e.value), e.refs.join(', ')]))

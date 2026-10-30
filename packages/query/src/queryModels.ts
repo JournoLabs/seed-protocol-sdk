@@ -2,24 +2,28 @@ import pluralize from 'pluralize'
 import { easName } from '@seedprotocol/eas'
 import { generateETag } from './cache/etag.js'
 
+type QueryModelProperty = {
+  readonly name?: string
+  readonly type?: string
+  readonly dataType?: string
+  readonly ref?: string
+  readonly refModelName?: string
+  readonly refValueType?: string
+  readonly items?: { readonly model?: string }
+}
+
+type QueryModel = {
+  readonly name?: string
+  readonly properties: { readonly [propertyName: string]: QueryModelProperty } | readonly QueryModelProperty[]
+}
+
 /**
  * A schema file's `models`, as much of it as query reads: each List property's `ref` (or the older
  * `items.model`). A `SchemaFileFormat['models']` from `@seedprotocol/sdk` can be passed as it is.
+ * Some tools write `models` and each model's `properties` as arrays with a `name` on each entry;
+ * those are read the same way, and entries with no `name` are skipped.
  */
-export type QueryModels = {
-  readonly [modelName: string]: {
-    readonly properties: {
-      readonly [propertyName: string]: {
-        readonly type?: string
-        readonly dataType?: string
-        readonly ref?: string
-        readonly refModelName?: string
-        readonly refValueType?: string
-        readonly items?: { readonly model?: string }
-      }
-    }
-  }
-}
+export type QueryModels = { readonly [modelName: string]: QueryModel } | readonly QueryModel[]
 
 type Registered = {
   /** By the model's EAS name: a List relation's EAS name → its schema key's EAS name. */
@@ -30,6 +34,12 @@ type Registered = {
 }
 
 let registered: Registered | null = null
+
+/** [name, entry] of a keyed object, or of an array's entries that have a `name`. */
+function namedEntries<T extends { readonly name?: string }>(entries: { readonly [name: string]: T } | readonly T[]): [string, T][] {
+  if (!Array.isArray(entries)) return Object.entries(entries as { readonly [name: string]: T })
+  return (entries as readonly T[]).flatMap((entry) => (entry?.name ? [[entry.name, entry] as [string, T]] : []))
+}
 
 /**
  * The EAS name the SDK publishes a List relation under: `singular(key) + Ref + Ids`
@@ -55,9 +65,9 @@ export function setQueryModels(models: QueryModels | null): void {
   }
   const byModel = new Map<string, Map<string, string>>()
   const keysByEasName = new Map<string, Set<string>>()
-  for (const [modelName, model] of Object.entries(models)) {
+  for (const [modelName, model] of namedEntries(models)) {
     const lists = new Map<string, string>()
-    for (const [propertyName, property] of Object.entries(model?.properties ?? {})) {
+    for (const [propertyName, property] of namedEntries(model?.properties ?? {})) {
       if ((property.type ?? property.dataType)?.toLowerCase() !== 'list') continue
       const ref = property.ref ?? property.refModelName ?? property.items?.model
       if (!ref) continue

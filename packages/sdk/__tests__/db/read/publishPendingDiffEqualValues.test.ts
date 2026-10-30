@@ -5,10 +5,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { and, eq, isNull } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, versions } from '@/seedSchema'
+import { metadata, seeds, versions } from '@/seedSchema'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { getPublishPendingDiff } from '@/db/read/getPublishPendingDiff'
-import { recordPublishRequest } from '@/db/write/recordPublishRequest'
+import { recordPublishRequests, type PublishRequestRecord } from '@/db/write/recordPublishRequests'
 import { propertyValuesEqual } from '@/helpers/propertyValuesEqual'
 import { generateId } from '@/helpers'
 import type { Item as ItemClass } from '@/Item/Item'
@@ -222,7 +222,76 @@ testDescribe('equal property values', () => {
     })
   })
 
-  describe('recordPublishRequest', () => {
+  describe('recordPublishRequests', () => {
+    /** One new item's publish: its seed, version and title property, with fresh uids. */
+    const publishRecord = async (title: string) => {
+      const { item } = await createItemWithBasicPropertiesOnly({ title, count: 1 })
+      const seedLocalId = item.seedLocalId!
+      const db = BaseDb.getAppDb()
+      const titleName = propertyOf(item, 'title').propertyName
+      const [row] = await db
+        .select()
+        .from(metadata)
+        .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, titleName)))
+      const versionUid = randomUid()
+      const seedUid = randomUid()
+      const record: PublishRequestRecord = {
+        seed: { seedLocalId, seedUid, publisher: UNPUBLISH_TEST_PUBLISHER },
+        version: { seedLocalId, versionUid, publisher: UNPUBLISH_TEST_PUBLISHER },
+        properties: {
+          seedLocalId,
+          attestationCreatedAtMs: Date.now(),
+          versionUid,
+          publisher: UNPUBLISH_TEST_PUBLISHER,
+          pairs: [{ schemaUid: randomUid(), attestationUid: randomUid(), metadataLocalId: row!.localId }],
+        },
+      }
+      const rows = async () => {
+        const seedRows = await db.select().from(seeds).where(eq(seeds.localId, seedLocalId))
+        const versionRows = await db.select().from(versions).where(eq(versions.seedLocalId, seedLocalId))
+        const metadataRows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+        return {
+          seedUid: seedRows[0]?.uid ?? null,
+          versionUids: versionRows.map((v: { uid: string | null }) => v.uid).sort(),
+          metadataUids: metadataRows.map((m: { uid: string | null }) => m.uid).sort(),
+          metadataRows: metadataRows.length,
+        }
+      }
+      return { record, rows, seedUid, versionUid }
+    }
+
+    it('a failure partway leaves nothing recorded', async () => {
+      const first = await publishRecord('Rolled back one')
+      const second = await publishRecord('Rolled back two')
+      const before = [await first.rows(), await second.rows()]
+
+      // Seeds are written last, so this fails after every version and property write.
+      const failing = {
+        ...second.record,
+        seed: {
+          seedLocalId: second.record.seed!.seedLocalId,
+          get seedUid(): string {
+            throw new Error('write failed')
+          },
+        },
+      }
+      await expect(recordPublishRequests([first.record, failing])).rejects.toThrow('write failed')
+
+      expect([await first.rows(), await second.rows()]).toEqual(before)
+    })
+
+    it('writing the same records again changes nothing', async () => {
+      const { record, rows, seedUid, versionUid } = await publishRecord('Recorded twice')
+
+      await recordPublishRequests([record])
+      const once = await rows()
+      expect(once.seedUid).toBe(seedUid)
+      expect(once.versionUids).toContain(versionUid)
+
+      await recordPublishRequests([record])
+      expect(await rows()).toEqual(once)
+    })
+
     it('records the version uid and the property uids together', async () => {
       const { item } = await createItemWithBasicPropertiesOnly({
         title: 'Receipt title',
@@ -242,26 +311,28 @@ testDescribe('equal property values', () => {
       const versionUid = randomUid()
       const propertyUid = randomUid()
 
-      await recordPublishRequest({
-        version: {
-          seedLocalId: item.seedLocalId!,
-          versionUid,
-          publisher: UNPUBLISH_TEST_PUBLISHER,
+      await recordPublishRequests([
+        {
+          version: {
+            seedLocalId: item.seedLocalId!,
+            versionUid,
+            publisher: UNPUBLISH_TEST_PUBLISHER,
+          },
+          properties: {
+            seedLocalId: item.seedLocalId!,
+            attestationCreatedAtMs: Date.now(),
+            versionUid,
+            publisher: UNPUBLISH_TEST_PUBLISHER,
+            pairs: [
+              {
+                schemaUid: randomUid(),
+                attestationUid: propertyUid,
+                metadataLocalId: row!.localId,
+              },
+            ],
+          },
         },
-        properties: {
-          seedLocalId: item.seedLocalId!,
-          attestationCreatedAtMs: Date.now(),
-          versionUid,
-          publisher: UNPUBLISH_TEST_PUBLISHER,
-          pairs: [
-            {
-              schemaUid: randomUid(),
-              attestationUid: propertyUid,
-              metadataLocalId: row!.localId,
-            },
-          ],
-        },
-      })
+      ])
 
       const versionRows = await db
         .select()

@@ -37,6 +37,8 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0025](0025-gateway-neutral-html-links.md) | Published Html names one gateway; every Seed reader re-hosts its links | Accepted |
 | [0026](0026-statement-and-blob-stores.md) | Seeds publish through statement and blob stores, and link across stores through proxy Seeds | Proposed |
 | [0027](0027-publish-depends-on-wallet-interfaces.md) | Core publish depends on wallet interfaces and standard RPC, not vendor SDKs | Accepted |
+| [0028](0028-reproducible-bag-format.md) | A reproducible bag's bytes are a versioned format | Proposed |
+| [0029](0029-bag-anchor-attestation.md) | A bag is anchored by its own attestation on the Version | Proposed |
 
 ## Writing one
 

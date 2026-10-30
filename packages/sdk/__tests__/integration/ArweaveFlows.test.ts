@@ -1,279 +1,152 @@
 /**
- * Integration tests for Arweave consumer flows
- * 
- * These tests verify that the various parts of the SDK that use Arweave
- * work correctly with the consolidated ArweaveClient.
- * 
- * Note: These tests run only in Node.js environment as they use MockArweaveClient
- * which requires Node.js-specific imports.
+ * The Arweave flows the SDK's consumers depend on, with the real Node client against a local
+ * Arweave node (arlocal). ArweaveClient.arlocal.test.ts covers each client method; these tests
+ * cover what consumers do with the results.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { BaseArweaveClient, invalidateReadGatewayCache } from '@seedprotocol/arweave'
+import '@seedprotocol/arweave/node'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
-import { MockArweaveClient } from '../test-utils/MockArweaveClient'
+import { buildArweaveContentTags } from '@/helpers/arweaveContentTags'
+import { pinArweaveClientTo, startLocalArweave, type LocalArweave } from '../test-utils/arlocal'
 
-// Skip in browser environment
 const isNodeEnv = typeof window === 'undefined'
+const MISSING_TX_ID = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+
+const decodeTag = (value: string) => new TextDecoder().decode(Buffer.from(value, 'base64url'))
 
 describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
-  let mock: MockArweaveClient
-
-  beforeEach(() => {
-    mock = new MockArweaveClient()
-    BaseArweaveClient.configure(mock)
-    MockArweaveClient.reset()
-    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
-    BaseArweaveClient.resetReadGatewaySelectionStateForTests()
-    invalidateReadGatewayCache()
-  })
-
-  afterEach(() => {
-    MockArweaveClient.reset()
-  })
-
   describe('URL Generation Flow', () => {
+    beforeEach(() => {
+      BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
+      BaseArweaveClient.resetReadGatewaySelectionStateForTests()
+      invalidateReadGatewayCache()
+    })
+
     it('generates correct Arweave URLs via BaseArweaveClient.getRawUrl()', () => {
-      const url = BaseArweaveClient.getRawUrl('abc123')
-      expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/abc123`)
+      expect(BaseArweaveClient.getRawUrl('abc123')).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/abc123`)
     })
 
     it('respects custom host configuration', () => {
       BaseArweaveClient.setHost('custom-gateway.example.com')
-      
-      const url = BaseArweaveClient.getRawUrl('abc123')
-      expect(url).toBe('https://custom-gateway.example.com/raw/abc123')
-
-      
-      // Reset
+      expect(BaseArweaveClient.getRawUrl('abc123')).toBe('https://custom-gateway.example.com/raw/abc123')
       BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
     })
   })
 
-  describe('Transaction Status Check Flow', () => {
-    it('correctly identifies confirmed transactions', async () => {
-      MockArweaveClient.addMockTransaction('confirmed-tx', new Uint8Array([1, 2, 3]), {
-        status: 200,
-        confirmed: {
-          block_height: 1000000,
-          block_indep_hash: 'test-hash',
-          number_of_confirmations: 100,
-        },
+  describe('against a local Arweave node', () => {
+    let node: LocalArweave
+    let unpin: () => void
+
+    beforeAll(async () => {
+      node = await startLocalArweave()
+      unpin = pinArweaveClientTo(node)
+    }, 60000)
+
+    afterAll(async () => {
+      unpin?.()
+      await node?.stop()
+    })
+
+    describe('Transaction Status Check Flow', () => {
+      it('reports a mined transaction as present', async () => {
+        const id = await node.postTransaction('mined')
+        expect(await BaseArweaveClient.getTransactionStatus(id)).toEqual({ status: 200, confirmed: null })
       })
 
-      const status = await BaseArweaveClient.getTransactionStatus('confirmed-tx')
-      
-      expect(status.status).toBe(200)
-      expect(status.confirmed).not.toBeNull()
-      expect(status.confirmed?.number_of_confirmations).toBeGreaterThan(0)
-    })
-
-    it('correctly identifies pending transactions', async () => {
-      MockArweaveClient.addMockTransaction('pending-tx', new Uint8Array([1, 2, 3]), {
-        status: 202, // Accepted but not yet confirmed
-        confirmed: null,
+      it('reports a posted transaction before it is mined', async () => {
+        const id = await node.postTransaction('pending', [], { mine: false })
+        expect(await BaseArweaveClient.getTransactionStatus(id)).toEqual({ status: 200, confirmed: null })
       })
 
-      const status = await BaseArweaveClient.getTransactionStatus('pending-tx')
-      
-      expect(status.status).toBe(202)
-      expect(status.confirmed).toBeNull()
-    })
-
-    it('correctly handles not found transactions', async () => {
-      const status = await BaseArweaveClient.getTransactionStatus('nonexistent-tx')
-      
-      expect(status.status).toBe(404)
-      expect(status.confirmed).toBeNull()
-    })
-  })
-
-  describe('Data Retrieval Flow', () => {
-    it('retrieves binary data correctly', async () => {
-      const binaryData = new Uint8Array([0x89, 0x50, 0x4E, 0x47]) // PNG header
-      MockArweaveClient.addMockTransaction('binary-tx', binaryData)
-
-      const data = await BaseArweaveClient.getTransactionData('binary-tx')
-      
-      expect(data).toEqual(binaryData)
-    })
-
-    it('retrieves text data as string', async () => {
-      const textContent = 'Hello, World!'
-      MockArweaveClient.addMockTransaction('text-tx', new TextEncoder().encode(textContent))
-
-      const data = await BaseArweaveClient.getTransactionData('text-tx', { string: true })
-      
-      expect(data).toBe(textContent)
-    })
-
-    it('retrieves JSON data correctly', async () => {
-      const jsonData = { name: 'Test', value: 42 }
-      MockArweaveClient.addMockTransaction('json-tx', new TextEncoder().encode(JSON.stringify(jsonData)))
-
-      const data = await BaseArweaveClient.getTransactionData('json-tx', { string: true })
-      const parsed = JSON.parse(data as string)
-      
-      expect(parsed).toEqual(jsonData)
-    })
-
-    it('retrieves HTML data correctly', async () => {
-      const htmlContent = '<html><body><h1>Test</h1></body></html>'
-      MockArweaveClient.addMockTransaction('html-tx', new TextEncoder().encode(htmlContent))
-
-      const data = await BaseArweaveClient.getTransactionData('html-tx', { string: true })
-      
-      expect(data).toBe(htmlContent)
-    })
-  })
-
-  describe('Transaction Creation Flow', () => {
-    it('creates transaction with content hash tag', async () => {
-      const contentHash = 'sha256-abc123def456'
-      
-      const tx = await BaseArweaveClient.createTransaction('test content', {
-        tags: [{ name: 'Content-SHA-256', value: contentHash }],
-      })
-
-      const createdTx = MockArweaveClient.getLastCreatedTransaction()
-      
-      expect(createdTx).toBeDefined()
-      expect(createdTx!.tags).toContainEqual({
-        name: 'Content-SHA-256',
-        value: contentHash,
+      it('reports a transaction the gateway lacks as 404', async () => {
+        expect(await BaseArweaveClient.getTransactionStatus(MISSING_TX_ID)).toEqual({ status: 404, confirmed: null })
       })
     })
 
-    it('creates transaction with multiple tags', async () => {
-      const tx = await BaseArweaveClient.createTransaction('test content', {
-        tags: [
-          { name: 'Content-Type', value: 'text/html' },
+    describe('Data Retrieval Flow', () => {
+      it('retrieves JSON data correctly', async () => {
+        const json = { name: 'Test', value: 42 }
+        const id = await node.postTransaction(JSON.stringify(json), [{ name: 'Content-Type', value: 'application/json' }])
+        const data = await BaseArweaveClient.getTransactionData(id, { string: true })
+        expect(JSON.parse(data as string)).toEqual(json)
+      })
+
+      it('retrieves HTML data correctly', async () => {
+        const html = '<html><body><h1>Test</h1></body></html>'
+        const id = await node.postTransaction(html, [{ name: 'Content-Type', value: 'text/html' }])
+        expect(await BaseArweaveClient.getTransactionData(id, { string: true })).toBe(html)
+      })
+    })
+
+    describe('Transaction Creation Flow', () => {
+      it('creates a transaction carrying the content tags in order', async () => {
+        const tags = buildArweaveContentTags('sha256-abc123def456', 'text/html', [
           { name: 'App-Name', value: 'SeedProtocol' },
-          { name: 'App-Version', value: '1.0.0' },
-        ],
+        ])
+        const tx = await BaseArweaveClient.createTransaction('test content', { tags })
+        expect(tx.tags.map((t: { name: string; value: string }) => [decodeTag(t.name), decodeTag(t.value)])).toEqual([
+          ['Content-SHA-256', 'sha256-abc123def456'],
+          ['Content-Type', 'text/html'],
+          ['App-Name', 'SeedProtocol'],
+        ])
       })
 
-      const createdTx = MockArweaveClient.getLastCreatedTransaction()
-      
-      expect(createdTx!.tags).toHaveLength(3)
+      it('buildArweaveContentTags puts additional tags after content tags', () => {
+        expect(buildArweaveContentTags('abc', 'text/plain', [{ name: 'App-Name', value: 'SeedProtocol' }])).toEqual([
+          { name: 'Content-SHA-256', value: 'abc' },
+          { name: 'Content-Type', value: 'text/plain' },
+          { name: 'App-Name', value: 'SeedProtocol' },
+        ])
+      })
     })
 
-    it('tracks all created transactions', async () => {
-      await BaseArweaveClient.createTransaction('content 1')
-      await BaseArweaveClient.createTransaction('content 2')
-      await BaseArweaveClient.createTransaction('content 3')
-
-      const allCreated = MockArweaveClient.getCreatedTransactions()
-      
-      expect(allCreated).toHaveLength(3)
-    })
-
-    it('buildArweaveContentTags puts additional tags after content tags', async () => {
-      const { buildArweaveContentTags } = await import('@/helpers/arweaveContentTags')
-      const tags = buildArweaveContentTags('abc', 'text/plain', [{ name: 'App-Name', value: 'SeedProtocol' }])
-      expect(tags).toEqual([
-        { name: 'Content-SHA-256', value: 'abc' },
-        { name: 'Content-Type', value: 'text/plain' },
-        { name: 'App-Name', value: 'SeedProtocol' },
-      ])
-    })
-  })
-
-  describe('Tag Retrieval Flow', () => {
-    it('retrieves Content-SHA-256 tag for metadata matching', async () => {
-      MockArweaveClient.addMockTransaction('tx-with-hash', new Uint8Array([1, 2, 3]), {
-        tags: [
+    describe('Tag Retrieval Flow', () => {
+      it('retrieves Content-SHA-256 tag for metadata matching', async () => {
+        const id = await node.postTransaction(new Uint8Array([1, 2, 3]), [
           { name: 'Content-SHA-256', value: 'expected-hash-value' },
           { name: 'Content-Type', value: 'application/octet-stream' },
-        ],
+        ])
+        const tags = await BaseArweaveClient.getTransactionTags(id)
+        expect(tags.find((t) => t.name === 'Content-SHA-256')?.value).toBe('expected-hash-value')
       })
-
-      const tags = await BaseArweaveClient.getTransactionTags('tx-with-hash')
-      const hashTag = tags.find(t => t.name === 'Content-SHA-256')
-      
-      expect(hashTag).toBeDefined()
-      expect(hashTag!.value).toBe('expected-hash-value')
-    })
-  })
-
-  describe('Bulk Download Flow', () => {
-    it('downloads multiple files in batch', async () => {
-      MockArweaveClient.addMockTransaction('img1', new Uint8Array([1, 2, 3]))
-      MockArweaveClient.addMockTransaction('img2', new Uint8Array([4, 5, 6]))
-      MockArweaveClient.addMockTransaction('img3', new Uint8Array([7, 8, 9]))
-
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: ['img1', 'img2', 'img3'],
-      })
-
-      expect(results).toHaveLength(3)
-      expect(results.every(r => r.success)).toBe(true)
     })
 
-    it('excludes specified transactions from download', async () => {
-      MockArweaveClient.addMockTransaction('keep1', new Uint8Array([1]))
-      MockArweaveClient.addMockTransaction('exclude1', new Uint8Array([2]))
-      MockArweaveClient.addMockTransaction('keep2', new Uint8Array([3]))
-
-      const excludedSet = new Set(['exclude1'])
-      
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: ['keep1', 'exclude1', 'keep2'],
-        excludedTransactions: excludedSet,
+    describe('Bulk Download Flow', () => {
+      it('downloads multiple files in batch', async () => {
+        const ids = [
+          await node.postTransaction(new Uint8Array([1, 2, 3])),
+          await node.postTransaction(new Uint8Array([4, 5, 6])),
+          await node.postTransaction(new Uint8Array([7, 8, 9])),
+        ]
+        const results = await BaseArweaveClient.downloadFiles({ transactionIds: ids })
+        expect(results.map((r) => [r.transactionId, r.success, [...r.data!]])).toEqual([
+          [ids[0], true, [1, 2, 3]],
+          [ids[1], true, [4, 5, 6]],
+          [ids[2], true, [7, 8, 9]],
+        ])
       })
 
-      expect(results).toHaveLength(2)
-      expect(results.map(r => r.transactionId)).toEqual(['keep1', 'keep2'])
-    })
-
-    it('reports failures for unavailable transactions', async () => {
-      MockArweaveClient.addMockTransaction('available', new Uint8Array([1, 2, 3]))
-      // 'unavailable' is not added
-
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: ['available', 'unavailable'],
+      it('reports why a transaction is unavailable', async () => {
+        const [result] = await BaseArweaveClient.downloadFiles({ transactionIds: [MISSING_TX_ID] })
+        expect(result).toMatchObject({ transactionId: MISSING_TX_ID, success: false })
+        expect(result!.error).toContain('404')
       })
 
-      expect(results).toHaveLength(2)
-      
-      const availableResult = results.find(r => r.transactionId === 'available')
-      expect(availableResult!.success).toBe(true)
-      
-      const unavailableResult = results.find(r => r.transactionId === 'unavailable')
-      expect(unavailableResult!.success).toBe(false)
-      expect(unavailableResult!.error).toBeDefined()
-    })
+      it('reports a gateway error for one file and keeps the rest of the batch', async () => {
+        const broken = await node.postTransaction(new Uint8Array([1, 2, 3]))
+        const fine = await node.postTransaction(new Uint8Array([4, 5, 6]))
+        node.failRawRead(broken, 500)
 
-    it('handles transactions with error status', async () => {
-      MockArweaveClient.addMockTransaction('error-tx', new Uint8Array([1, 2, 3]), {
-        status: 500,
-        confirmed: null,
+        const results = await BaseArweaveClient.downloadFiles({ transactionIds: [broken, fine] })
+
+        expect(results.map((r) => [r.transactionId, r.success])).toEqual([
+          [broken, false],
+          [fine, true],
+        ])
+        expect(results[0]!.error).toContain('500')
       })
-
-      const results = await BaseArweaveClient.downloadFiles({
-        transactionIds: ['error-tx'],
-      })
-
-      expect(results).toHaveLength(1)
-      expect(results[0].success).toBe(false)
-      expect(results[0].error).toContain('500')
-    })
-  })
-
-  describe('Mock Reset Behavior', () => {
-    it('reset clears all mock data', async () => {
-      MockArweaveClient.addMockTransaction('tx1', new Uint8Array([1]))
-      MockArweaveClient.setMockHost('custom.host')
-      await BaseArweaveClient.createTransaction('test')
-
-      MockArweaveClient.reset()
-
-      // Transactions should be cleared
-      const status = await BaseArweaveClient.getTransactionStatus('tx1')
-      expect(status.status).toBe(404)
-
-      // Created transactions should be cleared
-      expect(MockArweaveClient.getCreatedTransactions()).toHaveLength(0)
     })
   })
 })

@@ -122,6 +122,7 @@ const matches = (att: Record<string, any>, where: Record<string, any>): boolean 
     if (key === 'id' || key === 'refUID' || key === 'revoked' || key === 'schemaId') {
       if ('equals' in cond) return att[key] === cond.equals
       if ('in' in cond) return cond.in.includes(att[key])
+      if ('notIn' in cond) return !cond.notIn.includes(att[key])
       if ('startsWith' in cond) return String(att[key]).startsWith(cond.startsWith)
     }
     throw new Error(`fake EAS: unsupported where ${key}: ${JSON.stringify(cond)}`)

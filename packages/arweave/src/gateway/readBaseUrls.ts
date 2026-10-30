@@ -94,17 +94,17 @@ export async function fetchArweaveRawFromBaseUrl(
 }
 
 /**
- * GET `/raw/{id}` across read gateways and return the first non-empty body as text. Preferred
- * gateways go first and are tried before any read-gateway probe; a just-published item is served
- * by the gateway it was uploaded through well before it reaches L1 or the public hosts.
+ * GET `/raw/{id}` across read gateways and return the first non-empty body. Preferred gateways go
+ * first and are tried before any read-gateway probe; a just-published item is served by the
+ * gateway it was uploaded through well before it reaches L1 or the public hosts.
  * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`).
  */
-export async function fetchArweaveRawTextAcrossGateways(
+export async function fetchArweaveRawBytesAcrossGateways(
   transactionId: string,
   options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number },
-): Promise<string | undefined> {
+): Promise<Uint8Array | undefined> {
   const tried = new Set<string>()
-  const tryUrls = async (urls: string[]): Promise<string | undefined> => {
+  const tryUrls = async (urls: string[]): Promise<Uint8Array | undefined> => {
     for (const base of urls) {
       if (tried.has(base)) continue
       tried.add(base)
@@ -112,8 +112,7 @@ export async function fetchArweaveRawTextAcrossGateways(
       if (!res) continue
       try {
         const { bytes } = await readArweaveContentResponse(res, { transactionId })
-        const text = new TextDecoder().decode(bytes)
-        if (text.length > 0) return text
+        if (bytes.byteLength > 0) return bytes
       } catch {
         /* body read failed — next gateway */
       }
@@ -126,4 +125,13 @@ export async function fetchArweaveRawTextAcrossGateways(
 
   await ensureArweaveReadGatewayForFallback()
   return tryUrls(getResolvedArweaveReadBaseUrls(options))
+}
+
+/** {@link fetchArweaveRawBytesAcrossGateways} as text. */
+export async function fetchArweaveRawTextAcrossGateways(
+  transactionId: string,
+  options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number },
+): Promise<string | undefined> {
+  const bytes = await fetchArweaveRawBytesAcrossGateways(transactionId, options)
+  return bytes ? new TextDecoder().decode(bytes) || undefined : undefined
 }

@@ -179,6 +179,14 @@ each part without one is reported to `onUnmatched` with `splitFrom` set to the w
 a lookup row's `onSplitChange` set or clear it; `splitLookupValue` and `resolveLookup` expose the same
 rules to a host that matches strings itself.
 
+A field that repeats in the feed is a list, not a joined string. `rssXmlToSources` keeps every
+`dc:creator` (RSS) and `author` (RSS or Atom): the source's `value` is the first and `values` holds them
+all, in document order, without repeats. A lookup edge looks up each one, and `split` applies to each.
+Refs apply in that order without repeats, and each value without an entry is reported to `onUnmatched`
+(`applyMappingAsync` lists it in `errors`), so a partly known byline applies its known people. A Relation
+target takes the first ref. Copy edges read `value`. A host that passes `rssItemToSources` its own
+items gets the list from `parseRssString` in `@seedprotocol/feed`.
+
 A source value matches an entry when their `lookupKey` is the same: NFC, internal whitespace
 collapsed, trimmed and case-folded, so `mira chen` finds the `Mira Chen` entry. Entries are stored
 with case kept (`normalizeLookupKey`). An empty source value is no lookup: it is neither applied nor

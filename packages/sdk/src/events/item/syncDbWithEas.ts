@@ -62,6 +62,7 @@ import {
 import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 import { scheduleBulkFilesDownloadFromEasSync } from '@/events/files/download'
+import { abortable } from '@/helpers/abortable'
 import { assertLocalDbChain, waitForEasReadChain } from '@/helpers/localDbChain'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 import { emitAcrossTabs } from '@/helpers/tabEvents'
@@ -141,6 +142,8 @@ const isRelationPropertyName = (propertyNameSnake: string): boolean =>
   propertyNameSnake !== 'storage_provider_transaction_id'
 
 type SyncedPropertyName = {
+  /** The matched local property's schema key; undefined when no local property matched. */
+  key?: string
   /** metadata.property_name for the row. */
   propertyName: string
   isRelation: boolean
@@ -166,7 +169,7 @@ const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
  * relations), so related seeds are still followed for discovery. Undefined: the name matches
  * several local properties equally well, and the attestation is skipped.
  */
-const resolveSyncedPropertyName = (
+export const resolveSyncedPropertyName = (
   easPropertyName: string,
   value: unknown,
   modelSchema: Record<string, any> | undefined,
@@ -209,12 +212,12 @@ const resolveSyncedPropertyName = (
       const propertyName = metadataStorageName(key, def)
       const definitionId = typeof def?.id === 'string' && def.id ? def.id : undefined
       if (isListRelation) {
-        return { propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
+        return { key, propertyName, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined, definitionId }
       }
       if (isSingleRef) {
-        return { propertyName, isRelation: true, isList: false, definitionId }
+        return { key, propertyName, isRelation: true, isList: false, definitionId }
       }
-      return { propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
+      return { key, propertyName, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType), definitionId }
     }
     // A name one of the model's properties would match at a looser level than its nameMatch
     // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
@@ -1083,19 +1086,24 @@ const syncVersionsAndPropertiesForSeeds = async ({
   seedUids,
   itemSeeds,
   state,
+  signal,
 }: {
   seedUids: string[]
   itemSeeds: Attestation[]
   state: SyncRunState
+  signal?: AbortSignal
 }): Promise<void> => {
   if (seedUids.length === 0) return
 
   // Only the seed's attester can add versions to it, and only a version's attester can add
   // properties to it (see partitionByRefAttester): anyone can attest with any refUID.
-  const fetchedVersions = await getItemVersionsFromEas({
-    seedUids,
-    excludeRevoked: false,
-  })
+  const fetchedVersions = await abortable(
+    getItemVersionsFromEas({
+      seedUids,
+      excludeRevoked: false,
+    }),
+    signal,
+  )
   const { kept: itemVersions } = partitionByRefAttester(
     fetchedVersions,
     itemSeeds,
@@ -1107,10 +1115,13 @@ const syncVersionsAndPropertiesForSeeds = async ({
   })
 
   if (versionUids.length > 0) {
-    const allProperties = await getItemPropertiesFromEas({
-      versionUids,
-      excludeRevoked: false,
-    })
+    const allProperties = await abortable(
+      getItemPropertiesFromEas({
+        versionUids,
+        excludeRevoked: false,
+      }),
+      signal,
+    )
     const { kept: keptProperties } = partitionByRefAttester(allProperties, itemVersions)
 
     // The save makes the canonical pick; it also needs the other attestations to clean up after them.
@@ -1131,7 +1142,7 @@ const syncVersionsAndPropertiesForSeeds = async ({
  * would also break the canonical pick, which needs the revoked attestations to skip them (or to
  * keep the newest one when all are revoked), and would leave `seeds.revoked_at` unset.
  */
-const getRelatedSeedsAndVersions = async (state: SyncRunState) => {
+const getRelatedSeedsAndVersions = async (state: SyncRunState, signal?: AbortSignal) => {
   // Snapshot: relations found on the related seeds themselves aren't followed (one level deep).
   const uids = Array.from(state.relatedSeedUids)
   if (uids.length === 0) return
@@ -1139,18 +1150,21 @@ const getRelatedSeedsAndVersions = async (state: SyncRunState) => {
   const easClient = BaseEasClient.getEasClient()
 
   // No `revoked` filter, like `getSeedsFromSchemaUids({ excludeRevoked: false })` in the main sync.
-  const { itemSeeds } = await easClient.request(GET_SEEDS, {
-    where: {
-      id: {
-        in: uids,
+  const { itemSeeds } = await abortable(
+    easClient.request(GET_SEEDS, {
+      where: {
+        id: {
+          in: uids,
+        },
       },
-    },
-  })
+    }),
+    signal,
+  )
 
   const { seedUids } = await saveEasSeedsToDb({ itemSeeds, state })
 
   // Only seeds EAS returned: a version of an unknown seed would be stored without its seed.
-  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state })
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state, signal })
 }
 
 export type SyncFromEasOptions = {
@@ -1162,12 +1176,14 @@ export type SyncFromEasOptions = {
  * Core sync logic: fetches item attestations from EAS for configured models and given addresses,
  * then saves seeds, versions, and properties to the local DB.
  * Uses owned + watched addresses from DB when addresses are not provided.
+ * `signal` ends the run at its next network wait, rejecting with `signal.reason`; rows already
+ * saved stay, and the next sync picks up the rest.
  */
-export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void> => {
+export const runSyncFromEas = async (options?: SyncFromEasOptions, signal?: AbortSignal): Promise<void> => {
   let addresses = options?.addresses ?? (await getAllAddressesFromDb())
   const additionalGetter = getGetAdditionalSyncAddresses()
   if (additionalGetter) {
-    const additional = await additionalGetter()
+    const additional = await abortable(Promise.resolve(additionalGetter()), signal)
     if (additional?.length) {
       const seen = new Set(addresses.map((a) => a.toLowerCase()))
       for (const addr of additional) {
@@ -1183,7 +1199,7 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   }
 
   // Don't read the default chain while publish is about to configure another one.
-  await waitForEasReadChain()
+  await abortable(waitForEasReadChain(), signal)
   // Never mix attestations from two chains in one local DB.
   await assertLocalDbChain()
 
@@ -1195,7 +1211,10 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   // ADR 0008: matched by name, so seeds published under an older SDK's name are found too. Schemas
   // that match no local model (e.g. "bytes32 image" with no Image model) aren't fetched.
   const modelSchemaLookups = await localModelSchemaLookups()
-  const modelSchemaMatches = matchEasModelSchemas(await getModelSchemasFromEas(modelSchemaLookups), modelSchemaLookups)
+  const modelSchemaMatches = matchEasModelSchemas(
+    await abortable(getModelSchemasFromEas(modelSchemaLookups), signal),
+    modelSchemaLookups,
+  )
   // The same rule as init: only each model's exact schema goes into model_uids.
   await writeModelUids(modelSchemaMatches, appDb)
   const schemaUids = [...new Set(modelSchemaMatches.map((match) => match.schema.id))]
@@ -1206,11 +1225,14 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     return
   }
 
-  const itemSeeds = await getSeedsFromSchemaUids({
-    schemaUids,
-    addresses,
-    excludeRevoked: false,
-  })
+  const itemSeeds = await abortable(
+    getSeedsFromSchemaUids({
+      schemaUids,
+      addresses,
+      excludeRevoked: false,
+    }),
+    signal,
+  )
 
   const state = createSyncRunState()
 
@@ -1219,9 +1241,10 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     state,
   })
 
-  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state })
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state, signal })
 
-  await getRelatedSeedsAndVersions(state)
+  await getRelatedSeedsAndVersions(state, signal)
+  signal?.throwIfAborted()
   scheduleBulkFilesDownloadFromEasSync(addresses)
 
   // Loaded items in the browser see sync's writes through the change feed (ADR 0020); Node has none.

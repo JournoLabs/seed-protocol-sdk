@@ -43,6 +43,11 @@ export type SourceNode = {
   subtitle?: string
   kind: SourceKind
   value: string
+  /**
+   * Every value of a field that repeats, in document order; `value` is the first. Lookup edges
+   * look up each one. Other edges read `value`.
+   */
+  values?: string[]
   meta?: Record<string, unknown>
 }
 
@@ -65,7 +70,7 @@ export type TargetProperty = {
 export type UnmatchedLookup = {
   sourceId: string
   propertyName: string
-  /** The source value, or the part of it that missed when the edge splits, as {@link normalizeLookupKey} stores it. */
+  /** The source value (one of `values` when it repeats), or the part of it that missed when the edge splits, as {@link normalizeLookupKey} stores it. */
   value: string
   /** The whole source value `value` was split from. Absent when the whole value missed. */
   splitFrom?: string
