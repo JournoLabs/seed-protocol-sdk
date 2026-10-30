@@ -7,6 +7,7 @@ import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // - schema/Schema -> ... -> validateProperty -> Schema -> schema/Schema
 // import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
 // import { Schema } from '@/Schema/Schema'
+import { assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:actors:validateProperty')
@@ -69,6 +70,29 @@ export const validateProperty = fromCallback<
     if (!structureResult.isValid) {
       sendBack({ type: 'validationError', errors: structureResult.errors })
       return
+    }
+
+    // A rename to a name that can't publish stops here, before compareAndMarkDraft writes the row
+    if (fullContext.name && fullContext.name !== fullContext._originalValues?.name) {
+      try {
+        assertPropertyNameCanPublish(fullContext.name, {
+          dataType: fullContext.dataType,
+          refValueType: fullContext.refValueType,
+          ref: fullContext.ref ?? fullContext.refModelName,
+          name: fullContext.name,
+        })
+      } catch (error) {
+        sendBack({
+          type: 'validationError',
+          errors: [{
+            field: 'name',
+            message: error instanceof Error ? error.message : String(error),
+            code: 'reserved_name',
+            severity: 'error' as const,
+          }],
+        })
+        return
+      }
     }
 
     // If we have schema name and model name, validate against schema

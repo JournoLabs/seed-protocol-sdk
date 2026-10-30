@@ -1509,6 +1509,55 @@ testDescribe('ModelProperty Integration Tests', () => {
       }
     })
 
+    it('a rename to a reserved ABI word fails validation and leaves the row alone', async () => {
+      const schemaName = 'Test Schema Property Reserved Rename'
+      const modelName = 'TestModel Property Reserved Rename'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: { summary: { id: propertyFileId, type: 'Text' } },
+        },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      Model.create(modelName, schemaName, { waitForReady: false })
+      const propertyData = await waitForPropertySchema(modelName, 'summary', schemaName)
+      if (!propertyData) throw new Error('Property data not found')
+      const property = ModelProperty.create(propertyData, { waitForReady: false })
+      await waitForModelPropertyIdle(property)
+
+      property.name = 'view'
+      await waitForModelPropertyIdle(property)
+
+      const { isValid, errors } = await property.validate()
+      expect(isValid).toBe(false)
+      expect(errors).toEqual([
+        expect.objectContaining({
+          field: 'name',
+          code: 'reserved_name',
+          message: expect.stringContaining('Property "view" publishes as "view"'),
+        }),
+      ])
+      const db = BaseDb.getAppDb()
+      const rows = await db
+        .select({ name: propertiesTable.name })
+        .from(propertiesTable)
+        .where(eq(propertiesTable.schemaFileId, propertyFileId))
+      expect(rows).toEqual([{ name: 'summary' }])
+
+      // Renaming to a name that can publish clears the error and writes the row
+      property.name = 'overview'
+      await waitForModelPropertyIdle(property)
+      expect((await property.validate()).isValid).toBe(true)
+      await waitUntilOrThrow(async () => {
+        const [row] = await db
+          .select({ name: propertiesTable.name })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.schemaFileId, propertyFileId))
+        return row?.name === 'overview'
+      })
+    })
+
     it('newly created property: first rename persists and survives reload (regression test)', async () => {
       // Regression test: changing the name on a newly created ModelProperty must persist.
       // Scenario: user adds a new property (create from schema), renames it immediately,
