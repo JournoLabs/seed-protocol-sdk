@@ -285,8 +285,9 @@ async function attestProperty(
     isRemoval = true
   }
   // Patch mode skips properties that already have an EAS uid, except a storage transaction this
-  // publish uploaded.
-  if (!isRemoval && property.uid && !forceFullSnapshot && !uploaded) return undefined
+  // publish uploaded that isn't the one recorded: a retry of the same publish has attested it.
+  const attested = !uploaded || uploaded.txId === row?.propertyValue
+  if (!isRemoval && property.uid && !forceFullSnapshot && attested) return undefined
 
   // File/Image/Html values must be a storage seed id by now. Raw content means the property's
   // save pipeline never ran or failed (e.g. createNewItem with raw html), so it was never uploaded.

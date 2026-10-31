@@ -6,7 +6,12 @@ import { AttestationOutcomeUnknownError, PublishTransactionRevertedError } from 
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { findPinnedUserOp, readNonceSequence } from '~/helpers/pinnedNonce'
 import type { PublishMachineContext, UnrecordedAttestation } from '../../../types'
-import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
+import {
+  recordDirectAttestation,
+  type DirectAttestationStep,
+  type DirectAttestationTarget,
+} from './recordDirectAttestation'
+import { recordMultiPublishReceipt, recordRelatedSeedUid } from './recordMultiPublishReceipt'
 
 const logger = debug('seedProtocol:services:publish:actors:reconcileAttestations')
 
@@ -26,7 +31,8 @@ export type ReconcileResult =
  * have gone out, and resending could attest twice.
  *
  * Another run's landed transaction is recorded here, so that this run builds its payload on top of
- * it and sends what is left.
+ * it and sends what is left. So is any landed direct EAS transaction: the actor rebuilds its payload
+ * from the rows and skips what they hold.
  */
 export const reconcileAttestations = fromPromise(
   async ({ input: { context } }: { input: { context: PublishMachineContext } }): Promise<ReconcileResult> => {
@@ -76,6 +82,29 @@ export const reconcileAttestations = fromPromise(
         }
         logger('no receipt for %s: %O', attempt.txHash, err)
         return { outcome: 'unknown', error: new AttestationOutcomeUnknownError(seedLocalId, attempt, err) }
+      }
+
+      if (attempt.step !== 'multiPublish') {
+        const [target] = JSON.parse(attempt.requests) as DirectAttestationTarget[]
+        const step = attempt.step as DirectAttestationStep
+        const publisher = context.address as string
+        const { uids, attestationMs } = await recordDirectAttestation({
+          step,
+          target: target!,
+          receipt,
+          attester: attempt.attester,
+          publisher,
+          attemptId: attempt.id,
+        })
+        if (step === 'seed') {
+          await recordRelatedSeedUid({
+            seedLocalId: target!.localId,
+            seedUid: uids[0]!,
+            publisherAddress: publisher,
+            attestationCreatedAtMs: attestationMs,
+          })
+        }
+        continue
       }
 
       const unrecorded: UnrecordedAttestation = {

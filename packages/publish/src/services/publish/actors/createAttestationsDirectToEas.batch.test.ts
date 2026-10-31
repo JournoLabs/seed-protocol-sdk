@@ -61,6 +61,9 @@ mock.module('@seedprotocol/sdk', () => ({
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
   // The real one writes them in one transaction; here it hands each to its mock
+  claimPublishAttempt: async () => undefined,
+  findOpenPublishAttempts: async () => [],
+  updatePublishAttempt: async () => {},
   recordPublishRequests: async (records: Array<{ version?: unknown; properties?: unknown }>) => {
     if (recordFailure) throw recordFailure
     for (const { version, properties } of records) {
@@ -77,14 +80,12 @@ mock.module('../../../helpers/easDirect', () => ({
     ({ kind: 'attest', schema: p.schema, refUID: p.data.refUID }) as unknown,
   prepareEasMultiAttest: (reqs: Array<{ schema: string; data: unknown[] }>) =>
     ({ kind: 'multi', schemas: reqs.flatMap((r) => r.data.map(() => r.schema)) }) as unknown,
-  getAttestationUidFromReceipt: (receipt: { hash: string }) => {
-    const tx = sentTxs.get(receipt.hash)
-    if (tx?.kind !== 'attest') return undefined
-    return SEED_BY_SCHEMA[tx.schema] ?? VERSION_BY_SEED[tx.refUID]
-  },
   getAttestedUidsFromReceipt: (receipt: { hash: string }) => {
     const tx = sentTxs.get(receipt.hash)
-    if (tx?.kind !== 'multi') return []
+    if (!tx) return []
+    if (tx.kind === 'attest') {
+      return [{ schemaUid: tx.schema, uid: (SEED_BY_SCHEMA[tx.schema] ?? VERSION_BY_SEED[tx.refUID])! }]
+    }
     return tx.schemas.map((schemaUid) => ({ schemaUid, uid: PROPERTY_BY_SCHEMA[schemaUid]! }))
   },
 }))
@@ -94,6 +95,7 @@ mock.module('../../../config', () => ({
 }))
 mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
+  getPublishBlockNumber: async () => 100n,
   waitForPublishReceipt: async (hash: string) => ({ hash }),
 }))
 mock.module('../helpers/receiptAttestationMs', () => ({

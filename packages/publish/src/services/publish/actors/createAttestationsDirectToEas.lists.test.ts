@@ -62,7 +62,13 @@ mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish: async (args: ApplyArgs) => {
     applyCalls.push(structuredClone(args))
   },
-  recordPublishRequests: async () => {},
+  claimPublishAttempt: async () => undefined,
+  findOpenPublishAttempts: async () => [],
+  updatePublishAttempt: async () => {},
+  // The real one writes them in one transaction; here it hands each to its mock
+  recordPublishRequests: async (records: Array<{ properties?: ApplyArgs }>) => {
+    for (const { properties } of records) if (properties) applyCalls.push(structuredClone(properties))
+  },
   Item: { find: async () => undefined },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))
@@ -72,9 +78,8 @@ mock.module('../../../helpers/easDirect', () => ({
     ({ kind: 'attest', schema: p.schema, refUID: p.data.refUID }) as unknown,
   prepareEasMultiAttest: (requests: Array<{ schema: string; data: AttestData[] }>) =>
     ({ kind: 'multi', requests: structuredClone(requests) }) as unknown,
-  getAttestationUidFromReceipt: (receipt: { hash: string; uid: string }) => receipt.uid,
-  getAttestedUidsFromReceipt: (receipt: { hash: string; uids: Array<{ schemaUid: string; uid: string }> }) =>
-    receipt.uids,
+  getAttestedUidsFromReceipt: (receipt: { uid?: string; uids?: Array<{ schemaUid: string; uid: string }> }) =>
+    receipt.uids ?? [{ schemaUid: '', uid: receipt.uid }],
 }))
 mock.module('../../../config', () => ({
   ...realConfig,
@@ -82,6 +87,7 @@ mock.module('../../../config', () => ({
 }))
 mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
+  getPublishBlockNumber: async () => 100n,
   waitForPublishReceipt: async (hash: string) => {
     const tx = sentTxs.get(hash)!
     if (tx.kind === 'attest') {
