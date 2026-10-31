@@ -4,6 +4,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { publishAttempts } from '@/seedSchema'
 import {
   claimPublishAttempt,
+  findOpenPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
   type PublishAttemptStatus,
@@ -81,6 +82,14 @@ testDescribe('publish attempts', () => {
     await claimPublishAttempt(first)
     await updatePublishAttempt(first.id, { status })
     expect(await claimPublishAttempt(attempt([seedA]))).toBeUndefined()
+  })
+
+  it('findOpenPublishAttempts finds an attempt by any of its seeds, while it is open', async () => {
+    const first = attempt([seedA, seedB])
+    await claimPublishAttempt(first)
+    expect((await findOpenPublishAttempts([seedB])).map((a) => a.id)).toEqual([first.id])
+    await updatePublishAttempt(first.id, { status: 'abandoned' })
+    expect(await findOpenPublishAttempts([seedB])).toEqual([])
   })
 
   it('recordPublishRequests ends the attempt, with nothing to write too', async () => {

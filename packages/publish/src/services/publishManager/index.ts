@@ -1,5 +1,5 @@
 import { ActorRefFrom, createActor, setup } from 'xstate'
-import { Item } from '@seedprotocol/sdk'
+import { findOpenPublishAttempts, Item, updatePublishAttempt } from '@seedprotocol/sdk'
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
@@ -238,6 +238,26 @@ export const PublishManager = {
   },
   retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').PublishWallet) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
+  /**
+   * Settles a seed's open attempt, for a publish in `attestationOutcomeUnknown`, then retries.
+   * `txHash` names the transaction, found on a block explorer or from the wallet: it is read and
+   * recorded. `resend: true` gives the attempt up and sends again, which attests a second time if
+   * it did land, so this is for an author who knows it didn't or accepts that.
+   */
+  resolveAttestationAttempt: async (
+    seedLocalId: string,
+    resolution: { txHash: string } | { resend: true },
+    account?: import('../../helpers/seedSigner').PublishWallet,
+  ) => {
+    const [attempt] = await findOpenPublishAttempts([seedLocalId])
+    if (attempt) {
+      await updatePublishAttempt(
+        attempt.id,
+        'txHash' in resolution ? { status: 'sent', txHash: resolution.txHash } : { status: 'abandoned' },
+      )
+    }
+    publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account })
+  },
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
   /**
    * The current snapshot of a seed's publish (running, or settled this session), or undefined.

@@ -27,6 +27,7 @@ export type { UpdateSeedUidProps } from './db/write/updateSeedUid'
 export { recordPublishRequests, type PublishRequestRecord } from './db/write/recordPublishRequests'
 export {
   claimPublishAttempt,
+  findOpenPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
   type PublishAttemptStatus,

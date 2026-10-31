@@ -138,6 +138,31 @@ export class AttestationAttemptOpenError extends Error {
 }
 
 /**
+ * Why a publish is in `attestationOutcomeUnknown`: an earlier attempt may have landed and nothing
+ * here can tell. Retry looks again. `PublishManager.resolveAttestationAttempt` settles it.
+ */
+export class AttestationOutcomeUnknownError extends Error {
+  public readonly attemptId: string
+  public readonly transactionHash: string | null
+
+  constructor(
+    public readonly seedLocalId: string,
+    attempt: { id: string; txHash: string | null },
+    cause?: unknown,
+  ) {
+    super(
+      attempt.txHash
+        ? `Publish of ${seedLocalId}: no receipt for transaction ${attempt.txHash}, so it may or may not have landed.`
+        : `Publish of ${seedLocalId}: an attestation transaction may have gone out, and its hash was not saved.`,
+      { cause },
+    )
+    this.name = 'AttestationOutcomeUnknownError'
+    this.attemptId = attempt.id
+    this.transactionHash = attempt.txHash
+  }
+}
+
+/**
  * Thrown when a `multiPublish` landed and recording it locally failed. Nothing was recorded. A
  * retry records it from `unrecorded` and sends nothing.
  */

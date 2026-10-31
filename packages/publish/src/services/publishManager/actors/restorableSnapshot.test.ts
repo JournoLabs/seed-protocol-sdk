@@ -1,5 +1,21 @@
 import { describe, expect, test } from 'bun:test'
-import { isRestorableSnapshot } from './restorableSnapshot'
+import { isRestorableSnapshot, parkInterruptedAttestation } from './restorableSnapshot'
+
+describe('parkInterruptedAttestation', () => {
+  test('a state that can send comes back waiting for a retry, with no actor to re-run', () => {
+    for (const value of ['creatingAttestations', 'creatingAttestationsDirectToEas', 'reconcilingAttestations']) {
+      const parsed = { value, children: { attest: {} }, context: {} }
+      expect(parkInterruptedAttestation(parsed)).toBe(true)
+      expect(parsed).toEqual({ value: 'attestationFailureRecoverable', children: {}, context: {} })
+    }
+  })
+
+  test('other states are left alone', () => {
+    const parsed = { value: 'attestationOutcomeUnknown', children: {}, context: {} }
+    expect(parkInterruptedAttestation(parsed)).toBe(false)
+    expect(parsed.value).toBe('attestationOutcomeUnknown')
+  })
+})
 
 // Signed data items aren't saved with a publish, so one caught mid bundler upload can't resume.
 describe('isRestorableSnapshot', () => {

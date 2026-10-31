@@ -4,9 +4,17 @@ import { publishAttempts, type PublishAttemptType } from '@/seedSchema'
 
 /**
  * `sending`: about to send, or sent with no hash yet. `sent`: the hash is known. `landed`: the
- * receipt arrived and recording hasn't finished. `recorded`, `notSent` and `reverted` end an attempt.
+ * receipt arrived and recording hasn't finished. `recorded`, `notSent` and `reverted` end an attempt,
+ * and so does `abandoned`: the host chose to send again without knowing what happened to this one.
  */
-export type PublishAttemptStatus = 'sending' | 'sent' | 'landed' | 'recorded' | 'notSent' | 'reverted'
+export type PublishAttemptStatus =
+  | 'sending'
+  | 'sent'
+  | 'landed'
+  | 'recorded'
+  | 'notSent'
+  | 'reverted'
+  | 'abandoned'
 
 const OPEN_STATUSES: PublishAttemptStatus[] = ['sending', 'sent', 'landed']
 
@@ -14,6 +22,21 @@ export type NewPublishAttempt = Omit<
   PublishAttemptType,
   'seedLocalIds' | 'txHash' | 'status' | 'createdAt' | 'updatedAt'
 > & { seedLocalIds: string[] }
+
+const overlaps = (row: PublishAttemptType, seeds: Set<string>): boolean =>
+  (JSON.parse(row.seedLocalIds) as string[]).some((id) => seeds.has(id))
+
+/** Open attempts covering any of `seedLocalIds`. `claimPublishAttempt` lets one seed have one. */
+export async function findOpenPublishAttempts(seedLocalIds: string[]): Promise<PublishAttemptType[]> {
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('findOpenPublishAttempts: the database is not ready')
+  const open: PublishAttemptType[] = await db
+    .select()
+    .from(publishAttempts)
+    .where(inArray(publishAttempts.status, OPEN_STATUSES))
+  const seeds = new Set(seedLocalIds)
+  return open.filter((row) => overlaps(row, seeds))
+}
 
 /**
  * Commits an attempt row before a send, unless an open attempt covers any of its seeds: that one's
@@ -32,9 +55,7 @@ export async function claimPublishAttempt(
       .from(publishAttempts)
       .where(inArray(publishAttempts.status, OPEN_STATUSES))
     const seeds = new Set(attempt.seedLocalIds)
-    const blockedBy = open.find((row) =>
-      (JSON.parse(row.seedLocalIds) as string[]).some((id) => seeds.has(id)),
-    )
+    const blockedBy = open.find((row) => overlaps(row, seeds))
     if (blockedBy) return blockedBy
     const now = Date.now()
     await tx.insert(publishAttempts).values({

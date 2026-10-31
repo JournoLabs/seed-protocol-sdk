@@ -5,6 +5,7 @@
 export interface PersistedSnapshot {
   status?: string
   value?: string | Record<string, unknown>
+  children?: Record<string, unknown>
   context?: {
     item?: { seedLocalId?: string; modelName?: string; schemaId?: string }
     modelName?: string
@@ -40,6 +41,25 @@ const REMOVED_L1_STATES = new Set([
   'pollingForConfirmationPhase2',
   'uploadingDataPhase2',
 ])
+
+/** States that can send. Restoring one directly would run its actor on its saved input and send. */
+const ATTESTING_STATES = new Set([
+  'creatingAttestations',
+  'creatingAttestationsDirectToEas',
+  'reconcilingAttestations',
+])
+
+/**
+ * A publish interrupted while attesting comes back waiting for a retry, with no running actor. The
+ * retry reconciles, from the restored context, before anything can send.
+ * @returns true when the caller should send that `retry`
+ */
+export function parkInterruptedAttestation(parsed: PersistedSnapshot): boolean {
+  if (!ATTESTING_STATES.has(getStateValue(parsed))) return false
+  parsed.value = 'attestationFailureRecoverable'
+  parsed.children = {}
+  return true
+}
 
 export function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
   const stateValue = getStateValue(parsed)

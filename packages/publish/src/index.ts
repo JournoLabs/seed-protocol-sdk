@@ -50,6 +50,7 @@ export type {
 } from './services/publish/helpers/getPublishUploadData'
 export {
   AttestationAttemptOpenError,
+  AttestationOutcomeUnknownError,
   AttestationRecordError,
   AttestationVerificationError,
   isManagedAccountPublishError,

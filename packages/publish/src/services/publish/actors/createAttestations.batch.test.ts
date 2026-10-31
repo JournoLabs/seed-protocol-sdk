@@ -62,6 +62,7 @@ const recordPublishRequests = mock(async (records: Array<{ version?: unknown; pr
     if (properties) await applyPropertyAttestationUidsFromPublish(properties)
   }
 })
+let openAttempts: Array<Record<string, unknown>> = []
 const sendTransaction = mock(async () => ({ transactionHash: '0x01' }))
 const relatedImage = {
   seedLocalId: 'imageLocal2',
@@ -81,6 +82,7 @@ const itemFind = mock(async (q: { seedLocalId?: string }) =>
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   claimPublishAttempt: async () => undefined,
+  findOpenPublishAttempts: async () => openAttempts,
   updatePublishAttempt: async () => {},
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
@@ -128,6 +130,8 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 const { createAttestations } = await import('./createAttestations')
 const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
 const { publishMachine } = await import('../index')
+const { AttestationOutcomeUnknownError } = await import('../../../errors')
+const { parkInterruptedAttestation } = await import('../../publishManager/actors/restorableSnapshot')
 
 const attestation = (schema: string, name: string) => ({
   schema,
@@ -306,6 +310,57 @@ describe('createAttestations: recording failed after the transaction landed', ()
     expect(sendTransaction).toHaveBeenCalledTimes(1)
     expect(item.seedUid).toBe(POST_SEED)
     expect(actor.getSnapshot().context.unrecordedAttestation).toBeUndefined()
+  })
+
+  test('an attempt with no hash stops the retry, and a later retry after it is settled sends', async () => {
+    const { actor } = failedAttestation()
+    actor.start()
+    sendTransaction.mockClear()
+    openAttempts = [{ id: 'attempt0', txHash: null, status: 'sending' }]
+
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, atRest('attestationOutcomeUnknown'))
+    expect(sendTransaction).not.toHaveBeenCalled()
+    expect(actor.getSnapshot().context.error).toBeInstanceOf(AttestationOutcomeUnknownError)
+
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, atRest('attestationOutcomeUnknown'))
+    expect(sendTransaction).not.toHaveBeenCalled()
+
+    openAttempts = []
+    actor.send({ type: 'retry' } as any)
+    await waitFor(actor, atRest('success'))
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  test('a publish saved while attesting is restored through reconcile, from the restored context', async () => {
+    const { actor } = failedAttestation()
+    const saved = JSON.parse(JSON.stringify({ ...actor.getPersistedSnapshot(), value: 'creatingAttestations' }))
+    saved.context.item = { seedLocalId: 'postLocal02' }
+    reloadedPost = {
+      seedLocalId: 'postLocal02',
+      seedUid: undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async () => {}),
+      unload: () => {},
+    }
+    expect(parkInterruptedAttestation(saved)).toBe(true)
+
+    sendTransaction.mockClear()
+    openAttempts = [{ id: 'attempt0', txHash: null, status: 'sending' }]
+    const restored = createActor(machine, { snapshot: saved })
+    restored.start()
+    expect(sendTransaction).not.toHaveBeenCalled()
+    restored.send({ type: 'retry' } as any)
+    await waitFor(restored, atRest('attestationOutcomeUnknown'))
+    expect(sendTransaction).not.toHaveBeenCalled()
+
+    openAttempts = []
+    restored.send({ type: 'retry' } as any)
+    await waitFor(restored, atRest('success'))
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
+    reloadedPost = undefined
   })
 
   test('survives a saved snapshot, and a second failed record keeps the transaction', async () => {

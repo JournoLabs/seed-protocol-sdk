@@ -9,7 +9,9 @@ import {
   createArweaveDataItemsPhase2,
   createAttestations,
   createAttestationsDirectToEas,
+  reconcileAttestations,
   uploadViaBundler,
+  type ReconcileResult,
   checking,
   authorizing,
   preparingHtmlEmbedded,
@@ -60,6 +62,7 @@ export const publishMachine = setup({
     uploadViaBundler,
     createAttestations,
     createAttestationsDirectToEas,
+    reconcileAttestations,
     checking,
     authorizing,
     preparingHtmlEmbedded,
@@ -428,7 +431,49 @@ export const publishMachine = setup({
     attestationFailureRecoverable : {
       on : {
         retry : {
-          target  : 'creatingAttestations',
+          target  : 'reconcilingAttestations',
+          actions : [ 'assignAccountFromRetry', ],
+        },
+      },
+    },
+    // Every retry and restore passes through here: nothing sends until earlier attempts are settled.
+    reconcilingAttestations : {
+      invoke : {
+        src    : 'reconcileAttestations',
+        input  : ( { context } ) => ({ context } as { context: PublishMachineContext }),
+        onDone : [
+          {
+            guard   : ( { event } ) => (event.output as ReconcileResult).outcome === 'unknown',
+            target  : 'attestationOutcomeUnknown',
+            actions : assign({
+              error     : ( { event, }, ) => (event.output as Extract<ReconcileResult, { outcome: 'unknown' }>).error,
+              errorStep : () => 'reconcilingAttestations',
+            },),
+          },
+          {
+            guard   : ( { event } ) => (event.output as ReconcileResult).outcome === 'record',
+            target  : 'creatingAttestations',
+            actions : assign({
+              unrecordedAttestation : ( { event, }, ) =>
+                (event.output as Extract<ReconcileResult, { outcome: 'record' }>).unrecorded,
+            },),
+          },
+          {
+            guard  : ( { context } ) => attestationUsesDirectEas(context) && !context.unrecordedAttestation,
+            target : 'creatingAttestationsDirectToEas',
+          },
+          { target : 'creatingAttestations' },
+        ],
+        onError : {
+          target  : 'attestationFailureRecoverable',
+          actions : [ 'assignErrorCreatingAttestations', 'handleError', ],
+        },
+      },
+    },
+    attestationOutcomeUnknown : {
+      on : {
+        retry : {
+          target  : 'reconcilingAttestations',
           actions : [ 'assignAccountFromRetry', ],
         },
       },
@@ -455,7 +500,7 @@ export const publishMachine = setup({
     attestationFailureRecoverableDirectToEas : {
       on : {
         retry : {
-          target  : 'creatingAttestationsDirectToEas',
+          target  : 'reconcilingAttestations',
           actions : [ 'assignAccountFromRetry', ],
         },
       },
