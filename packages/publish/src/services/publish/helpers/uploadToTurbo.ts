@@ -42,7 +42,7 @@ async function rawBytesOf(item: unknown): Promise<Uint8Array> {
 export async function uploadToTurbo(
   items: unknown[],
   turbo: NonNullable<ResolvedPublishPayment['storage']['turbo']>,
-  context: PublishMachineContext,
+  context: Pick<PublishMachineContext, 'dataItemSigner'>,
 ): Promise<void> {
   const raws = await Promise.all(items.map(rawBytesOf))
   const signerAddress =
