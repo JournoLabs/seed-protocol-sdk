@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `exportArchive` takes `expectedAttestations`: with `reproducible`, it refuses with `not_synced` until EAS reports those uids, so a bag built right after a publish can't be silently incomplete. A seed with no Version on EAS is `not_synced`, not `not_published`. A reproducible bag holds attested properties only and no schema name, and its default time covers storage seeds. `VERIFY.txt` gives the rebuild command with the bag's `asOf`.
 - `ExportableItem` and `ArchiveSeedRef` are exported.
 - `exportArchive` returns `arweaveTransactions`: with `reproducible`, each bag path whose bytes a published transaction already holds, for `buildPathManifest`.
 - **Breaking:** `PublishUploadData` has `blob: Blob` instead of `data: Uint8Array`. `getPublishUploadData` opens each file without reading it into memory: OPFS `getFile()` in the browser, `fs.openAsBlob` in Node, through the new `BaseFileManager.openBlob`. Content-SHA-256 is computed in chunks and the MIME sniff reads the first 4 KiB. New `readPublishUploadBytes(upload)` loads an upload and rejects when its bytes no longer match `contentHash`, because a Blob of a file that changed can return other bytes without an error.

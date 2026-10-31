@@ -367,6 +367,23 @@ export const getAttestationChangesSince = async ({
   return [...byId.values()]
 }
 
+/**
+ * Which of `uids` EAS reports, in lowercase. Asks the indexer directly, so a retry waiting on it
+ * never gets a cached answer.
+ */
+export const getReportedAttestationUids = async (uids: readonly string[]): Promise<Set<string>> => {
+  const easClient = BaseEasClient.getEasClient()
+  const unique = [...new Set(uids)]
+  const reported = new Set<string>()
+  for (let i = 0; i < unique.length; i += CHANGES_UIDS_PER_REQUEST) {
+    const { changes } = (await easClient.request(GET_ATTESTATION_CHANGES, {
+      where: { id: { in: unique.slice(i, i + CHANGES_UIDS_PER_REQUEST) } },
+    })) as { changes: AttestationChange[] }
+    for (const change of changes ?? []) reported.add(change.id.toLowerCase())
+  }
+  return reported
+}
+
 export const getSeedUidsBySchemaName = async (schemaName: string, limit: number = 10) => {
   const itemSeeds = await getSeedsBySchemaName(schemaName, limit)
   return itemSeeds.map((seed: Attestation) => seed.id)

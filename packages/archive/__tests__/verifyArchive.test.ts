@@ -7,7 +7,7 @@ import { createBag, getBagFile, verifyArchive, verifyInstructions, type Bag } fr
 import { writeBagDirectory } from '../src/node'
 
 const encoder = new TextEncoder()
-const VERIFY = verifyInstructions({ seedUid: '0xseed', versionUid: '0xversion', reproducible: true })
+const VERIFY = verifyInstructions({ seedUid: '0xseed', versionUid: '0xversion', asOf: 1791500000 })
 
 const makeBag = (body = 'hello'): Bag =>
   createBag({

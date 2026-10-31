@@ -55,6 +55,8 @@ export type ArchivePackageOptions = {
   asOf?: number
   /** Default `discoverable`. */
   tagPolicy?: ArchiveTagPolicy
+  /** Attestation uids the bag has to wait for, such as a publish's. See `exportArchive`. */
+  expectedAttestations?: readonly string[]
 }
 
 export type AnchorArchiveOptions = ArchivePackageOptions & {
@@ -207,7 +209,11 @@ export async function anchorArchive(
   item: ExportableItem | ArchiveSeedRef,
   options: AnchorArchiveOptions = {},
 ): Promise<AnchorArchiveResult> {
-  const { bag, arweaveTransactions } = await exportArchive(item, { reproducible: true, asOf: options.asOf })
+  const { bag, arweaveTransactions } = await exportArchive(item, {
+    reproducible: true,
+    asOf: options.asOf,
+    expectedAttestations: options.expectedAttestations,
+  })
   const info = readBagInfo(bag)
   const seedUid = info.get('Seed-Uid')!
   const versionUid = info.get('Seed-Version-Uid')!
@@ -241,7 +247,11 @@ export async function estimateArchiveAnchorCost(
   item: ExportableItem | ArchiveSeedRef,
   options: ArchivePackageOptions & Pick<EstimatePublishCostOptions, 'rates'> = {},
 ): Promise<PublishCostEstimate> {
-  const { bag, arweaveTransactions } = await exportArchive(item, { reproducible: true, asOf: options.asOf })
+  const { bag, arweaveTransactions } = await exportArchive(item, {
+    reproducible: true,
+    asOf: options.asOf,
+    expectedAttestations: options.expectedAttestations,
+  })
   const files = filesToUpload(bag, arweaveTransactions)
   // Only the size matters here, and a manifest's ids are all the same length.
   const placeholders = Object.fromEntries(bag.files.map((file) => [file.path, 'A'.repeat(43)]))

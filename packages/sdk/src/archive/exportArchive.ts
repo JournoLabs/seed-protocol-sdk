@@ -23,6 +23,7 @@ import {
   getEasReadChainId,
   isEasEmptyValue,
   isUnfilledReference,
+  getReportedAttestationUids,
   isValidEasAttestationUid,
   type Attestation,
 } from '@seedprotocol/eas'
@@ -76,6 +77,12 @@ export type ExportArchiveOptions = {
    * live Version's properties.
    */
   asOf?: number
+  /**
+   * Reproducible only: attestation uids that must be on EAS before the bag is built, such as the
+   * ones a publish just made. Refuses with `not_synced` until EAS reports them all, because a bag
+   * built while the indexer is part way through a publish is valid and silently incomplete.
+   */
+  expectedAttestations?: readonly string[]
   /** bag-info.txt Source-Organization, e.g. the publication. Left out when not given. */
   sourceOrganization?: string
   /** Bagging-Date and the time of the bag's own PREMIS events. Defaults to now. */
@@ -368,8 +375,24 @@ async function assertChainHasLocalState(item: ExportableItem, state: SeedAtTime)
   }
 }
 
+async function assertChainReports(uids: readonly string[]): Promise<void> {
+  if (uids.length === 0) return
+  let reported: Set<string>
+  try {
+    reported = await getReportedAttestationUids(uids)
+  } catch (error) {
+    throw new ArchiveExportError('chain_unavailable', "Couldn't read the expected attestations from EAS", { cause: error })
+  }
+  const missing = uids.filter((uid) => !reported.has(uid.toLowerCase()))
+  if (missing.length > 0) throw new ArchiveExportError('not_synced', `EAS doesn't report ${missing.join(', ')} yet`)
+}
+
 /** The bag's source on EAS and Arweave. Uses this device for nothing but the schema. */
-async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number | undefined): Promise<ArchiveSource> {
+async function chainSource(
+  item: ExportableItem | ArchiveSeedRef,
+  asOf: number | undefined,
+  expectedAttestations: readonly string[] = [],
+): Promise<ArchiveSource> {
   const localItem = 'seedLocalId' in item && item.seedLocalId ? (item as ExportableItem) : undefined
   const seedRow = localItem ? await findSeedRow({ localId: localItem.seedLocalId }) : undefined
   const seedUid = localItem ? seedRow?.uid : (item as ArchiveSeedRef).seedUid
@@ -381,11 +404,13 @@ async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number |
     : await resolveModelRecordByNameOrType(item.modelName, { schemaName: (item as ArchiveSeedRef).schemaName })
   if (!model) throw new ArchiveExportError('invalid_options', `Model ${item.modelName} isn't loaded; load its schema first`)
 
-  const state = await readSeedFromChain(seedUid, asOf)
+  // First, so everything read after it includes what the caller is waiting for.
+  await assertChainReports(expectedAttestations)
+  let state = await readSeedFromChain(seedUid, asOf)
   if (!state) throw new ArchiveExportError('not_synced', `EAS has no seed attestation ${seedUid}`)
-  const version = state.version
+  if (state.versions.length === 0) throw new ArchiveExportError('not_synced', `EAS reports no Version of ${seedUid} yet`)
   const seedRevoked = state.seed.revoked && (asOf === undefined || state.seed.revocationTime <= asOf)
-  if (!version || seedRevoked) {
+  if (!state.version || seedRevoked) {
     throw new ArchiveExportError('not_published', `${model.name} ${seedUid} has no live Version${asOf ? ` at ${asOf}` : ''}`)
   }
   if (localItem && asOf === undefined) await assertChainHasLocalState(localItem, state)
@@ -395,20 +420,42 @@ async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number |
   const schema = Object.fromEntries(
     [...definitions].map(([key, def]) => [key, { ...def, nameMatch: levels.property(model.name, key, model.schemaFileId ?? undefined) }]),
   )
-  const attested = new Map<string, { attestation: Attestation; value: string | null }>()
-  let storageTransaction: { attestation: Attestation; id: string } | undefined
-  // Oldest first: where two schemas stand for one property, the newer one holds it.
-  for (const attestation of [...state.properties].sort((a, b) => a.timeCreated - b.timeCreated)) {
-    const parsed = parseEasPropertyMetadata(attestation.decodedDataJson)
-    if (!parsed.ok || !parsed.metadata.name) continue
-    const { name, value: raw, type } = parsed.metadata
-    if (name === 'storage_transaction_id' && typeof raw === 'string') storageTransaction = { attestation, id: raw }
-    const resolved = resolveSyncedPropertyName(name, raw, schema, type)
-    const key = resolved?.key ?? resolved?.propertyName
-    if (!resolved || !key || !definitions.has(key)) continue
-    const value = attestedValue(parsed.metadata, resolved.dataType, resolved.isRelation, attestation.revoked)
-    if (value !== undefined) attested.set(key, { attestation, value })
+  const readAttested = (properties: Attestation[]) => {
+    const values = new Map<string, { attestation: Attestation; value: string | null }>()
+    let slot: { attestation: Attestation; id: string } | undefined
+    // Oldest first: where two schemas stand for one property, the newer one holds it.
+    for (const attestation of [...properties].sort((a, b) => a.timeCreated - b.timeCreated)) {
+      const parsed = parseEasPropertyMetadata(attestation.decodedDataJson)
+      if (!parsed.ok || !parsed.metadata.name) continue
+      const { name, value: raw, type } = parsed.metadata
+      if (name === 'storage_transaction_id' && typeof raw === 'string') slot = { attestation, id: raw }
+      const resolved = resolveSyncedPropertyName(name, raw, schema, type)
+      const key = resolved?.key ?? resolved?.propertyName
+      if (!resolved || !key || !definitions.has(key)) continue
+      const value = attestedValue(parsed.metadata, resolved.dataType, resolved.isRelation, attestation.revoked)
+      if (value !== undefined) values.set(key, { attestation, value })
+    }
+    return { values, slot }
   }
+  let { values: attested, slot: storageTransaction } = readAttested(state.properties)
+
+  // The default time has to cover the storage seeds too, or a file attested after the Version's last
+  // property would read as missing or as its older transaction.
+  if (asOf === undefined) {
+    const storageUids = [...attested]
+      .filter(([key]) => publishPropertyKind(key, definitions.get(key)!) === 'storageSeed')
+      .map(([, { value }]) => normalizeRelationPropertyValue(value))
+      .filter((uid): uid is string => !!uid && isPublishedSeedRef(uid))
+    const storageStates = await Promise.all(storageUids.map((uid) => readSeedFromChain(uid)))
+    const latest = Math.max(state.asOf, ...storageStates.map((s) => s?.asOf ?? 0))
+    if (latest > state.asOf) {
+      state = (await readSeedFromChain(seedUid, latest))!
+      ;({ values: attested, slot: storageTransaction } = readAttested(state.properties))
+    }
+  }
+  const chainState = state
+  const version = chainState.version!
+  const slot = storageTransaction
 
   const downloads = new Map<string, Promise<Uint8Array | undefined>>()
   const readTransaction = (txId: string): Promise<Uint8Array | undefined> => {
@@ -421,16 +468,18 @@ async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number |
     seedUid,
     versionUid: version.id,
     modelName: model.name,
-    attester: state.seed.attester,
-    chain: state,
-    properties: [...definitions].map(([key, definition]) => {
+    attester: chainState.seed.attester,
+    chain: chainState,
+    // Attested properties only: a bag describes the record, not the schema around it, so a property
+    // added to the schema later doesn't change it.
+    properties: [...definitions].flatMap(([key, definition]) => {
       const kind = publishPropertyKind(key, definition)
-      const held = kind === 'itemStorage' ? storageTransaction?.attestation : attested.get(key)?.attestation
-      return { key, definition, kind, value: attested.get(key)?.value, attestationUid: held?.id }
+      const held = kind === 'itemStorage' ? slot?.attestation : attested.get(key)?.attestation
+      return held ? [{ key, definition, kind, value: attested.get(key)?.value, attestationUid: held.id }] : []
     }),
     readItemStorage: async (property) => {
-      if (!storageTransaction || storageTransaction.attestation.revoked) return undefined
-      const bytes = await readTransaction(storageTransaction.id)
+      if (!slot || slot.attestation.revoked) return undefined
+      const bytes = await readTransaction(slot.id)
       if (!bytes) return 'missing'
       if (!isCompositeUpload(bytes)) return { bytes }
       const child = decodeCompositeUpload(bytes)?.find((c) => c.name === property.key)
@@ -438,14 +487,14 @@ async function chainSource(item: ExportableItem | ArchiveSeedRef, asOf: number |
     },
     readStorageSeed: async (property) => {
       const uid = normalizeRelationPropertyValue(property.value)
-      const arweaveTransactionId = uid ? await chainStorageTransaction(uid, state.asOf) : undefined
+      const arweaveTransactionId = uid ? await chainStorageTransaction(uid, chainState.asOf) : undefined
       return { bytes: arweaveTransactionId ? await readTransaction(arweaveTransactionId) : undefined, arweaveTransactionId }
     },
     readEmbeddedImage: async (txId) => {
       const bytes = await readTransaction(txId)
       return bytes ? { bytes, arweaveTransactionId: txId } : undefined
     },
-    history: async (chainId) => chainHistoryEvents(state, chainId),
+    history: async (chainId) => chainHistoryEvents(chainState, chainId),
   }
 }
 
@@ -484,11 +533,14 @@ export async function exportArchive(
   if (asOf !== undefined && (!reproducible || !Number.isSafeInteger(asOf) || asOf <= 0)) {
     throw new ArchiveExportError('invalid_options', 'asOf is unix seconds, and needs reproducible: rows only hold the latest state')
   }
+  if (options.expectedAttestations && !reproducible) {
+    throw new ArchiveExportError('invalid_options', 'expectedAttestations needs reproducible: an ordinary export reads rows')
+  }
   if (!reproducible && !('seedLocalId' in item && item.seedLocalId)) {
     throw new ArchiveExportError('invalid_options', 'A seed named by uid can only be exported with reproducible')
   }
   const source = reproducible
-    ? await chainSource(item, asOf)
+    ? await chainSource(item, asOf, options.expectedAttestations)
     : await localSource(item as ExportableItem, fetch)
   const { seedUid, versionUid, modelName, attester, chain: chainRecord } = source
 
@@ -515,7 +567,9 @@ export async function exportArchive(
   const chainId = getEasReadChainId()
   const chain = getEasChainDeployment(chainId)
   const explorerUrl = (uid: string) => (chain ? getEasAttestationExplorerUrl(chain, uid) : undefined)
-  const schemaName = 'seedLocalId' in item ? item.getService?.().getSnapshot().context.schemaName : item.schemaName
+  // Left out of a reproducible bag: it's the caller's name for the schema, and isn't on chain.
+  const localSchemaName = 'seedLocalId' in item ? item.getService?.().getSnapshot().context.schemaName : item.schemaName
+  const schemaName = reproducible ? undefined : localSchemaName
 
   const omitted: ArchiveOmission[] = []
   const payload: BagFile[] = []
@@ -570,7 +624,11 @@ export async function exportArchive(
     if (kind === 'itemStorage') {
       const file = await source.readItemStorage(property)
       if (file === 'missing') omitted.push({ property: key, reason: 'its file is not on this device' })
-      if (!file || file === 'missing' || !file.bytes) continue
+      if (!file || file === 'missing' || !file.bytes) {
+        // The composite has no child for it: that property has no record on this Version.
+        if (reproducible && !file) delete properties[key]
+        continue
+      }
       if (dataType === 'Html') {
         htmlSources.push({ key, bytes: file.bytes, text: new TextDecoder().decode(file.bytes) })
       } else {
@@ -735,7 +793,7 @@ export async function exportArchive(
       {
         path: 'VERIFY.txt',
         bytes: encoder.encode(
-          verifyInstructions({ seedUid, versionUid, explorerUrl: explorerUrl(versionUid), reproducible }),
+          verifyInstructions({ seedUid, versionUid, explorerUrl: explorerUrl(versionUid), asOf: chainRecord?.asOf }),
         ),
       },
     ],
