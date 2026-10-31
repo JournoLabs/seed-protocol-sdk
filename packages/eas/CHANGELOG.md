@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- New `getReportedAttestationUids(uids)`: which uids EAS reports, uncached.
 - New `getArchiveAnchorsFromEas({ versionUid, attester })`, `arweaveTxIdToBytes32` and `bytes32ToArweaveTxId`.
 - New `ARCHIVE_ANCHOR_SCHEMA_DEF`, `ARCHIVE_ANCHOR_SCHEMA_UID` and `ARCHIVE_ANCHOR_SCHEMA_NAME`, the schema of a bag anchor (ADR 0029). `getItemPropertiesFromEas`, and so `getCanonicalItemPropertiesFromEas`, sync and Query's remote source, leave anchors out, and `getAttestationChangesSince` doesn't report them.
 

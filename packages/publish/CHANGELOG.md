@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `anchorArchive` and `estimateArchiveAnchorCost` take `expectedAttestations`.
 - New `anchorArchive(item, options)`: uploads a reproducible bag's files that no transaction holds, then its path manifest, and attests both on the Version (ADR 0029), by the route a publish takes, with no new session-key permission. Repeating it for the same bag returns the existing anchor. `tagPolicy` is `discoverable` or `hash-only`. New `estimateArchiveAnchorCost(item)`, `ensureArchiveAnchorSchema(wallet)`, `encodeArchiveAnchorData` and `ArchiveAnchorSchemaNotRegisteredError`.
 - `@seedprotocol/archive` is a dependency.
 - **Breaking:** a publish fails with `PUBLISH_TOO_LARGE` before anything is sent, with no RPC call, when its calldata is over 120,000 bytes or its data alone needs more than the new `maxPublishGas` config (default 16,000,000 gas). The message names the three largest requests. The direct-to-EAS route checks each request's transaction the same way. A gas estimate over `maxPublishGas` fails the same way; the limit used to be the block's.

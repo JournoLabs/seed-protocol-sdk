@@ -17,7 +17,8 @@ to them visible.
 A reproducible bag is a function of these inputs and no others:
 
 - The time it covers, `asOf`, in unix seconds. bag-info.txt records it as `Seed-Bag-As-Of`. The
-  default is the last attestation or revocation on the properties of the newest live Version.
+  default is the last attestation or revocation on the properties of the newest live Version and
+  on its storage seeds.
 - The seed's attestation, and its Versions up to and including the newest one live at `asOf`, as EAS
   reports them.
 - For each property schema on that Version, from the Version's attester, the attestation current at
@@ -25,14 +26,18 @@ A reproducible bag is a function of these inputs and no others:
   else the newest one, which is a retraction and holds no value.
 - The same selection on each storage seed, and the bytes of the Arweave transactions those
   attestations name.
-- The schema, which decides the model and property names in the bag.
+- The schema's model name, and the key and data type of each attested property. Only these: a
+  property with no attestation isn't in the bag, and neither is the schema's name, so a property
+  added to the schema later changes nothing. Renaming an attested property or changing its type
+  does change the hash.
 - The chain id and the rules of the format version, including the text of `VERIFY.txt`.
 
-So the export reads no rows and no local files: a device with the schema loaded and nothing else
-gets the same bag, named by `{ seedUid, modelName, schemaName }`, and an unpublished edit changes
+So the export reads no rows and no local files: a device with a matching schema loaded and nothing
+else gets the same bag, named by `{ seedUid, modelName, schemaName }`, and an unpublished edit changes
 nothing. The following never reach the bytes: the export time, device clocks, local file names,
 local seed ids, the configured gateway, `sourceOrganization`, and anything that happens after
-`asOf`. Relations are recorded as seed uids. Files are typed by their bytes. Html in `data/source/`
+`asOf`. An `asOf` says what to read, not that EAS has it all: `expectedAttestations` is how a caller
+waits out an indexer part way through a publish. Relations are recorded as seed uids. Files are typed by their bytes. Html in `data/source/`
 is the transaction's bytes unchanged. An export that can't meet this refuses (`not_synced`,
 `chain_unavailable`, `incomplete`, `invalid_options`).
 

@@ -66,21 +66,27 @@ export type VerifyInstructions = {
   versionUid: string
   /** The Version's attestation on an explorer. */
   explorerUrl?: string
-  /** The bag was built to be rebuilt by any client. */
-  reproducible: boolean
+  /** A reproducible bag's time, unix seconds. */
+  asOf?: number
 }
 
 /** VERIFY.txt: how to check the bag by hand. */
-export function verifyInstructions({ seedUid, versionUid, explorerUrl, reproducible }: VerifyInstructions): string {
-  const rebuild = reproducible
-    ? [
-        '',
-        'This bag is reproducible: exportArchive(item, { reproducible: true }) on a client with this',
-        'Version synced gives the same tagmanifest-sha256.txt. Compare its SHA-256 with this bag\'s:',
-        '',
-        '  shasum -a 256 tagmanifest-sha256.txt',
-      ]
-    : []
+export function verifyInstructions({ seedUid, versionUid, explorerUrl, asOf }: VerifyInstructions): string {
+  const rebuild =
+    asOf === undefined
+      ? []
+      : [
+          '',
+          'This bag is reproducible. It records its time as Seed-Bag-As-Of in bag-info.txt, and a rebuild',
+          'without that time follows the seed past it. With a schema that gives the properties the same',
+          'names, this gives the same tagmanifest-sha256.txt:',
+          '',
+          `  exportArchive({ seedUid, modelName, schemaName }, { reproducible: true, asOf: ${asOf} })`,
+          '',
+          "Compare that file's SHA-256 with this bag's:",
+          '',
+          '  shasum -a 256 tagmanifest-sha256.txt',
+        ]
   return [
     'To check every file against this bag\'s manifests, with no network, run in this directory:',
     '',

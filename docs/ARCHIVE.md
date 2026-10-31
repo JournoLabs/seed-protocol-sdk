@@ -73,8 +73,8 @@ address doesn't say whether it is a person or an organization.
 ## Reproducible bags
 
 `exportArchive(item, { reproducible: true })` builds the bag every client gets for a seed at one
-time: the same bytes, so the same `tagmanifest-sha256.txt` hash, from any device with the same
-schema loaded. This is the bag to anchor, sign or publish. It reads EAS and Arweave and no rows, so
+time: the same bytes, so the same `tagmanifest-sha256.txt` hash, from any device whose
+schema gives the attested properties the same names. This is the bag to anchor, sign or publish. It reads EAS and Arweave and no rows, so
 a device that holds nothing for the seed can name it instead:
 
 ```ts
@@ -88,7 +88,12 @@ const { bag } = await exportArchive(
   `Seed-Bag-As-Of` in bag-info.txt. The bag holds the newest Version live then and the property
   values current then, so a later patch, Version, retraction or revocation doesn't change it. Without
   `asOf` it covers the latest state: the time of the last attestation or revocation on the
-  properties of the newest live Version.
+  properties of the newest live Version and on its storage seeds.
+- `expectedAttestations` lists uids that have to be on EAS first, such as the ones a publish just
+  made. Pass it whenever the bag is built soon after a publish: with `asOf` or a seed named by uid
+  nothing else notices an indexer part way through, and the bag would be valid and incomplete.
+- The bag holds attested properties only, and no schema name, so a property added to the schema
+  later doesn't change it. Renaming an attested property or changing its type does.
 - A property's value follows sync's rule at that time: its newest live attestation, and no value
   when all of them were revoked (a retraction).
 - Only the seed attester's Versions and the Version attester's properties count, since anyone can
@@ -106,8 +111,9 @@ const { bag } = await exportArchive(
   `application/octet-stream`.
 - bag-info.txt's `Seed-Bag-Format` names the rules the bag was built under (see
   [ADR 0028](adr/0028-reproducible-bag-format.md)).
-- Without `asOf`, `not_synced` means EAS doesn't yet report a Version or property attestation this
-  device has made, so retry once the indexer catches up. It also means EAS has no such seed.
+- `not_synced` means retry once the indexer catches up: EAS has no such seed, no Version of it, or
+  not everything in `expectedAttestations`. Without `asOf` it also covers a Version or property
+  attestation this device has made.
 - A bag that would leave something out is refused (`incomplete`) rather than written with an
   omission another client might not have. That includes a file no gateway served.
 

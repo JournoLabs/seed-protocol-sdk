@@ -57,7 +57,9 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     fetchQuery: ({ queryFn }: { queryFn: () => unknown }) => queryFn(),
   } as never)
   vi.spyOn(actual.BaseEasClient, 'getEasClient').mockReturnValue({
-    request: async (_doc: unknown, { where }: { where: { refUID: { in: string[] }; schemaId: { notIn: string[] } } }) => ({
+    request: async (doc: any, { where }: { where: any }) => doc.definitions[0].name.value === 'GetAttestationChanges'
+      ? { changes: reachable(fakeEas.properties.filter((p) => where.id.in.includes(p.id))) }
+      : ({
       itemProperties: reachable(
         fakeEas.properties.filter((p) => where.refUID.in.includes(p.refUID) && !where.schemaId.notIn.includes(p.schemaId)),
       ),
@@ -187,6 +189,7 @@ testDescribe('exportArchive from the chain', () => {
             readerIds: { type: 'List', refValueType: 'Relation', ref: 'ChainWriter' },
             featureImage: { type: 'Image' },
             body: { type: 'Html' },
+            subtitle: { type: 'Text' },
           },
         },
         ChainWriter: { properties: { name: { type: 'Text' } } },
@@ -351,6 +354,50 @@ testDescribe('exportArchive from the chain', () => {
     expect(verifyArchive(rebuilt, { expectedTagmanifestSha256: expected }).anchor.status).toBe('passed')
   }, 120000)
 
+  it('waits for the attestations the caller expects, and bags nothing until EAS has them', async () => {
+    const late = property(VERSION, 'title', 'string', 'Second title', T0 + 1)
+    const options = { reproducible: true, asOf: T0 + 1, expectedAttestations: [late.id.toUpperCase().replace('0X', '0x')] }
+    await expect(exportArchive(REF, options)).rejects.toMatchObject({ code: 'not_synced' })
+    fakeEas.properties.push(late)
+    const { bag } = await exportArchive(REF, options)
+    expect(itemJson(bag).properties.title.value).toBe('Second title')
+    fakeEas.down = true
+    await expect(exportArchive(REF, options)).rejects.toMatchObject({ code: 'chain_unavailable' })
+  }, 120000)
+
+  it('reports a seed with no Version on EAS yet as lag, not as unpublished', async () => {
+    fakeEas.versions = []
+    await expect(exported()).rejects.toMatchObject({ code: 'not_synced' })
+    await expect(exported(T0)).rejects.toMatchObject({ code: 'not_synced' })
+  }, 120000)
+
+  it('describes the record, not the schema around it', async () => {
+    const bag = await exported()
+    expect(Object.keys(itemJson(bag).properties)).not.toContain('subtitle')
+    expect(itemJson(bag).schemaName).toBeUndefined()
+    expect(text(bag, 'bag-info.txt')).not.toContain('Seed-Schema')
+    const { bag: unnamed } = await exportArchive({ seedUid: POST, modelName: 'ChainPost' }, { reproducible: true })
+    expect(hash(unnamed)).toBe(hash(bag))
+  }, 120000)
+
+  it('tells a reader to rebuild at the time the bag covers', async () => {
+    expect(text(await exported(T0), 'VERIFY.txt')).toContain(`asOf: ${T0}`)
+  }, 120000)
+
+  it('covers a storage seed attested after the Version by default', async () => {
+    const newerImage = new Uint8Array([...PNG, 1])
+    const NEW_TX = tx('chainexportimage3')
+    gateway.set(NEW_TX, newerImage)
+    fakeEas.properties.push(property(IMAGE_VERSION, 'storage_transaction_id', 'string', NEW_TX, T0 + 100))
+    const bag = await exported()
+    expect(itemJson(bag).asOf).toBe(new Date((T0 + 100) * 1000).toISOString())
+    expect(itemJson(bag).properties.featureImage.arweaveTransactionId).toBe(NEW_TX)
+
+    // The only attestation of the file is the late one.
+    fakeEas.properties = fakeEas.properties.filter((p) => !(p.refUID === IMAGE_VERSION && p.timeCreated === T0))
+    expect(itemJson(await exported()).properties.featureImage.arweaveTransactionId).toBe(NEW_TX)
+  }, 120000)
+
   it('gives the same bag with an anchor on the Version', async () => {
     const before = await exported()
     fakeEas.properties.push(attestation(uid('26'), VERSION, T0 + 100, { schemaId: ARCHIVE_ANCHOR_SCHEMA_UID }))
@@ -391,6 +438,7 @@ testDescribe('exportArchive from the chain', () => {
     await expect(exportArchive(REF, { asOf: T0 })).rejects.toMatchObject({ code: 'invalid_options' })
     await expect(exportArchive(REF, { reproducible: true, asOf: T0 + 0.5 })).rejects.toMatchObject({ code: 'invalid_options' })
     await expect(exportArchive(REF, { reproducible: true, fetch: false })).rejects.toMatchObject({ code: 'invalid_options' })
+    await expect(exportArchive(REF, { expectedAttestations: [POST] })).rejects.toMatchObject({ code: 'invalid_options' })
     await expect(exportArchive(REF, { reproducible: true, sourceOrganization: 'Desk' })).rejects.toMatchObject({ code: 'invalid_options' })
 
     fakeEas.down = true
