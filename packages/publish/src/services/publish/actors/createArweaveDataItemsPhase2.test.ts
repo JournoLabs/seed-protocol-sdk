@@ -82,7 +82,7 @@ describe('executeCreateArweaveDataItemsPhase2', () => {
   it('signs non-empty upload list via signDataItems from config', async () => {
     vi.spyOn(getPublishUploadDataModule, 'getPublishUploadData').mockResolvedValue([
       {
-        data: new Uint8Array([1, 2, 3]),
+        blob: new Blob([new Uint8Array([1, 2, 3])]),
         tags: [],
         itemPropertyName: 'bodyHtml',
         itemPropertyLocalId: 'pl1',

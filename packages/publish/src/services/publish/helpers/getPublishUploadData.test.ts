@@ -94,8 +94,9 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
 
     // Content-SHA-256 is SHA-256 of the uploaded bytes, and the first tag.
     const html = uploads.find((u) => u.seedLocalId === bHtmlSeed)!
-    expect(html.contentHash).toBe(getContentSha256(html.data))
-    expect(html.contentHash).toBe(createHash('sha256').update(html.data).digest('hex'))
+    const htmlBytes = new Uint8Array(await html.blob.arrayBuffer())
+    expect(html.contentHash).toBe(getContentSha256(htmlBytes))
+    expect(html.contentHash).toBe(createHash('sha256').update(htmlBytes).digest('hex'))
     expect(html.tags[0]).toEqual({ name: 'Content-SHA-256', value: html.contentHash })
   }, 60000)
 })

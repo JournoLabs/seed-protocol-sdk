@@ -131,6 +131,20 @@ function isTransientOpfsReadError(error: unknown): boolean {
   return false
 }
 
+async function retryTransientOpfsRead<T>(read: () => Promise<T>): Promise<T> {
+  const maxAttempts = 3
+  const baseDelayMs = 50
+  for (let attempt = 0; attempt < maxAttempts - 1; attempt++) {
+    try {
+      return await read()
+    } catch (error) {
+      if (!isTransientOpfsReadError(error)) throw error
+      await sleep(baseDelayMs * (attempt + 1))
+    }
+  }
+  return read()
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -562,20 +576,10 @@ export class BrowserFileManager implements IFileManager {
 
   async readFile(filePath: string): Promise<File> {
     const zenfs = await this.getFs()
-    const maxAttempts = 3
-    const baseDelayMs = 50
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        const data = await zenfs.promises.readFile(filePath)
-        return new File([new Uint8Array(data)], filePath)
-      } catch (error) {
-        if (!isTransientOpfsReadError(error) || attempt === maxAttempts - 1) {
-          throw error
-        }
-        await sleep(baseDelayMs * (attempt + 1))
-      }
-    }
-    throw new Error('readFile: exhausted retries')
+    return retryTransientOpfsRead(async () => {
+      const data = await zenfs.promises.readFile(filePath)
+      return new File([new Uint8Array(data)], filePath)
+    })
     // try {
     //   // Get a handle to the OPFS root directory
     //   const root = await navigator.storage.getDirectory();
@@ -626,6 +630,16 @@ export class BrowserFileManager implements IFileManager {
       console.error(`Error reading from OPFS: ${errorMessage}`);
       throw error;
     }
+  }
+
+  async openBlob(filePath: string): Promise<Blob> {
+    const { mounts } = await this.getFs()
+    const { TolerantWebAccessFS } = await import('./tolerantWebAccess')
+    const mounted = mounts.get('/')
+    // After unmountFileSystem the file lives in memory: there is no disk-backed File to open.
+    if (!(mounted instanceof TolerantWebAccessFS)) return this.readFileAsBuffer(filePath)
+    const absolute = filePath.startsWith('/') ? filePath : `/${filePath}`
+    return retryTransientOpfsRead(() => mounted.openFile(absolute))
   }
 
   async readFileAsString(filePath: string): Promise<string> {

@@ -201,6 +201,10 @@ export abstract class BaseFileManager {
     return BaseFileManager.requireImpl().readFileAsBuffer(filePath)
   }
 
+  static async openBlob(filePath: string): Promise<Blob> {
+    return BaseFileManager.requireImpl().openBlob(filePath)
+  }
+
   static async readFileAsString(filePath: string): Promise<string> {
     return BaseFileManager.requireImpl().readFileAsString(filePath)
   }

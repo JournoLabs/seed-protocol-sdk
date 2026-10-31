@@ -380,6 +380,16 @@ export class TolerantWebAccessFS extends WebAccessFS {
   }
 
   /**
+   * The file as OPFS has it, backed by disk: no bytes are read until they're asked for, and none go
+   * through the in-memory copy. Waits for queued sync-API writes first, which reach OPFS after the
+   * call that made them returned.
+   */
+  async openFile(path: string): Promise<File> {
+    await this.sync()
+    return ((await this.get('file', path)) as FileSystemFileHandle).getFile()
+  }
+
+  /**
    * Forgets what the mount cached for `path` (size, handle, contents) and reads it again from OPFS.
    * For files written outside this ZenFS instance: by another tab, or by a worker writing to OPFS
    * directly. Only reads OPFS (never writes it, so never calls onOpfsChange).

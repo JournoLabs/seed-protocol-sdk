@@ -299,7 +299,7 @@ Provide a data item signer at publish time via `PublishManager.createPublish` op
 // Signer passed at publish time (recommended for apps where signer isn't available at startup)
 PublishManager.createPublish(item, address, account, {
   signDataItems: async (uploads) => {
-    // Sign with wallet (ArConnect, MetaMask, etc.)
+    // Sign with wallet (ArConnect, MetaMask, etc.). Each upload's content is `u.blob`.
     return uploads.map((u) => ({ transaction: { id: '...' }, versionId: u.versionLocalId, modelName: u.itemPropertyName }))
   },
 })

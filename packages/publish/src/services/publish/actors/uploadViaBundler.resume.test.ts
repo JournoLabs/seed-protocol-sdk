@@ -77,7 +77,7 @@ describe('uploadViaBundler batch body', () => {
 describe('signBundlerUploadDataList', () => {
   test('marks the upload not needed when signDataItems uploaded, or there was nothing', async () => {
     const { signBundlerUploadDataList } = await import('./createArweaveDataItems')
-    const upload = { data: new Uint8Array([1]), tags: [], itemPropertyName: 'body' } as never
+    const upload = { blob: new Blob([new Uint8Array([1])]), tags: [], itemPropertyName: 'body' } as never
     const viaSigner = await signBundlerUploadDataList([upload], async () => [{ transaction: { id: 'x' } }] as never, undefined)
     expect(viaSigner.bundlerUploadNotNeeded).toBe(true)
   })
