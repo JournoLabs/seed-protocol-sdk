@@ -329,3 +329,26 @@ export class ArchiveAnchorSchemaNotRegisteredError extends Error {
     this.name = 'ArchiveAnchorSchemaNotRegisteredError'
   }
 }
+
+/** What an interrupted `anchorArchive` already uploaded. Plain data, so a job can store it. */
+export type ArchiveAnchorResume = {
+  /** The bag these uploads belong to. A retry that builds another bag ignores them. */
+  tagmanifestSha256: string
+  /** Bag path to transaction id. */
+  transactions: Record<string, string>
+  manifestTx?: string
+}
+
+/**
+ * `anchorArchive` failed after uploading. Retry with `resumeFrom: error.resume`. `cause` is what
+ * went wrong. A batch that failed part way isn't in `resume`, because which items landed isn't known.
+ */
+export class ArchiveAnchorInterruptedError extends Error {
+  readonly code = 'ARCHIVE_ANCHOR_INTERRUPTED'
+  readonly resume: ArchiveAnchorResume
+  constructor(resume: ArchiveAnchorResume, cause: unknown) {
+    super(`anchorArchive stopped after uploading: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    this.name = 'ArchiveAnchorInterruptedError'
+    this.resume = resume
+  }
+}

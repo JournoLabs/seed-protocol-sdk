@@ -202,15 +202,26 @@ it, so run it as its own job after the Version is attested.
 ```ts
 import { anchorArchive, estimateArchiveAnchorCost } from '@seedprotocol/publish'
 
-const { uid, manifestTx, tagmanifestSha256, alreadyAnchored } = await anchorArchive(post, { tagPolicy: 'hash-only' })
+const { uid, manifestTx, tagmanifestSha256, alreadyAnchored } = await anchorArchive(
+  { seedUid, modelName: 'Post', schemaName },
+  { asOf, expectedAttestations, wallet, dataItemSigner },
+)
 ```
 
-- `asOf` works as in `exportArchive`. `item` can be `{ seedUid, modelName, schemaName }`.
+- `asOf` works as in `exportArchive`. `item` can be an Item or `{ seedUid, modelName, schemaName }`.
+- `wallet` sends the attestation and `dataItemSigner` (or `signDataItems`) signs the uploads. Each
+  defaults to the registered wallet and the publish config, and a server job with neither has to
+  pass them.
 - Repeating it for the same bag returns the existing anchor with `alreadyAnchored: true` and spends
   nothing. If the indexer hasn't reported a landed anchor yet, a repeat attests a second, identical
-  one, which is harmless. A retry after a failed attestation uploads the new files again.
-- `ArchiveExportError` with `not_synced` or `incomplete` means retry later: the indexer or a gateway
-  hasn't caught up. Nothing has been uploaded.
+  one, which is harmless.
+- `ArchiveExportError` with `not_synced` means retry once the indexer catches up. `incomplete` means
+  a gateway didn't serve a file, or the bag can't be built at all, such as a Json storage seed, so
+  cap those retries and log the reason. Neither has uploaded anything.
+- `ArchiveAnchorInterruptedError` means it stopped after paying for uploads. Keep `error.resume`,
+  which is plain data, and retry with `resumeFrom: error.resume`. The retry reuses each transaction
+  it can still find and uploads the rest, so nothing is paid for twice unless a batch failed part way,
+  because which of its items landed isn't known. `resume` for another bag is ignored.
 - `tagPolicy` is `discoverable` (default), which adds `Archive-Part`, `Seed-Version-Uid` and the
   configured `arweaveUploadTags`, or `hash-only`, which leaves `Content-SHA-256` and `Content-Type`.
   Tags on Arweave can't be removed. The policy covers the package's uploads, not a publish's.
