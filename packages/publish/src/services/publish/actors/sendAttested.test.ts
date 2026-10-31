@@ -7,11 +7,22 @@ const { ManagedAccountPublishError, PublishTransactionRevertedError, Attestation
   '../../../errors'
 )
 
-type Row = { id: string; status: string; txHash: string | null; seedLocalIds: string[]; requests: string }
+type Row = {
+  id: string
+  status: string
+  txHash: string | null
+  seedLocalIds: string[]
+  requests: string
+  sender: string
+  nonceKey: string | null
+  entryPoint: string | null
+}
 let rows: Row[] = []
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
+  findOpenPublishAttempts: async () =>
+    rows.filter((r) => ['sending', 'sent', 'landed'].includes(r.status)),
   claimPublishAttempt: async (attempt: Omit<Row, 'status' | 'txHash'>) => {
     const open = rows.find(
       (r) =>
@@ -44,9 +55,15 @@ const attempt = (seedLocalId = 'post', requests: Array<Record<string, unknown>> 
   publishRunId: 'run1',
   seedLocalId,
   requests,
-  sender: SENDER,
+  sender: { address: SENDER as `0x${string}` },
   attester: SENDER,
   send,
+})
+const ENTRY_POINT = `0x${'e'.repeat(40)}` as `0x${string}`
+const pinned = (over: Record<string, unknown> = {}) => ({
+  ...attempt(),
+  sender: { address: SENDER as `0x${string}`, pinsNonceOn: ENTRY_POINT },
+  ...over,
 })
 
 beforeEach(() => {
@@ -107,6 +124,79 @@ describe('sendAttested', () => {
     expect(rows[0]!.status).toBe('sending')
     await expect(sendAttested(attempt())).rejects.toBeInstanceOf(AttestationAttemptOpenError)
     expect(send).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sendAttested: a sender that pins its nonce', () => {
+  const failedSend = async () => {
+    send.mockImplementationOnce(async () => {
+      throw new Error('Timeout waiting for userOp to be mined')
+    })
+    await expect(sendAttested(pinned())).rejects.toThrow('Timeout')
+    return rows[0]!
+  }
+
+  test('sends under a nonce key kept on the attempt', async () => {
+    await sendAttested(pinned())
+    const [key] = send.mock.calls[0] as unknown as [bigint]
+    expect(key).toBeGreaterThan(0n)
+    expect(key >> 192n).toBe(0n)
+    expect(rows[0]).toMatchObject({ nonceKey: key.toString(), entryPoint: ENTRY_POINT })
+  })
+
+  test('each attempt gets its own key', async () => {
+    await sendAttested(pinned())
+    await sendAttested(pinned({ seedLocalId: 'other', requests: [{ localId: 'other' }] }))
+    expect(rows[0]!.nonceKey).not.toBe(rows[1]!.nonceKey)
+  })
+
+  test('a sender with no pin sends no key', async () => {
+    await sendAttested(attempt())
+    expect(send.mock.calls[0]).toEqual([undefined] as never)
+    expect(rows[0]).toMatchObject({ nonceKey: null, entryPoint: null })
+  })
+
+  test('a resume repeats the attempt under the same key, with no new row', async () => {
+    const row = await failedSend()
+    await sendAttested(pinned({ resumeAttemptId: row.id }))
+    expect(rows).toHaveLength(1)
+    expect(send.mock.calls.map(([key]: any) => key?.toString())).toEqual([row.nonceKey, row.nonceKey])
+    expect(rows[0]!.status).toBe('sent')
+  })
+
+  test('a resume with different requests is refused: the record could not tell which landed', async () => {
+    const row = await failedSend()
+    send.mockClear()
+    await expect(
+      sendAttested(pinned({ resumeAttemptId: row.id, requests: [{ localId: 'post', edited: true }] })),
+    ).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  test('a resume from a sender on another EntryPoint is refused: the key would mean nothing', async () => {
+    const row = await failedSend()
+    send.mockClear()
+    await expect(
+      sendAttested(pinned({ resumeAttemptId: row.id, sender: { address: SENDER as `0x${string}` } })),
+    ).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  test('a rejected resend keeps the attempt open: the first send may still be pending', async () => {
+    const row = await failedSend()
+    send.mockImplementationOnce(async () => {
+      throw new Error('AA21 did not pay prefund')
+    })
+    await expect(sendAttested(pinned({ resumeAttemptId: row.id }))).rejects.toThrow('AA21')
+    expect(rows[0]!.status).toBe('sending')
+  })
+
+  test('a used pinned nonce keeps the attempt open: it can be this send having landed', async () => {
+    send.mockImplementationOnce(async () => {
+      throw new Error('nonce too low')
+    })
+    await expect(sendAttested(pinned())).rejects.toThrow('nonce too low')
+    expect(rows[0]!.status).toBe('sending')
   })
 })
 

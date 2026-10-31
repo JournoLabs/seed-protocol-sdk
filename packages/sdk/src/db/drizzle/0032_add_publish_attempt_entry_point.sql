@@ -1,0 +1,1 @@
+ALTER TABLE `publish_attempts` ADD `entry_point` text;

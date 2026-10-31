@@ -12,6 +12,7 @@ import {
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
 import { isManagedAccountPublishError } from '../../errors'
+import { pinnedNonce } from '../pinnedNonce'
 import { assertUserOpSucceeded, bundlerFeesPerGas } from './userOps'
 
 export type CreatePermissionlessTxSenderOptions = {
@@ -132,6 +133,7 @@ export async function createPermissionlessTxSender(
 
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
+    pinsNonceOn: entryPoint08Address,
     sendTransaction: async (tx: SeedTxRequest) => {
       const authorization = await authorizationForUserOp({
         signer,
@@ -143,6 +145,7 @@ export async function createPermissionlessTxSender(
       try {
         const hash = await smartAccountClient.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
+          ...(tx.nonceKey !== undefined && { nonce: pinnedNonce(tx.nonceKey) }),
           ...(authorization && { authorization }),
         })
         const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })

@@ -70,6 +70,23 @@ function client(success = true) {
 }
 
 describe('sendUserOpWithHeadroom', () => {
+  test('a nonce key is sent at sequence 0, to the estimate and the UserOp', async () => {
+    const calls: Array<{ nonce?: bigint }> = []
+    const client = {
+      estimateUserOperationGas: async (args: { nonce?: bigint }) => {
+        calls.push(args)
+        return { callGasLimit: 100n, verificationGasLimit: 1n, preVerificationGas: 1n }
+      },
+      sendUserOperation: async (args: { nonce?: bigint }) => {
+        calls.push(args)
+        return '0x01' as Hash
+      },
+      waitForUserOperationReceipt: async () => ({ success: true, receipt: { transactionHash: '0x02' as Hash } }),
+    } satisfies UserOpClient
+    await sendUserOpWithHeadroom(client, { to: `0x${'1'.repeat(40)}`, data: '0x', nonceKey: 5n }, '0xsender')
+    expect(calls.map((c) => c.nonce)).toEqual([5n << 64n, 5n << 64n])
+  })
+
   test('sends the estimate with callGasLimit raised by the headroom', async () => {
     const { c, sent } = client()
     await expect(sendUserOpWithHeadroom(c, { to: TO, data: '0x1234' }, TO)).resolves.toBe(TX_HASH)
