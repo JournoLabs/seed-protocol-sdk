@@ -15,6 +15,7 @@ import {
 import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { publishGasLimit } from '~/helpers/publishGas'
+import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
@@ -212,6 +213,7 @@ export async function resolveMultiPublishSender(source: {
         address,
       )
     }
+    assertPublishFits(from, requests, { calldata: unsized.data })
     // Contracts of another version answer with a Router revert; name the mismatch instead.
     await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
     await simulateCallFromAccount(
@@ -225,7 +227,7 @@ export async function resolveMultiPublishSender(source: {
             requireSimulation: false,
           },
     )
-    const tx = { ...unsized, gas: await publishGasLimit(from, unsized) }
+    const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
     try {
       return await activeWallet.txSender.sendTransaction(tx)
     } catch (err) {

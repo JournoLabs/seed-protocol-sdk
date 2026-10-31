@@ -246,6 +246,16 @@ beforeEach(() => {
   uidCounter = 0
 })
 
+describe('createAttestationsDirectToEas: size', () => {
+  test('refuses a request too large for one transaction before sending anything', async () => {
+    const huge = { schema: SCHEMA_TITLE, data: [dataEntry(`0x${'ab'.repeat(30_000)}`)], _propertyName: 'title' }
+    await expect(runPublish([draftRequest(POST, SCHEMA_POST_SEED, [huge])])).rejects.toMatchObject({
+      code: 'PUBLISH_TOO_LARGE',
+    })
+    expect(sentTxs.size).toBe(0)
+  })
+})
+
 describe('createAttestationsDirectToEas: relation and list properties with draft targets', () => {
   test('a list of [published, draft A, draft B] attests every member seed uid in order', async () => {
     const listLink = { publishLocalId: POST, propertySchemaUid: SCHEMA_AUTHORS }

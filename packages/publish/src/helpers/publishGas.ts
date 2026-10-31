@@ -1,6 +1,7 @@
 import { BaseError, parseEther, type Address } from 'viem'
 import { getPublishPublicClient } from './chainClient'
 import { ManagedAccountPublishError } from '../errors'
+import { maxPublishGas } from './publishSize'
 import type { SeedTxRequest } from './seedSigner'
 
 /** The gas a publish is sent with when its estimate can't be made (the fixed limit before estimates). */
@@ -13,14 +14,18 @@ const isInsufficientFunds = (err: unknown): boolean => {
   return /insufficient funds|insufficient balance/i.test(msg)
 }
 
+const withHeadroom = (gas: bigint) => (gas * PUBLISH_GAS_HEADROOM_BPS) / 10_000n
+const lower = (a: bigint, b: bigint) => (a < b ? a : b)
+
 /**
- * The gas limit to send `tx` from `from` with: its estimate plus {@link PUBLISH_GAS_HEADROOM_BPS},
- * or {@link PUBLISH_GAS_FALLBACK} when the estimate can't be made. A whole publish graph goes in one
- * transaction, so a large one can need more than a block holds; that throws `PUBLISH_TOO_LARGE`
- * before anything is sent. Call it after the transaction's simulation passed: a revert here is
- * not reported as one.
+ * The gas limit to send `tx` from `from` with: its estimate plus {@link PUBLISH_GAS_HEADROOM_BPS}.
+ * When the estimate can't be made it is {@link PUBLISH_GAS_FALLBACK}, or `localEstimate` with
+ * headroom when that is higher, never above {@link maxPublishGas}. A whole publish graph goes in one
+ * transaction, so a large one can need more than that limit or a block holds; that throws
+ * `PUBLISH_TOO_LARGE` before anything is sent. Call it after the transaction's simulation passed:
+ * a revert here is not reported as one.
  */
-export async function publishGasLimit(from: string, tx: SeedTxRequest): Promise<bigint> {
+export async function publishGasLimit(from: string, tx: SeedTxRequest, localEstimate = 0n): Promise<bigint> {
   const client = getPublishPublicClient()
   const estimate = (withBalance: boolean) =>
     client.estimateGas({
@@ -40,13 +45,15 @@ export async function publishGasLimit(from: string, tx: SeedTxRequest): Promise<
       estimated = await estimate(true)
     }
   } catch {
-    return PUBLISH_GAS_FALLBACK
+    const local = withHeadroom(localEstimate)
+    return lower(local > PUBLISH_GAS_FALLBACK ? local : PUBLISH_GAS_FALLBACK, maxPublishGas())
   }
-  const gas = (estimated * PUBLISH_GAS_HEADROOM_BPS) / 10_000n
+  const gas = withHeadroom(estimated)
   const { gasLimit: blockGasLimit } = await client.getBlock()
-  if (gas > blockGasLimit) {
+  const limit = lower(maxPublishGas(), blockGasLimit)
+  if (gas > limit) {
     throw new ManagedAccountPublishError(
-      `This publish needs about ${gas} gas, more than a block holds (${blockGasLimit}); nothing was sent. ` +
+      `This publish needs about ${gas} gas, over the limit of ${limit}; nothing was sent. ` +
         'Publish some of its related drafts on their own first.',
       'PUBLISH_TOO_LARGE',
       from,
