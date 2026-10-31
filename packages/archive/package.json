@@ -39,6 +39,16 @@
         "default": "./dist/node.js"
       }
     },
+    "./verify": {
+      "import": {
+        "types": "./dist/verify.d.ts",
+        "default": "./dist/verify.js"
+      },
+      "require": {
+        "types": "./dist/verify.d.ts",
+        "default": "./dist/verify.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [

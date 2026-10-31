@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { SchemaEncoder } from '@ethereum-attestation-service/eas-sdk'
 import { createBag, parsePathManifest, verifyArchive, type Bag } from '@seedprotocol/archive'
+import * as verifyEntry from '@seedprotocol/archive/verify'
 import { ARCHIVE_ANCHOR_SCHEMA_DEF, ARCHIVE_ANCHOR_SCHEMA_UID, VERSION_SCHEMA_UID, arweaveTxIdToBytes32 } from '@seedprotocol/eas'
 
 const ATTESTER = '0x00000000000000000000000000000000000000aa'
@@ -152,6 +153,14 @@ describe('anchorArchive', () => {
     expect(BigInt(fields.covered_until as bigint)).toBe(BigInt(AS_OF))
     expect(fields.manifest_tx).toBe(arweaveTxIdToBytes32(result.manifestTx))
     expect(fields.tagmanifest_sha256).toBe(`0x${hash}`)
+    // What a reader's page decodes, with no EAS code.
+    expect(verifyEntry.decodeArchiveAnchorData(attestation.data[0].data)).toEqual({
+      coveredUntil: AS_OF,
+      manifestTx: result.manifestTx,
+      tagmanifestSha256: hash,
+    })
+    expect(verifyEntry.ARCHIVE_ANCHOR_SCHEMA_UID).toBe(ARCHIVE_ANCHOR_SCHEMA_UID)
+    expect(verifyEntry.VERSION_SCHEMA_UID).toBe(VERSION_SCHEMA_UID)
     // The contract encoder takes it as it stands.
     expect(encodeMultiPublish(ATTESTER as `0x${string}`, sent[0]!).data).toMatch(/^0x/)
   })
