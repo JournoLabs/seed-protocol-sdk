@@ -16,7 +16,8 @@ Publishing needs the publish package (`@seedprotocol/publish`). The SDK prepares
 does not upload or attest on its own: `item.publish(options)` hands the item to the executor
 that `initPublish()` / `<PublishProvider config>` registers (`setPublishExecutor(publishItem)`),
 and throws if none is registered. It resolves when the publish has finished and rejects if it
-failed; attestation failures that wait for `PublishManager.retryAttestations` also reject.
+failed; attestation failures that wait for `PublishManager.retryAttestations` also reject, see
+[Interrupted publishes](#interrupted-publishes).
 `options` are the publish package's `CreatePublishOptions`.
 
 When using the publish package with `ConnectButton` and its publish flow:
@@ -151,6 +152,51 @@ When the SDK syncs from EAS into SQLite, property rows are deduplicated to **can
 ## Verification after publish
 
 The publish package’s verification step checks that each **expected schema** in the publish request appears on EAS for the target **Version** UID (after indexing). It does not require a specific attestation UID beyond schema presence.
+
+## Interrupted publishes
+
+Each attestation transaction commits a row to `publish_attempts` before it is sent, so a lost receipt,
+a closed tab or a crash can't lead to a second send ([ADR 0030](adr/0030-attestation-sends-are-journaled.md)).
+A row is open until it is recorded, reverted, or an error proves nothing went out. While one is open, a
+send covering any seed in its requests fails with `AttestationAttemptOpenError`, including a new
+Publish and a publish of a related item alone. This also means a publish needs its database: with none,
+the send is refused.
+
+`PublishManager.retryAttestations(seedLocalId)` and a restored publish enter `reconcilingAttestations`
+before anything can send:
+
+| What it finds | What happens |
+| --- | --- |
+| Transaction landed | Recorded, nothing sent, and the publish carries on |
+| Transaction reverted | The attempt closes and the publish sends again |
+| UserOp with a pinned nonce that hasn't landed, in the run that sent it | Sent again under the same nonce, so only one can land |
+| Anything else: no hash saved, no receipt, or another run's unlanded UserOp | Stops at `attestationOutcomeUnknown` |
+
+`createManagedAccountTxSender`, `createPermissionlessTxSender` and the managed wallet from
+`getManagedAccountWallet` pin the nonce, so a retry of the same run settles without a hash unless the
+chain can't be read. A new run that meets another run's unlanded UserOp stops at
+`attestationOutcomeUnknown`, because it doesn't have the same requests to send under that nonce. A custom `SeedTxSender` pins by setting `pinsNonceOn` and honouring
+`SeedTxRequest.nonceKey`. Other senders, EOAs and browser wallets included, can stop there whenever the
+hash was lost. A tab closed during a wallet prompt does this even if the author never signed.
+
+Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
+`describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
+`snapshot.context.error` is an `AttestationOutcomeUnknownError` with `attemptId` and `transactionHash`.
+`retryAttestations` looks again and never sends blind. To settle it:
+
+```typescript
+// The author found the transaction: read and record it
+await PublishManager.resolveAttestationAttempt(seedLocalId, { txHash })
+
+// Give the attempt up and send again. If it did land, this attests a second time.
+await PublishManager.resolveAttestationAttempt(seedLocalId, { resend: true })
+```
+
+Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
+retry. `PublishManager.getRestoreStatus()` returns `outcome`, one of `pending`, `restored`, `dbNotReady`
+or `failed`, and `onRestoreStatus(listener)` calls back when it changes. `dbNotReady` restores by itself
+when the database arrives. `failed` holds `error` and isn't tried again until the next load.
+`unreadableSeedLocalIds` lists saved publishes that couldn't be parsed; their rows stay `in_progress`.
 
 ## Arweave upload tags
 

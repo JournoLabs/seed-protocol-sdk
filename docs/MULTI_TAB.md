@@ -20,6 +20,12 @@ A publish runs in the tab that started it, which holds `seed:publish:<seedLocalI
 restores in-progress publishes, it skips any whose lock another tab holds, and
 `PublishManager.createPublish` resolves `undefined` for a seed publishing elsewhere.
 
+That lock names one seed, and an attestation transaction can cover several. The open rows in
+`publish_attempts` cover the rest: they are in the shared database, and the check and the insert are
+one transaction, so a tab publishing a related item alone fails with `AttestationAttemptOpenError`
+while another tab's attempt covers that item. See
+[Interrupted publishes](PUBLISHING.md#interrupted-publishes).
+
 ## Locks
 
 These sections run one tab at a time, whatever `multiTab` is set to:
@@ -97,5 +103,5 @@ another tab.
 ## Not covered yet
 
 No lock covers ordinary item edits, item creates or deletes, or schema and model edits, so two tabs
-editing the same draft property can each write a draft row. Chain uids (`seeds.uid`,
-`versions.uid`, `metadata.uid`) have no unique index.
+editing the same draft property can each write a draft row. `metadata.uid` has no unique index;
+`seeds.uid` and `versions.uid` do.

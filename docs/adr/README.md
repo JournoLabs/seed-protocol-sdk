@@ -39,6 +39,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0027](0027-publish-depends-on-wallet-interfaces.md) | Core publish depends on wallet interfaces and standard RPC, not vendor SDKs | Accepted |
 | [0028](0028-reproducible-bag-format.md) | A reproducible bag's bytes are a versioned format | Proposed |
 | [0029](0029-bag-anchor-attestation.md) | A bag is anchored by its own attestation on the Version | Proposed |
+| [0030](0030-attestation-sends-are-journaled.md) | Attestation sends are journaled, and UserOps pin their nonce | Accepted |
 
 ## Writing one
 
