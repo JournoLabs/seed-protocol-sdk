@@ -117,6 +117,15 @@ export async function getAccountCodeKind(address: string): Promise<ReturnType<ty
   return accountCodeKind(code)
 }
 
+/** The chain head, or null when it can't be read. */
+export async function getPublishBlockNumber(): Promise<bigint | null> {
+  try {
+    return await getPublishPublicClient().getBlockNumber()
+  } catch {
+    return null
+  }
+}
+
 export async function getBlockTimestampMs(blockNumber: bigint): Promise<number | null> {
   try {
     const block = await getPublishPublicClient().getBlock({ blockNumber })

@@ -4,6 +4,7 @@ import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import type { IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
+import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
@@ -20,7 +21,7 @@ import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
-import type { Address, TransactionReceipt } from 'viem'
+import type { Address, Hash, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
@@ -111,6 +112,14 @@ export const createAttestations = fromPromise(
   },
 )
 
+type SendTx = () => Promise<{ transactionHash: Hash }>
+
+/**
+ * Checks and sends a `multiPublish`. `through` gets the send once every preflight has passed, and
+ * the address sending it, so a caller can wrap only the send (sendAttested).
+ */
+type SendMultiPublish = <T>(requests: any[], through: (send: SendTx, sender: string) => Promise<T>) => Promise<T>
+
 /**
  * Works out how `address` attests through `multiPublish`, the executor module or the account
  * itself, and returns the function that sends it. Used by publish and by `anchorArchive`.
@@ -119,7 +128,7 @@ export async function resolveMultiPublishSender(source: {
   address: Address
   wallet?: unknown
   account?: unknown
-}): Promise<{ sendMultiPublish: (requests: any[]) => Promise<{ transactionHash: Address }>; attesterAddress: string }> {
+}): Promise<{ sendMultiPublish: SendMultiPublish; attesterAddress: string }> {
   const { address } = source
   const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
   let routing = resolvePublishRouting({ useModularExecutor: false, publisherAddress: address })
@@ -200,7 +209,7 @@ export async function resolveMultiPublishSender(source: {
   // Every publish is simulated from the sending account first, so a call that would revert is
   // never sent and its decoded reason is reported. Automation also refuses to send when the
   // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
-  const sendPublishTx = async (requests: any[]) => {
+  const sendPublishTx: SendMultiPublish = async (requests, through) => {
     const to = routing.txTargetAddress as Address
     const unsized = routeToExecutorModule
       ? encodeExecutorMultiPublish(to, requests)
@@ -228,11 +237,14 @@ export async function resolveMultiPublishSender(source: {
           },
     )
     const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
-    try {
-      return await activeWallet.txSender.sendTransaction(tx)
-    } catch (err) {
-      throw explainUserOpError(err, activeWallet.txSender.address)
+    const send: SendTx = async () => {
+      try {
+        return await activeWallet.txSender.sendTransaction(tx)
+      } catch (err) {
+        throw explainUserOpError(err, activeWallet.txSender.address)
+      }
     }
+    return through(send, activeWallet.txSender.address)
   }
 
   return { sendMultiPublish: sendPublishTx, attesterAddress: routing.attesterAddress }
@@ -324,14 +336,24 @@ async function executeCreateAttestations(
     // property, so a reference in any direction is filled with its seed uid (encodeMultiPublish).
     const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
     const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-    const result = await sendMultiPublish(payloadForContract)
+    const result = await sendMultiPublish(payloadForContract, (send, sender) =>
+      sendAttested({
+        publishRunId: context.publishRunId,
+        seedLocalId: item.seedLocalId,
+        requests: payloadForContract,
+        sender,
+        attester: attesterAddress,
+        send,
+      }),
+    )
 
-    const receipt = await waitForPublishReceipt(result.transactionHash)
+    const receipt = await waitForAttemptReceipt(result.attemptId, result.transactionHash)
     if (!receipt) {
       throw new Error('Failed to send transaction')
     }
 
     const landed: UnrecordedAttestation = {
+      attemptId: result.attemptId,
       transactionHash: result.transactionHash,
       requests: payloadForContract,
       attester: attesterAddress,
@@ -357,6 +379,7 @@ async function recordAttested(
       rootSeedLocalId: item.seedLocalId,
       publisherAddress: address,
       attester: landed.attester,
+      attemptId: landed.attemptId,
     }).catch((err) => {
       throw new AttestationRecordError(landed, err)
     })

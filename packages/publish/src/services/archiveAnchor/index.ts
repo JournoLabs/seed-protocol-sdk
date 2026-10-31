@@ -185,7 +185,7 @@ async function attestAnchor(
         listOfAttestations: [{ schema: ARCHIVE_ANCHOR_SCHEMA_UID, data: [attestation] }],
         propertiesToUpdate: [],
       },
-    ]))
+    ], (send) => send()))
   }
   const receipt = await waitForPublishReceipt(transactionHash)
   const attested = receipt ? getAttestedUidsFromReceipt(receipt, getPublishConfig().easContractAddress, attester) : []

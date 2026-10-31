@@ -696,6 +696,26 @@ CREATE UNIQUE INDEX \`versions_attested_uid_unique\` ON \`versions\` (\`uid\`) W
 
 export const migrationSql_0030_drop_property_uids = `DROP TABLE \`property_uids\`;`
 
+export const migrationSql_0031_add_publish_attempts = `CREATE TABLE \`publish_attempts\` (
+	\`id\` text PRIMARY KEY NOT NULL,
+	\`publish_run_id\` text,
+	\`seed_local_id\` text NOT NULL,
+	\`seed_local_ids\` text NOT NULL,
+	\`step\` text NOT NULL,
+	\`requests\` text NOT NULL,
+	\`sender\` text NOT NULL,
+	\`attester\` text NOT NULL,
+	\`chain_id\` integer NOT NULL,
+	\`nonce_key\` text,
+	\`from_block\` text,
+	\`tx_hash\` text,
+	\`status\` text NOT NULL,
+	\`created_at\` integer NOT NULL,
+	\`updated_at\` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX \`publish_attempts_status_idx\` ON \`publish_attempts\` (\`status\`);`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -917,6 +937,13 @@ export const journalJson = `{
       "when": 1792866514704,
       "tag": "0030_drop_property_uids",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1793404988926,
+      "tag": "0031_add_publish_attempts",
+      "breakpoints": true
     }
   ]
 }`
@@ -926,8 +953,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "b6717ca6-f22d-4440-a51d-27a3aba4eb0e",
-  "prevId": "0937d0b1-f4ea-4ae1-885b-7173e7b786b9",
+  "id": "5f8dcb6d-de44-4536-9489-fef3eb4bd2ef",
+  "prevId": "b6717ca6-f22d-4440-a51d-27a3aba4eb0e",
   "tables": {
     "appState": {
       "name": "appState",
@@ -2030,6 +2057,129 @@ export const snapshotJson = `{
             "seed_local_id",
             "property_name",
             "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "publish_attempts": {
+      "name": "publish_attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publish_run_id": {
+          "name": "publish_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seed_local_ids": {
+          "name": "seed_local_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step": {
+          "name": "step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requests": {
+          "name": "requests",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sender": {
+          "name": "sender",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attester": {
+          "name": "attester",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nonce_key": {
+          "name": "nonce_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "from_block": {
+          "name": "from_block",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "publish_attempts_status_idx": {
+          "name": "publish_attempts_status_idx",
+          "columns": [
+            "status"
           ],
           "isUnique": false
         }

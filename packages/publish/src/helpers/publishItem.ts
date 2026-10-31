@@ -14,6 +14,7 @@ import { PublishRetractionError, UploadNeedsConfirmError, UploadTooLargeError } 
 const RECOVERABLE_FAILURE_STATES = new Set([
   'attestationFailureRecoverable',
   'attestationFailureRecoverableDirectToEas',
+  'attestationOutcomeUnknown',
   'retractionFailureRecoverable',
 ])
 
@@ -69,6 +70,15 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
             `Revoking the retracted properties of ${seedLocalId} failed: ${detail ?? 'unknown error'}. ` +
               `The new attestations are in place; retry with PublishManager.retryAttestations('${seedLocalId}') ` +
               'to send the revocation again.',
+            { cause },
+          ),
+        )
+      } else if (value === 'attestationOutcomeUnknown') {
+        finish(
+          new Error(
+            `${detail ?? `Publish of ${seedLocalId} can't tell whether its transaction landed.`} ` +
+              `Publishing again could attest twice. Retry with PublishManager.retryAttestations('${seedLocalId}') ` +
+              `to look again, or settle it with PublishManager.resolveAttestationAttempt('${seedLocalId}', ...).`,
             { cause },
           ),
         )

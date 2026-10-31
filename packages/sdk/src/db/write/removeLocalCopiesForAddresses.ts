@@ -6,6 +6,7 @@ import {
   metadata,
   pendingWrites,
   publishProcesses,
+  publishAttempts,
   seeds,
   versions,
 } from '@/seedSchema'
@@ -162,6 +163,10 @@ export async function hardDeleteLocalSeedsByLocalIds(
   await appDb
     .delete(publishProcesses)
     .where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+
+  await appDb
+    .delete(publishAttempts)
+    .where(inArray(publishAttempts.seedLocalId, seedLocalIds))
 
   await appDb.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
 

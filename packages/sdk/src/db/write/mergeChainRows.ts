@@ -5,6 +5,7 @@ import {
   metadata,
   pendingWrites,
   publishProcesses,
+  publishAttempts,
   seeds,
   versions,
 } from '@/seedSchema'
@@ -43,7 +44,7 @@ export async function mergeSeedRowInto(db: Db, dupLocalId: string, keepLocalId: 
     await db.delete(metadata).where(and(eq(metadata.seedLocalId, dupLocalId), inArray(metadata.uid, keptUids)))
   }
 
-  for (const table of [metadata, versions, pendingWrites, publishProcesses, arweaveL1FinalizeJobs]) {
+  for (const table of [metadata, versions, pendingWrites, publishProcesses, publishAttempts, arweaveL1FinalizeJobs]) {
     await db.update(table).set({ seedLocalId: keepLocalId }).where(eq(table.seedLocalId, dupLocalId))
   }
   await db

@@ -71,6 +71,8 @@ const identity = {
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
+  claimPublishAttempt: async () => undefined,
+  updatePublishAttempt: async () => {},
   recordPublishRequests: async () => {},
   Item: { find: async (q: { seedLocalId?: string }) => (q.seedLocalId === IDENTITY ? identity : undefined) },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
@@ -81,6 +83,7 @@ mock.module('../../../config', () => ({
 }))
 mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
+  getPublishBlockNumber: async () => 100n,
   isContractDeployed: async () => true,
   waitForPublishReceipt: async () => RECEIPT,
 }))

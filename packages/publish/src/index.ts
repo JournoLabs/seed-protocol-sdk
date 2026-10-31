@@ -49,6 +49,8 @@ export type {
   GetPublishUploadDataOptions,
 } from './services/publish/helpers/getPublishUploadData'
 export {
+  AttestationAttemptOpenError,
+  AttestationOutcomeUnknownError,
   AttestationRecordError,
   AttestationVerificationError,
   isManagedAccountPublishError,

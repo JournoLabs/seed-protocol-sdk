@@ -48,6 +48,9 @@ export const PUBLISH_RUN_STATE_PHASES: Readonly<Record<string, PublishRunDescrip
   uploadingViaBundlerPhase2: { phase: 'uploading', awaitingRetry: false, terminal: false },
   creatingAttestations: { phase: 'attesting', awaitingRetry: false, terminal: false },
   attestationFailureRecoverable: { phase: 'attesting', awaitingRetry: true, terminal: false },
+  reconcilingAttestations: { phase: 'attesting', awaitingRetry: false, terminal: false },
+  // Retry only looks again; resolveAttestationAttempt settles it.
+  attestationOutcomeUnknown: { phase: 'attesting', awaitingRetry: true, terminal: false },
   creatingAttestationsDirectToEas: { phase: 'attesting', awaitingRetry: false, terminal: false },
   attestationFailureRecoverableDirectToEas: { phase: 'attesting', awaitingRetry: true, terminal: false },
   revokingRetractedProperties: { phase: 'retracting', awaitingRetry: false, terminal: false },

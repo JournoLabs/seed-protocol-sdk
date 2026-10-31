@@ -5,7 +5,7 @@ import { publishMachine } from '../../publish'
 import { subscribe } from './subscribe'
 import { releasePublishLock, tryHoldPublishLock } from '../publishLocks'
 import { markInProgressPublishInterrupted } from './savePublish'
-import { isRestorableSnapshot, type PersistedSnapshot } from './restorableSnapshot'
+import { isRestorableSnapshot, parkInterruptedAttestation, type PersistedSnapshot } from './restorableSnapshot'
 
 const RESTORE_DB_WAIT_MS = 60_000
 const RESTORE_DB_POLL_MS = 2_000
@@ -144,6 +144,7 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
 
         // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
         patchPublishContextItemForRestore(parsed, seedLocalId, publishProcessRecord)
+        const reconcile = parkInterruptedAttestation(parsed)
 
         const publishProcess = createActor(publishMachine as unknown as import('xstate').AnyActorLogic, {
           snapshot: parsed as any,
@@ -161,6 +162,7 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
 
         publishProcess.start()
         subscription.start()
+        if (reconcile) publishProcess.send({ type: 'retry' })
       }
       return { newPublishProcesses, newSubscriptions }
     }
