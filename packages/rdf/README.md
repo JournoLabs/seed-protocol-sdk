@@ -34,6 +34,7 @@ toQuads(graph)    // RDF/JS quads for N3.js, Comunica, Oxigraph or rdf-ext
 | `chainId` | The chain the seeds were attested on. Required: EAS uids don't include it. |
 | `base` | Base of the minted IRIs, ending in `/`. Default `PROVISIONAL_BASE_IRI`. |
 | `contentUrl` | `(transactionId) => string`, an `https://` URL for stored content, written as `schema:contentUrl`. |
+| `lens` | `{ schema, sidecar }`: maps your models and properties to terms and types Numbers and Dates. See [Lens](#lens). |
 
 To export seeds you have already read, pass the entries of `getSeedAttestations` to `stateGraph`.
 
@@ -53,8 +54,45 @@ For each seed, at its head Version (or the pinned one):
 
 Literals are typed from the EAS type: `bool` is `xsd:boolean`, integer types are `xsd:integer`,
 `bytes` values are `xsd:hexBinary`, and everything else is `xsd:string`. A Number is an EAS
-`string` (ADR 0010) and a Date a `uint256` of seconds, so without the app's Schema they come out
+`string` (ADR 0010) and a Date a `uint256` of seconds, so without a [lens](#lens) they come out
 as `xsd:string` and `xsd:integer`. A removed value (ADR 0021) is left out. The graph has no blank
 nodes except the cells of lists.
 
 `seedVocabulary()` returns the `seed:` terms in Turtle.
+
+## Lens
+
+A protocol predicate such as `{base}p/string/title` says what is on chain, not what it means. A
+lens adds that: pass your Schema and a sidecar, a JSON file that lives beside it.
+
+```json
+{
+  "schemaId": "my-schema-id",
+  "@context": { "schema": "https://schema.org/", "dcterms": "http://purl.org/dc/terms/" },
+  "terms": {
+    "<Post model id>": "schema:BlogPosting",
+    "<title property id>": "schema:headline",
+    "<publishedAt property id>": "schema:datePublished",
+    "<authors property id>": "dcterms:creator"
+  }
+}
+```
+
+```ts
+const graph = await exportSeeds([seedUid], { chainId, lens: { schema, sidecar } })
+graph.warnings // terms it couldn't use, values that don't fit their type
+```
+
+`terms` is keyed by the `id` of a model or property in the Schema file, so renaming either keeps its
+term. Values are a prefixed name, using the top-level strings of `@context`, or an absolute IRI.
+
+- A mapped model's class replaces `{base}c/{model}`, and a mapped property's term replaces its
+  protocol predicate. `seed:Seed` stays, and anything unmapped keeps its protocol IRI.
+- A Number is typed per value: `xsd:integer`, `xsd:decimal`, or `xsd:double` in its canonical form
+  (`1e+21` becomes `1.0E21`). A value that isn't a number stays an `xsd:string`, with a warning.
+- A Date is an `xsd:dateTime` in UTC.
+- On-chain names are matched to the Schema the way sync matches them, including `nameMatch`. An
+  attestation made under a name the Schema no longer matches keeps its protocol predicate.
+
+A sidecar whose `schemaId` isn't the Schema's `id` throws. A term with no matching id or a prefix
+`@context` doesn't define is a warning, and the export goes on without it.

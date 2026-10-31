@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `listRelationEasName(propertyName, ref)` is exported: the EAS name the SDK publishes a List relation under.
+
 ## 0.8.0 (2026-10-30)
 
 - Only `bytes32` and `bytes32[]` properties are relations. Since 0.7.13 a property of any type whose EAS name ended in `_id` or `_ids` came back without the suffix (a `string external_id` as `external`, with no `external_id` or `externalId`), in every `relations` mode and in changelog entries; it is back under its own name. Its value was also fetched as a related seed (before 0.7.13 too) and, with `'expand'`, replaced by that seed when one matched. The name rule now applies only to an attestation with no type. `getSeedAttestations` reports `isRelation` by the same rule, so RDF export no longer links a `string external_id` as a related seed. The item cache codes for `'expand'` and `'uids'` changed (`e6`, `e7`), so records cached in the 0.7.13 shape aren't read.

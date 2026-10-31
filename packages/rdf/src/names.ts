@@ -4,6 +4,7 @@ import { PROV, RDF, XSD } from './iri.js'
 // A local part that needs no escaping in Turtle and stays a compact IRI in JSON-LD.
 const SAFE_LOCAL = /^[A-Za-z_][A-Za-z0-9_-]*$/
 const SAFE_PREFIX = /^[a-z][a-z0-9]*$/
+const SAFE_LENS_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/
 
 /** Namespace by prefix for the graph: the fixed ones, then `c:` and one `p_<type>:` per EAS type. */
 export function prefixesFor(graph: StateGraph): Map<string, string> {
@@ -22,6 +23,10 @@ export function prefixesFor(graph: StateGraph): Map<string, string> {
       const easType = predicate.slice(base.length + 2).split('/')[0]!
       if (SAFE_PREFIX.test(easType)) prefixes.set(`p_${easType}`, `${base}p/${easType}/`)
     }
+  }
+  // A prefix must end in a delimiter to compact in JSON-LD 1.1; the rest stay full IRIs.
+  for (const [prefix, ns] of graph.prefixes) {
+    if (SAFE_LENS_PREFIX.test(prefix) && /[/#:]$/.test(ns) && !prefixes.has(prefix)) prefixes.set(prefix, ns)
   }
   return prefixes
 }
