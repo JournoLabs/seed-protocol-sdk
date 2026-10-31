@@ -10,7 +10,7 @@ export const publishAttempts = sqliteTable(
     seedLocalId: text('seed_local_id').notNull(),
     /** JSON array: every seed in the requests, the publishing item's included. */
     seedLocalIds: text('seed_local_ids').notNull(),
-    step: text('step').notNull(), // 'multiPublish'
+    step: text('step').notNull(), // 'multiPublish', or direct EAS's 'seed', 'version', 'properties'
     /** JSON: the normalized requests in the order they were sent, bigints as strings. */
     requests: text('requests').notNull(),
     sender: text('sender').notNull(),

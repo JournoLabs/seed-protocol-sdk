@@ -119,6 +119,10 @@ export const publishMachine = setup({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'revokingRetractedProperties',
     },),
+    assignResumeAttemptId : assign({
+      resumeAttemptId : ( { event, }, ) =>
+        ((event as unknown as { output: Extract<ReconcileResult, { outcome: 'send' }> }).output).resumeAttemptId,
+    },),
     assignAccountFromRetry : assign({
       wallet : ( { event, }, ) => {
         const ev = event as { wallet?: import('~/helpers/seedSigner').PublishWallet; account?: import('~/helpers/seedSigner').PublishWallet }
@@ -459,15 +463,13 @@ export const publishMachine = setup({
             },),
           },
           {
-            guard  : ( { context } ) => attestationUsesDirectEas(context) && !context.unrecordedAttestation,
-            target : 'creatingAttestationsDirectToEas',
+            guard   : ( { context } ) => attestationUsesDirectEas(context) && !context.unrecordedAttestation,
+            target  : 'creatingAttestationsDirectToEas',
+            actions : 'assignResumeAttemptId',
           },
           {
             target  : 'creatingAttestations',
-            actions : assign({
-              resumeAttemptId : ( { event, }, ) =>
-                (event.output as Extract<ReconcileResult, { outcome: 'send' }>).resumeAttemptId,
-            },),
+            actions : 'assignResumeAttemptId',
           },
         ],
         onError : {

@@ -13,6 +13,7 @@ type Row = {
   txHash: string | null
   seedLocalIds: string[]
   requests: string
+  step?: string
   sender: string
   nonceKey: string | null
   entryPoint: string | null
@@ -197,6 +198,26 @@ describe('sendAttested: a sender that pins its nonce', () => {
     })
     await expect(sendAttested(pinned())).rejects.toThrow('nonce too low')
     expect(rows[0]!.status).toBe('sending')
+  })
+})
+
+describe('sendAttested: a direct EAS step', () => {
+  test('keeps its step on the attempt', async () => {
+    await sendAttested({ ...attempt(), step: 'version' })
+    expect(rows[0]).toMatchObject({ step: 'version' })
+  })
+
+  test('a resume of another step is refused', async () => {
+    const pinnedSender = { address: SENDER as `0x${string}`, pinsNonceOn: ENTRY_POINT }
+    send.mockImplementationOnce(async () => {
+      throw new Error('Timeout')
+    })
+    await expect(sendAttested({ ...attempt(), sender: pinnedSender, step: 'seed' })).rejects.toThrow('Timeout')
+    send.mockClear()
+    await expect(
+      sendAttested({ ...attempt(), sender: pinnedSender, step: 'version', resumeAttemptId: rows[0]!.id }),
+    ).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).not.toHaveBeenCalled()
   })
 })
 

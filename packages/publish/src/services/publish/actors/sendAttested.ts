@@ -12,6 +12,7 @@ import { getPublishViemChain } from '~/helpers/chainConfig'
 import { nonceKeyForAttempt } from '~/helpers/pinnedNonce'
 import { isNonceTooLowError } from '~/helpers/retryNonceTooLow'
 import type { SeedTxSender } from '~/helpers/seedSigner'
+import type { DirectAttestationStep } from './recordDirectAttestation'
 
 const logger = debug('seedProtocol:services:publish:actors:sendAttested')
 
@@ -55,6 +56,8 @@ export type AttestedSend = {
   sender: Pick<SeedTxSender, 'address' | 'pinsNonceOn'>
   attester: string
   send: (nonceKey?: bigint) => Promise<{ transactionHash: Hex }>
+  /** Which transaction this is: a direct EAS publish sends several per request. */
+  step?: 'multiPublish' | DirectAttestationStep
   /**
    * An open attempt reconcile found not landed, to send again under its own nonce key. A new key
    * would let the old UserOp, if it is still pending, land beside this one.
@@ -75,6 +78,7 @@ export async function sendAttested({
   sender,
   attester,
   send,
+  step = 'multiPublish',
   resumeAttemptId,
 }: AttestedSend): Promise<{ attemptId: string; transactionHash: Hex }> {
   const serialized = JSON.stringify(requests, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
@@ -86,6 +90,7 @@ export async function sendAttested({
   if (resumed) {
     // The record reads this attempt's requests, so whichever send lands must have sent them.
     const same =
+      resumed.step === step &&
       resumed.requests === serialized &&
       resumed.sender.toLowerCase() === sender.address.toLowerCase() &&
       resumed.entryPoint?.toLowerCase() === sender.pinsNonceOn?.toLowerCase()
@@ -103,7 +108,7 @@ export async function sendAttested({
       seedLocalIds: [
         ...new Set([seedLocalId, ...requests.flatMap((r) => (r.localId ? [r.localId] : []))]),
       ],
-      step: 'multiPublish',
+      step,
       requests: serialized,
       sender: sender.address,
       attester,

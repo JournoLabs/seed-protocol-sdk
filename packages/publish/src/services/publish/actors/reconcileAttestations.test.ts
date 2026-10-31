@@ -5,7 +5,7 @@ const realSdk = await import('@seedprotocol/sdk')
 const realChainClient = await import('../../../helpers/chainClient')
 const { AttestationOutcomeUnknownError, PublishTransactionRevertedError } = await import('../../../errors')
 
-type Row = { id: string; publishRunId: string | null; txHash: string | null; requests: string; attester: string; status: string; nonceKey?: string; entryPoint?: string; sender?: string; fromBlock?: string }
+type Row = { id: string; publishRunId: string | null; txHash: string | null; requests: string; attester: string; status: string; step?: string; nonceKey?: string; entryPoint?: string; sender?: string; fromBlock?: string }
 let rows: Row[] = []
 const open = (row: Row) => ['sending', 'sent', 'landed'].includes(row.status)
 const updatePublishAttempt = mock(async (id: string, update: Partial<Row>) => {
@@ -28,7 +28,14 @@ const recordMultiPublishReceipt = mock(async ({ attemptId }: { attemptId?: strin
   Object.assign(rows.find((r) => r.id === attemptId)!, { status: 'recorded' })
   return { requests: [], attributed: [] }
 })
-mock.module('./recordMultiPublishReceipt', () => ({ recordMultiPublishReceipt }))
+const recordRelatedSeedUid = mock(async (_: unknown) => {})
+mock.module('./recordMultiPublishReceipt', () => ({ recordMultiPublishReceipt, recordRelatedSeedUid }))
+
+const recordDirectAttestation = mock(async ({ attemptId }: { attemptId: string }) => {
+  Object.assign(rows.find((r) => r.id === attemptId)!, { status: 'recorded' })
+  return { uids: [SEED_UID], attestationMs: 1 }
+})
+mock.module('./recordDirectAttestation', () => ({ recordDirectAttestation }))
 
 let sequence: () => Promise<bigint> = async () => 0n
 let userOp: () => Promise<unknown> = async () => undefined
@@ -41,6 +48,7 @@ const { reconcileAttestations } = await import('./reconcileAttestations')
 const { createActor, toPromise } = await import('xstate')
 
 const HASH = `0x${'a'.repeat(64)}`
+const SEED_UID = `0x${'c'.repeat(64)}`
 const ATTESTER = `0x${'b'.repeat(40)}`
 const pinnedRow = (over: Partial<Row> = {}): Row =>
   row({ txHash: null, status: 'sending', nonceKey: '7', entryPoint: ATTESTER, sender: ATTESTER, fromBlock: '100', ...over })
@@ -51,6 +59,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   requests: '[{"localId":"post"}]',
   attester: ATTESTER,
   status: 'sent',
+  step: 'multiPublish',
   ...over,
 })
 
@@ -70,6 +79,8 @@ beforeEach(() => {
   sequence = async () => 0n
   userOp = async () => undefined
   recordMultiPublishReceipt.mockClear()
+  recordDirectAttestation.mockClear()
+  recordRelatedSeedUid.mockClear()
 })
 
 describe('reconcileAttestations', () => {
@@ -117,6 +128,39 @@ describe('reconcileAttestations', () => {
     const result = await reconcile()
     expect(result.outcome).toBe('unknown')
     expect((result as { error: unknown }).error).toBeInstanceOf(AttestationOutcomeUnknownError)
+  })
+})
+
+describe('reconcileAttestations: a direct EAS attempt', () => {
+  test('landed: recorded here, then the actor sends what is left, in any run', async () => {
+    rows = [row({ step: 'seed' })]
+    expect(await reconcile()).toEqual({ outcome: 'send' })
+    expect(recordDirectAttestation).toHaveBeenCalledTimes(1)
+    expect(recordDirectAttestation.mock.calls[0]![0]).toMatchObject({
+      step: 'seed',
+      target: { localId: 'post' },
+      attester: ATTESTER,
+      attemptId: 'attempt1',
+    })
+    expect(recordMultiPublishReceipt).not.toHaveBeenCalled()
+  })
+
+  test('a landed seed reaches the loaded item', async () => {
+    rows = [row({ step: 'seed' })]
+    await reconcile()
+    expect(recordRelatedSeedUid.mock.calls[0]![0]).toMatchObject({ seedLocalId: 'post', seedUid: SEED_UID })
+  })
+
+  test('a landed version or properties transaction leaves the seed alone', async () => {
+    rows = [row({ step: 'version' })]
+    await reconcile()
+    expect(recordRelatedSeedUid).not.toHaveBeenCalled()
+  })
+
+  test('no hash and no pin: unknown', async () => {
+    rows = [row({ step: 'properties', txHash: null, status: 'sending' })]
+    expect((await reconcile()).outcome).toBe('unknown')
+    expect(recordDirectAttestation).not.toHaveBeenCalled()
   })
 })
 

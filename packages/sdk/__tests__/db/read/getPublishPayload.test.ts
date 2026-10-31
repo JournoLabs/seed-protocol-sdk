@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID } from '@/helpers/constants'
+import { recordPublishRequests } from '@/db/write/recordPublishRequests'
 import { Item } from '@/Item/Item'
 import { and, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -173,6 +174,47 @@ testDescribe('getPublishPayload integration', () => {
     expect(imagePayload).toBeDefined()
     expect(imagePayload!.listOfAttestations).toBeDefined()
     expect(imagePayload!.listOfAttestations.length).toBeGreaterThanOrEqual(1)
+  }, 30000)
+
+  it('a retry skips the storage transaction it recorded, and a new upload attests', async () => {
+    const { imageSeedLocalId } = await createImageItemWithMissingStorageTxMetadata()
+    const imageItem = await Item.find({ seedLocalId: imageSeedLocalId })
+    if (!imageItem) throw new Error('Image item not found')
+    const uid = (c: string) => '0x' + c.repeat(64)
+    const storageAttestations = (payload: any[]) =>
+      payload
+        .find((p) => p.localId === imageSeedLocalId)
+        ?.listOfAttestations.filter((a: any) => a._propertyName === 'storageTransactionId') ?? []
+
+    const uploads = [{ txId: 'recorded-arweave-tx-id', seedLocalId: imageSeedLocalId }]
+    const first = (await getPublishPayload(imageItem, uploads)) as any[]
+    const [attestation] = storageAttestations(first)
+    expect(attestation).toBeDefined()
+
+    await recordPublishRequests([
+      {
+        version: { seedLocalId: imageSeedLocalId, versionUid: uid('b') },
+        properties: {
+          seedLocalId: imageSeedLocalId,
+          attestationCreatedAtMs: Date.now(),
+          versionUid: uid('b'),
+          pairs: [
+            {
+              schemaUid: attestation.schema,
+              attestationUid: uid('c'),
+              propertyName: attestation._propertyName,
+              metadataLocalId: attestation._metadataLocalId,
+              value: attestation._attestedValue,
+            },
+          ],
+        },
+        seed: { seedLocalId: imageSeedLocalId, seedUid: uid('a') },
+      },
+    ])
+
+    expect(storageAttestations((await getPublishPayload(imageItem, uploads)) as any[])).toHaveLength(0)
+    const newUpload = [{ txId: 'new-arweave-tx-id', seedLocalId: imageSeedLocalId }]
+    expect(storageAttestations((await getPublishPayload(imageItem, newUpload)) as any[])).toHaveLength(1)
   }, 30000)
 
   it('with image and uploadedTransactions: Image model has storageTransactionId in properties', async () => {

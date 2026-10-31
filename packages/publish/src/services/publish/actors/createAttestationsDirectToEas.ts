@@ -2,24 +2,24 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import {
-  updateVersionUid,
-  applyPropertyAttestationUidsFromPublish,
-  recordPublishRequests,
   resolvePublishPayloadValues,
   type IItem,
 } from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
+import {
+  recordDirectAttestation,
+  type DirectAttestationStep,
+  type DirectAttestationTarget,
+} from './recordDirectAttestation'
 import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
+import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
 import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
-import { getPublishConfig } from '~/config'
-import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
-import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { assertPublishFits } from '~/helpers/publishSize'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import {
@@ -27,8 +27,6 @@ import {
   prepareEasMultiAttest,
   encodeBytes32,
   ZERO_BYTES32,
-  getAttestationUidFromReceipt,
-  getAttestedUidsFromReceipt,
   type MultiAttestationRequest,
 } from '~/helpers/easDirect'
 import type { ArweaveTransactionInfo } from '../../../types'
@@ -312,16 +310,38 @@ async function executeCreateAttestationsDirectToEas(
       seedLocalId?: string
       persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
     }
+    // The seed row holds the uid by now; this brings the loaded item up to date.
     const persistCreatedSeed = async (seedLocalId: string, seedUid: string, attestationMs: number) => {
-      await recordPublishRequests([
-        { seed: { seedLocalId, seedUid, publisher: address, attestationCreatedAt: attestationMs } },
-      ])
       if (seedLocalId === item.seedLocalId) {
         itemWithPersist.seedUid = seedUid
         await persistSeedUidSafely(itemWithPersist, address, attestationMs)
       } else {
         await recordRelatedSeedUid({ seedLocalId, seedUid, publisherAddress: address, attestationCreatedAtMs: attestationMs })
       }
+    }
+
+    /** Reconcile found this attempt not landed: its transaction goes again under its nonce key. */
+    let resumeAttemptId = context.resumeAttemptId
+
+    /** Sends one transaction of the publish and records it, each behind its attempt. */
+    const attest = async (
+      step: DirectAttestationStep,
+      target: DirectAttestationTarget,
+      tx: Parameters<typeof txSender.sendTransaction>[0],
+    ) => {
+      const { attemptId, transactionHash } = await sendAttested({
+        publishRunId: context.publishRunId,
+        seedLocalId: item.seedLocalId,
+        requests: [target],
+        sender: txSender,
+        attester: txSender.address,
+        step,
+        send: (nonceKey) => txSender.sendTransaction(nonceKey === undefined ? tx : { ...tx, nonceKey }),
+        ...(resumeAttemptId ? { resumeAttemptId } : {}),
+      })
+      resumeAttemptId = undefined
+      const receipt = await waitForAttemptReceipt(attemptId, transactionHash)
+      return recordDirectAttestation({ step, target, receipt, attester: txSender.address, publisher: address, attemptId })
     }
 
     for (let i = 0; i < normalizedRequests.length; i++) {
@@ -338,23 +358,14 @@ async function executeCreateAttestationsDirectToEas(
             revocable: request.seedIsRevocable,
           },
         })
-        const result = await txSender.sendTransaction(attestTx)
-        const receipt = await waitForPublishReceipt(result.transactionHash)
-        if (!receipt) throw new Error('Failed to create Seed attestation')
-        lastAttestationMs = await attestationMsFromReceipt(receipt)
-        const { easContractAddress } = getPublishConfig()
-        const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
-        if (!seedUidFromReceipt || seedUidFromReceipt === ZERO_BYTES32) {
-          throw new Error('Failed to get Seed UID from attestation receipt')
-        }
+        const recorded = await attest('seed', { localId: request.localId }, attestTx)
+        lastAttestationMs = recorded.attestationMs
+        const seedUidFromReceipt = recorded.uids[0]!
         newSeedUid = seedUidFromReceipt
         request.seedUid = seedUidFromReceipt
         if (request.localId) {
           createdSeeds.set(request.localId, { seedUid: seedUidFromReceipt, attestationMs: lastAttestationMs })
           resolvedUids[request.localId] = seedUidFromReceipt
-          // Record the seed now: each attestation is its own transaction, so a later one failing
-          // must not leave this seed on chain with no local row pointing at it (a retry would
-          // attest a second seed for the same item).
           await persistCreatedSeed(request.localId, seedUidFromReceipt, lastAttestationMs)
         }
         batchExtraUids.push(seedUidFromReceipt)
@@ -372,25 +383,16 @@ async function executeCreateAttestationsDirectToEas(
             revocable: true,
           },
         })
-        const result = await txSender.sendTransaction(attestTx)
-        const receipt = await waitForPublishReceipt(result.transactionHash)
-        if (!receipt) throw new Error('Failed to create Version attestation')
-        lastAttestationMs = await attestationMsFromReceipt(receipt)
-        const { easContractAddress } = getPublishConfig()
-        const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress, txSender.address)
-        if (!versionUidFromReceipt || versionUidFromReceipt === ZERO_BYTES32) {
-          throw new Error('Failed to get Version UID from attestation receipt')
-        }
+        const recorded = await attest(
+          'version',
+          { localId: request.localId, ...(request.versionLocalId ? { versionLocalId: request.versionLocalId } : {}) },
+          attestTx,
+        )
+        lastAttestationMs = recorded.attestationMs
+        const versionUidFromReceipt = recorded.uids[0]!
         newVersionUid = versionUidFromReceipt
         request.versionUid = versionUidFromReceipt
         batchExtraUids.push(versionUidFromReceipt)
-        await updateVersionUid({
-          seedLocalId: request.localId,
-          versionUid: versionUidFromReceipt,
-          ...(request.versionLocalId ? { versionLocalId: request.versionLocalId } : {}),
-          publisher: address,
-          attestationCreatedAt: lastAttestationMs,
-        })
         logger('created Version attestation', newVersionUid)
       } else if (newVersionUid !== ZERO_BYTES32) {
         batchExtraUids.push(newVersionUid)
@@ -432,37 +434,25 @@ async function executeCreateAttestationsDirectToEas(
 
       if (multiRequests.length > 0) {
         const multiTx = prepareEasMultiAttest(multiRequests)
-        const result = await txSender.sendTransaction(multiTx)
-        const receipt = await waitForPublishReceipt(result.transactionHash)
-        if (!receipt) throw new Error('Failed to create property attestations')
-        lastAttestationMs = await attestationMsFromReceipt(receipt)
-        logger('created property attestations for request', i)
-        const { easContractAddress } = getPublishConfig()
-        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress, txSender.address)
-        for (const a of attested) {
-          if (a.uid) batchExtraUids.push(a.uid)
-        }
-        const list = request.listOfAttestations
-        const sameLen = attested.length === list.length
         // Relation and list values are recorded as the seed uids they attested (resolvedUids: the
-        // seeds created so far, recorded on their own rows only after the loop).
-        await applyPropertyAttestationUidsFromPublish({
-          seedLocalId: request.localId,
-          attestationCreatedAtMs: lastAttestationMs ?? null,
-          versionUid: newVersionUid !== ZERO_BYTES32 ? newVersionUid : null,
-          resolvedSeedUids: { ...resolvedUids },
-          publisher: address,
-          pairs: attested.map((a, j) => ({
-            schemaUid: a.schemaUid,
-            attestationUid: a.uid,
-            propertyName:
-              sameLen && typeof list[j]?._propertyName === 'string' && list[j]!._propertyName !== ''
-                ? list[j]!._propertyName
-                : undefined,
-            metadataLocalId: sameLen ? list[j]?._metadataLocalId : undefined,
-            value: sameLen ? list[j]?._attestedValue : undefined,
-          })),
-        })
+        // seeds created so far).
+        const recorded = await attest(
+          'properties',
+          {
+            localId: request.localId,
+            versionUid: newVersionUid,
+            resolvedSeedUids: { ...resolvedUids },
+            properties: request.listOfAttestations.map(({ _propertyName, _metadataLocalId, _attestedValue }) => ({
+              ...(_propertyName !== undefined ? { _propertyName } : {}),
+              ...(_metadataLocalId !== undefined ? { _metadataLocalId } : {}),
+              ...(_attestedValue !== undefined ? { _attestedValue } : {}),
+            })),
+          },
+          multiTx,
+        )
+        lastAttestationMs = recorded.attestationMs
+        logger('created property attestations for request', i)
+        batchExtraUids.push(...recorded.uids)
       }
     }
 
