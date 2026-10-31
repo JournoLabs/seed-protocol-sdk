@@ -46,8 +46,10 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
   attester: string
   /** Seed uids (by local id) created by earlier transactions of the same publish (sequential). */
   resolvedSeedUids?: Record<string, string>
+  /** The publish attempt this transaction belongs to, ended with the record. */
+  attemptId?: string
 }): Promise<{ requests: R[]; attributed: RequestAttestations[] }> {
-  const { receipt, requests, rootSeedLocalId, publisherAddress, attester } = params
+  const { receipt, requests, rootSeedLocalId, publisherAddress, attester, attemptId } = params
   const { easContractAddress } = getPublishConfig()
   const attributed = attributeMultiPublishReceipt({
     receipt,
@@ -108,6 +110,7 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
         },
       ]
     }),
+    attemptId ? { attemptId } : undefined,
   )
 
   for (let i = 0; i < requests.length; i++) {

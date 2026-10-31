@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - A `multiPublish` that landed and failed to record locally is no longer sent again. Its seed, version and property uids are written in one database transaction, so a failure leaves none of them, and the publish keeps the transaction hash. The new `AttestationRecordError` reports the failure, and `retryAttestations` records from the receipt without sending. A failure partway used to leave property uids recorded without their seed uid, and Retry then attested a second Seed.
+- A `multiPublish` commits a row to the new `publish_attempts` table before it sends, and refuses to send while an earlier attempt covering any of its seeds may have landed, whichever run, Retry or restore reached the send. The refusal is the new `AttestationAttemptOpenError`. An attempt closes when it is recorded, reverted, or the error shows nothing was sent (a rejected wallet prompt, insufficient funds, a used nonce, a bundler validation failure). A lost receipt or a send timeout leaves it open.
 - A publish fails when a seed uid can't be written, on both paths. It used to log the failure and reach `success`, and the next Publish from a fresh load attested a second Seed.
 
 ## 0.8.0 (2026-10-30)

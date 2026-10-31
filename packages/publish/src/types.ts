@@ -10,6 +10,8 @@ import type { ethers } from 'ethers'
 
 /** A `multiPublish` transaction that landed, with what is needed to record it from its receipt. */
 export type UnrecordedAttestation = {
+  /** The `publish_attempts` row, ended by the record. */
+  attemptId: string
   transactionHash: import('viem').Hex
   /** The normalized requests, in the order they were sent. */
   requests: unknown[]

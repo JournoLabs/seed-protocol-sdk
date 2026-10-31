@@ -26,6 +26,12 @@ export { updateVersionUid, type UpdateVersionUidProps } from './db/write/updateV
 export type { UpdateSeedUidProps } from './db/write/updateSeedUid'
 export { recordPublishRequests, type PublishRequestRecord } from './db/write/recordPublishRequests'
 export {
+  claimPublishAttempt,
+  updatePublishAttempt,
+  type NewPublishAttempt,
+  type PublishAttemptStatus,
+} from './db/write/publishAttempts'
+export {
   applyPropertyAttestationUidsFromPublish,
 } from './db/write/applyPropertyAttestationUidsFromPublish'
 export type {
@@ -57,6 +63,7 @@ export {
   modelSchemas,
   properties,
   publishProcesses,
+  publishAttempts,
   uploadProcesses,
   arweaveL1FinalizeJobs,
   htmlEmbeddedImageCoPublish,

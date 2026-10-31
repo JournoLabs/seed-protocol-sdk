@@ -114,6 +114,30 @@ export class PublishTransactionRevertedError extends Error {
 }
 
 /**
+ * Thrown instead of sending when an earlier attempt covering these seeds is still open: its
+ * transaction may have landed, so a send could attest them twice. Nothing was sent.
+ */
+export class AttestationAttemptOpenError extends Error {
+  public readonly attemptId: string
+  public readonly attemptStatus: string
+  public readonly transactionHash: string | null
+
+  constructor(
+    public readonly seedLocalId: string,
+    attempt: { id: string; status: string; txHash: string | null },
+  ) {
+    super(
+      `Publish of ${seedLocalId} was not sent: an earlier attempt (${attempt.status}` +
+        `${attempt.txHash ? `, transaction ${attempt.txHash}` : ''}) may have landed.`,
+    )
+    this.name = 'AttestationAttemptOpenError'
+    this.attemptId = attempt.id
+    this.attemptStatus = attempt.status
+    this.transactionHash = attempt.txHash
+  }
+}
+
+/**
  * Thrown when a `multiPublish` landed and recording it locally failed. Nothing was recorded. A
  * retry records it from `unrecorded` and sends nothing.
  */

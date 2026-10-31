@@ -80,6 +80,8 @@ const itemFind = mock(async (q: { seedLocalId?: string }) =>
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
+  claimPublishAttempt: async () => undefined,
+  updatePublishAttempt: async () => {},
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
   recordPublishRequests,
@@ -92,6 +94,7 @@ mock.module('../../../config', () => ({
 }))
 mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
+  getPublishBlockNumber: async () => 100n,
   isContractDeployed: async () => true,
   waitForPublishReceipt: async () => RECEIPT,
 }))

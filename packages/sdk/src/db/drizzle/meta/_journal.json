@@ -218,6 +218,13 @@
       "when": 1792866514704,
       "tag": "0030_drop_property_uids",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1793404988926,
+      "tag": "0031_add_publish_attempts",
+      "breakpoints": true
     }
   ]
 }

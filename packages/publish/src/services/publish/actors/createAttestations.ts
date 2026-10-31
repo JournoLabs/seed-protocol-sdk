@@ -4,6 +4,7 @@ import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import type { IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
+import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
@@ -294,11 +295,20 @@ async function executeCreateAttestations(
             },
       )
       const tx = { ...unsized, gas: await publishGasLimit(from, unsized) }
-      try {
-        return await activeWallet.txSender.sendTransaction(tx)
-      } catch (err) {
-        throw explainUserOpError(err, activeWallet.txSender.address)
-      }
+      return sendAttested({
+        publishRunId: context.publishRunId,
+        seedLocalId: item.seedLocalId,
+        requests,
+        sender: activeWallet.txSender.address,
+        attester: routing.attesterAddress,
+        send: async () => {
+          try {
+            return await activeWallet.txSender.sendTransaction(tx)
+          } catch (err) {
+            throw explainUserOpError(err, activeWallet.txSender.address)
+          }
+        },
+      })
     }
 
     // One transaction for the whole graph: the contract creates every seed before it attests any
@@ -307,12 +317,13 @@ async function executeCreateAttestations(
     const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
     const result = await sendPublishTx(payloadForContract)
 
-    const receipt = await waitForPublishReceipt(result.transactionHash)
+    const receipt = await waitForAttemptReceipt(result.attemptId, result.transactionHash)
     if (!receipt) {
       throw new Error('Failed to send transaction')
     }
 
     const landed: UnrecordedAttestation = {
+      attemptId: result.attemptId,
       transactionHash: result.transactionHash,
       requests: payloadForContract,
       attester: routing.attesterAddress,
@@ -338,6 +349,7 @@ async function recordAttested(
       rootSeedLocalId: item.seedLocalId,
       publisherAddress: address,
       attester: landed.attester,
+      attemptId: landed.attemptId,
     }).catch((err) => {
       throw new AttestationRecordError(landed, err)
     })

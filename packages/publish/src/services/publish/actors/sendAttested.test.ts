@@ -1,0 +1,169 @@
+import { beforeEach, describe, expect, mock, test } from 'bun:test'
+
+/** sendAttested: an attempt row around every send, and no send while an earlier one may have landed. */
+const realSdk = await import('@seedprotocol/sdk')
+const realChainClient = await import('../../../helpers/chainClient')
+const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError } = await import(
+  '../../../errors'
+)
+
+type Row = { id: string; status: string; txHash: string | null; seedLocalIds: string[]; requests: string }
+let rows: Row[] = []
+
+mock.module('@seedprotocol/sdk', () => ({
+  ...realSdk,
+  claimPublishAttempt: async (attempt: Omit<Row, 'status' | 'txHash'>) => {
+    const open = rows.find(
+      (r) =>
+        ['sending', 'sent', 'landed'].includes(r.status) &&
+        r.seedLocalIds.some((id) => attempt.seedLocalIds.includes(id)),
+    )
+    if (open) return open
+    rows.push({ ...attempt, status: 'sending', txHash: null })
+    return undefined
+  },
+  updatePublishAttempt: async (id: string, update: Partial<Row>) => {
+    Object.assign(rows.find((r) => r.id === id)!, update)
+  },
+}))
+
+let receipt: () => Promise<unknown> = async () => ({ status: 'success' })
+mock.module('../../../helpers/chainClient', () => ({
+  ...realChainClient,
+  getPublishBlockNumber: async () => 100n,
+  waitForPublishReceipt: () => receipt(),
+}))
+mock.module('../../../helpers/chainConfig', () => ({ getPublishViemChain: () => ({ id: 84532 }) }))
+
+const { attemptStatusAfterFailedSend, sendAttested, waitForAttemptReceipt } = await import('./sendAttested')
+
+const HASH = `0x${'a'.repeat(64)}` as `0x${string}`
+const SENDER = `0x${'b'.repeat(40)}`
+const send = mock(async () => ({ transactionHash: HASH }))
+const attempt = (seedLocalId = 'post', requests: Array<Record<string, unknown>> = [{ localId: 'post' }]) => ({
+  publishRunId: 'run1',
+  seedLocalId,
+  requests,
+  sender: SENDER,
+  attester: SENDER,
+  send,
+})
+
+beforeEach(() => {
+  rows = []
+  send.mockClear()
+  receipt = async () => ({ status: 'success' })
+})
+
+describe('sendAttested', () => {
+  test('commits the attempt before sending and the hash after', async () => {
+    let statusDuringSend: string | undefined
+    send.mockImplementationOnce(async () => {
+      statusDuringSend = rows[0]?.status
+      return { transactionHash: HASH }
+    })
+    await sendAttested(attempt())
+    expect(statusDuringSend).toBe('sending')
+    expect(rows[0]).toMatchObject({ status: 'sent', txHash: HASH })
+  })
+
+  test('keeps the requests, bigints as strings, and every seed in them', async () => {
+    await sendAttested(attempt('post', [{ localId: 'image', value: 5n }, { localId: 'post' }]))
+    expect(rows[0]!.seedLocalIds).toEqual(['post', 'image'])
+    expect(JSON.parse(rows[0]!.requests)[0].value).toBe('5')
+  })
+
+  test('refuses to send while an attempt on the same seed is open', async () => {
+    await sendAttested(attempt())
+    send.mockClear()
+    await expect(sendAttested(attempt())).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  test('refuses when only a related seed overlaps: another run, publishing the Image alone', async () => {
+    await sendAttested(attempt('post', [{ localId: 'image' }, { localId: 'post' }]))
+    send.mockClear()
+    await expect(sendAttested(attempt('image', [{ localId: 'image' }]))).rejects.toBeInstanceOf(
+      AttestationAttemptOpenError,
+    )
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  test('a send that shows nothing went out closes the attempt, and a retry sends', async () => {
+    send.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('User rejected the request.'), { code: 4001 })
+    })
+    await expect(sendAttested(attempt())).rejects.toThrow('User rejected')
+    expect(rows[0]!.status).toBe('notSent')
+    await sendAttested(attempt())
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  test('a send timeout leaves the attempt open: the UserOp can still land', async () => {
+    send.mockImplementationOnce(async () => {
+      throw new Error('Timeout waiting for userOp to be mined')
+    })
+    await expect(sendAttested(attempt())).rejects.toThrow('Timeout')
+    expect(rows[0]!.status).toBe('sending')
+    await expect(sendAttested(attempt())).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('waitForAttemptReceipt', () => {
+  test('a receipt moves the attempt to landed, still open until recorded', async () => {
+    const { attemptId } = await sendAttested(attempt())
+    await waitForAttemptReceipt(attemptId, HASH)
+    expect(rows[0]!.status).toBe('landed')
+    await expect(sendAttested(attempt())).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+  })
+
+  test('a lost receipt leaves the attempt open, so a retry cannot send again', async () => {
+    const { attemptId } = await sendAttested(attempt())
+    receipt = async () => {
+      throw new Error('fetch failed')
+    }
+    await expect(waitForAttemptReceipt(attemptId, HASH)).rejects.toThrow('fetch failed')
+    expect(rows[0]!.status).toBe('sent')
+    await expect(sendAttested(attempt())).rejects.toBeInstanceOf(AttestationAttemptOpenError)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  test('a revert closes the attempt: nothing was attested', async () => {
+    const { attemptId } = await sendAttested(attempt())
+    receipt = async () => {
+      throw new PublishTransactionRevertedError(HASH, {})
+    }
+    await expect(waitForAttemptReceipt(attemptId, HASH)).rejects.toBeInstanceOf(PublishTransactionRevertedError)
+    expect(rows[0]!.status).toBe('reverted')
+    await sendAttested(attempt())
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('attemptStatusAfterFailedSend', () => {
+  const wrapped = (message: string) => new Error('ManagedAccount UserOp failed', { cause: new Error(message) })
+
+  test.each([
+    ['a rejected prompt', new Error('User denied transaction signature')],
+    ['ethers rejection', Object.assign(new Error('rejected'), { code: 'ACTION_REJECTED' })],
+    ['no funds', wrapped('insufficient funds for gas * price + value')],
+    ['a used nonce', wrapped('nonce too low')],
+    ['bundler validation', wrapped('UserOperation rejected: AA21 did not pay prefund')],
+  ])('%s: not sent', (_name, err) => {
+    expect(attemptStatusAfterFailedSend(err)).toBe('notSent')
+  })
+
+  test('a failed UserOp: reverted', () => {
+    const err = new ManagedAccountPublishError('failed', 'USEROP_REVERTED', SENDER)
+    expect(attemptStatusAfterFailedSend(err)).toBe('reverted')
+  })
+
+  test.each([
+    ['a timeout', new Error('Timed out while waiting for User Operation')],
+    ['a network failure', wrapped('fetch failed')],
+    ['a used EntryPoint nonce, which can be this send landing', wrapped('AA25 invalid account nonce')],
+  ])('%s: unknown', (_name, err) => {
+    expect(attemptStatusAfterFailedSend(err)).toBeUndefined()
+  })
+})
