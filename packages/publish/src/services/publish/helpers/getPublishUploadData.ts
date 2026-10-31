@@ -1,5 +1,5 @@
 /**
- * Raw upload data (bytes + Content-SHA-256 / Content-Type / configured tags) that publish signs
+ * Raw upload data (a Blob of the content + Content-SHA-256 / Content-Type / configured tags) that publish signs
  * as data items. The builder lives in the SDK (`getPublishUploadData`, next to `getPublishUploads`,
  * which makes L1 transactions from the same data).
  *

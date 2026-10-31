@@ -57,6 +57,7 @@ export {
   isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  ArchiveAnchorSchemaNotRegisteredError,
   EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
   PublishRetractionError,
@@ -295,3 +296,4 @@ export {
   type AttestPublishedByParams,
   type AttestPublishedByResult,
 } from './services/publishedBy/public'
+export * from './services/archiveAnchor/public'

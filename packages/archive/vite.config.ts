@@ -8,6 +8,7 @@ export default defineConfig({
       entry: {
         index: resolve(__dirname, 'src/index.ts'),
         node: resolve(__dirname, 'src/node/index.ts'),
+        verify: resolve(__dirname, 'src/verify.ts'),
       },
       formats: ['es'],
     },

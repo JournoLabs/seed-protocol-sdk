@@ -82,6 +82,7 @@ export {
   type ArchiveExportErrorCode,
   type ArchiveOmission,
   type ArchiveSeedRef,
+  type ExportableItem,
   type ExportArchiveOptions,
   type ExportArchiveResult,
 } from './archive/exportArchive'
@@ -388,6 +389,7 @@ export { getPublishModels, type PublishModel, type GetPublishModelsOptions } fro
 export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,
+  readPublishUploadBytes,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
 export type { PublishUploadData } from './types/publish'

@@ -16,11 +16,12 @@ import {
 import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { publishGasLimit } from '~/helpers/publishGas'
+import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
-import type { Address, TransactionReceipt } from 'viem'
+import type { Address, Hash, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
@@ -111,6 +112,144 @@ export const createAttestations = fromPromise(
   },
 )
 
+type SendTx = () => Promise<{ transactionHash: Hash }>
+
+/**
+ * Checks and sends a `multiPublish`. `through` gets the send once every preflight has passed, and
+ * the address sending it, so a caller can wrap only the send (sendAttested).
+ */
+type SendMultiPublish = <T>(requests: any[], through: (send: SendTx, sender: string) => Promise<T>) => Promise<T>
+
+/**
+ * Works out how `address` attests through `multiPublish`, the executor module or the account
+ * itself, and returns the function that sends it. Used by publish and by `anchorArchive`.
+ */
+export async function resolveMultiPublishSender(source: {
+  address: Address
+  wallet?: unknown
+  account?: unknown
+}): Promise<{ sendMultiPublish: SendMultiPublish; attesterAddress: string }> {
+  const { address } = source
+  const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
+  let routing = resolvePublishRouting({ useModularExecutor: false, publisherAddress: address })
+  let activeWallet: PublishWallet = resolvePublishWallet(source)
+  let routeToExecutorModule = false
+
+  if (useModularExecutor) {
+    // App-held automation session keys (PUBLISH_AUTOMATION.md): keep the provided
+    // PublishWallet when it is an active session key on the ManagedAccount. Do not
+    // require a connected modular in-app wallet on the server.
+    const sessionKeyAddress = activeWallet?.signer?.address
+    let automationActive = false
+    if (address && sessionKeyAddress) {
+      const { isAutomationSessionActive } = await import(
+        '~/helpers/ensureAutomationSessionKey'
+      )
+      // Probe failures must not silently fall through to modular in-app bootstrap
+      // (that path requires a browser wallet and hides the real RPC/error).
+      automationActive = await isAutomationSessionActive(address, sessionKeyAddress)
+    }
+
+    if (automationActive) {
+      const module = modularAccountModuleContract?.trim()
+      if (!isExecutorModuleAddress(module)) {
+        throw new Error(
+          '@seedprotocol/publish: automation publish requires PublishConfig.modularAccountModuleContract ' +
+            '(executor module). Session keys are module-only and cannot call the ManagedAccount directly.',
+        )
+      }
+      routing = resolvePublishRouting({
+        useModularExecutor,
+        publisherAddress: address,
+        modularAccountModuleContract: module,
+        managedAddress: address,
+        routeToExecutorModule: true,
+      })
+      routeToExecutorModule = true
+      // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
+      await assertExecutorModuleReadyForAccount(address)
+      const { assertSessionKeyApprovesExecutor } = await import('~/helpers/ensureAutomationSessionKey')
+      await assertSessionKeyApprovesExecutor(address, sessionKeyAddress, module)
+      const { warnOnAutomationExposure } = await import('~/helpers/automationExposure')
+      await warnOnAutomationExposure(address)
+    } else if (sendsAsManagedAccount(activeWallet, address)) {
+      // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
+      // publishes as it is: no Thirdweb in-app wallet to connect.
+      routing = resolvePublishRouting({
+        useModularExecutor,
+        publisherAddress: address,
+        modularAccountModuleContract,
+        managedAddress: address,
+      })
+      await ensureManagedAccountEasConfigured(address, activeWallet)
+    } else {
+      const { runModularExecutorPublishPrep } = await import('~/helpers/ensureManagedAccountReady')
+      const prep = await runModularExecutorPublishPrep()
+      if (!prep.ok) {
+        throw prep.error
+      }
+      routing = resolvePublishRouting({
+        useModularExecutor,
+        publisherAddress: address,
+        modularAccountModuleContract,
+        managedAddress: prep.managedAddress,
+      })
+      const { ensureModularPublishBootstrap } = await import(
+        '~/helpers/ensureModularPublishBootstrap'
+      )
+      const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
+      activeWallet = fromThirdwebAccount(
+        await ensureModularPublishBootstrap(prep.managedAddress),
+      )
+    }
+  } else {
+    await ensureManagedAccountEasConfigured(address, activeWallet)
+  }
+
+  // Every publish is simulated from the sending account first, so a call that would revert is
+  // never sent and its decoded reason is reported. Automation also refuses to send when the
+  // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
+  const sendPublishTx: SendMultiPublish = async (requests, through) => {
+    const to = routing.txTargetAddress as Address
+    const unsized = routeToExecutorModule
+      ? encodeExecutorMultiPublish(to, requests)
+      : encodeMultiPublish(to, requests)
+    const from = routeToExecutorModule ? address : activeWallet.txSender.address
+    if (routeToExecutorModule && unsized.value) {
+      throw new ManagedAccountPublishError(
+        `This publish needs ${unsized.value} wei with its attestations, but session keys are granted no native value; nothing was sent.`,
+        'AUTOMATION_PREFLIGHT_FAILED',
+        address,
+      )
+    }
+    assertPublishFits(from, requests, { calldata: unsized.data })
+    // Contracts of another version answer with a Router revert; name the mismatch instead.
+    await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
+    await simulateCallFromAccount(
+      routeToExecutorModule
+        ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
+        : {
+            managedAddress: from,
+            tx: unsized,
+            action: 'multiPublish',
+            code: 'PUBLISH_PREFLIGHT_FAILED',
+            requireSimulation: false,
+          },
+    )
+    const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
+    const send: SendTx = async () => {
+      try {
+        return await activeWallet.txSender.sendTransaction(tx)
+      } catch (err) {
+        throw explainUserOpError(err, activeWallet.txSender.address)
+      }
+    }
+    return through(send, activeWallet.txSender.address)
+  }
+
+  return { sendMultiPublish: sendPublishTx, attesterAddress: routing.attesterAddress }
+}
+
 async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
@@ -120,7 +259,7 @@ async function executeCreateAttestations(
     const publishUploads = context.publishUploads ?? []
     let { item } = context
 
-    const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
+    const { useModularExecutor } = getPublishConfig()
 
     if (!address || typeof address !== 'string' || !address.trim()) {
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
@@ -159,13 +298,6 @@ async function executeCreateAttestations(
       )
     }
 
-    let routing = resolvePublishRouting({
-      useModularExecutor: false,
-      publisherAddress: address,
-    })
-    let activeWallet: PublishWallet = resolvePublishWallet(context)
-    let routeToExecutorModule = false
-
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
         const tx = arweaveTransaction.transaction as { id?: string }
@@ -194,128 +326,26 @@ async function executeCreateAttestations(
 
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
 
-    if (useModularExecutor) {
-      // App-held automation session keys (PUBLISH_AUTOMATION.md): keep the provided
-      // PublishWallet when it is an active session key on the ManagedAccount. Do not
-      // require a connected modular in-app wallet on the server.
-      const sessionKeyAddress = activeWallet?.signer?.address
-      let automationActive = false
-      if (address && sessionKeyAddress) {
-        const { isAutomationSessionActive } = await import(
-          '~/helpers/ensureAutomationSessionKey'
-        )
-        // Probe failures must not silently fall through to modular in-app bootstrap
-        // (that path requires a browser wallet and hides the real RPC/error).
-        automationActive = await isAutomationSessionActive(address, sessionKeyAddress)
-      }
-
-      if (automationActive) {
-        const module = modularAccountModuleContract?.trim()
-        if (!isExecutorModuleAddress(module)) {
-          throw new Error(
-            '@seedprotocol/publish: automation publish requires PublishConfig.modularAccountModuleContract ' +
-              '(executor module). Session keys are module-only and cannot call the ManagedAccount directly.',
-          )
-        }
-        routing = resolvePublishRouting({
-          useModularExecutor,
-          publisherAddress: address,
-          modularAccountModuleContract: module,
-          managedAddress: address,
-          routeToExecutorModule: true,
-        })
-        routeToExecutorModule = true
-        // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
-        await assertExecutorModuleReadyForAccount(address)
-        const { assertSessionKeyApprovesExecutor } = await import('~/helpers/ensureAutomationSessionKey')
-        await assertSessionKeyApprovesExecutor(address, sessionKeyAddress, module)
-        const { warnOnAutomationExposure } = await import('~/helpers/automationExposure')
-        await warnOnAutomationExposure(address)
-      } else if (sendsAsManagedAccount(activeWallet, address)) {
-        // A wallet that already sends as the ManagedAccount (e.g. createManagedAccountTxSender)
-        // publishes as it is: no Thirdweb in-app wallet to connect.
-        routing = resolvePublishRouting({
-          useModularExecutor,
-          publisherAddress: address,
-          modularAccountModuleContract,
-          managedAddress: address,
-        })
-        await ensureManagedAccountEasConfigured(address, activeWallet)
-      } else {
-        const { runModularExecutorPublishPrep } = await import('~/helpers/ensureManagedAccountReady')
-        const prep = await runModularExecutorPublishPrep()
-        if (!prep.ok) {
-          throw prep.error
-        }
-        routing = resolvePublishRouting({
-          useModularExecutor,
-          publisherAddress: address,
-          modularAccountModuleContract,
-          managedAddress: prep.managedAddress,
-        })
-        const { ensureModularPublishBootstrap } = await import(
-          '~/helpers/ensureModularPublishBootstrap'
-        )
-        const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
-        activeWallet = fromThirdwebAccount(
-          await ensureModularPublishBootstrap(prep.managedAddress),
-        )
-      }
-    } else {
-      await ensureManagedAccountEasConfigured(address, activeWallet)
-    }
-
-    // Every publish is simulated from the sending account first, so a call that would revert is
-    // never sent and its decoded reason is reported. Automation also refuses to send when the
-    // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
-    const sendPublishTx = async (requests: any[]) => {
-      const to = routing.txTargetAddress as Address
-      const unsized = routeToExecutorModule
-        ? encodeExecutorMultiPublish(to, requests)
-        : encodeMultiPublish(to, requests)
-      const from = routeToExecutorModule ? address : activeWallet.txSender.address
-      if (routeToExecutorModule && unsized.value) {
-        throw new ManagedAccountPublishError(
-          `This publish needs ${unsized.value} wei with its attestations, but session keys are granted no native value; nothing was sent.`,
-          'AUTOMATION_PREFLIGHT_FAILED',
-          address,
-        )
-      }
-      // Contracts of another version answer with a Router revert; name the mismatch instead.
-      await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
-      await simulateCallFromAccount(
-        routeToExecutorModule
-          ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
-          : {
-              managedAddress: from,
-              tx: unsized,
-              action: 'multiPublish',
-              code: 'PUBLISH_PREFLIGHT_FAILED',
-              requireSimulation: false,
-            },
-      )
-      const tx = { ...unsized, gas: await publishGasLimit(from, unsized) }
-      return sendAttested({
-        publishRunId: context.publishRunId,
-        seedLocalId: item.seedLocalId,
-        requests,
-        sender: activeWallet.txSender.address,
-        attester: routing.attesterAddress,
-        send: async () => {
-          try {
-            return await activeWallet.txSender.sendTransaction(tx)
-          } catch (err) {
-            throw explainUserOpError(err, activeWallet.txSender.address)
-          }
-        },
-      })
-    }
+    const { sendMultiPublish, attesterAddress } = await resolveMultiPublishSender({
+      address: address as Address,
+      wallet: context.wallet,
+      account: context.account,
+    })
 
     // One transaction for the whole graph: the contract creates every seed before it attests any
     // property, so a reference in any direction is filled with its seed uid (encodeMultiPublish).
     const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
     const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-    const result = await sendPublishTx(payloadForContract)
+    const result = await sendMultiPublish(payloadForContract, (send, sender) =>
+      sendAttested({
+        publishRunId: context.publishRunId,
+        seedLocalId: item.seedLocalId,
+        requests: payloadForContract,
+        sender,
+        attester: attesterAddress,
+        send,
+      }),
+    )
 
     const receipt = await waitForAttemptReceipt(result.attemptId, result.transactionHash)
     if (!receipt) {
@@ -326,7 +356,7 @@ async function executeCreateAttestations(
       attemptId: result.attemptId,
       transactionHash: result.transactionHash,
       requests: payloadForContract,
-      attester: routing.attesterAddress,
+      attester: attesterAddress,
     }
     return recordAttested(context, item, receipt, landed, requestData)
 }

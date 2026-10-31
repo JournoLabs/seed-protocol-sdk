@@ -56,6 +56,14 @@ describe('NodeFileManager', () => {
       expect(await file.text()).toBe('blob-content')
     })
 
+    it('openBlob returns the file as a Blob that reads in slices', async () => {
+      const p = path.join(tmpDir, 'open', 'data.bin')
+      await fm.saveFile(p, new Uint8Array([1, 2, 3, 4]).buffer)
+      const blob = await fm.openBlob(p)
+      expect(blob.size).toBe(4)
+      expect([...new Uint8Array(await blob.slice(1, 3).arrayBuffer())]).toEqual([2, 3])
+    })
+
     it('saveFileSync writes strings and rejects Blobs', () => {
       const p = path.join(tmpDir, 'sync', 'x.txt')
       fm.saveFileSync(p, 'sync')

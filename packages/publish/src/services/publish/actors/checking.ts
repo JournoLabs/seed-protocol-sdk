@@ -21,7 +21,7 @@ import { estimateUpload } from '../../publishCost/uploadEstimate'
 
 const activePublishProcesses = new Set<string>()
 
-async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
+export async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
   const cfg = getPublishConfig()
   if (cfg.useDirectEas) return 'directEas'
   if (cfg.useModularExecutor) return 'multiPublish'
@@ -36,7 +36,7 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
  * to EAS only when the wallet says it is an EOA and signs as the publisher; an undeployed smart
  * account, an unknown wallet, or a wallet that sends as someone else is refused.
  */
-function directEasRefusal(
+export function directEasRefusal(
   problem: import('../helpers/undeployedSmartAccount').DirectEasProblem | null,
   publisherAddress: string,
   wallet: Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,

@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BrowserFileManager } from '@/browser/helpers/FileManager'
 import { TolerantWebAccessFS } from '@/browser/helpers/tolerantWebAccess'
+import { readPublishUploadBytes } from '@/db/read/getPublishUploads'
+import { getContentSha256 } from '@/helpers/arweaveContentTags'
+import type { PublishUploadData } from '@/types/publish'
 
 /**
  * Overwriting an OPFS file must leave exactly the new bytes, also when they are fewer than before.
@@ -57,6 +60,34 @@ describe('overwriting OPFS files through ZenFS', () => {
   afterAll(async () => {
     const root = await navigator.storage.getDirectory()
     await root.removeEntry(testDir, { recursive: true }).catch(() => {})
+  })
+
+  it('openBlob sees a write ZenFS only queued', async () => {
+    const path = `/${testDir}/open-queued.txt`
+    fs.writeFileSync(path, 'queued')
+    expect(await (await fileManager.openBlob(path)).text()).toBe('queued')
+  })
+
+  it('openBlob reads from OPFS, not the in-memory copy', async () => {
+    const path = `/${testDir}/open-elsewhere.txt`
+    await fs.promises.writeFile(path, 'old')
+    const name = path.split('/').pop()!
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(testDir)
+    const writable = await (await dir.getFileHandle(name)).createWritable()
+    await writable.write('written elsewhere')
+    await writable.close()
+    expect(await (await fileManager.openBlob(path)).text()).toBe('written elsewhere')
+  })
+
+  it('readPublishUploadBytes refuses a file changed after it was opened', async () => {
+    const path = `/${testDir}/open-changed.txt`
+    await fs.promises.writeFile(path, 'first')
+    const blob = await fileManager.openBlob(path)
+    const upload = { blob, contentHash: getContentSha256(enc.encode('first')), itemPropertyName: 'body' } as PublishUploadData
+    expect(new TextDecoder().decode(await readPublishUploadBytes(upload))).toBe('first')
+
+    await fs.promises.writeFile(path, 'second, longer')
+    await expect(readPublishUploadBytes(upload)).rejects.toThrow('the file changed during the publish')
   })
 
   it('promises.writeFile: longer content, then shorter', async () => {

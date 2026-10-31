@@ -251,6 +251,11 @@ export interface PublishConfig {
    */
   maxAutomationExposureWei?: bigint
   /**
+   * Most gas one publish transaction may use. Default 16,000,000. A larger publish fails with
+   * `PUBLISH_TOO_LARGE` before anything is sent. A chain's block gas limit still applies above it.
+   */
+  maxPublishGas?: bigint
+  /**
    * Most a publish may upload, summed over its files, in bytes. Default 100 MiB; `Infinity` turns
    * the limit off. A larger publish fails with `UploadTooLargeError` before reading any file.
    */

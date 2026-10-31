@@ -317,3 +317,15 @@ export class PublishWalletMissingError extends Error {
     this.name = 'PublishWalletMissingError'
   }
 }
+
+/**
+ * The anchor schema isn't registered on this chain. A session key can't register it: call
+ * `ensureArchiveAnchorSchema` once with the owner wallet.
+ */
+export class ArchiveAnchorSchemaNotRegisteredError extends Error {
+  readonly code = 'ARCHIVE_ANCHOR_SCHEMA_NOT_REGISTERED'
+  constructor() {
+    super('The archive anchor schema is not registered on this chain. Call ensureArchiveAnchorSchema with the owner wallet.')
+    this.name = 'ArchiveAnchorSchemaNotRegisteredError'
+  }
+}

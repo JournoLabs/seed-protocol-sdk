@@ -291,7 +291,7 @@ Publish signs each file (image, Html, ...) as an Arweave data item and posts the
 
 `useArweaveBundler` is deprecated: `true` changes nothing, and `false` makes `initPublish` throw. The L1 path it used to select, an Arweave transaction the upload API reimbursed, has been removed along with the `signArweaveTransactions` and `arweaveJwk` options.
 
-**Size limits:** a publish whose uploads add up to more than `maxUploadBytes` (default 100 MiB) fails with `UploadTooLargeError` before reading any file. Over `confirmUploadAboveBytes` (default 25 MiB) it fails with `UploadNeedsConfirmError` until it is given `confirmUpload: true`. Both errors carry an `estimate` with the size, upload time and memory, and `estimatePublishCost` returns the same in `upload`. A browser publish holds about 7 copies of its upload bytes in memory. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for the measurements and an example confirm.
+**Size limits:** a publish whose uploads add up to more than `maxUploadBytes` (default 100 MiB) fails with `UploadTooLargeError` before reading any file. Over `confirmUploadAboveBytes` (default 25 MiB) it fails with `UploadNeedsConfirmError` until it is given `confirmUpload: true`. Both errors carry an `estimate` with the size, upload time and memory, and `estimatePublishCost` returns the same in `upload`. A browser publish holds about 7 copies of its upload bytes in memory. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for the measurements and an example confirm. A publish that won't fit in one transaction fails with `ManagedAccountPublishError` code `PUBLISH_TOO_LARGE` before anything is sent: over 120,000 bytes of calldata, or over `maxPublishGas` (default 16,000,000).
 
 Provide a data item signer at publish time via `PublishManager.createPublish` options:
 
@@ -299,7 +299,7 @@ Provide a data item signer at publish time via `PublishManager.createPublish` op
 // Signer passed at publish time (recommended for apps where signer isn't available at startup)
 PublishManager.createPublish(item, address, account, {
   signDataItems: async (uploads) => {
-    // Sign with wallet (ArConnect, MetaMask, etc.)
+    // Sign with wallet (ArConnect, MetaMask, etc.). Each upload's content is `u.blob`.
     return uploads.map((u) => ({ transaction: { id: '...' }, versionId: u.versionLocalId, modelName: u.itemPropertyName }))
   },
 })

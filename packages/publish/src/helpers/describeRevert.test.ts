@@ -67,6 +67,7 @@ describe('describeFailedUserOp', () => {
   test('points at running out of gas when there is no revert data', () => {
     const message = describeFailedUserOp(TX)
     expect(message).toContain('ran out of gas')
+    expect(message).toContain('16000000 gas or 120000 calldata bytes')
     expect(message).toContain(`seed:explain-userop --network <network> --tx ${TX}`)
   })
 

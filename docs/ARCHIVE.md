@@ -133,11 +133,34 @@ const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag,
 ```
 
 `rebuilt` is `not_checked`, with the reason in `detail`, for an ordinary export, a bag of another
-seed, a bag in another `Seed-Bag-Format`, or an export that refuses. Nothing attests a bag's hash
-yet, so this rebuild is the SDK's only hash source. The anchor attestation is defined in
-[ADR 0029](adr/0029-bag-anchor-attestation.md); the SDK doesn't write or read one yet.
+seed, a bag in another `Seed-Bag-Format`, or an export that refuses. Without an anchor, this rebuild is
+the SDK's only hash source. The anchor attestation is defined in
+[ADR 0029](adr/0029-bag-anchor-attestation.md). `anchorArchive` writes one, and `verifyPublishedArchive` checks a bag against it.
 
 Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
+
+`verifyPublishedArchive` from `@seedprotocol/archive/verify` checks a published bag from its Version
+uid alone. Import it when a reader asks: it reads EAS and a gateway with `fetch`, and pulls in no Html
+parser or Seed code.
+
+```ts
+const { verifyPublishedArchive } = await import('@seedprotocol/archive/verify')
+
+const result = await verifyPublishedArchive({ versionUid, easEndpoint, gateways: ['https://arweave.net'] })
+```
+
+Each check is reported on its own, with no overall verdict:
+
+- `attestation`: the attester of the Version and its seed has a live anchor on it. Anyone else's is
+  ignored. Pass `asOf` for the anchor of one time; the default is the newest.
+- `fixity`: the fetched files match the bag's own manifests.
+- `anchor`: the bag's tag manifest matches the anchored hash.
+- `identity`: the bag says it is this Version as of the anchor's time.
+- `revocation`: the Version is live on EAS. A revoked one fails here while the bag still checks out.
+- `timestamp`: always `not_checked`, since anchors carry no Bitcoin proof yet.
+
+It doesn't throw for what it finds. A service that can't be reached leaves its checks `not_checked`
+with the reason in `detail`, so an outage never reads as a forgery.
 
 ## A bag on Arweave
 
@@ -163,6 +186,36 @@ several Html properties has no index, and its pages work at `data/<property>.htm
 
 The manifest says where files are, and doesn't vouch for them. Only the check against an outside
 hash does.
+
+## Anchoring a bag
+
+`anchorArchive(item)` from `@seedprotocol/publish` does the steps above and attests the result on
+the Version, which puts the bag's hash on chain. It's separate from publish, which never waits for
+it, so run it as its own job after the Version is attested.
+
+```ts
+import { anchorArchive, estimateArchiveAnchorCost } from '@seedprotocol/publish'
+
+const { uid, manifestTx, tagmanifestSha256, alreadyAnchored } = await anchorArchive(post, { tagPolicy: 'hash-only' })
+```
+
+- `asOf` works as in `exportArchive`. `item` can be `{ seedUid, modelName, schemaName }`.
+- Repeating it for the same bag returns the existing anchor with `alreadyAnchored: true` and spends
+  nothing. If the indexer hasn't reported a landed anchor yet, a repeat attests a second, identical
+  one, which is harmless. A retry after a failed attestation uploads the new files again.
+- `ArchiveExportError` with `not_synced` or `incomplete` means retry later: the indexer or a gateway
+  hasn't caught up. Nothing has been uploaded.
+- `tagPolicy` is `discoverable` (default), which adds `Archive-Part`, `Seed-Version-Uid` and the
+  configured `arweaveUploadTags`, or `hash-only`, which leaves `Content-SHA-256` and `Content-Type`.
+  Tags on Arweave can't be removed. The policy covers the package's uploads, not a publish's.
+- It attests by the route a publish from the Version's attester takes, so a session key needs no
+  new permission. The wallet must attest as that attester.
+- The schema has to exist first. Call `ensureArchiveAnchorSchema(wallet)` once per chain with the
+  owner wallet; without it `anchorArchive` throws `ArchiveAnchorSchemaNotRegisteredError` before
+  uploading anything.
+
+`estimateArchiveAnchorCost(item)` returns a `PublishCostEstimate` for the files to upload, the
+manifest and one attestation. It reads the real bag, so the item has to be published.
 
 ## What an attestation proves
 

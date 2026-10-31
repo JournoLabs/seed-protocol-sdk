@@ -34,6 +34,10 @@ Version, for sync, Query's remote source and bags, and it leaves anchors out.
 An anchor changes no bag, no synced row and no Query record, and a bag's default `asOf` ignores it.
 A new sidecar on a Version needs the same treatment, since the read excludes by schema.
 
+`anchorArchive` is safe to repeat because it looks for an anchor with the same `covered_until` and
+hash first, and two identical anchors, from a repeat the indexer hadn't caught up with, mean the same
+thing. It runs after publish and publish never waits for it, so a Version can go without an anchor.
+
 The definition can't change without a new UID, so a change means a new schema and readers that
 accept both.
 
