@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `anchorArchive` takes `resumeFrom`. A failure after an upload throws `ArchiveAnchorInterruptedError`, whose `resume` lists what was uploaded, so a retry doesn't pay for it again.
 - `anchorArchive` and `estimateArchiveAnchorCost` take `expectedAttestations`.
 - New `anchorArchive(item, options)`: uploads a reproducible bag's files that no transaction holds, then its path manifest, and attests both on the Version (ADR 0029), by the route a publish takes, with no new session-key permission. Repeating it for the same bag returns the existing anchor. `tagPolicy` is `discoverable` or `hash-only`. New `estimateArchiveAnchorCost(item)`, `ensureArchiveAnchorSchema(wallet)`, `encodeArchiveAnchorData` and `ArchiveAnchorSchemaNotRegisteredError`.
 - `@seedprotocol/archive` is a dependency.

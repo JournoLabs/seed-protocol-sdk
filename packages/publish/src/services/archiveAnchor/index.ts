@@ -24,7 +24,7 @@ import {
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
-import { ArchiveAnchorSchemaNotRegisteredError } from '~/errors'
+import { ArchiveAnchorInterruptedError, ArchiveAnchorSchemaNotRegisteredError, type ArchiveAnchorResume } from '~/errors'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { getAttestedUidsFromReceipt, prepareEasAttest, ZERO_ADDRESS } from '~/helpers/easDirect'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
@@ -66,6 +66,8 @@ export type AnchorArchiveOptions = ArchivePackageOptions & {
   dataItemSigner?: PublishMachineContext['dataItemSigner']
   signDataItems?: PublishMachineContext['signDataItems']
   publishAuthorization?: PublishMachineContext['publishAuthorization']
+  /** `resume` from an {@link ArchiveAnchorInterruptedError}, so a retry doesn't pay for those uploads again. */
+  resumeFrom?: ArchiveAnchorResume
 }
 
 export type AnchorArchiveResult = {
@@ -121,7 +123,7 @@ function uploadData(upload: PackageUpload, versionUid: string, policy: ArchiveTa
   }
 }
 
-/** Signs and uploads `uploads`, returning their transaction ids in order. */
+/** Signs and uploads `uploads`, returning their transaction ids in order. They may not be readable yet. */
 async function uploadAll(uploads: PublishUploadData[], options: AnchorArchiveOptions): Promise<string[]> {
   if (uploads.length === 0) return []
   const config = getPublishConfig()
@@ -130,9 +132,27 @@ async function uploadAll(uploads: PublishUploadData[], options: AnchorArchiveOpt
   if (signed.signedDataItems) {
     await uploadSignedDataItems(signed.signedDataItems, { dataItemSigner, publishAuthorization: options.publishAuthorization })
   }
-  const ids = signed.arweaveTransactions.map((t) => (t.transaction as { id: string }).id)
-  await verifyArweaveTransactionsExist(ids)
-  return ids
+  return signed.arweaveTransactions.map((t) => (t.transaction as { id: string }).id)
+}
+
+const transactionExists = (id: string): Promise<boolean> =>
+  verifyArweaveTransactionsExist([id]).then(
+    () => true,
+    () => false,
+  )
+
+/** What can be reused from `resume` for this bag: the same bag, and transactions that exist. */
+async function reusableUploads(bag: Bag, resume: ArchiveAnchorResume | undefined, tagmanifestSha256: string): Promise<ArchiveAnchorResume> {
+  const none = { tagmanifestSha256, transactions: {} }
+  if (resume?.tagmanifestSha256 !== tagmanifestSha256) return none
+  const paths = new Set(bag.files.map((file) => file.path))
+  const held = await Promise.all(
+    Object.entries(resume.transactions)
+      .filter(([path]) => paths.has(path))
+      .map(async ([path, id]) => ((await transactionExists(id)) ? [[path, id] as const] : [])),
+  )
+  const manifestTx = resume.manifestTx && (await transactionExists(resume.manifestTx)) ? resume.manifestTx : undefined
+  return { tagmanifestSha256, transactions: Object.fromEntries(held.flat()), manifestTx }
 }
 
 export function encodeArchiveAnchorData(anchor: {
@@ -199,8 +219,8 @@ async function attestAnchor(
 /**
  * Puts a reproducible bag of `item` on Arweave as a path manifest and attests it on the Version
  * (ADR 0029). Separate from publish, which never depends on it. Safe to repeat: the same bag with an
- * anchor from the attester returns that anchor, and any failure leaves nothing a retry trips over,
- * though a retry after a failed attestation uploads the new files again.
+ * anchor from the attester returns that anchor. A failure after an upload throws
+ * {@link ArchiveAnchorInterruptedError}; pass its `resume` as `resumeFrom` so the retry reuses them.
  *
  * Throws `ArchiveExportError`, whose `not_synced` means retry once the indexer has the Version, and
  * {@link ArchiveAnchorSchemaNotRegisteredError} before uploading anything when the schema is missing.
@@ -230,16 +250,30 @@ export async function anchorArchive(
   if (!(await getSchemaRecord(ARCHIVE_ANCHOR_SCHEMA_UID))) throw new ArchiveAnchorSchemaNotRegisteredError()
 
   const policy = options.tagPolicy ?? 'discoverable'
-  const files = filesToUpload(bag, arweaveTransactions)
-  const ids = await uploadAll(files.map((f) => uploadData(f, versionUid, policy)), options)
-  const transactions = { ...arweaveTransactions, ...Object.fromEntries(files.map((f, i) => [f.path, ids[i]!])) }
-  const { bytes } = buildPathManifest(bag, transactions)
-  const manifest = { path: 'manifest', bytes, contentType: PATH_MANIFEST_CONTENT_TYPE, part: 'manifest' }
-  const [manifestTx] = await uploadAll([uploadData(manifest, versionUid, policy)], options)
-
-  const data = encodeArchiveAnchorData({ coveredUntil, manifestTx: manifestTx!, tagmanifestSha256 })
-  const uid = await attestAnchor({ seedUid, versionUid, attester, data }, options.wallet)
-  return { uid, coveredUntil, manifestTx: manifestTx!, tagmanifestSha256, alreadyAnchored: false }
+  const progress = await reusableUploads(bag, options.resumeFrom, tagmanifestSha256)
+  try {
+    const files = filesToUpload(bag, { ...arweaveTransactions, ...progress.transactions })
+    if (files.length > 0) {
+      // New files mean a new manifest.
+      progress.manifestTx = undefined
+      const ids = await uploadAll(files.map((f) => uploadData(f, versionUid, policy)), options)
+      files.forEach((file, i) => (progress.transactions[file.path] = ids[i]!))
+      await verifyArweaveTransactionsExist(ids)
+    }
+    if (!progress.manifestTx) {
+      const { bytes } = buildPathManifest(bag, { ...arweaveTransactions, ...progress.transactions })
+      const manifest = { path: 'manifest', bytes, contentType: PATH_MANIFEST_CONTENT_TYPE, part: 'manifest' }
+      ;[progress.manifestTx] = await uploadAll([uploadData(manifest, versionUid, policy)], options)
+      await verifyArweaveTransactionsExist([progress.manifestTx!])
+    }
+    const manifestTx = progress.manifestTx!
+    const data = encodeArchiveAnchorData({ coveredUntil, manifestTx, tagmanifestSha256 })
+    const uid = await attestAnchor({ seedUid, versionUid, attester, data }, options.wallet)
+    return { uid, coveredUntil, manifestTx, tagmanifestSha256, alreadyAnchored: false }
+  } catch (error) {
+    if (Object.keys(progress.transactions).length === 0 && !progress.manifestTx) throw error
+    throw new ArchiveAnchorInterruptedError(progress, error)
+  }
 }
 
 /** What an anchor of this bag would cost: its uploads, and one attestation. */
