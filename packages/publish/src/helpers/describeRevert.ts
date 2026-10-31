@@ -3,6 +3,7 @@ import { easAbi } from './abi/eas'
 import { executorModuleAbi } from './abi/executor'
 import { seedErrorsAbi } from './abi/seedErrors'
 import { ManagedAccountPublishError } from '../errors'
+import { PUBLISH_MAX_CALLDATA_BYTES, PUBLISH_MAX_GAS } from './publishSize'
 
 /** Every error a publish call can revert with. `Error(string)` and `Panic` decode without it. */
 const publishErrorsAbi = [...seedErrorsAbi, ...executorModuleAbi, ...easAbi] as Abi
@@ -50,6 +51,7 @@ export function describeFailedUserOp(txHash: string, revertData?: Hex): string {
   return (
     `The publish UserOp in transaction ${txHash} failed with no revert reason. That usually means it ran out of gas ` +
     `(the bundler's gas estimate was too low), not that the publish data is wrong. ` +
+    `A publish near ${PUBLISH_MAX_GAS} gas or ${PUBLISH_MAX_CALLDATA_BYTES} calldata bytes can also exceed what a bundler accepts. ` +
     `To confirm, run \`npx hardhat seed:explain-userop --network <network> --tx ${txHash}\` in seed-protocol.`
   )
 }
