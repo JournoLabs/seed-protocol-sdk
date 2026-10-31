@@ -1,6 +1,7 @@
 import { prepareTransaction, sendTransaction, type ThirdwebClient } from 'thirdweb'
 import type { Account } from 'thirdweb/wallets'
 import type { Address, Hex } from 'viem'
+import { entryPoint06Address } from 'viem/account-abstraction'
 import {
   brandSigner,
   brandTxSender,
@@ -13,6 +14,7 @@ import {
 import { getPublishThirdwebChain } from '../thirdwebChain'
 import { retryNonceTooLow } from '../retryNonceTooLow'
 import { logGas } from '../gasLog'
+import { withNonceSlot } from '../thirdwebNonceSlot'
 
 export type FromThirdwebAccountOptions = {
   /**
@@ -22,6 +24,11 @@ export type FromThirdwebAccountOptions = {
   client?: ThirdwebClient
   /** What the account is, when the caller knows (see PublishWalletKind). */
   kind?: PublishWalletKind
+  /**
+   * The account comes from `getManagedAccountWallet`, whose nonce hook honours
+   * `SeedTxRequest.nonceKey`. Any other account gets its nonce from Thirdweb.
+   */
+  pinsNonce?: boolean
 }
 
 /**
@@ -46,6 +53,7 @@ export function fromThirdwebAccount(
   })
   const txSender = brandTxSender({
     address,
+    ...(options?.pinsNonce && { pinsNonceOn: entryPoint06Address }),
     sendTransaction: async (tx) => {
       const client = explicitClient ?? (await import('../publishThirdwebClient')).getClient()
       const chain = getPublishThirdwebChain()
@@ -67,7 +75,10 @@ export function fromThirdwebAccount(
       // Smart accounts send UserOps (EntryPoint nonces); this only matters for plain EOAs.
       let result
       try {
-        result = await retryNonceTooLow(() => sendTransaction({ account, transaction }))
+        const nonceKey = options?.pinsNonce ? tx.nonceKey : undefined
+        const send = () => sendTransaction({ account, transaction })
+        // A pinned send is never retried here: the slot is spent, so a retry would get a random key.
+        result = await withNonceSlot(address, nonceKey, nonceKey === undefined ? () => retryNonceTooLow(send) : send)
       } catch (error) {
         logGas('thirdweb sendTransaction failed', {
           account: address,

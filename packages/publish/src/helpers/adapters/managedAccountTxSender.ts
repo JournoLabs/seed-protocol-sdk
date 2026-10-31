@@ -76,6 +76,7 @@ export async function createManagedAccountTxSender(
 
   return brandTxSender({
     address,
+    pinsNonceOn: options.entryPointAddress ?? entryPoint06Address,
     sendTransaction: async (tx) => {
       try {
         return { transactionHash: await sendUserOpWithHeadroom(client, tx, address) }

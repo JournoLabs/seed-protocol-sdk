@@ -26,6 +26,7 @@ const attempt = (seedLocalIds: string[]): NewPublishAttempt => ({
   attester: '0x' + 'b'.repeat(40),
   chainId: 84532,
   nonceKey: null,
+  entryPoint: null,
   fromBlock: '100',
 })
 

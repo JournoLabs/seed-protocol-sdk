@@ -1,6 +1,7 @@
 import type { Hash, Hex } from 'viem'
 import { ManagedAccountPublishError } from '../../errors'
 import { userOpFailureError } from '../describeRevert'
+import { pinnedNonce } from '../pinnedNonce'
 import type { SeedTxRequest } from '../seedSigner'
 
 /**
@@ -48,12 +49,13 @@ async function pimlicoGasPrice(bundlerUrl: string): Promise<FeesPerGas | undefin
 }
 
 type Calls = { calls: { to: Hex; data: Hex; value: bigint }[] }
+type Nonce = { nonce?: bigint }
 type Gas = { callGasLimit: bigint; verificationGasLimit: bigint; preVerificationGas: bigint }
 
 /** The smart-account client methods a send uses (permissionless `createSmartAccountClient`). */
 export type UserOpClient = {
-  estimateUserOperationGas(args: Calls): Promise<Gas>
-  sendUserOperation(args: Calls & Partial<Gas>): Promise<Hash>
+  estimateUserOperationGas(args: Calls & Nonce): Promise<Gas>
+  sendUserOperation(args: Calls & Nonce & Partial<Gas>): Promise<Hash>
   waitForUserOperationReceipt(args: { hash: Hash }): Promise<UserOpReceiptLike>
 }
 
@@ -71,10 +73,12 @@ export async function sendUserOpWithHeadroom(
   sender: string,
 ): Promise<Hex> {
   const calls = [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }]
-  const estimate = await client.estimateUserOperationGas({ calls })
+  const nonce = tx.nonceKey === undefined ? {} : { nonce: pinnedNonce(tx.nonceKey) }
+  const estimate = await client.estimateUserOperationGas({ calls, ...nonce })
   const raised = (estimate.callGasLimit * CALL_GAS_HEADROOM_BPS) / 10_000n
   const hash = await client.sendUserOperation({
     calls,
+    ...nonce,
     ...estimate,
     callGasLimit: tx.gas != null && tx.gas > raised ? tx.gas : raised,
   })

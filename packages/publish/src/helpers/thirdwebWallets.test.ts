@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import type { Chain } from 'viem'
+import { withNonceSlot } from './thirdwebNonceSlot'
 
 type InAppOptions = { executionMode: Record<string, any> }
 const created: InAppOptions[] = []
@@ -49,7 +50,7 @@ describe('in-app wallets follow publish config', () => {
       smartAccount: { sponsorGas: true, factoryAddress: '0x76f47d88bfaf670f5208911181fcdc0e160cb16d' },
     })
     const overrides = managed.options.executionMode.smartAccount.overrides
-    expect(Object.keys(overrides)).toEqual(['paymaster'])
+    expect(Object.keys(overrides)).toEqual(['paymaster', 'getAccountNonce'])
     expect(typeof overrides.paymaster).toBe('function')
     const modular = getModularAccountWallet() as unknown as { options: InAppOptions }
     expect(modular.options.executionMode).toEqual({ mode: 'EIP7702', sponsorGas: true })
@@ -62,7 +63,10 @@ describe('in-app wallets follow publish config', () => {
     expect(smartAccount.chain.id).toBe(31337)
     expect(smartAccount.chain.rpc).toBe('http://127.0.0.1:8545')
     expect(smartAccount.sponsorGas).toBe(false)
-    expect(smartAccount.overrides).toEqual({ bundlerUrl: 'http://127.0.0.1:4337' })
+    expect(smartAccount.overrides).toEqual({
+      bundlerUrl: 'http://127.0.0.1:4337',
+      getAccountNonce: expect.any(Function),
+    })
     expect(smartAccount.factoryAddress).toBe(FACTORY)
     const modular = getModularAccountWallet() as unknown as { options: InAppOptions }
     expect(modular.options.executionMode).toEqual({ mode: 'EOA' })
@@ -84,10 +88,25 @@ describe('in-app wallets follow publish config', () => {
     expect(typeof overrides.paymaster).toBe('function')
   })
 
-  test('unsponsored managed wallet on a hosted chain has no overrides', () => {
+  test('unsponsored managed wallet on a hosted chain overrides only the nonce', () => {
     setConfigRef({ uploadApiBaseUrl: 'https://example.com', thirdweb: { sponsorGas: false } })
     const managed = getManagedAccountWallet() as unknown as { options: InAppOptions }
-    expect(managed.options.executionMode.smartAccount.overrides).toBeUndefined()
+    expect(Object.keys(managed.options.executionMode.smartAccount.overrides)).toEqual(['getAccountNonce'])
+  })
+
+  test("the nonce hook uses a send's key at sequence 0, else a fresh random key", async () => {
+    setConfigRef(twinConfig)
+    const managed = getManagedAccountWallet() as unknown as { options: InAppOptions }
+    const { getAccountNonce } = managed.options.executionMode.smartAccount.overrides
+    const account = { address: '0x00000000000000000000000000000000000000aa' }
+
+    const nonce = await withNonceSlot(account.address, 7n, () => getAccountNonce(account))
+    expect(nonce).toBe(7n << 64n)
+
+    const [a, b] = [await getAccountNonce(account), await getAccountNonce(account)]
+    expect(a).not.toBe(b)
+    expect(a & ((1n << 64n) - 1n)).toBe(0n)
+    expect(a >> 256n).toBe(0n)
   })
 
   test('EIP-7702 follows thirdweb.sponsorGas on a hosted chain', () => {

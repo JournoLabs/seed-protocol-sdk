@@ -716,6 +716,8 @@ export const migrationSql_0031_add_publish_attempts = `CREATE TABLE \`publish_at
 --> statement-breakpoint
 CREATE INDEX \`publish_attempts_status_idx\` ON \`publish_attempts\` (\`status\`);`
 
+export const migrationSql_0032_add_publish_attempt_entry_point = `ALTER TABLE \`publish_attempts\` ADD \`entry_point\` text;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -944,6 +946,13 @@ export const journalJson = `{
       "when": 1793404988926,
       "tag": "0031_add_publish_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1793445761265,
+      "tag": "0032_add_publish_attempt_entry_point",
+      "breakpoints": true
     }
   ]
 }`
@@ -953,8 +962,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "5f8dcb6d-de44-4536-9489-fef3eb4bd2ef",
-  "prevId": "b6717ca6-f22d-4440-a51d-27a3aba4eb0e",
+  "id": "fe36f4c1-843f-4399-b985-c891e77d89d4",
+  "prevId": "5f8dcb6d-de44-4536-9489-fef3eb4bd2ef",
   "tables": {
     "appState": {
       "name": "appState",
@@ -2134,6 +2143,13 @@ export const snapshotJson = `{
         },
         "nonce_key": {
           "name": "nonce_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entry_point": {
+          "name": "entry_point",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

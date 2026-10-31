@@ -18,6 +18,8 @@ export const publishAttempts = sqliteTable(
     chainId: int('chain_id').notNull(),
     /** EntryPoint nonce key the send is pinned to, as a decimal string. */
     nonceKey: text('nonce_key'),
+    /** The EntryPoint that key is on. */
+    entryPoint: text('entry_point'),
     /** Chain head just before the send, as a decimal string. */
     fromBlock: text('from_block'),
     txHash: text('tx_hash'),

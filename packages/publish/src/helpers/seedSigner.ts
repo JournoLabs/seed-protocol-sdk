@@ -8,6 +8,11 @@ export type SeedTxRequest = {
   data: Hex
   value?: bigint
   gas?: bigint
+  /**
+   * EntryPoint nonce key to send under, at sequence 0, so the send can land once however often it
+   * is repeated. Honoured by a sender with `pinsNonceOn`.
+   */
+  nonceKey?: bigint
 }
 
 /**
@@ -61,6 +66,13 @@ export function requireSignTypedData(signer: SeedSigner): NonNullable<SeedSigner
  */
 export interface SeedTxSender {
   readonly address: Address
+
+  /**
+   * The EntryPoint on which this sender uses `SeedTxRequest.nonceKey`. Set it only when it does:
+   * reconcile trusts the key's sequence to say whether a send landed, and a sender that ignores
+   * the key would read as not landed.
+   */
+  readonly pinsNonceOn?: Address
 
   /** Submit already-encoded calldata. */
   sendTransaction(tx: SeedTxRequest): Promise<{ transactionHash: Hex }>

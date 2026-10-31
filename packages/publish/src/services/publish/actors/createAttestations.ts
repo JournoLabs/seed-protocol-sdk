@@ -20,7 +20,7 @@ import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
-import { sendsAsManagedAccount, type PublishWallet } from '~/helpers/seedSigner'
+import { sendsAsManagedAccount, type PublishWallet, type SeedTxSender } from '~/helpers/seedSigner'
 import type { Address, Hash, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
@@ -112,13 +112,16 @@ export const createAttestations = fromPromise(
   },
 )
 
-type SendTx = () => Promise<{ transactionHash: Hash }>
+type SendTx = (nonceKey?: bigint) => Promise<{ transactionHash: Hash }>
 
 /**
  * Checks and sends a `multiPublish`. `through` gets the send once every preflight has passed, and
- * the address sending it, so a caller can wrap only the send (sendAttested).
+ * the sender, so a caller can wrap only the send (sendAttested).
  */
-type SendMultiPublish = <T>(requests: any[], through: (send: SendTx, sender: string) => Promise<T>) => Promise<T>
+type SendMultiPublish = <T>(
+  requests: any[],
+  through: (send: SendTx, sender: SeedTxSender) => Promise<T>,
+) => Promise<T>
 
 /**
  * Works out how `address` attests through `multiPublish`, the executor module or the account
@@ -200,6 +203,7 @@ export async function resolveMultiPublishSender(source: {
       const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
       activeWallet = fromThirdwebAccount(
         await ensureModularPublishBootstrap(prep.managedAddress),
+        { pinsNonce: true },
       )
     }
   } else {
@@ -237,14 +241,14 @@ export async function resolveMultiPublishSender(source: {
           },
     )
     const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
-    const send: SendTx = async () => {
+    const send: SendTx = async (nonceKey) => {
       try {
-        return await activeWallet.txSender.sendTransaction(tx)
+        return await activeWallet.txSender.sendTransaction(nonceKey === undefined ? tx : { ...tx, nonceKey })
       } catch (err) {
         throw explainUserOpError(err, activeWallet.txSender.address)
       }
     }
-    return through(send, activeWallet.txSender.address)
+    return through(send, activeWallet.txSender)
   }
 
   return { sendMultiPublish: sendPublishTx, attesterAddress: routing.attesterAddress }
@@ -344,6 +348,7 @@ async function executeCreateAttestations(
         sender,
         attester: attesterAddress,
         send,
+        resumeAttemptId: context.resumeAttemptId,
       }),
     )
 

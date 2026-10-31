@@ -27,6 +27,7 @@ mock.module('thirdweb/chains', () => ({
 const { setConfigRef } = await import('../../config')
 const { getClient, resetPublishThirdwebClient } = await import('../publishThirdwebClient')
 const { fromThirdwebAccount } = await import('./thirdwebAccount')
+const { takeNonceSlot } = await import('../thirdwebNonceSlot')
 
 const account = {
   address: '0x0000000000000000000000000000000000000001',
@@ -62,5 +63,44 @@ describe('fromThirdwebAccount client', () => {
       data: '0x',
     })
     expect(prepareTransaction.mock.calls[0]?.[0].client).toEqual(getClient())
+  })
+})
+
+describe('fromThirdwebAccount nonce keys', () => {
+  const tx = { to: '0x0000000000000000000000000000000000000002', data: '0x', nonceKey: 9n } as const
+
+  test('only a pinning wallet says so', () => {
+    expect(fromThirdwebAccount(account).txSender.pinsNonceOn).toBeUndefined()
+    expect(fromThirdwebAccount(account, { pinsNonce: true }).txSender.pinsNonceOn).toBeDefined()
+  })
+
+  test('a pinning wallet offers the key to the nonce hook', async () => {
+    let offered: bigint | undefined
+    sendTransaction.mockImplementationOnce(async () => {
+      offered = takeNonceSlot(account.address)
+      return { transactionHash: '0x01' }
+    })
+    await fromThirdwebAccount(account, { pinsNonce: true }).txSender.sendTransaction(tx)
+    expect(offered).toBe(9n)
+  })
+
+  test('any other wallet offers none', async () => {
+    let offered: bigint | undefined = 1n
+    sendTransaction.mockImplementationOnce(async () => {
+      offered = takeNonceSlot(account.address)
+      return { transactionHash: '0x01' }
+    })
+    await fromThirdwebAccount(account).txSender.sendTransaction(tx)
+    expect(offered).toBeUndefined()
+  })
+
+  test('a pinned send is not retried on a nonce error: a retry would land under a random key', async () => {
+    sendTransaction.mockImplementationOnce(async () => {
+      throw new Error('nonce too low')
+    })
+    await expect(
+      fromThirdwebAccount(account, { pinsNonce: true }).txSender.sendTransaction(tx),
+    ).rejects.toThrow('nonce too low')
+    expect(sendTransaction).toHaveBeenCalledTimes(1)
   })
 })

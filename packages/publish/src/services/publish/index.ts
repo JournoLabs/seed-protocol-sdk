@@ -462,7 +462,13 @@ export const publishMachine = setup({
             guard  : ( { context } ) => attestationUsesDirectEas(context) && !context.unrecordedAttestation,
             target : 'creatingAttestationsDirectToEas',
           },
-          { target : 'creatingAttestations' },
+          {
+            target  : 'creatingAttestations',
+            actions : assign({
+              resumeAttemptId : ( { event, }, ) =>
+                (event.output as Extract<ReconcileResult, { outcome: 'send' }>).resumeAttemptId,
+            },),
+          },
         ],
         onError : {
           target  : 'attestationFailureRecoverable',

@@ -1,10 +1,17 @@
-import { claimPublishAttempt, updatePublishAttempt, type PublishAttemptStatus } from '@seedprotocol/sdk'
+import {
+  claimPublishAttempt,
+  findOpenPublishAttempts,
+  updatePublishAttempt,
+  type PublishAttemptStatus,
+} from '@seedprotocol/sdk'
 import debug from 'debug'
-import type { Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { AttestationAttemptOpenError, isManagedAccountPublishError, PublishTransactionRevertedError } from '~/errors'
 import { getPublishBlockNumber, waitForPublishReceipt } from '~/helpers/chainClient'
 import { getPublishViemChain } from '~/helpers/chainConfig'
+import { nonceKeyForAttempt } from '~/helpers/pinnedNonce'
 import { isNonceTooLowError } from '~/helpers/retryNonceTooLow'
+import type { SeedTxSender } from '~/helpers/seedSigner'
 
 const logger = debug('seedProtocol:services:publish:actors:sendAttested')
 
@@ -45,9 +52,14 @@ export type AttestedSend = {
   seedLocalId: string
   /** The normalized requests, in the order they are sent. */
   requests: Array<{ localId?: string }>
-  sender: string
+  sender: Pick<SeedTxSender, 'address' | 'pinsNonceOn'>
   attester: string
-  send: () => Promise<{ transactionHash: Hex }>
+  send: (nonceKey?: bigint) => Promise<{ transactionHash: Hex }>
+  /**
+   * An open attempt reconcile found not landed, to send again under its own nonce key. A new key
+   * would let the old UserOp, if it is still pending, land beside this one.
+   */
+  resumeAttemptId?: string
 }
 
 /**
@@ -63,33 +75,55 @@ export async function sendAttested({
   sender,
   attester,
   send,
+  resumeAttemptId,
 }: AttestedSend): Promise<{ attemptId: string; transactionHash: Hex }> {
-  const attemptId = crypto.randomUUID()
-  const fromBlock = await getPublishBlockNumber()
-  const seedLocalIds = [
-    ...new Set([seedLocalId, ...requests.flatMap((r) => (r.localId ? [r.localId] : []))]),
-  ]
-  const blockedBy = await claimPublishAttempt({
-    id: attemptId,
-    publishRunId: publishRunId ?? null,
-    seedLocalId,
-    seedLocalIds,
-    step: 'multiPublish',
-    requests: JSON.stringify(requests, (_key, v) => (typeof v === 'bigint' ? v.toString() : v)),
-    sender,
-    attester,
-    chainId: getPublishViemChain().id,
-    nonceKey: null,
-    fromBlock: fromBlock?.toString() ?? null,
-  })
-  if (blockedBy) throw new AttestationAttemptOpenError(seedLocalId, blockedBy)
+  const serialized = JSON.stringify(requests, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
+  const resumed = resumeAttemptId
+    ? (await findOpenPublishAttempts([seedLocalId])).find((a) => a.id === resumeAttemptId)
+    : undefined
+  let attemptId: string
+  let nonceKey: bigint | undefined
+  if (resumed) {
+    // The record reads this attempt's requests, so whichever send lands must have sent them.
+    const same =
+      resumed.requests === serialized &&
+      resumed.sender.toLowerCase() === sender.address.toLowerCase() &&
+      resumed.entryPoint?.toLowerCase() === sender.pinsNonceOn?.toLowerCase()
+    if (!same) throw new AttestationAttemptOpenError(seedLocalId, resumed)
+    attemptId = resumed.id
+    nonceKey = BigInt(resumed.nonceKey!)
+  } else {
+    attemptId = crypto.randomUUID()
+    nonceKey = sender.pinsNonceOn ? nonceKeyForAttempt(attemptId) : undefined
+    const fromBlock = await getPublishBlockNumber()
+    const blockedBy = await claimPublishAttempt({
+      id: attemptId,
+      publishRunId: publishRunId ?? null,
+      seedLocalId,
+      seedLocalIds: [
+        ...new Set([seedLocalId, ...requests.flatMap((r) => (r.localId ? [r.localId] : []))]),
+      ],
+      step: 'multiPublish',
+      requests: serialized,
+      sender: sender.address,
+      attester,
+      chainId: getPublishViemChain().id,
+      nonceKey: nonceKey?.toString() ?? null,
+      entryPoint: (sender.pinsNonceOn as Address | undefined) ?? null,
+      fromBlock: fromBlock?.toString() ?? null,
+    })
+    if (blockedBy) throw new AttestationAttemptOpenError(seedLocalId, blockedBy)
+  }
 
   let transactionHash: Hex
   try {
-    ;({ transactionHash } = await send())
+    ;({ transactionHash } = await send(nonceKey))
   } catch (err) {
     const status = attemptStatusAfterFailedSend(err)
-    if (status) await moveAttempt(attemptId, status)
+    // A rejected resend says nothing about the first send, which may still be pending, and a used
+    // pinned nonce can be this very send having landed.
+    const inconclusive = status === 'notSent' && (resumed || (nonceKey !== undefined && isNonceTooLowError(err)))
+    if (status && !inconclusive) await moveAttempt(attemptId, status)
     throw err
   }
   await moveAttempt(attemptId, 'sent', transactionHash)
