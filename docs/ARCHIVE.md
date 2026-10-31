@@ -135,9 +135,32 @@ const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag,
 `rebuilt` is `not_checked`, with the reason in `detail`, for an ordinary export, a bag of another
 seed, a bag in another `Seed-Bag-Format`, or an export that refuses. Without an anchor, this rebuild is
 the SDK's only hash source. The anchor attestation is defined in
-[ADR 0029](adr/0029-bag-anchor-attestation.md). `anchorArchive` writes one, and `verifyArchive` doesn't read them yet.
+[ADR 0029](adr/0029-bag-anchor-attestation.md). `anchorArchive` writes one, and `verifyPublishedArchive` checks a bag against it.
 
 Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
+
+`verifyPublishedArchive` from `@seedprotocol/archive/verify` checks a published bag from its Version
+uid alone. Import it when a reader asks: it reads EAS and a gateway with `fetch`, and pulls in no Html
+parser or Seed code.
+
+```ts
+const { verifyPublishedArchive } = await import('@seedprotocol/archive/verify')
+
+const result = await verifyPublishedArchive({ versionUid, easEndpoint, gateways: ['https://arweave.net'] })
+```
+
+Each check is reported on its own, with no overall verdict:
+
+- `attestation`: the attester of the Version and its seed has a live anchor on it. Anyone else's is
+  ignored. Pass `asOf` for the anchor of one time; the default is the newest.
+- `fixity`: the fetched files match the bag's own manifests.
+- `anchor`: the bag's tag manifest matches the anchored hash.
+- `identity`: the bag says it is this Version as of the anchor's time.
+- `revocation`: the Version is live on EAS. A revoked one fails here while the bag still checks out.
+- `timestamp`: always `not_checked`, since anchors carry no Bitcoin proof yet.
+
+It doesn't throw for what it finds. A service that can't be reached leaves its checks `not_checked`
+with the reason in `detail`, so an outage never reads as a forgery.
 
 ## A bag on Arweave
 
