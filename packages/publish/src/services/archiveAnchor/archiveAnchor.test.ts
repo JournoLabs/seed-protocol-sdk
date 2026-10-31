@@ -35,6 +35,11 @@ const state = {
   schema: true as boolean,
   strategy: 'multiPublish' as 'multiPublish' | 'directEas',
   attester: ATTESTER,
+  /** Transaction ids a read doesn't find; `*` for every new one. */
+  unreadable: new Set<string>(),
+  sendError: undefined as Error | undefined,
+  /** Fails the nth signDataItems call. */
+  failSign: undefined as number | undefined,
 }
 const sent: any[][] = []
 const sentDirect: any[] = []
@@ -73,13 +78,18 @@ mock.module('../../helpers/easDirect', () => ({
   ...realDirect,
   getAttestedUidsFromReceipt: () => [{ schemaUid: ARCHIVE_ANCHOR_SCHEMA_UID, uid: ANCHOR_UID }],
 }))
-mock.module('../publish/helpers/verifyArweaveTransactionsExist', () => ({ verifyArweaveTransactionsExist: async () => {} }))
+mock.module('../publish/helpers/verifyArweaveTransactionsExist', () => ({
+  verifyArweaveTransactionsExist: async (ids: string[]) => {
+    for (const id of ids) if (state.unreadable.has(id)) throw new Error(`${id} not found`)
+  },
+}))
 const realAttest = await import('../publish/actors/createAttestations')
 mock.module('../publish/actors/createAttestations', () => ({
   ...realAttest,
   resolveMultiPublishSender: async () => ({
     attesterAddress: state.attester,
     sendMultiPublish: async (requests: any[]) => {
+      if (state.sendError) throw state.sendError
       sent.push(requests)
       return { transactionHash: '0x01' }
     },
@@ -88,10 +98,12 @@ mock.module('../publish/actors/createAttestations', () => ({
 
 const { anchorArchive, ensureArchiveAnchorSchema, estimateArchiveAnchorCost } = await import('./index')
 const { encodeMultiPublish } = await import('../../helpers/contracts')
-const { ArchiveAnchorSchemaNotRegisteredError } = await import('../../errors')
+const { ArchiveAnchorInterruptedError, ArchiveAnchorSchemaNotRegisteredError } = await import('../../errors')
 
 const txFor = (n: number) => `${String(n).padStart(2, '0')}${'B'.repeat(40)}A`
+let signCalls = 0
 const signDataItems = async (list: any[]) => {
+  if (++signCalls === state.failSign) throw new Error('upload failed')
   const signed = []
   for (const u of list) {
     const id = txFor(uploads.length)
@@ -121,7 +133,8 @@ const decode = (data: string) =>
   Object.fromEntries(new SchemaEncoder(ARCHIVE_ANCHOR_SCHEMA_DEF).decodeData(data).map((f) => [f.name, f.value.value]))
 
 beforeEach(() => {
-  Object.assign(state, { exportError: undefined, asOf: AS_OF, anchors: [], schema: true, strategy: 'multiPublish', attester: ATTESTER })
+  Object.assign(state, { exportError: undefined, asOf: AS_OF, anchors: [], schema: true, strategy: 'multiPublish', attester: ATTESTER, unreadable: new Set(), sendError: undefined, failSign: undefined })
+  signCalls = 0
   sent.length = 0
   sentDirect.length = 0
   uploads = []
@@ -218,6 +231,80 @@ describe('anchorArchive', () => {
     expect(anchor).toBe(ANCHOR_UID)
     expect(sentDirect).toHaveLength(1)
     expect(sent).toEqual([])
+  })
+})
+
+describe('anchorArchive after a failure', () => {
+  const interrupted = async (extra: object = {}) => {
+    const error = await anchorArchive(REF, { ...(options as object), ...extra } as never).catch((e) => e)
+    expect(error).toBeInstanceOf(ArchiveAnchorInterruptedError)
+    return error as InstanceType<typeof ArchiveAnchorInterruptedError>
+  }
+
+  test('a failed attestation retries with no upload', async () => {
+    state.sendError = new Error('reverted')
+    const error = await interrupted()
+    expect(error.message).toContain('reverted')
+    expect((error.cause as Error).message).toBe('reverted')
+    expect(error.resume.manifestTx).toBeDefined()
+
+    const before = uploads.length
+    state.sendError = undefined
+    const result = await anchorArchive(REF, { ...(options as object), resumeFrom: error.resume } as never)
+    expect(uploads).toHaveLength(before)
+    expect(result.manifestTx).toBe(error.resume.manifestTx!)
+    expect(sent).toHaveLength(1)
+  })
+
+  test('a failed manifest upload keeps the files', async () => {
+    state.failSign = 2
+    const error = await interrupted()
+    expect(error.resume.manifestTx).toBeUndefined()
+    const files = uploads.length
+    expect(Object.keys(error.resume.transactions)).toHaveLength(files)
+
+    await anchorArchive(REF, { ...(options as object), resumeFrom: error.resume } as never)
+    expect(uploads).toHaveLength(files + 1)
+    expect(uploads.at(-1)!.name).toBe('manifest')
+    const manifest = parsePathManifest(uploads.at(-1)!.bytes)
+    expect(manifest.paths['bagit.txt']?.id).toBe(error.resume.transactions['bagit.txt'])
+  })
+
+  test('uploads that a read cannot find yet are kept, and reused once they can be', async () => {
+    state.unreadable = new Set([txFor(0)])
+    const error = await interrupted()
+    expect(error.resume.transactions[uploads[0]!.name]).toBe(txFor(0))
+    const before = uploads.length
+    state.unreadable = new Set()
+    await anchorArchive(REF, { ...(options as object), resumeFrom: error.resume } as never)
+    expect(uploads.slice(before).map((u) => u.name)).toEqual(['manifest'])
+  })
+
+  test('uploads again what never landed, and a new manifest for it', async () => {
+    state.sendError = new Error('reverted')
+    const { resume } = await interrupted()
+    state.sendError = undefined
+    const before = uploads.length
+    state.unreadable = new Set([resume.transactions['bagit.txt']!])
+    const result = await anchorArchive(REF, { ...(options as object), resumeFrom: resume } as never)
+    expect(uploads.slice(before).map((u) => u.name)).toEqual(['bagit.txt', 'manifest'])
+    expect(result.manifestTx).not.toBe(resume.manifestTx)
+  })
+
+  test('ignores uploads from another bag', async () => {
+    state.sendError = new Error('reverted')
+    const { resume } = await interrupted()
+    state.sendError = undefined
+    state.asOf = AS_OF + 100
+    const before = uploads.length
+    await anchorArchive(REF, { ...(options as object), resumeFrom: resume } as never)
+    expect(uploads.length - before).toBe(before)
+  })
+
+  test('throws the first upload failure as it is, with nothing to resume', async () => {
+    state.failSign = 1
+    await expect(anchorArchive(REF, options)).rejects.toThrow('upload failed')
+    await expect(anchorArchive(REF, options)).resolves.toBeDefined()
   })
 })
 
