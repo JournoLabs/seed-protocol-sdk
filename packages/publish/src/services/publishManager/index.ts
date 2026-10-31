@@ -10,7 +10,7 @@ import { addSubscription } from './actions/addSubscription'
 import { requestSavePublish } from './actions/requestSavePublish'
 import { publishDone } from './actions/publishDone'
 import { removeSubscription } from './actions/removeSubscription'
-import { restoreFromDb } from './actors/restoreFromDb'
+import { restoreFromDb, restoreWhenDbReady, type PublishRestoreStatus } from './actors/restoreFromDb'
 import { queueCreatePublish } from './actions/queueCreatePublish'
 import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
@@ -27,10 +27,11 @@ export interface PublishManagerMachineContext {
   pendingCreates: PublishManagerEvent[]
   /** Last finished actor per seed. Not used by the in-flight duplicate guard. */
   settledPublishes: Map<string, import('xstate').ActorRef<any, any>>
+  restoreStatus: PublishRestoreStatus
 }
 
 type PublishManagerEvent =
-  | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions'] }
+  | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions']; status: PublishRestoreStatus }
   | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown; options?: import('../../config').CreatePublishOptions; createToken?: number }
   | { type: 'ADD_SUBSCRIPTION'; seedLocalId: string; newSubscription?: import('xstate').ActorRef<any, any> }
   | { type: 'REQUEST_SAVE_PUBLISH'; seedLocalId: string; publishProcess?: unknown; triggerPublishDone?: boolean }
@@ -49,6 +50,7 @@ export const publishManagerMachine = setup({
   },
   actors: {
     restoreFromDb,
+    restoreWhenDbReady,
   },
   actions: {
     assignRestoreFromDb,
@@ -71,6 +73,7 @@ export const publishManagerMachine = setup({
     subscriptions: new Map(),
     pendingCreates: [],
     settledPublishes: new Map(),
+    restoreStatus: { outcome: 'pending' },
   },
   states: {
     restoreFromDb: {
@@ -90,7 +93,14 @@ export const publishManagerMachine = setup({
     },
     active: {
       entry: 'drainPendingCreates',
+      invoke: {
+        src: 'restoreWhenDbReady',
+        input: ({ context }) => ({ context, status: context.restoreStatus }),
+      },
       on: {
+        RESTORE_FROM_DB_DONE: {
+          actions: ['assignRestoreFromDb'],
+        },
         CREATE_PUBLISH: {
           actions: ['createPublish'],
         },
@@ -131,6 +141,7 @@ const initialManagerContext = {
   subscriptions: new Map(),
   pendingCreates: [] as PublishManagerEvent[],
   settledPublishes: new Map(),
+  restoreStatus: { outcome: 'pending' } as PublishRestoreStatus,
 }
 
 const publishManager = createActor(publishManagerMachine, {
@@ -210,6 +221,21 @@ export const PublishManager = {
         resolve()
       }
     })
+  },
+  /**
+   * Whether this tab's in-progress publishes were restored. `dbNotReady` moves on by itself once
+   * the database is ready; `failed` holds the error, and those publishes aren't running here.
+   */
+  getRestoreStatus: (): PublishRestoreStatus => publishManager.getSnapshot().context.restoreStatus,
+  /** Calls `listener` when the restore status changes. Returns the unsubscribe function. */
+  onRestoreStatus: (listener: (status: PublishRestoreStatus) => void): (() => void) => {
+    let last = publishManager.getSnapshot().context.restoreStatus
+    const sub = publishManager.subscribe((snapshot) => {
+      if (snapshot.context.restoreStatus === last) return
+      last = snapshot.context.restoreStatus
+      listener(last)
+    })
+    return () => sub.unsubscribe()
   },
   /**
    * Spawn a publish. Resolves with the child actor once it exists.
