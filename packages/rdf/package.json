@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@rdfjs/types": "^2.0.1",
+    "@seedprotocol/eas": "workspace:*",
     "@seedprotocol/query": "workspace:*"
   },
   "devDependencies": {

@@ -46,7 +46,7 @@ function namedEntries<T extends { readonly name?: string }>(entries: { readonly 
  * (`coAuthors` of `Identity` → `co_author_identity_ids`), as `listRelationEasPropertyName` in the
  * SDK writes it.
  */
-function listRelationEasName(propertyName: string, ref: string): string {
+export function listRelationEasName(propertyName: string, ref: string): string {
   const storageName = propertyName.endsWith(`${ref}Ids`) ? propertyName : `${pluralize(propertyName, 1)}${ref}Ids`
   return easName(storageName)
 }

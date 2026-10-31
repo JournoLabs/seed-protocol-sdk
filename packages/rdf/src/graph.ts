@@ -1,5 +1,6 @@
 import type { SeedAttestations, SeedPropertyAttestation } from '@seedprotocol/query'
 import { PROV, RDF_TYPE, XSD, assertIri, iriScheme, type IriScheme } from './iri.js'
+import { compileLens, type CompiledLens, type RdfLens } from './lens.js'
 
 /** An IRI, a typed literal, or an RDF list of either. */
 export type RdfObject =
@@ -20,6 +21,10 @@ export type RdfNode = {
 export type StateGraph = {
   readonly iris: IriScheme
   readonly nodes: readonly RdfNode[]
+  /** Prefixes from the lens, for the writers. */
+  readonly prefixes: ReadonlyMap<string, string>
+  /** Lens terms that couldn't be used, and values that don't fit their data type. Empty without a lens. */
+  readonly warnings: readonly string[]
 }
 
 export type StateGraphOptions = {
@@ -32,10 +37,16 @@ export type StateGraphOptions = {
    * `ar://` content IRI, since most RDF tools can't fetch `ar://`. None by default.
    */
   contentUrl?: (transactionId: string) => string
+  /**
+   * The app's Schema and sidecar. Mapped classes and predicates replace the protocol IRIs in the
+   * graph, and a Number or Date gets its literal type. None by default.
+   */
+  lens?: RdfLens
 }
 
 const SCHEMA_CONTENT_URL = 'https://schema.org/contentUrl'
 const STORAGE_TRANSACTION = 'storage_transaction_id'
+const STORAGE_NAMES = new Set([STORAGE_TRANSACTION, 'storage_provider_transaction_id'])
 // Assembly skips this value as a relation (see relationValuesToExclude in @seedprotocol/query).
 const NOT_A_SEED = '0x0000000000000000000000000000000000000000000000000000000000000020'
 
@@ -48,6 +59,32 @@ function dateTime(seconds: number): RdfObject {
 }
 
 const HEX = /^0x([0-9a-fA-F]*)$/
+const DECIMAL = /^[+-]?(?:\d+\.\d*|\.\d+)$/
+const DOUBLE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/
+const MAX_DATE_SECONDS = 8.64e12
+
+/** The literal for a Number's string (ADR 0010), typed per value: `1e+21` is no `xsd:decimal`. */
+function numberLiteral(value: string): RdfObject | undefined {
+  if (/^[+-]?\d+$/.test(value)) return literal(value, `${XSD}integer`)
+  if (DECIMAL.test(value)) return literal(value, `${XSD}decimal`)
+  if (!DOUBLE.test(value) || !Number.isFinite(Number(value))) return undefined
+  // The canonical form, which JSON-LD processors write: RDFC-1.0 compares literals as text.
+  return literal(Number(value).toExponential(15).replace(/(\d)0*e\+?/, '$1E'), `${XSD}double`)
+}
+
+/** The literal for a value of local type `dataType`, or undefined when the type doesn't change it. */
+function typedByLens(dataType: string, easType: string, value: unknown, warn: (message: string) => void): RdfObject | undefined {
+  if (typeof value !== 'string') return undefined
+  if (dataType === 'number' && easType === 'string') {
+    const number = numberLiteral(value)
+    if (!number) warn(`"${value}" isn't a number; exported as a string`)
+    return number
+  }
+  if (dataType === 'date' && /^u?int\d*$/.test(easType) && Math.abs(Number(value)) <= MAX_DATE_SECONDS) {
+    return dateTime(Number(value))
+  }
+  return undefined
+}
 
 /** The literal for one non-relation value of EAS type `easType`. */
 function scalar(easType: string, value: string | boolean): RdfObject {
@@ -78,7 +115,12 @@ class NodeBuilder {
   }
 }
 
-function propertyObject(iris: IriScheme, property: SeedPropertyAttestation): RdfObject | null {
+function propertyObject(
+  iris: IriScheme,
+  property: SeedPropertyAttestation,
+  dataType: string | undefined,
+  warn: (message: string) => void,
+): RdfObject | null {
   const { easType, value } = property
   if (property.isRelation) {
     const seeds = (typeof value === 'string' ? [value] : Array.isArray(value) ? value : []).filter(
@@ -91,7 +133,8 @@ function propertyObject(iris: IriScheme, property: SeedPropertyAttestation): Rdf
     const itemType = easType.replace(/\[\]$/, '')
     return { kind: 'list', items: value.map((v: string) => scalar(itemType, v)) }
   }
-  return scalar(easType, value as string | boolean)
+  const typed = dataType ? typedByLens(dataType, easType, value, warn) : undefined
+  return typed ?? scalar(easType, value as string | boolean)
 }
 
 /**
@@ -100,12 +143,18 @@ function propertyObject(iris: IriScheme, property: SeedPropertyAttestation): Rdf
  * `did:pkh`, and linked to its head Version; each property is one statement with the protocol
  * predicate `{base}p/{easType}/{easName}`. Relations are Seed IRIs, lists are RDF lists, and an
  * Image, File, Html or Json seed's `storage_transaction_id` also gives `seed:content <ar://…>`.
- * Values are typed from the EAS type alone: a Number (an EAS `string`, ADR 0010) is an
- * `xsd:string`, and a Date (`uint256` seconds) an `xsd:integer`.
+ * Without a lens, values are typed from the EAS type alone: a Number (an EAS `string`, ADR 0010)
+ * is an `xsd:string`, and a Date (`uint256` seconds) an `xsd:integer`. With one, a Number is typed
+ * per value and a Date is an `xsd:dateTime`, and mapped terms replace the protocol IRIs.
  */
 export function stateGraph(seeds: readonly SeedAttestations[], options: StateGraphOptions): StateGraph {
   const iris = iriScheme(options.chainId, options.base)
   const ns = iris.seed
+  const lens: CompiledLens | undefined = options.lens && compileLens(options.lens)
+  const warnings = lens?.warnings ?? []
+  const warn = (message: string) => {
+    if (!warnings.includes(message)) warnings.push(message)
+  }
   const nodes = new Map<string, NodeBuilder>()
   const node = (id: string) => {
     let found = nodes.get(id)
@@ -117,7 +166,7 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
     if (nodes.has(iris.attestation(record.seedUid))) continue
     const seed = node(iris.attestation(record.seedUid))
     seed.add(RDF_TYPE, iri(`${ns}Seed`))
-    seed.add(RDF_TYPE, iri(iris.modelClass(record.schemaName)))
+    seed.add(RDF_TYPE, iri(lens?.classOf(record.schemaName) ?? iris.modelClass(record.schemaName)))
     if (record.attester) seed.add(`${PROV}wasAttributedTo`, iri(iris.account(record.attester)))
     if (record.timeCreated > 0) seed.add(`${PROV}generatedAtTime`, dateTime(record.timeCreated))
 
@@ -130,9 +179,10 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
     }
 
     for (const property of properties) {
-      const object = propertyObject(iris, property)
+      const local = STORAGE_NAMES.has(property.easName) ? undefined : lens?.propertyOf(record.schemaName, property.easName)
+      const object = propertyObject(iris, property, local?.dataType, warn)
       if (!object) continue
-      seed.add(iris.property(property.easType, property.easName), object)
+      seed.add(local?.term ?? iris.property(property.easType, property.easName), object)
       if (property.easName === STORAGE_TRANSACTION && typeof property.value === 'string' && property.value) {
         const transactionId = encodeURIComponent(property.value)
         seed.add(`${ns}content`, iri(`ar://${transactionId}`))
@@ -143,5 +193,5 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
     }
   }
 
-  return { iris, nodes: [...nodes.values()] }
+  return { iris, nodes: [...nodes.values()], prefixes: lens?.prefixes ?? new Map(), warnings }
 }
