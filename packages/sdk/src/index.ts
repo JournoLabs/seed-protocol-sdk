@@ -74,6 +74,7 @@ export {
   type ArchiveExportErrorCode,
   type ArchiveOmission,
   type ArchiveSeedRef,
+  type ExportableItem,
   type ExportArchiveOptions,
   type ExportArchiveResult,
 } from './archive/exportArchive'
