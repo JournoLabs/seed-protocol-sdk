@@ -13,6 +13,15 @@ export type { JsonLdDocument } from './jsonld.js'
 export { seedVocabulary } from './vocabulary.js'
 export { toShacl } from './shacl.js'
 export type { ShaclOptions } from './shacl.js'
+export { SUGGESTED_PREFIXES, checkSidecar, sidecarContext, suggestTerms, syncSidecar } from './sidecar.js'
+export type {
+  SchemaTarget,
+  SidecarContext,
+  SidecarContextOptions,
+  SidecarReport,
+  SidecarSchema,
+  TermSuggestion,
+} from './sidecar.js'
 
 export type ExportSeedsOptions = StateGraphOptions & Pick<GetSeedsOptions, 'source' | 'pins'>
 

@@ -33,6 +33,8 @@ export type LensSchema = {
 export type RdfSidecar = {
   /** The schema these terms were written for. Must equal the schema's `id`. */
   readonly schemaId: string
+  /** The schema `version` the sidecar was last synced with. Informational: terms are read by id. */
+  readonly schemaVersion?: number
   readonly '@context'?: { readonly [prefix: string]: unknown }
   readonly terms: { readonly [id: string]: string }
 }
