@@ -4,7 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- New entry `@seedprotocol/archive/verify`: `verifyPublishedArchive({ versionUid, easEndpoint, gateways, asOf })` finds a Version's anchor on EAS, rebuilds its bag from the path manifest and reports `attestation`, `fixity`, `anchor`, `identity`, `revocation` and `timestamp` separately. Also `decodeArchiveAnchorData`.
+- New entry `@seedprotocol/archive/verify`: `verifyPublishedArchive({ versionUid, easEndpoint, gateways, asOf })` finds a Version's anchor on EAS, rebuilds its bag from the path manifest and reports `attestation`, `fixity`, `anchor`, `identity`, `record`, `revocation` and `timestamp` separately. `attestation` is `no_anchor` for a Version with no anchor from its attester, and `not_checked` for one EAS hasn't reported. `record` checks that the attestations in `data/item.json` are on the Version from its attester, and `recorded` returns them with their Arweave transactions. `revocation` also fails for a revoked seed. Options `maxBytes`, `onProgress` and `signal`; `size` reports `Payload-Oxum`. Also `findArchiveAnchors`, which reads EAS only, and `decodeArchiveAnchorData`.
+- `readBagFromManifest` takes `{ only }` to read some paths.
 - New `buildPathManifest(bag, transactions)`, `parsePathManifest(bytes)` and `readBagFromManifest(manifest, fetchTransaction)`, with `PATH_MANIFEST_CONTENT_TYPE`: a bag on Arweave as an `arweave/paths` 0.2.0 manifest, and back. `ArchiveErrorCode` gains `invalid_manifest` and `missing_file`.
 - New `verifyArchive(bag, { expectedTagmanifestSha256 })` reports `fixity` and `anchor` separately, and fails `fixity` for a bag with no `tagmanifest-sha256.txt`. `readBagInfo` reads bag-info.txt, and `verifyInstructions` writes the text of VERIFY.txt.
 
