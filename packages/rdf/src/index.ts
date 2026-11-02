@@ -11,6 +11,8 @@ export { toTurtle } from './turtle.js'
 export { toJsonLd } from './jsonld.js'
 export type { JsonLdDocument } from './jsonld.js'
 export { seedVocabulary } from './vocabulary.js'
+export { toShacl } from './shacl.js'
+export type { ShaclOptions } from './shacl.js'
 
 export type ExportSeedsOptions = StateGraphOptions & Pick<GetSeedsOptions, 'source' | 'pins'>
 
