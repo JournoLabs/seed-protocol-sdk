@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { takeNonceSlot, withNonceSlot } from './thirdwebNonceSlot'
+import { pinnedNonce } from './pinnedNonce'
+import { seedAccountNonce, takeNonceSlot, withNonceSlot } from './thirdwebNonceSlot'
 
 const ACCOUNT = '0xAaAa000000000000000000000000000000000000'
 
@@ -55,5 +56,22 @@ describe('thirdweb nonce slot', () => {
   test('accounts don’t wait for each other', async () => {
     void withNonceSlot('0xcc00000000000000000000000000000000000000', 1n, never)
     expect(await withNonceSlot('0xdd00000000000000000000000000000000000000', 2n, async () => 'sent')).toBe('sent')
+  })
+})
+
+describe('seedAccountNonce', () => {
+  test('gives the asking send its key at sequence 0, once', async () => {
+    await withNonceSlot(ACCOUNT, 5n, async () => {
+      expect(await seedAccountNonce({ address: ACCOUNT })).toBe(pinnedNonce(5n))
+      expect(await seedAccountNonce({ address: ACCOUNT })).not.toBe(pinnedNonce(5n))
+    })
+  })
+
+  test('with no send asking, a random key at sequence 0', async () => {
+    const a = await seedAccountNonce({ address: ACCOUNT })
+    const b = await seedAccountNonce({ address: ACCOUNT })
+    expect(a).not.toBe(b)
+    expect(a & ((1n << 64n) - 1n)).toBe(0n)
+    expect(a >> 256n).toBe(0n)
   })
 })

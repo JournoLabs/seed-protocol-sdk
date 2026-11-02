@@ -15,7 +15,8 @@ mock.module('./chainClient', () => ({
   getPublishPublicClient: () => ({ readContract: async () => chainNonce, getLogs }),
 }))
 
-const { findPinnedUserOp, nonceKeyForAttempt, pinnedNonce, readNonceSequence } = await import('./pinnedNonce')
+const { findPinnedUserOp, findPublishByNonceKey, nonceKeyForAttempt, pinnedNonce, publishNonceKey, readNonceSequence } =
+  await import('./pinnedNonce')
 
 const log = (nonce: bigint, success: boolean) => ({ transactionHash: TX, args: { nonce, success } })
 
@@ -56,5 +57,32 @@ describe('pinned nonces', () => {
       '0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f',
     )
     expect(encodeAbiParameters([{ type: 'address' }], [zeroAddress])).toHaveLength(66)
+  })
+})
+
+describe('host nonce keys', () => {
+  test('a host key gives a stable 192-bit key, apart from an attempt id with the same text', () => {
+    const key = publishNonceKey('run-7')
+    expect(publishNonceKey('run-7')).toBe(key)
+    expect(publishNonceKey('run-8')).not.toBe(key)
+    expect(key).not.toBe(nonceKeyForAttempt('run-7'))
+    expect(key >> 192n).toBe(0n)
+  })
+
+  test('nothing landed: sequence 0 and no log read', async () => {
+    chainNonce = pinnedNonce(publishNonceKey('run-7'))
+    getLogs.mockClear()
+    expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })).toEqual({ sequence: 0n })
+    expect(getLogs).not.toHaveBeenCalled()
+  })
+
+  test('landed: the UserOp, attested or reverted', async () => {
+    const key = publishNonceKey('run-7')
+    chainNonce = pinnedNonce(key) + 1n
+    logs = [log(pinnedNonce(key), false)]
+    expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })).toEqual({
+      sequence: 1n,
+      userOp: { transactionHash: TX, success: false },
+    })
   })
 })

@@ -1,5 +1,4 @@
-import { pinnedNonce } from './pinnedNonce'
-import { takeNonceSlot } from './thirdwebNonceSlot'
+import { seedAccountNonce } from './thirdwebNonceSlot'
 import { deploySmartAccount, getContract, } from 'thirdweb'
 import { getClient } from './publishThirdwebClient'
 import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
@@ -7,7 +6,7 @@ import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
 import { useEffect, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
-import { bytesToHex, type Address, type Hex } from 'viem'
+import { type Address, type Hex } from 'viem'
 import debug from 'debug'
 import {
   getConfigRef,
@@ -407,9 +406,6 @@ const IN_APP_AUTH_OPTIONS = ['farcaster', 'email', 'passkey', 'phone'] as const
  */
 let _managedInAppWallet: { key: string; wallet: Wallet } | null = null
 
-const randomNonceKey = (): bigint =>
-  BigInt(bytesToHex(crypto.getRandomValues(new Uint8Array(24))))
-
 /**
  * Managed (EIP-4337) in-app wallet: the user's ManagedAccount smart account, admin = the
  * user's in-app EOA. Publishes are UserOps from this account.
@@ -448,8 +444,7 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
               // Adds headroom to callGasLimit; see seedPaymaster.
               ...(sponsorGas ? { paymaster: seedPaymaster(getClient, chain, bundlerUrl) } : {}),
               // A send's pinned key, else a random key as Thirdweb's own default, whose sequence is 0.
-              getAccountNonce: async (accountContract: { address: string }) =>
-                pinnedNonce(takeNonceSlot(accountContract.address) ?? randomNonceKey()),
+              getAccountNonce: seedAccountNonce,
             },
           },
         },

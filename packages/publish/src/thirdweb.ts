@@ -3,6 +3,7 @@
  * Import from here when using ConnectButton / in-app wallets / ModularCore bootstrap.
  */
 export { fromThirdwebAccount, asThirdwebPublishWallet, asSeedSignerFromThirdweb } from './helpers/adapters/thirdwebAccount'
+export { seedAccountNonce } from './helpers/thirdwebNonceSlot'
 
 export {
   getClient,

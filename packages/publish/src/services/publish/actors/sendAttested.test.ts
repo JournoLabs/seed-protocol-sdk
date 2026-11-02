@@ -40,14 +40,18 @@ mock.module('@seedprotocol/sdk', () => ({
 }))
 
 let receipt: () => Promise<unknown> = async () => ({ status: 'success' })
+/** The EntryPoint nonce a host key's check reads. */
+let chainNonce = 0n
 mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
   getPublishBlockNumber: async () => 100n,
   waitForPublishReceipt: () => receipt(),
+  getPublishPublicClient: () => ({ readContract: async () => chainNonce }),
 }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishViemChain: () => ({ id: 84532 }) }))
 
 const { attemptStatusAfterFailedSend, sendAttested, waitForAttemptReceipt } = await import('./sendAttested')
+const { pinnedNonce, publishNonceKey } = await import('../../../helpers/pinnedNonce')
 
 const HASH = `0x${'a'.repeat(64)}` as `0x${string}`
 const SENDER = `0x${'b'.repeat(40)}`
@@ -69,6 +73,7 @@ const pinned = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   rows = []
+  chainNonce = 0n
   send.mockClear()
   receipt = async () => ({ status: 'success' })
 })
@@ -276,5 +281,37 @@ describe('attemptStatusAfterFailedSend', () => {
     ['a used EntryPoint nonce, which can be this send landing', wrapped('AA25 invalid account nonce')],
   ])('%s: unknown', (_name, err) => {
     expect(attemptStatusAfterFailedSend(err)).toBeUndefined()
+  })
+})
+
+describe('sendAttested: a host nonce key', () => {
+  test('every try with the same host key sends under one key, whatever its seed and attempt', async () => {
+    await sendAttested(pinned({ hostNonceKey: 'run-7' }))
+    rows = [] // a new process: no rows from the first try
+    await sendAttested(pinned({ seedLocalId: 'post2', requests: [{ localId: 'post2' }], hostNonceKey: 'run-7' }))
+    const keys = send.mock.calls.map(([key]) => key as unknown as bigint)
+    expect(keys).toEqual([publishNonceKey('run-7'), publishNonceKey('run-7')])
+    expect(rows[0]!.nonceKey).toBe(publishNonceKey('run-7').toString())
+  })
+
+  test('a key an earlier try landed under sends nothing and claims no attempt', async () => {
+    chainNonce = pinnedNonce(publishNonceKey('run-7')) + 1n
+    await expect(sendAttested(pinned({ hostNonceKey: 'run-7' }))).rejects.toMatchObject({
+      name: 'PublishNonceKeyError',
+      code: 'NONCE_KEY_SPENT',
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(rows).toEqual([])
+  })
+
+  test('a sender that does not pin, or a direct EAS step, is refused before the send', async () => {
+    await expect(sendAttested({ ...attempt(), hostNonceKey: 'run-7' })).rejects.toMatchObject({
+      code: 'NONCE_KEY_NOT_PINNED',
+    })
+    await expect(sendAttested(pinned({ hostNonceKey: 'run-7', step: 'seed' }))).rejects.toMatchObject({
+      code: 'NONCE_KEY_DIRECT_EAS',
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(rows).toEqual([])
   })
 })

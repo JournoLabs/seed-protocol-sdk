@@ -180,6 +180,10 @@ chain can't be read. A new run that meets another run's unlanded UserOp stops at
 `SeedTxRequest.nonceKey`. Other senders, EOAs and browser wallets included, can stop there whenever the
 hash was lost. A tab closed during a wallet prompt does this even if the author never signed.
 
+The nonce key comes from the attempt, so it covers tries that share a database and an item. A host
+whose tries don't, such as a server job that creates a new item per try, passes its own id as
+`CreatePublishOptions.nonceKey`; see [Tries that don't share a database](PUBLISH_AUTOMATION.md#tries-that-dont-share-a-database).
+
 Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
 `describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
 `snapshot.context.error` is an `AttestationOutcomeUnknownError` (code `ATTESTATION_OUTCOME_UNKNOWN`)

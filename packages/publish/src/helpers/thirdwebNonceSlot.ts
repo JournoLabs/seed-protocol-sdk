@@ -1,3 +1,6 @@
+import { bytesToHex } from 'viem'
+import { pinnedNonce } from './pinnedNonce'
+
 /**
  * Thirdweb asks for a UserOp's nonce through a hook set once on the wallet, with no way to tell
  * which send is asking. So a send puts its nonce key here, and sends from one account wait their
@@ -35,4 +38,15 @@ export function takeNonceSlot(account: string): bigint | undefined {
   slots.delete(id)
   slot?.release()
   return slot?.key
+}
+
+const randomNonceKey = (): bigint => BigInt(bytesToHex(crypto.getRandomValues(new Uint8Array(24))))
+
+/**
+ * `getAccountNonce` for a thirdweb smart wallet's `overrides`: the nonce key of the send now asking,
+ * else a random key as thirdweb's own default, whose sequence is 0. A wallet built with it can be
+ * wrapped with `fromThirdwebAccount(account, { pinsNonce: true })`.
+ */
+export async function seedAccountNonce(accountContract: { address: string }): Promise<bigint> {
+  return pinnedNonce(takeNonceSlot(accountContract.address) ?? randomNonceKey())
 }

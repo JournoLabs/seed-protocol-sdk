@@ -349,6 +349,7 @@ async function executeCreateAttestations(
         attester: attesterAddress,
         send,
         resumeAttemptId: context.resumeAttemptId,
+        hostNonceKey: context.nonceKey,
       }),
     )
 
