@@ -125,6 +125,8 @@ export interface PublishMachineContext {
   confirmUpload?: boolean
   /** A `multiPublish` that landed and failed to record: a retry records it instead of sending. */
   unrecordedAttestation?: UnrecordedAttestation
+  /** CreatePublishOptions.nonceKey: the host's id that the attestation nonce key comes from. */
+  nonceKey?: string
   /** An attempt reconcile found not landed: the next send repeats it under its nonce key. */
   resumeAttemptId?: string
   /** Resolved batch from attest actors; set on transition to success. */

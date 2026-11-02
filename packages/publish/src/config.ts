@@ -308,6 +308,17 @@ export interface CreatePublishOptions {
    * doesn't lift `maxUploadBytes`.
    */
   confirmUpload?: boolean
+  /**
+   * The host's own id for this publish, such as a job or run id that every try of it shares. Its
+   * attestation UserOp is sent under an EntryPoint nonce key derived from it (`publishNonceKey`),
+   * so of all the tries, from any process, one can land. Without it the key comes from the
+   * attempt, which a new process or a new item doesn't share.
+   *
+   * Needs a wallet whose sender pins its nonce (`pinsNonceOn`), and a publish through the Seed
+   * contract: either missing fails with `PublishNonceKeyError` before anything is uploaded. A key
+   * is spent once a UserOp lands under it, reverted or not, and then fails the same way.
+   */
+  nonceKey?: string
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */

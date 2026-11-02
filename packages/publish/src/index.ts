@@ -57,6 +57,8 @@ export {
   isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  PublishNonceKeyError,
+  type PublishNonceKeyErrorCode,
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
   type ArchiveAnchorResume,
@@ -127,6 +129,7 @@ export {
   type PrivyEthereumWalletLike,
 } from './helpers/adapters/privy'
 export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
+export { findPublishByNonceKey, publishNonceKey, type PublishByNonceKey } from './helpers/pinnedNonce'
 export { CALL_GAS_HEADROOM_BPS } from './helpers/adapters/userOps'
 export {
   createManagedAccountTxSender,

@@ -44,7 +44,8 @@ transaction's seed, version and property uids and ends its attempt together. A f
 publish, and the next retry records from the stored requests without sending.
 
 **UserOps pin their nonce.** The EntryPoint nonce key is a 192-bit hash of the attempt id, at sequence
-0, so that UserOp can land once. Reconcile reads the sequence from EntryPoint: 1 means find the
+0, so that UserOp can land once. A host whose tries don't share a database or an item passes its own id
+as `CreatePublishOptions.nonceKey`, and the key is a hash of that instead (added 2026-11-02). Reconcile reads the sequence from EntryPoint: 1 means find the
 `UserOperationEvent` from `fromBlock` and record it, and 0 means resend under the same key. Only the run
 that sent it can resend, since a key is tied to the stored requests. A sender declares this
 with `SeedTxSender.pinsNonceOn` and must then honour `SeedTxRequest.nonceKey`. Thirdweb's hook is per

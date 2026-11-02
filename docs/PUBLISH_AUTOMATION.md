@@ -185,6 +185,46 @@ const actor = await PublishManager.createPublish(item, managedAddress, onChainWa
 
    A publish needs a schema only for what it attests: the seed's model and the properties that have a value (or an empty value that removes an earlier attestation). A missing one fails before the UserOp with `EasSchemasNotRegisteredError` (`code: 'EAS_SCHEMAS_NOT_REGISTERED'`), whose `missing` lists every missing definition.
 
+### Tries that don't share a database
+
+A publish's attempt rows ([Interrupted publishes](PUBLISHING.md#interrupted-publishes)) live in its
+process's database, and a server job usually creates a new item for each try. A try after a timeout
+then can't see that the previous try's UserOp landed, and attests a second Seed. Pass the job's own id
+as `nonceKey`: every try sends its UserOp under the EntryPoint nonce key derived from it, so one can
+land.
+
+The sender has to pin its nonce. For a thirdweb smart wallet you build yourself, add Seed's nonce hook
+beside your paymaster and wrap the account with `pinsNonce`:
+
+```ts
+import { fromThirdwebAccount, seedAccountNonce } from '@seedprotocol/publish/thirdweb'
+
+const wallet = smartWallet({
+  ...yourOptions,
+  overrides: { ...yourOverrides, getAccountNonce: seedAccountNonce },
+})
+// connect it with the session key as you do now, then:
+const onChainWallet = fromThirdwebAccount(account, { client, pinsNonce: true })
+
+await PublishManager.createPublish(item, managedAddress, onChainWallet, {
+  dataItemSigner: dataItemWallet.signer,
+  nonceKey: `job:${jobId}`,
+})
+```
+
+`createManagedAccountTxSender` and `createPermissionlessTxSender` pin already.
+
+Before a try, `findPublishByNonceKey({ sender: managedAddress, nonceKey, fromBlock })` says what earlier
+tries did, from EntryPoint with no local rows. `sequence` 0 means nothing landed and the publish can go
+ahead. Otherwise `userOp` is the landed UserOp: with `success` its transaction holds the Seed, and
+without it the try reverted and attested nothing. Save a block from before the first try with the job
+to use as `fromBlock`.
+
+A key is spent once a UserOp lands under it, reverted or not. A publish fails with
+`PublishNonceKeyError` before anything is uploaded when its key is spent (`NONCE_KEY_SPENT`), its sender
+doesn't pin (`NONCE_KEY_NOT_PINNED`), or it would attest directly to EAS (`NONCE_KEY_DIRECT_EAS`). After
+a revert, publish again under a new key, such as the job id with a try count.
+
 Readers should treat **EAS attester (ManagedAccount)** as authorship. Bind Arweave owners with:
 
 ```ts
@@ -222,6 +262,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - `ensurePublishAuthorizationSchema`, `attestPublishAuthorization`, `revokePublishAuthorization`
 - `assessPublishAuthorizationLive`
 - `assertExecutorModuleReadyForAccount` (check an account before offering enrollment), `simulateCallFromAccount`
+- `CreatePublishOptions.nonceKey`, `findPublishByNonceKey`, `publishNonceKey`, `PublishNonceKeyError` (see [Tries that don't share a database](#tries-that-dont-share-a-database))
 - `enrollPublishAutomation`, `revokePublishAutomation` (take `userWallet`, and `admin` when the executor needs installing; see [Enroll](#enroll)), `ensureExecutorModuleInstalled(account, getAdmin, config)`
 - `ensureAutomationSessionKey`, `removeAutomationSessionKey` (take `admin: PublishWallet`; see below), `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
 
@@ -233,6 +274,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - `ensureAutomationSessionKey`, `removeAutomationSessionKey` with `admin` optional: it defaults to the connected managed in-app wallet, which signs with its admin EOA and sends a sponsored UserOp from the account
 - `enrollPublishAutomation`, `revokePublishAutomation` with `userWallet` defaulting to the connected managed in-app wallet and `admin` to its in-app admin EOA; `ensureExecutorModuleInstalled` with `getAdmin` defaulting to that admin EOA
 - `assertStorageBoundToIdentity`
+- `seedAccountNonce`, the `getAccountNonce` override that lets `fromThirdwebAccount(account, { pinsNonce: true })` pin
 - `buildAutomationSessionKeyPermissions`, `hashAutomationSessionKeyPermissions`
 
 ## Integrator checklist
@@ -246,6 +288,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - [ ] Revoke attestations with the user's wallet, not the automation key
 - [ ] Register content schemas with the owner wallet via `ensureEasSchemasForModels` whenever the owner is present (automation keys cannot register schemas)
 - [ ] Use a UserOp-capable `PublishWallet` for on-chain txs; `fromEthersWallet` is fine for DataItem signing only
+- [ ] Pass a `nonceKey` that every try of a job shares, from a sender that pins its nonce, when tries run in separate processes or create new items
 - [ ] Use `assertStorageBoundToIdentity` (or equivalent) before treating Arweave owners as the identity
 - [ ] Expose “Disconnect automation” → `revokePublishAutomation`
 

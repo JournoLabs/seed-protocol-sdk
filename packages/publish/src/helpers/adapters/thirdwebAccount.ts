@@ -25,8 +25,9 @@ export type FromThirdwebAccountOptions = {
   /** What the account is, when the caller knows (see PublishWalletKind). */
   kind?: PublishWalletKind
   /**
-   * The account comes from `getManagedAccountWallet`, whose nonce hook honours
-   * `SeedTxRequest.nonceKey`. Any other account gets its nonce from Thirdweb.
+   * The account's wallet honours `SeedTxRequest.nonceKey`: it comes from `getManagedAccountWallet`,
+   * or is a smart wallet built with `overrides.getAccountNonce: seedAccountNonce`. Any other
+   * account gets its nonce from Thirdweb.
    */
   pinsNonce?: boolean
 }

@@ -99,6 +99,7 @@ mock.module('../../../helpers/chainClient', () => ({
   getPublishBlockNumber: async () => 100n,
   isContractDeployed: async () => true,
   waitForPublishReceipt: async () => RECEIPT,
+  getPublishPublicClient: () => ({ readContract: async () => 0n }),
 }))
 mock.module('../helpers/receiptAttestationMs', () => ({
   attestationMsFromReceipt: async () => 1_700_000_000_000,
@@ -116,9 +117,11 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
   simulateCallFromAccount: async () => {},
   assertExecutorModuleReadyForAccount: async () => {},
 }))
+/** Set to the EntryPoint when the publish wallet's sender pins its nonce. */
+let pinsNonceOn: string | undefined
 mock.module('../../../helpers/resolvePublishWallet', () => ({
   resolvePublishWallet: () => ({
-    txSender: { address: PUBLISHER, sendTransaction },
+    txSender: { address: PUBLISHER, sendTransaction, ...(pinsNonceOn && { pinsNonceOn }) },
   }),
 }))
 mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
@@ -131,6 +134,7 @@ const { createAttestations } = await import('./createAttestations')
 const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
 const { publishMachine } = await import('../index')
 const { AttestationOutcomeUnknownError } = await import('../../../errors')
+const { publishNonceKey } = await import('../../../helpers/pinnedNonce')
 const { parkInterruptedAttestation } = await import('../../publishManager/actors/restorableSnapshot')
 
 const attestation = (schema: string, name: string) => ({
@@ -222,6 +226,40 @@ describe('createAttestations: related items published in the same transaction', 
     expect(relatedImage.persistSeedUid.mock.calls[0]![0]).toBe(PUBLISHER)
 
     expect(result.publishedBatch?.seedUid?.toLowerCase()).toBe(POST_SEED)
+  })
+
+  test('a host nonceKey on the publish is the nonce key of its multiPublish', async () => {
+    pinsNonceOn = `0x${'7'.repeat(40)}`
+    sendTransaction.mockClear()
+    try {
+      const item = {
+        seedLocalId: 'postLocal02',
+        seedUid: undefined as string | undefined,
+        getPublishUploads: async () => [],
+        getPublishPayload: async () => requests(),
+        persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+      }
+      const actor = createActor(createAttestations, {
+        input: {
+          context: {
+            address: PUBLISHER,
+            account: {},
+            item,
+            arweaveTransactions: [],
+            publishUploads: [],
+            publishMode: 'patch',
+            nonceKey: 'run-7',
+          } as any,
+          event: {},
+        },
+      })
+      actor.start()
+      await toPromise(actor)
+      const [tx] = sendTransaction.mock.calls[0] as unknown as [{ nonceKey?: bigint }]
+      expect(tx.nonceKey).toBe(publishNonceKey('run-7'))
+    } finally {
+      pinsNonceOn = undefined
+    }
   })
 
   // A restored publish carries the item as plain data; the actor loads it and releases that hold.

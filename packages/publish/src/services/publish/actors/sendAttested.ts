@@ -9,6 +9,7 @@ import type { Address, Hex } from 'viem'
 import { AttestationAttemptOpenError, isManagedAccountPublishError, PublishTransactionRevertedError } from '~/errors'
 import { getPublishBlockNumber, waitForPublishReceipt } from '~/helpers/chainClient'
 import { getPublishViemChain } from '~/helpers/chainConfig'
+import { usableHostNonceKey } from '~/helpers/hostNonceKey'
 import { nonceKeyForAttempt } from '~/helpers/pinnedNonce'
 import { isNonceTooLowError } from '~/helpers/retryNonceTooLow'
 import type { SeedTxSender } from '~/helpers/seedSigner'
@@ -63,12 +64,15 @@ export type AttestedSend = {
    * would let the old UserOp, if it is still pending, land beside this one.
    */
   resumeAttemptId?: string
+  /** CreatePublishOptions.nonceKey: a new attempt sends under the key derived from it. */
+  hostNonceKey?: string
 }
 
 /**
  * The one way an attestation transaction goes out: commits an attempt row first, and refuses when
  * an open attempt covers any of these seeds, whichever run, retry or restore got here.
  * @throws AttestationAttemptOpenError when an open attempt is in the way; nothing was sent
+ * @throws PublishNonceKeyError when `hostNonceKey` can't be used; nothing was sent
  * @throws whatever `send` throws, after closing the attempt when that error settles what happened
  */
 export async function sendAttested({
@@ -80,6 +84,7 @@ export async function sendAttested({
   send,
   step = 'multiPublish',
   resumeAttemptId,
+  hostNonceKey,
 }: AttestedSend): Promise<{ attemptId: string; transactionHash: Hex }> {
   const serialized = JSON.stringify(requests, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
   const resumed = resumeAttemptId
@@ -99,7 +104,12 @@ export async function sendAttested({
     nonceKey = BigInt(resumed.nonceKey!)
   } else {
     attemptId = crypto.randomUUID()
-    nonceKey = sender.pinsNonceOn ? nonceKeyForAttempt(attemptId) : undefined
+    nonceKey =
+      hostNonceKey !== undefined
+        ? await usableHostNonceKey({ nonceKey: hostNonceKey, sender, directEas: step !== 'multiPublish' })
+        : sender.pinsNonceOn
+          ? nonceKeyForAttempt(attemptId)
+          : undefined
     const fromBlock = await getPublishBlockNumber()
     const blockedBy = await claimPublishAttempt({
       id: attemptId,

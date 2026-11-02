@@ -164,6 +164,32 @@ export class AttestationOutcomeUnknownError extends Error {
   }
 }
 
+export type PublishNonceKeyErrorCode =
+  /** The publish wallet's sender doesn't pin its nonce, so the key would be ignored. */
+  | 'NONCE_KEY_NOT_PINNED'
+  /** The publish attests directly to EAS, which sends several transactions; one key can't cover them. */
+  | 'NONCE_KEY_DIRECT_EAS'
+  /** A UserOp already landed under the key, so a send under it can't land. */
+  | 'NONCE_KEY_SPENT'
+
+/**
+ * `CreatePublishOptions.nonceKey` can't be used for this publish. Nothing was sent. On
+ * `NONCE_KEY_SPENT` an earlier try landed, or reverted, under the key: `findPublishByNonceKey`
+ * says which. A reverted try needs a new key to publish again.
+ */
+export class PublishNonceKeyError extends Error {
+  constructor(
+    message: string,
+    public readonly code: PublishNonceKeyErrorCode,
+    public readonly nonceKey: string,
+    /** The account the key belongs to, when known. */
+    public readonly sender?: string,
+  ) {
+    super(message)
+    this.name = 'PublishNonceKeyError'
+  }
+}
+
 /**
  * Thrown when a `multiPublish` landed and recording it locally failed. Nothing was recorded. A
  * retry records it from `unrecorded` and sends nothing.

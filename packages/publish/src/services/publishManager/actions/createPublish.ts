@@ -110,6 +110,7 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
           uplinkBitsPerSecond: publishCfg.uplinkBitsPerSecond,
         },
         confirmUpload: options?.confirmUpload === true,
+        ...(options?.nonceKey !== undefined && { nonceKey: options.nonceKey }),
       },
     })
 

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- New `CreatePublishOptions.nonceKey`: the host's own id for a publish, such as a job id. Its `multiPublish` UserOp is sent under an EntryPoint nonce key derived from it (`publishNonceKey`), so tries from different processes or with new items land once. A key can't be used without a sender that pins its nonce, on a direct EAS publish, or after a UserOp landed under it: each fails with the new `PublishNonceKeyError` (`NONCE_KEY_NOT_PINNED`, `NONCE_KEY_DIRECT_EAS`, `NONCE_KEY_SPENT`) in `checking`, before any upload. New `findPublishByNonceKey({ sender, nonceKey, fromBlock })` reads what landed under a key from EntryPoint, with no local rows.
+- `@seedprotocol/publish/thirdweb` exports `seedAccountNonce`, the `getAccountNonce` override `getManagedAccountWallet` uses. A thirdweb smart wallet built with it can be wrapped with `fromThirdwebAccount(account, { pinsNonce: true })` and pins its nonce.
 - `AttestationAttemptOpenError`, `AttestationOutcomeUnknownError` and `AttestationRecordError` have a `code`: `ATTESTATION_ATTEMPT_OPEN`, `ATTESTATION_OUTCOME_UNKNOWN` and `ATTESTATION_RECORD_FAILED`. A saved publish row keeps it in `errorCode`, so a host can tell them apart after a reload without reading the message.
 - `anchorArchive` takes `resumeFrom`. A failure after an upload throws `ArchiveAnchorInterruptedError`, whose `resume` lists what was uploaded, so a retry doesn't pay for it again.
 - `anchorArchive` and `estimateArchiveAnchorCost` take `expectedAttestations`.
