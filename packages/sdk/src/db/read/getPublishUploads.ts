@@ -88,13 +88,28 @@ const buildPublishUploadData = async (
 }
 
 /**
+ * Thrown by `readPublishUploadBytes` when an upload's file was edited after the publish opened it.
+ * Nothing was signed from it; publishing again reads the new file.
+ */
+export class PublishUploadChangedError extends Error {
+  readonly code = 'UPLOAD_CHANGED_DURING_PUBLISH' as const
+
+  constructor(readonly itemPropertyName: string) {
+    super(`Cannot publish ${itemPropertyName}: the file changed during the publish`)
+    this.name = 'PublishUploadChangedError'
+    Object.setPrototypeOf(this, PublishUploadChangedError.prototype)
+  }
+}
+
+/**
  * An upload's bytes, checked against its hash. The Blob of a file reads what is on disk now, so a
  * file edited during the publish would otherwise sign bytes other than those its tags describe.
+ * @throws PublishUploadChangedError when the bytes no longer match `contentHash`
  */
 export const readPublishUploadBytes = async (upload: PublishUploadData): Promise<Uint8Array> => {
   const bytes = new Uint8Array(await upload.blob.arrayBuffer())
   if (upload.contentHash && getContentSha256(bytes) !== upload.contentHash) {
-    throw new Error(`Cannot publish ${upload.itemPropertyName}: the file changed during the publish`)
+    throw new PublishUploadChangedError(upload.itemPropertyName)
   }
   return bytes
 }

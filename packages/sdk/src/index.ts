@@ -390,6 +390,7 @@ export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,
   readPublishUploadBytes,
+  PublishUploadChangedError,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
 export type { PublishUploadData } from './types/publish'
