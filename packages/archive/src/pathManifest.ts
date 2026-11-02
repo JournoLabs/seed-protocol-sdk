@@ -91,13 +91,14 @@ export function parsePathManifest(data: Uint8Array | string): PathManifest {
  * Fetches every path of `manifest` and returns the bag, without the asset paths that exist for the
  * index. Check it with `verifyArchive`: nothing here says the bytes are the ones anchored.
  * `fetchTransaction` resolves to the transaction's bytes, or undefined when it can't be read, which
- * throws `missing_file`.
+ * throws `missing_file`. `only` limits it to the bag paths it accepts.
  */
 export async function readBagFromManifest(
   manifest: PathManifest,
   fetchTransaction: (id: string) => Promise<Uint8Array | undefined>,
+  { only }: { only?: (path: string) => boolean } = {},
 ): Promise<Bag> {
-  const entries = Object.entries(manifest.paths).filter(([path]) => !path.startsWith('assets/'))
+  const entries = Object.entries(manifest.paths).filter(([path]) => !path.startsWith('assets/') && (only?.(path) ?? true))
   const files = await Promise.all(
     entries.map(async ([path, { id }]) => {
       const bytes = await fetchTransaction(id)

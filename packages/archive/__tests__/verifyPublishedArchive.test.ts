@@ -4,6 +4,7 @@ import {
   ARCHIVE_ANCHOR_SCHEMA_UID,
   VERSION_SCHEMA_UID,
   decodeArchiveAnchorData,
+  findArchiveAnchors,
   verifyPublishedArchive,
 } from '../src/verify'
 
@@ -11,6 +12,8 @@ const uid = (byte: string) => `0x${byte.repeat(32)}`
 const SEED = uid('11')
 const VERSION = uid('12')
 const ANCHOR = uid('13')
+const TITLE = uid('14')
+const SOURCE_TX = 'S'.repeat(43)
 const ATTESTER = `0x${'aa'.repeat(20)}`
 const OTHER = `0x${'bb'.repeat(20)}`
 const EAS = 'https://eas.test/graphql'
@@ -27,14 +30,21 @@ const txOf = (bytes: Uint8Array) => {
   return { id: bits.match(/.{6}/g)!.map((b) => alphabet[parseInt(b, 2)]).join(''), hex }
 }
 
-const makeBag = (version = VERSION, asOf = asOfIso, body = '<p>view</p>'): Bag =>
+const itemJson = (properties: Record<string, unknown> = { title: { attestationUid: TITLE, arweaveTransactionId: SOURCE_TX } }, version = VERSION) =>
+  encoder.encode(JSON.stringify({ seedUid: SEED, versionUid: version, properties }))
+
+const makeBag = (version = VERSION, asOf = asOfIso, body = '<p>view</p>', item = itemJson(undefined, version)): Bag =>
   createBag({
-    payload: [{ path: 'index.html', bytes: encoder.encode(body) }],
+    payload: [
+      { path: 'index.html', bytes: encoder.encode(body) },
+      { path: 'item.json', bytes: item },
+    ],
     info: [['Seed-Version-Uid', version], ['Seed-Bag-As-Of', asOf]],
     baggingDate: new Date(AS_OF * 1000),
   })
 
 let gateway: Map<string, Uint8Array>
+let gatewayReads: string[]
 let attestations: Record<string, any>[]
 
 const att = (id: string, schemaId: string, refUID: string, extra: Record<string, unknown> = {}) => ({
@@ -62,9 +72,12 @@ const fakeFetch = (async (url: string, init?: { body?: string }) => {
     const { where } = JSON.parse(init!.body!).variables
     const rows = where.OR
       ? attestations.filter((a) => a.id === VERSION || (a.refUID === VERSION && a.schemaId === ARCHIVE_ANCHOR_SCHEMA_UID))
-      : attestations.filter((a) => a.id === where.id.equals)
+      : where.id.in
+        ? attestations.filter((a) => where.id.in.includes(a.id))
+        : attestations.filter((a) => a.id === where.id.equals)
     return Response.json({ data: { attestations: rows } })
   }
+  gatewayReads.push(url.split('/').pop()!)
   const bytes = gateway.get(url.split('/').pop()!)
   return new Response(bytes ?? null, { status: bytes ? 200 : 404 })
 }) as typeof globalThis.fetch
@@ -75,7 +88,8 @@ const run = (extra = {}) =>
 describe('verifyPublishedArchive', () => {
   beforeEach(() => {
     gateway = new Map()
-    attestations = [att(SEED, uid('aa'), uid('00')), att(VERSION, VERSION_SCHEMA_UID, SEED)]
+    gatewayReads = []
+    attestations = [att(SEED, uid('aa'), uid('00')), att(VERSION, VERSION_SCHEMA_UID, SEED), att(TITLE, uid('bb'), VERSION)]
   })
 
   it('passes every check it can run, and reports the proof it has no way to run', async () => {
@@ -85,9 +99,11 @@ describe('verifyPublishedArchive', () => {
     expect(result.fixity.status).toBe('passed')
     expect(result.anchor.status).toBe('passed')
     expect(result.identity.status).toBe('passed')
+    expect(result.record.status).toBe('passed')
     expect(result.revocation.status).toBe('passed')
     expect(result.timestamp.status).toBe('not_checked')
     expect(result.archiveAnchor).toMatchObject({ uid: ANCHOR, coveredUntil: AS_OF, manifestTx, attester: ATTESTER })
+    expect(result.recorded).toEqual({ seedUid: SEED, versionUid: VERSION, attestations: { title: TITLE }, transactions: { title: SOURCE_TX } })
   })
 
   it('fails the anchor for a bag with consistent manifests that was not the one anchored', async () => {
@@ -109,14 +125,14 @@ describe('verifyPublishedArchive', () => {
   it('ignores an anchor from anyone but the attester', async () => {
     publish(makeBag(), undefined, { attester: OTHER })
     const result = await run()
-    expect(result.attestation.status).toBe('failed')
+    expect(result.attestation.status).toBe('no_anchor')
     expect(result.archiveAnchor).toBeUndefined()
     expect(result.fixity.status).toBe('not_checked')
   })
 
   it('ignores a revoked anchor', async () => {
     publish(makeBag(), undefined, { revoked: true, revocationTime: AS_OF + 20 })
-    expect((await run()).attestation.status).toBe('failed')
+    expect((await run()).attestation.status).toBe('no_anchor')
   })
 
   it("refuses a Version that isn't from its seed's attester", async () => {
@@ -141,7 +157,86 @@ describe('verifyPublishedArchive', () => {
   it('picks the anchor for a time, and fails when there is none', async () => {
     publish(makeBag())
     expect((await run({ asOf: AS_OF })).attestation.status).toBe('passed')
-    expect((await run({ asOf: AS_OF + 1 })).attestation.status).toBe('failed')
+    expect((await run({ asOf: AS_OF + 1 })).attestation.status).toBe('no_anchor')
+  })
+
+  it('reports a Version with no anchor as no_anchor, not a failure', async () => {
+    const result = await run()
+    expect(result.attestation.status).toBe('no_anchor')
+    expect(result.revocation.status).toBe('passed')
+    expect(result.fixity.status).toBe('not_checked')
+  })
+
+  it("says not_checked for a Version the indexer hasn't reported", async () => {
+    attestations = attestations.filter((a) => a.id !== VERSION)
+    const result = await run()
+    expect(result.attestation.status).toBe('not_checked')
+    expect(result.attestation.detail).toContain("hasn't reported")
+  })
+
+  it('fails revocation for a revoked seed', async () => {
+    publish(makeBag())
+    Object.assign(attestations.find((a) => a.id === SEED)!, { revoked: true, revocationTime: AS_OF + 30 })
+    const result = await run()
+    expect(result.revocation.status).toBe('failed')
+    expect(result.revocation.detail).toContain('seed')
+  })
+
+  it('fails the record for an attestation that is on another Version or from someone else', async () => {
+    const elsewhere = uid('15')
+    const stranger = uid('16')
+    attestations.push(att(elsewhere, uid('bb'), uid('99')), att(stranger, uid('bb'), VERSION, { attester: OTHER }))
+    publish(makeBag(VERSION, asOfIso, '<p>view</p>', itemJson({ title: { attestationUid: TITLE }, body: { attestationUid: elsewhere }, by: { attestationUid: stranger } })))
+    const result = await run()
+    expect(result.anchor.status).toBe('passed')
+    expect(result.record.status).toBe('failed')
+    expect(result.record.detail).toContain(`body (${elsewhere})`)
+    expect(result.record.detail).toContain(`by (${stranger})`)
+    expect(result.record.detail).not.toContain('title')
+  })
+
+  it('fails the record when item.json names another Version', async () => {
+    const bag = makeBag(VERSION, asOfIso, '<p>view</p>', itemJson(undefined, uid('99')))
+    publish(bag)
+    expect((await run()).record.status).toBe('failed')
+  })
+
+  it('checks the tag files alone when the payload is over maxBytes', async () => {
+    const bag = makeBag()
+    publish(bag)
+    const payload = bag.files.filter((f) => f.path.startsWith('data/'))
+    const payloadBytes = payload.reduce((n, f) => n + f.bytes.byteLength, 0)
+    const result = await run({ maxBytes: payloadBytes - 1 })
+    expect(result.size).toEqual({ payloadBytes, payloadFiles: payload.length })
+    expect(result.anchor.status).toBe('passed')
+    expect(result.identity.status).toBe('passed')
+    expect(result.fixity.status).toBe('not_checked')
+    expect(result.record.status).toBe('not_checked')
+    for (const file of payload) expect(gatewayReads).not.toContain(txOf(file.bytes).id)
+
+    expect((await run({ maxBytes: payloadBytes })).fixity.status).toBe('passed')
+  })
+
+  it('reports progress through the payload against Payload-Oxum', async () => {
+    const bag = makeBag()
+    publish(bag)
+    const progress: { loadedBytes: number; totalBytes: number }[] = []
+    await run({ onProgress: (p: { loadedBytes: number; totalBytes: number }) => progress.push(p) })
+    const payloadBytes = bag.files.filter((f) => f.path.startsWith('data/')).reduce((n, f) => n + f.bytes.byteLength, 0)
+    expect(progress.length).toBe(2)
+    expect(progress.at(-1)).toEqual({ loadedBytes: payloadBytes, totalBytes: payloadBytes })
+  })
+
+  it('stops when the signal aborts', async () => {
+    publish(makeBag())
+    const controller = new AbortController()
+    const reason = new Error('reader left')
+    const abortingFetch = (async (url: string, init?: { body?: string; signal?: AbortSignal }) => {
+      if (url !== EAS) controller.abort(reason)
+      if (init?.signal?.aborted) throw init.signal.reason
+      return fakeFetch(url, init)
+    }) as typeof globalThis.fetch
+    await expect(run({ fetch: abortingFetch, signal: controller.signal })).rejects.toBe(reason)
   })
 
   it('says not_checked, and does not throw, when a service is down', async () => {
@@ -163,6 +258,27 @@ describe('verifyPublishedArchive', () => {
       url.startsWith('https://down.test') ? Promise.reject(new Error('offline')) : fakeFetch(url, init)) as typeof globalThis.fetch
     const result = await run({ fetch: fetchOne, gateways: ['https://down.test', GATEWAY] })
     expect(result.anchor.status).toBe('passed')
+  })
+})
+
+describe('findArchiveAnchors', () => {
+  beforeEach(() => {
+    gateway = new Map()
+    gatewayReads = []
+    attestations = [att(SEED, uid('aa'), uid('00')), att(VERSION, VERSION_SCHEMA_UID, SEED)]
+  })
+
+  it("lists the attester's live anchors without reading a gateway", async () => {
+    const { manifestTx } = publish(makeBag())
+    attestations.push(att(uid('20'), ARCHIVE_ANCHOR_SCHEMA_UID, VERSION, { attester: OTHER, data: attestations.at(-1)!.data }))
+    const anchors = await findArchiveAnchors({ versionUid: VERSION, easEndpoint: EAS, fetch: fakeFetch })
+    expect(anchors).toEqual([{ uid: ANCHOR, attester: ATTESTER, coveredUntil: AS_OF, manifestTx, tagmanifestSha256: expect.any(String), timeCreated: AS_OF + 10 }])
+    expect(gatewayReads).toEqual([])
+  })
+
+  it("returns none for a Version the indexer hasn't reported", async () => {
+    attestations = []
+    expect(await findArchiveAnchors({ versionUid: VERSION, easEndpoint: EAS, fetch: fakeFetch })).toEqual([])
   })
 })
 

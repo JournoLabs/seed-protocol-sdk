@@ -158,15 +158,32 @@ const result = await verifyPublishedArchive({ versionUid, easEndpoint, gateways:
 Each check is reported on its own, with no overall verdict:
 
 - `attestation`: the attester of the Version and its seed has a live anchor on it. Anyone else's is
-  ignored. Pass `asOf` for the anchor of one time; the default is the newest.
+  ignored. Pass `asOf` for the anchor of one time; the default is the newest. `no_anchor` means the
+  Version is on EAS with no such anchor, and `not_checked` that EAS hasn't reported the Version.
 - `fixity`: the fetched files match the bag's own manifests.
 - `anchor`: the bag's tag manifest matches the anchored hash.
 - `identity`: the bag says it is this Version as of the anchor's time.
-- `revocation`: the Version is live on EAS. A revoked one fails here while the bag still checks out.
+- `record`: every attestation `data/item.json` names is on this Version from its attester. It doesn't
+  compare values, which needs the schema.
+- `revocation`: the Version and its seed are live on EAS. A revoked one fails here while the bag still
+  checks out.
 - `timestamp`: always `not_checked`, since anchors carry no Bitcoin proof yet.
 
+The result also has `recorded`, the seed, Version, attestations and Arweave transactions from
+`data/item.json`, which is what a passed `record` vouches for. `size` gives `Payload-Oxum` from
+bag-info.txt.
+
+The tag files are fetched first. `maxBytes` skips the payload when `Payload-Oxum` is over it, and then
+`anchor` and `identity` are still checked while `fixity` and `record` are `not_checked`. `onProgress`
+receives `{ loadedBytes, totalBytes }` after each payload file, and `signal` stops the reads.
+
 It doesn't throw for what it finds. A service that can't be reached leaves its checks `not_checked`
-with the reason in `detail`, so an outage never reads as a forgery.
+with the reason in `detail`, so an outage never reads as a forgery. It throws only when `signal`
+aborts.
+
+`findArchiveAnchors({ versionUid, easEndpoint })` lists the live anchors from the Version's attester,
+newest first, without downloading a bag, for deciding whether to offer the check. It throws when EAS
+can't be read.
 
 ## A bag on Arweave
 
