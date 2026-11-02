@@ -66,7 +66,12 @@ function middlewareHeaders(
   hookName: 'configureServer' | 'configurePreviewServer',
 ): Record<string, string> | undefined {
   let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
-  hookFn(plugin, hookName)({ middlewares: { use: (m: typeof middleware) => { middleware = m } } })
+  hookFn(plugin, hookName)({
+    middlewares: { use: (m: typeof middleware) => { middleware = m } },
+    // For the RDF sidecar check, which finds no sidecar here.
+    config: { root: testDir, logger: createLogger('silent') },
+    watcher: { add: () => {}, on: () => {} },
+  })
   if (!middleware) return undefined
   const applied: Record<string, string> = {}
   const res = {

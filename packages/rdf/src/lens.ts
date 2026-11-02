@@ -33,9 +33,17 @@ export type LensSchema = {
 export type RdfSidecar = {
   /** The schema these terms were written for. Must equal the schema's `id`. */
   readonly schemaId: string
+  /** The schema `version` the sidecar was last synced with. Informational: terms are read by id. */
+  readonly schemaVersion?: number
   readonly '@context'?: { readonly [prefix: string]: unknown }
   readonly terms: { readonly [id: string]: string }
 }
+
+/** JSON with object keys sorted, so key order doesn't change it. */
+export const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, v) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
+  )
 
 export type RdfLens = {
   readonly schema: LensSchema
@@ -58,12 +66,12 @@ export type CompiledLens = {
   propertyOf(modelType: string, easPropertyName: string): PropertyEntry | undefined
 }
 
-const RELATION_TYPES = new Set(['relation', 'image', 'file', 'html', 'json', 'blob'])
+export const RELATION_TYPES = new Set(['relation', 'image', 'file', 'html', 'json', 'blob'])
 
 const level = (...values: (string | undefined)[]): NameMatchLevel | undefined =>
   values.find((value): value is NameMatchLevel => isNameMatchLevel(value))
 
-function prefixesOf(sidecar: RdfSidecar): Map<string, string> {
+export function prefixesOf(sidecar: RdfSidecar): Map<string, string> {
   const prefixes = new Map<string, string>()
   for (const [prefix, value] of Object.entries(sidecar['@context'] ?? {})) {
     if (!prefix.startsWith('@') && typeof value === 'string') prefixes.set(prefix, value)
@@ -72,7 +80,7 @@ function prefixesOf(sidecar: RdfSidecar): Map<string, string> {
 }
 
 /** The absolute IRI of a term, or undefined when it can't be read. */
-function expandTerm(term: string, prefixes: ReadonlyMap<string, string>): string | undefined {
+export function expandTerm(term: string, prefixes: ReadonlyMap<string, string>): string | undefined {
   const colon = term.indexOf(':')
   const prefix = colon > 0 ? prefixes.get(term.slice(0, colon)) : undefined
   const expanded = prefix !== undefined ? prefix + term.slice(colon + 1) : term

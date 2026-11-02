@@ -14,6 +14,13 @@ declare module 'n3' {
     match(subject?: RDF.Term | null, predicate?: RDF.Term | null, object?: RDF.Term | null, graph?: RDF.Term | null): RDF.DatasetCore
     [Symbol.iterator](): Iterator<RDF.Quad>
     getObjects(subject: RDF.Term | string | null, predicate: RDF.Term | string | null, graph: RDF.Term | string | null): RDF.Quad_Object[]
+    getSubjects(predicate: RDF.Term | string | null, object: RDF.Term | string | null, graph: RDF.Term | string | null): RDF.Quad_Subject[]
+    getQuads(
+      subject: RDF.Term | string | null,
+      predicate: RDF.Term | string | null,
+      object: RDF.Term | string | null,
+      graph: RDF.Term | string | null,
+    ): RDF.Quad[]
   }
 }
 

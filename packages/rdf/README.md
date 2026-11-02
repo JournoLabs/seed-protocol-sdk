@@ -94,5 +94,55 @@ term. Values are a prefixed name, using the top-level strings of `@context`, or 
 - On-chain names are matched to the Schema the way sync matches them, including `nameMatch`. An
   attestation made under a name the Schema no longer matches keeps its protocol predicate.
 
+The graph also records which mapping it used: a `prov:Activity` at `{base}export/{sha256}`
+with `prov:used <ni:///sha-256;…>` (RFC 6920), the SHA-256 of the sidecar's `schemaId`, `terms`
+and `@context` as JSON with sorted keys. The node stands for the mapping, not for one export, so
+two exports with the same sidecar name the same node, and it has no time or agent. Like every
+minted IRI it uses the provisional base; keep it out of anything anchored.
+
 A sidecar whose `schemaId` isn't the Schema's `id` throws. A term with no matching id or a prefix
 `@context` doesn't define is a warning, and the export goes on without it.
+
+## SHACL
+
+```ts
+import { toShacl } from '@seedprotocol/rdf'
+
+const shapes = toShacl({ schema, sidecar }) // Turtle
+```
+
+`toShacl` describes the graphs `exportSeeds` gives with the same lens, in SHACL 2017. Each model is a
+`sh:NodeShape` targeting the class its seeds get, and each property a property shape on the
+predicate they get:
+
+| Schema | Shape |
+|---|---|
+| Text, Boolean, Date | `sh:datatype` `xsd:string`, `xsd:boolean`, `xsd:dateTime` |
+| Number | `sh:or` of `xsd:integer`, `xsd:decimal` and `xsd:double` |
+| Relation, Image, File, Html, Json | `sh:nodeKind sh:IRI` |
+| List | every cell of the `rdf:List` has one `rdf:first` and one `rdf:rest`; a List of relations' members are IRIs |
+| `required: true` | `sh:minCount 1` |
+
+Every property has `sh:maxCount 1`. A relation's class isn't checked, because the related seed is
+often not in the export. For shapes over the protocol IRIs, pass a sidecar with empty `terms`.
+
+## Keeping the sidecar current
+
+The sidecar's own `@context` can carry a type-scoped context with your local names, for tools
+that read the file as JSON-LD. It's generated from `terms`, so it goes stale when a model or
+property is renamed; `terms` doesn't, because it's keyed by id.
+
+```bash
+seed-rdf check              # stale and unreadable terms, unmapped properties; exits 1 on the first two
+seed-rdf sync --write       # regenerate @context and schemaVersion from terms and the current names
+seed-rdf suggest            # draft schema.org / dcterms terms for unmapped names such as title or author
+seed-rdf suggest --write    # add them to the sidecar, creating it if needed
+```
+
+Each command reads `seedSchema.json` and `seedSchema.context.jsonld` in the working directory;
+`--schema` and `--sidecar` take other paths. `sync` and `suggest` print what they would write
+unless given `--write`, and `sync` keeps stale terms: removing a mapping is your call. The same
+functions are exported as `checkSidecar`, `syncSidecar`, `suggestTerms` and `sidecarContext`.
+
+`seedVitePlugin` from `@seedprotocol/vite` runs the check on the dev server and warns when the
+schema or sidecar changes.

@@ -10,6 +10,7 @@ import {
 import { appendAliases } from './aliases'
 import { warnAboutNodeGlobals } from './nodeGlobals'
 import { nodePolyfillPlugins } from './nodePolyfills'
+import { watchRdfSidecar, type RdfSidecarOptions } from './rdfSidecar'
 
 export interface SeedVitePluginOptions {
   /**
@@ -49,7 +50,19 @@ export interface SeedVitePluginOptions {
    * @default false
    */
   debug?: boolean
+
+  /**
+   * On the dev server, check the app's RDF sidecar (the `@seedprotocol/rdf` lens mapping) against
+   * its schema at startup and whenever either file changes, and warn about stale terms or an
+   * `@context` a rename left behind. Runs only when the sidecar exists and the app has
+   * @seedprotocol/rdf installed; never writes either file. Set `false` to turn it off, or pass the
+   * paths, relative to the Vite root.
+   * @default { schema: 'seedSchema.json', sidecar: 'seedSchema.context.jsonld' }
+   */
+  rdfSidecar?: false | RdfSidecarOptions
 }
+
+export type { RdfSidecarOptions }
 
 /**
  * Packages deduplicated when the app root resolves them, so a linked or workspace Seed package
@@ -148,7 +161,7 @@ function applyIsolationHeaderMiddleware(
   })
 }
 
-const KNOWN_OPTIONS = new Set(['fsModules', 'debug', 'includeNodePolyfills', 'isolationHeaders'])
+const KNOWN_OPTIONS = new Set(['fsModules', 'debug', 'includeNodePolyfills', 'isolationHeaders', 'rdfSidecar'])
 
 /**
  * The Vite settings a browser app using @seedprotocol/sdk needs: cross-origin isolation headers
@@ -170,6 +183,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     debug = false,
     includeNodePolyfills = false,
     isolationHeaders: isolationHeadersOption,
+    rdfSidecar = {},
   } = options
 
   const isolationHeaders = resolveIsolationHeaders(isolationHeadersOption)
@@ -249,6 +263,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
 
     configureServer(server) {
       if (serverIsolationHeaders) applyIsolationHeaderMiddleware(server, serverIsolationHeaders)
+      if (rdfSidecar) void watchRdfSidecar(server, rdfSidecar)
     },
 
     configurePreviewServer(server) {

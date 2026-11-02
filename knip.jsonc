@@ -31,7 +31,7 @@
       "ignoreDependencies": ["@graphql-codegen/introspection"]
     },
     "packages/rdf": {
-      "entry": ["src/index.ts", "__tests__/**/*.test.ts"],
+      "entry": ["src/index.ts", "src/bin.ts", "__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
     },
     "packages/bundler-core": {
