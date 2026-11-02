@@ -87,7 +87,12 @@ describe('overwriting OPFS files through ZenFS', () => {
     expect(new TextDecoder().decode(await readPublishUploadBytes(upload))).toBe('first')
 
     await fs.promises.writeFile(path, 'second, longer')
-    await expect(readPublishUploadBytes(upload)).rejects.toThrow('the file changed during the publish')
+    await expect(readPublishUploadBytes(upload)).rejects.toMatchObject({
+      name: 'PublishUploadChangedError',
+      code: 'UPLOAD_CHANGED_DURING_PUBLISH',
+      itemPropertyName: 'body',
+      message: 'Cannot publish body: the file changed during the publish',
+    })
   })
 
   it('promises.writeFile: longer content, then shorter', async () => {

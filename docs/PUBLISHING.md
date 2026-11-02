@@ -158,7 +158,8 @@ The publish package’s verification step checks that each **expected schema** i
 Each attestation transaction commits a row to `publish_attempts` before it is sent, so a lost receipt,
 a closed tab or a crash can't lead to a second send ([ADR 0030](adr/0030-attestation-sends-are-journaled.md)).
 A row is open until it is recorded, reverted, or an error proves nothing went out. While one is open, a
-send covering any seed in its requests fails with `AttestationAttemptOpenError`, including a new
+send covering any seed in its requests fails with `AttestationAttemptOpenError` (code
+`ATTESTATION_ATTEMPT_OPEN`), including a new
 Publish and a publish of a related item alone. This also means a publish needs its database: with none,
 the send is refused.
 
@@ -181,7 +182,8 @@ hash was lost. A tab closed during a wallet prompt does this even if the author 
 
 Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
 `describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
-`snapshot.context.error` is an `AttestationOutcomeUnknownError` with `attemptId` and `transactionHash`.
+`snapshot.context.error` is an `AttestationOutcomeUnknownError` (code `ATTESTATION_OUTCOME_UNKNOWN`)
+with `attemptId` and `transactionHash`.
 `retryAttestations` looks again and never sends blind. To settle it:
 
 ```typescript

@@ -118,6 +118,7 @@ export class PublishTransactionRevertedError extends Error {
  * transaction may have landed, so a send could attest them twice. Nothing was sent.
  */
 export class AttestationAttemptOpenError extends Error {
+  readonly code = 'ATTESTATION_ATTEMPT_OPEN' as const
   public readonly attemptId: string
   public readonly attemptStatus: string
   public readonly transactionHash: string | null
@@ -142,6 +143,7 @@ export class AttestationAttemptOpenError extends Error {
  * here can tell. Retry looks again. `PublishManager.resolveAttestationAttempt` settles it.
  */
 export class AttestationOutcomeUnknownError extends Error {
+  readonly code = 'ATTESTATION_OUTCOME_UNKNOWN' as const
   public readonly attemptId: string
   public readonly transactionHash: string | null
 
@@ -167,6 +169,8 @@ export class AttestationOutcomeUnknownError extends Error {
  * retry records it from `unrecorded` and sends nothing.
  */
 export class AttestationRecordError extends Error {
+  readonly code = 'ATTESTATION_RECORD_FAILED' as const
+
   constructor(
     public readonly unrecorded: UnrecordedAttestation,
     cause: unknown,

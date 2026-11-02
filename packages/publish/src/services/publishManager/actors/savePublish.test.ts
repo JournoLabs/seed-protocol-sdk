@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { BaseDb } from '@seedprotocol/sdk'
-import { Eip7702ModularAccountPublishError, ManagedAccountPublishError } from '../../../errors'
+import {
+  AttestationAttemptOpenError,
+  AttestationOutcomeUnknownError,
+  AttestationRecordError,
+  Eip7702ModularAccountPublishError,
+  ManagedAccountPublishError,
+} from '../../../errors'
 import {
   errorFieldsFromContext,
   isTerminalPublishRowStatus,
@@ -99,6 +105,26 @@ describe('errorFieldsFromContext', () => {
   test('saves the code from Eip7702ModularAccountPublishError', () => {
     const err = new Eip7702ModularAccountPublishError('Not upgraded', 'EIP7702_MODULAR_NOT_UPGRADED')
     expect(errorFieldsFromContext({ error: err }, 'failed').errorCode).toBe('EIP7702_MODULAR_NOT_UPGRADED')
+  })
+
+  test('saves the code of each attempt error, also after a restore from the DB', () => {
+    const attempt = { id: 'attempt1', status: 'sending', txHash: null }
+    const cases: Array<[Error, string]> = [
+      [new AttestationAttemptOpenError('post', attempt), 'ATTESTATION_ATTEMPT_OPEN'],
+      [new AttestationOutcomeUnknownError('post', attempt), 'ATTESTATION_OUTCOME_UNKNOWN'],
+      [
+        new AttestationRecordError(
+          { attemptId: 'attempt1', transactionHash: '0x01', requests: [], attester: '0x02' },
+          new Error('disk full'),
+        ),
+        'ATTESTATION_RECORD_FAILED',
+      ],
+    ]
+    for (const [err, code] of cases) {
+      expect(errorFieldsFromContext({ error: err }, 'failed').errorCode).toBe(code)
+      const restored = JSON.parse(JSON.stringify(err)) as unknown
+      expect(errorFieldsFromContext({ error: restored }, 'in_progress').errorCode).toBe(code)
+    }
   })
 
   test('clears the code for errors without one', () => {
