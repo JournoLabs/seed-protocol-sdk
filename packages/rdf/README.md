@@ -94,6 +94,12 @@ term. Values are a prefixed name, using the top-level strings of `@context`, or 
 - On-chain names are matched to the Schema the way sync matches them, including `nameMatch`. An
   attestation made under a name the Schema no longer matches keeps its protocol predicate.
 
+The graph also records which mapping it used: a `prov:Activity` at `{base}export/{sha256}`
+with `prov:used <ni:///sha-256;…>` (RFC 6920), the SHA-256 of the sidecar's `schemaId`, `terms`
+and `@context` as JSON with sorted keys. The node stands for the mapping, not for one export, so
+two exports with the same sidecar name the same node, and it has no time or agent. Like every
+minted IRI it uses the provisional base; keep it out of anything anchored.
+
 A sidecar whose `schemaId` isn't the Schema's `id` throws. A term with no matching id or a prefix
 `@context` doesn't define is a warning, and the export goes on without it.
 

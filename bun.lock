@@ -283,7 +283,11 @@
     "packages/rdf": {
       "name": "@seedprotocol/rdf",
       "version": "0.8.0",
+      "bin": {
+        "seed-rdf": "./dist/bin.js",
+      },
       "dependencies": {
+        "@noble/hashes": "^1.8.0",
         "@rdfjs/types": "^2.0.1",
         "@seedprotocol/eas": "workspace:*",
         "@seedprotocol/query": "workspace:*",

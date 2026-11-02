@@ -165,6 +165,48 @@ describe('lens', () => {
   })
 })
 
+describe('lens provenance', () => {
+  const PROV = 'http://www.w3.org/ns/prov#'
+  const activities = (graph: StateGraph) =>
+    store(graph)
+      .getSubjects(`${RDF}type`, `${PROV}Activity`, null)
+      .map((s) => ({ id: s.value, used: store(graph).getObjects(s, `${PROV}used`, null).map((o) => o.value) }))
+
+  it('names the sidecar by its SHA-256 in prov:used on an activity minted from the hash', async () => {
+    const [activity, ...rest] = activities(await lensExport())
+    expect(rest).toEqual([])
+    const hex = activity!.id.slice(`${B}export/`.length)
+    expect(activity!.id).toMatch(new RegExp(`^${B}export/[0-9a-f]{64}$`))
+    expect(activity!.used).toEqual([`ni:///sha-256;${Buffer.from(hex, 'hex').toString('base64url')}`])
+    // Only a type and the hash: nothing that would differ between two exports.
+    expect(store(await lensExport()).getQuads(activity!.id, null, null, null)).toHaveLength(2)
+  })
+
+  it('gives the same IRI for the same sidecar, whatever its key order or schemaVersion', async () => {
+    const reordered: RdfSidecar = {
+      terms: Object.fromEntries(Object.entries(sidecar.terms).reverse()),
+      '@context': Object.fromEntries(Object.entries(sidecar['@context']!).reverse()),
+      schemaId: sidecar.schemaId,
+      schemaVersion: 9,
+    }
+    expect(activities(await lensExport({ schema, sidecar: reordered }))).toEqual(activities(await lensExport()))
+  })
+
+  it('gives another IRI when a term or the @context changes', async () => {
+    const before = activities(await lensExport())
+    const term = activities(await lensExport({ schema, sidecar: { ...sidecar, terms: { ...sidecar.terms, 'prop-title': 'schema:name' } } }))
+    const context = activities(await lensExport({ schema, sidecar: { ...sidecar, '@context': { ...sidecar['@context'], ex: 'https://example.org/' } } }))
+    expect(new Set([before[0]!.id, term[0]!.id, context[0]!.id]).size).toBe(3)
+    expect(new Set([before[0]!.used[0], term[0]!.used[0], context[0]!.used[0]]).size).toBe(3)
+  })
+
+  it('writes no activity without a lens', async () => {
+    const graph = await exportSeeds([POST, HTML], { chainId: CHAIN_ID, source: 'local' })
+    expect(activities(graph)).toEqual([])
+    expect(toNQuads(graph)).not.toContain('/export/')
+  })
+})
+
 describe('lens output, checked by independent parsers', () => {
   const canonical = (nquads: string): Promise<string> =>
     canonize(nquads, { algorithm: 'RDFC-1.0', inputFormat: 'application/n-quads' })

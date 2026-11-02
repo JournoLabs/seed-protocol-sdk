@@ -39,6 +39,12 @@ export type RdfSidecar = {
   readonly terms: { readonly [id: string]: string }
 }
 
+/** JSON with object keys sorted, so key order doesn't change it. */
+export const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, v) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
+  )
+
 export type RdfLens = {
   readonly schema: LensSchema
   readonly sidecar: RdfSidecar

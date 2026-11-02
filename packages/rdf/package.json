@@ -43,6 +43,7 @@
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "@rdfjs/types": "^2.0.1",
     "@seedprotocol/eas": "workspace:*",
     "@seedprotocol/query": "workspace:*"

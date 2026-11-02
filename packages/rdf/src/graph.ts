@@ -1,6 +1,8 @@
+import { sha256 } from '@noble/hashes/sha256'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
 import type { SeedAttestations, SeedPropertyAttestation } from '@seedprotocol/query'
 import { PROV, RDF_TYPE, XSD, assertIri, iriScheme, type IriScheme } from './iri.js'
-import { compileLens, type CompiledLens, type RdfLens } from './lens.js'
+import { canonicalJson, compileLens, type CompiledLens, type RdfLens, type RdfSidecar } from './lens.js'
 
 /** An IRI, a typed literal, or an RDF list of either. */
 export type RdfObject =
@@ -49,6 +51,17 @@ const STORAGE_TRANSACTION = 'storage_transaction_id'
 const STORAGE_NAMES = new Set([STORAGE_TRANSACTION, 'storage_provider_transaction_id'])
 // Assembly skips this value as a relation (see relationValuesToExclude in @seedprotocol/query).
 const NOT_A_SEED = '0x0000000000000000000000000000000000000000000000000000000000000020'
+
+/**
+ * The SHA-256 of the parts of a sidecar the lens reads (`schemaId`, `terms`, `@context`), as
+ * canonical JSON with sorted keys. `schemaVersion` is left out: it changes no term.
+ */
+function sidecarHash({ schemaId, terms, '@context': context }: RdfSidecar): Uint8Array {
+  return sha256(utf8ToBytes(canonicalJson({ schemaId, terms, '@context': context ?? {} })))
+}
+
+const base64Url = (bytes: Uint8Array): string =>
+  btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
 const iri = (value: string): RdfObject => ({ kind: 'iri', iri: value })
 const literal = (value: string, datatype: string): RdfObject => ({ kind: 'literal', value, datatype })
@@ -145,7 +158,10 @@ function propertyObject(
  * Image, File, Html or Json seed's `storage_transaction_id` also gives `seed:content <ar://…>`.
  * Without a lens, values are typed from the EAS type alone: a Number (an EAS `string`, ADR 0010)
  * is an `xsd:string`, and a Date (`uint256` seconds) an `xsd:integer`. With one, a Number is typed
- * per value and a Date is an `xsd:dateTime`, and mapped terms replace the protocol IRIs.
+ * per value and a Date is an `xsd:dateTime`, and mapped terms replace the protocol IRIs, and the
+ * graph gets a `prov:Activity` `{base}export/{sha256}` whose `prov:used` is the sidecar's hash as
+ * an RFC 6920 `ni:///sha-256;…` IRI. That IRI is under the provisional base: keep it out of
+ * anything anchored, such as an archive bag.
  */
 export function stateGraph(seeds: readonly SeedAttestations[], options: StateGraphOptions): StateGraph {
   const iris = iriScheme(options.chainId, options.base)
@@ -191,6 +207,15 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
         }
       }
     }
+  }
+
+  if (options.lens) {
+    // The node stands for the mapping, not for one export: its IRI comes from the hash, so exports
+    // made with the same sidecar name the same node. No time or agent, which would differ per export.
+    const hash = sidecarHash(options.lens.sidecar)
+    const activity = node(`${iris.base}export/${bytesToHex(hash)}`)
+    activity.add(RDF_TYPE, iri(`${PROV}Activity`))
+    activity.add(`${PROV}used`, iri(`ni:///sha-256;${base64Url(hash)}`))
   }
 
   return { iris, nodes: [...nodes.values()], prefixes: lens?.prefixes ?? new Map(), warnings }

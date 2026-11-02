@@ -1,6 +1,6 @@
 import { easName, fuzzyNameKey } from '@seedprotocol/eas'
 import { XSD, iriScheme } from './iri.js'
-import { RELATION_TYPES, expandTerm, prefixesOf, type RdfLens, type RdfSidecar } from './lens.js'
+import { RELATION_TYPES, canonicalJson, expandTerm, prefixesOf, type RdfLens, type RdfSidecar } from './lens.js'
 
 export type SidecarContextOptions = {
   /** Base of the protocol class for a model whose properties are mapped but which isn't. Default PROVISIONAL_BASE_IRI. */
@@ -78,12 +78,6 @@ function targets(schema: SidecarSchema): SchemaTarget[] {
   ])
 }
 
-// JSON with object keys sorted, so key order doesn't count as a difference.
-const stable = (value: unknown): string =>
-  JSON.stringify(value, (_key, v) =>
-    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v,
-  )
-
 function assertSameSchema({ schema, sidecar }: RdfLens): void {
   if (!schema.id || schema.id !== sidecar.schemaId) {
     throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id'}`)
@@ -105,7 +99,7 @@ export function checkSidecar(
     stale: terms.filter(({ id }) => !ids.has(id)),
     invalid: terms.filter(({ id, term }) => ids.has(id) && !expandTerm(term, prefixes)),
     unmapped: all.filter((t) => !t.id || sidecar.terms[t.id] === undefined),
-    contextOutdated: stable(sidecar['@context'] ?? {}) !== stable(sidecarContext(lens, options)),
+    contextOutdated: canonicalJson(sidecar['@context'] ?? {}) !== canonicalJson(sidecarContext(lens, options)),
     versionOutdated: schema.version !== undefined && sidecar.schemaVersion !== schema.version,
   }
 }
