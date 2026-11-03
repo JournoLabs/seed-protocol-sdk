@@ -27,7 +27,7 @@ import {
   isValidEasAttestationUid,
   type Attestation,
 } from '@seedprotocol/eas'
-import { parseEasPropertyMetadata } from '@seedprotocol/query'
+import { parseEasPropertyMetadata, readSeedAtTime, type SeedAtTime } from '@seedprotocol/query'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { findSeedRow } from '@/db/read/findSeedRow'
@@ -49,7 +49,6 @@ import { getPropertyDefinitions, type PropertyDefinition } from '@/helpers/prope
 import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { versions } from '@/seedSchema'
 import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind, type StoredValueKind } from '@/storageValue/resolve'
-import { readSeedAtTime, type SeedAtTime } from './seedAtTime'
 
 /**
  * Exports a published item as a BagIt bag (RFC 8493) that an archive can ingest without Seed
