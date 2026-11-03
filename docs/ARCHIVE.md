@@ -5,8 +5,10 @@ bag: a directory of files with checksum manifests that BagIt tools (the Library 
 `bagit.py`, Archivematica's bag transfers) can validate without Seed code. The bag holds
 the item's Html, its files and its attested values, with Dublin Core and PREMIS metadata.
 
+`exportArchive` is in `@seedprotocol/archive`, which builds on the SDK: install both.
+
 ```ts
-import { exportArchive } from '@seedprotocol/sdk'
+import { exportArchive } from '@seedprotocol/archive'
 import { writeBagDirectory } from '@seedprotocol/archive/node'
 
 const { bag, omitted } = await exportArchive(post, { sourceOrganization: 'The Daily Example' })
@@ -122,18 +124,18 @@ device to device.
 
 ## Verifying a bag
 
-`verifyArchive(bag, { expectedTagmanifestSha256 })` from `@seedprotocol/archive` needs no Seed code
-or network. `fixity` checks the bag against its own manifests. `anchor` compares the SHA-256 of
+`verifyArchive(bag, { expectedTagmanifestSha256 })` from `@seedprotocol/archive` reads no rows
+and no network. `fixity` checks the bag against its own manifests. `anchor` compares the SHA-256 of
 `tagmanifest-sha256.txt` with a hash from outside the bag, and stays `not_checked` without one.
 Each check is reported on its own, because anyone who changes a file can rewrite the manifests too:
 `fixity` alone says the bag is intact, and not that it's the bag you expect.
 
-`verifyArchiveAgainstChain(bag, item)` from `@seedprotocol/sdk` adds `rebuilt`: it makes a
+`verifyArchiveAgainstChain(bag, item)` adds `rebuilt`: it makes a
 reproducible export of the item at the bag's `Seed-Bag-As-Of` and compares the two bags, listing
 what differs in `differingFiles`. `item` can be `{ seedUid, modelName, schemaName }`.
 
 ```ts
-import { verifyArchiveAgainstChain } from '@seedprotocol/sdk'
+import { verifyArchiveAgainstChain } from '@seedprotocol/archive'
 
 const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag, post)
 ```
@@ -147,7 +149,7 @@ Every bag carries `VERIFY.txt` with the `shasum` commands to check it by hand.
 
 `verifyPublishedArchive` from `@seedprotocol/archive/verify` checks a published bag from its Version
 uid alone. Import it when a reader asks: it reads EAS and a gateway with `fetch`, and pulls in no Html
-parser or Seed code.
+parser or Seed code, so it works where the SDK isn't installed.
 
 ```ts
 const { verifyPublishedArchive } = await import('@seedprotocol/archive/verify')

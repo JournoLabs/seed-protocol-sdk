@@ -6,12 +6,12 @@
 Archive packaging for [Seed Protocol](https://seedprotocol.io): [BagIt](https://www.rfc-editor.org/rfc/rfc8493)
 1.0 bags with SHA-256 and SHA-512 manifests, [PREMIS 3.0](https://www.loc.gov/standards/premis/v3/)
 and Dublin Core metadata, and a reader for [h-entry](https://microformats.org/wiki/h-entry) archive
-documents. It works on bytes and plain objects and depends on no other Seed package, so archive
-tools and servers can use it without the SDK.
-
-To export a Seed item, use `exportArchive` from [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk),
-which builds its bag with this package. The bag's layout is described in
+documents, and `exportArchive`, which writes a Seed item as a bag. The bag's layout is described in
 [docs/ARCHIVE.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/ARCHIVE.md).
+
+The main entry needs [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk), an
+optional peer. `@seedprotocol/archive/verify`, which checks a published bag, and
+`@seedprotocol/archive/node` don't, so a reader without the SDK can use them.
 
 ## Installation
 
