@@ -23,10 +23,13 @@ import {
   HTML,
   HTML_V,
   POST,
+  POST_V0,
+  POST_V1,
   POST_V2,
   PUBLISHED_AT,
   TITLE,
   TRANSACTION_ID,
+  chain,
   localSource,
 } from './fixtures'
 
@@ -89,6 +92,27 @@ describe('state graph', () => {
   it('links the seed to its head Version', () => {
     expect(objects(at(POST), `${B}ns#currentVersion`).map((o) => o.value)).toEqual([at(POST_V2)])
     expect(objects(at(POST_V2), `${B}ns#versionOf`).map((o) => o.value)).toEqual([at(POST)])
+  })
+
+  it('writes the Version history in PROV-O, each Version a revision of the one before', () => {
+    const PROV = 'http://www.w3.org/ns/prov#'
+    expect(objects(at(POST_V1), `${RDF}type`).map((o) => o.value)).toEqual([`${B}ns#Version`])
+    expect(objects(at(POST_V1), `${B}ns#versionOf`).map((o) => o.value)).toEqual([at(POST)])
+    expect(objects(at(POST_V1), `${PROV}generatedAtTime`).map((o) => o.value)).toEqual(['1970-01-01T00:01:40Z'])
+    expect(objects(at(POST_V1), `${PROV}wasAttributedTo`).map((o) => o.value)).toEqual([
+      `did:pkh:eip155:${CHAIN_ID}:${ATTESTER.toLowerCase()}`,
+    ])
+    expect(objects(at(POST_V1), `${PROV}wasRevisionOf`)).toEqual([])
+    expect(objects(at(POST_V2), `${PROV}wasRevisionOf`).map((o) => o.value)).toEqual([at(POST_V1)])
+  })
+
+  it('leaves a revoked Version out of the history', async () => {
+    const data = chain()
+    data.versions.push({ ...data.versions[0]!, id: POST_V0, timeCreated: 50, revoked: true })
+    registerLocalQuerySource(localSource(data))
+    graph = await exportSeeds([POST], { chainId: CHAIN_ID, source: 'local' })
+    expect(objects(at(POST_V0), `${RDF}type`)).toEqual([])
+    expect(objects(at(POST_V1), 'http://www.w3.org/ns/prov#wasRevisionOf')).toEqual([])
   })
 
   it("gives the head Version's newest value from the seed's attester, under the protocol predicate", () => {
@@ -203,6 +227,13 @@ ex:Seed a sh:NodeShape ;
     sh:property [ sh:path seed:currentVersion ; sh:minCount 1 ; sh:maxCount 1 ; sh:class seed:Version ] ;
     sh:property [ sh:path prov:generatedAtTime ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
     sh:property [ sh:path prov:wasAttributedTo ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] .
+
+ex:Version a sh:NodeShape ;
+    sh:targetClass seed:Version ;
+    sh:property [ sh:path seed:versionOf ; sh:minCount 1 ; sh:maxCount 1 ; sh:class seed:Seed ] ;
+    sh:property [ sh:path prov:generatedAtTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path prov:wasAttributedTo ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path prov:wasRevisionOf ; sh:maxCount 1 ; sh:class seed:Version ] .
 
 ex:Post a sh:NodeShape ;
     sh:targetClass <${B}c/post> ;

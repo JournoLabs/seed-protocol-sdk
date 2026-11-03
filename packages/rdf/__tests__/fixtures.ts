@@ -7,6 +7,7 @@ const OTHER = '0x' + '9'.repeat(40)
 const uid = (tag: string) => '0x' + tag.repeat(64 / tag.length)
 
 export const POST = uid('a1')
+export const POST_V0 = uid('b0')
 export const POST_V1 = uid('b1')
 export const POST_V2 = uid('b2')
 export const HTML = uid('c1')

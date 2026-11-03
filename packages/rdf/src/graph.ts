@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
-import type { SeedAttestations, SeedPropertyAttestation } from '@seedprotocol/query'
+import type { SeedAttestations, SeedPropertyAttestation, SeedVersionAttestation } from '@seedprotocol/query'
 import { PROV, RDF_TYPE, XSD, assertIri, iriScheme, type IriScheme } from './iri.js'
 import { canonicalJson, compileLens, type CompiledLens, type RdfLens, type RdfSidecar } from './lens.js'
 
@@ -111,6 +111,10 @@ function scalar(easType: string, value: string | boolean): RdfObject {
 const objectKey = (object: RdfObject): string | undefined =>
   object.kind === 'iri' ? `<${object.iri}>` : object.kind === 'literal' ? `${object.value}^^${object.datatype}` : undefined
 
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+const byName = (a: SeedPropertyAttestation, b: SeedPropertyAttestation): number =>
+  compare(a.easName, b.easName) || compare(a.easType, b.easType) || compare(a.attestationUid, b.attestationUid)
+
 class NodeBuilder {
   readonly properties = new Map<string, RdfObject[]>()
   // A graph is a set: the same statement twice is written once.
@@ -153,7 +157,9 @@ function propertyObject(
 /**
  * The state graph of `seeds` (from `getSeedAttestations` in @seedprotocol/query). Each seed is
  * typed `seed:Seed` and its model class (`{base}c/{model}`), attributed to its attester as a
- * `did:pkh`, and linked to its head Version; each property is one statement with the protocol
+ * `did:pkh`, and linked to its head Version (`seed:currentVersion`). Its live Versions up to the head
+ * are `seed:Version`s with `prov:generatedAtTime`, `prov:wasAttributedTo`, and `prov:wasRevisionOf`
+ * the Version before; revoked Versions are left out, as in an archive bag. Each property is one statement with the protocol
  * predicate `{base}p/{easType}/{easName}`. Relations are Seed IRIs, lists are RDF lists, and an
  * Image, File, Html or Json seed's `storage_transaction_id` also gives `seed:content <ar://…>`.
  * Without a lens, values are typed from the EAS type alone: a Number (an EAS `string`, ADR 0010)
@@ -178,7 +184,7 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
     return found
   }
 
-  for (const { record, properties } of seeds) {
+  for (const { record, properties, versions = [] } of seeds) {
     if (nodes.has(iris.attestation(record.seedUid))) continue
     const seed = node(iris.attestation(record.seedUid))
     seed.add(RDF_TYPE, iri(`${ns}Seed`))
@@ -186,15 +192,23 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
     if (record.attester) seed.add(`${PROV}wasAttributedTo`, iri(iris.account(record.attester)))
     if (record.timeCreated > 0) seed.add(`${PROV}generatedAtTime`, dateTime(record.timeCreated))
 
-    if (record.versionUid) {
-      const versionIri = iris.attestation(record.versionUid)
-      seed.add(`${ns}currentVersion`, iri(versionIri))
-      const version = node(versionIri)
+    if (record.versionUid) seed.add(`${ns}currentVersion`, iri(iris.attestation(record.versionUid)))
+    // The history ends at the current Version; without one (an older query), that Version alone.
+    const history: readonly SeedVersionAttestation[] =
+      versions.length > 0 ? versions : record.versionUid ? [{ attestationUid: record.versionUid, timeCreated: 0 }] : []
+    let previous: string | undefined
+    for (const { attestationUid, attester, timeCreated } of history) {
+      const version = node(iris.attestation(attestationUid))
       version.add(RDF_TYPE, iri(`${ns}Version`))
       version.add(`${ns}versionOf`, iri(seed.id))
+      if (timeCreated > 0) version.add(`${PROV}generatedAtTime`, dateTime(timeCreated))
+      if (attester) version.add(`${PROV}wasAttributedTo`, iri(iris.account(attester)))
+      if (previous) version.add(`${PROV}wasRevisionOf`, iri(previous))
+      previous = version.id
     }
 
-    for (const property of properties) {
+    // By name, not in the order the source returned them, so the same state gives the same bytes.
+    for (const property of [...properties].sort(byName)) {
       const local = STORAGE_NAMES.has(property.easName) ? undefined : lens?.propertyOf(record.schemaName, property.easName)
       const object = propertyObject(iris, property, local?.dataType, warn)
       if (!object) continue

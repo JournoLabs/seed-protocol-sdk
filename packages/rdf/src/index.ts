@@ -1,4 +1,4 @@
-import { getSeedAttestations, type GetSeedsOptions } from '@seedprotocol/query'
+import { getSeedAttestations, type GetSeedAttestationsOptions } from '@seedprotocol/query'
 import { stateGraph, type StateGraph, type StateGraphOptions } from './graph.js'
 
 export { PROVISIONAL_BASE_IRI, iriScheme } from './iri.js'
@@ -23,17 +23,20 @@ export type {
   TermSuggestion,
 } from './sidecar.js'
 
-export type ExportSeedsOptions = StateGraphOptions & Pick<GetSeedsOptions, 'source' | 'pins'>
+export type ExportSeedsOptions = StateGraphOptions & Pick<GetSeedAttestationsOptions, 'source' | 'pins' | 'asOf'>
 
 /**
  * The state graph of the seeds, read with `getSeedAttestations` from @seedprotocol/query (same
- * sources and pins as `getSeeds`). Seeds that aren't found are left out.
+ * sources and pins as `getSeeds`). Seeds that aren't found are left out. With `asOf` (unix
+ * seconds), the graph is what EAS held then, the same attestations a reproducible archive bag with
+ * that `Seed-Bag-As-Of` holds; it reads EAS and refuses `source: 'local'`. Two exports with the
+ * same seeds, `asOf`, options and sidecar give the same bytes from every writer.
  */
 export async function exportSeeds(
   seedUids: readonly string[],
   options: ExportSeedsOptions,
 ): Promise<StateGraph> {
-  const { source, pins, ...graphOptions } = options
-  const found = await getSeedAttestations(seedUids, { source, pins })
+  const { source, pins, asOf, ...graphOptions } = options
+  const found = await getSeedAttestations(seedUids, { source, pins, asOf })
   return stateGraph([...found.values()], graphOptions)
 }
