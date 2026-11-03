@@ -1,10 +1,19 @@
-import { keccak256, parseAbi, stringToHex, type Address, type Hex } from 'viem'
+import { encodeEventTopics, keccak256, parseAbi, stringToHex, type Address, type Hex } from 'viem'
 import { entryPoint06Address } from 'viem/account-abstraction'
+import { getPublishConfig } from '../config'
 import { getPublishPublicClient } from './chainClient'
 
 const entryPointAbi = parseAbi([
   'function getNonce(address sender, uint192 key) view returns (uint256)',
   'event UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)',
+  'event BeforeExecution()',
+])
+
+// EntryPoint emits BeforeExecution once validation of the bundle is done, then runs each UserOp and
+// emits its UserOperationEvent, so a UserOp's own logs lie between the boundary before it and its event.
+const userOpBoundaryTopics = new Set<string>([
+  encodeEventTopics({ abi: entryPointAbi, eventName: 'UserOperationEvent' })[0]!,
+  encodeEventTopics({ abi: entryPointAbi, eventName: 'BeforeExecution' })[0]!,
 ])
 
 const SEQUENCE_MASK = (1n << 64n) - 1n
@@ -42,13 +51,14 @@ export async function readNonceSequence(entryPoint: Address, sender: Address, ke
   return nonce & SEQUENCE_MASK
 }
 
-/** The landed UserOp under `key`, from the logs since `fromBlock`. */
-export async function findPinnedUserOp(params: {
+type PinnedUserOpParams = {
   entryPoint: Address
   sender: Address
   key: bigint
   fromBlock: bigint
-}): Promise<{ transactionHash: Hex; success: boolean } | undefined> {
+}
+
+async function findPinnedUserOpLog(params: PinnedUserOpParams) {
   const { entryPoint, sender, key, fromBlock } = params
   const logs = await getPublishPublicClient().getLogs({
     address: entryPoint,
@@ -57,15 +67,68 @@ export async function findPinnedUserOp(params: {
     fromBlock,
   })
   const log = logs.find((l) => l.args.nonce === pinnedNonce(key))
-  if (!log?.transactionHash) return undefined
-  return { transactionHash: log.transactionHash, success: log.args.success === true }
+  return log?.transactionHash ? log : undefined
+}
+
+/** The landed UserOp under `key`, from the logs since `fromBlock`. */
+export async function findPinnedUserOp(
+  params: PinnedUserOpParams,
+): Promise<{ transactionHash: Hex; success: boolean } | undefined> {
+  const log = await findPinnedUserOpLog(params)
+  if (!log) return undefined
+  return { transactionHash: log.transactionHash!, success: log.args.success === true }
+}
+
+type ReceiptLog = { address: string; logIndex: number | null; topics: readonly unknown[] }
+
+/** The receipt's logs emitted while the UserOp whose UserOperationEvent is at `userOpLogIndex` ran. */
+function logsOfUserOp<L extends ReceiptLog>(logs: readonly L[], entryPoint: Address, userOpLogIndex: number): L[] {
+  const ep = entryPoint.toLowerCase()
+  let start = -1
+  for (const l of logs) {
+    if (l.logIndex == null || l.logIndex >= userOpLogIndex) continue
+    if (l.address.toLowerCase() === ep && userOpBoundaryTopics.has(String(l.topics[0]))) {
+      start = Math.max(start, l.logIndex)
+    }
+  }
+  return logs.filter((l) => l.logIndex != null && l.logIndex > start && l.logIndex < userOpLogIndex)
+}
+
+/** The uids of the Seeds of `modelName` that `sender` attested in the UserOp. */
+async function seedUidsOfUserOp(params: {
+  entryPoint: Address
+  sender: Address
+  transactionHash: Hex
+  userOpLogIndex: number
+  modelName: string
+}): Promise<string[]> {
+  const { getEasSchemaUidForModel } = await import('@seedprotocol/sdk')
+  const { getAttestedUidsFromReceipt } = await import('./easDirect')
+  const schemaUid = await getEasSchemaUidForModel(params.modelName)
+  if (!schemaUid) throw new Error(`findPublishByNonceKey: no EAS schema uid for model ${params.modelName}`)
+  const receipt = await getPublishPublicClient().getTransactionReceipt({ hash: params.transactionHash })
+  const logs = logsOfUserOp(receipt.logs, params.entryPoint, params.userOpLogIndex)
+  return getAttestedUidsFromReceipt({ logs }, getPublishConfig().easContractAddress, params.sender)
+    .filter((a) => a.schemaUid.toLowerCase() === schemaUid.toLowerCase())
+    .map((a) => a.uid)
 }
 
 export type PublishByNonceKey = {
   /** How many UserOps have landed under the key: 0 means none, and a send under it can still land. */
   sequence: bigint
   /** The landed UserOp, when `sequence` is above 0 and its event is at or after `fromBlock`. */
-  userOp?: { transactionHash: Hex; success: boolean }
+  userOp?: {
+    transactionHash: Hex
+    success: boolean
+    /**
+     * With `modelName` and `success`: the uids of the new Seeds of that model the sender attested in
+     * this UserOp, other UserOps in the same transaction left out. Empty when the publish made no new
+     * Seed of it, as when the item was already published.
+     */
+    seedUids?: string[]
+    /** `seedUids[0]` when it holds exactly one uid: the root Seed when `modelName` is the root's model. */
+    seedUid?: string
+  }
 }
 
 /**
@@ -74,17 +137,37 @@ export type PublishByNonceKey = {
  * and attested nothing, but it still spent the key.
  * @param fromBlock a block before the first try; logs are read from there
  * @param entryPoint defaults to EntryPoint v0.6, which ManagedAccounts use
+ * @param modelName the published item's model: a successful UserOp then carries `seedUids` and
+ *   `seedUid`, read from its transaction's `Attested` events on that model's Seed schema with the
+ *   sender as attester. Throws when the model has no EAS schema uid.
  */
 export async function findPublishByNonceKey(params: {
   sender: Address
   nonceKey: string
   fromBlock: bigint
   entryPoint?: Address
+  modelName?: string
 }): Promise<PublishByNonceKey> {
   const entryPoint = params.entryPoint ?? entryPoint06Address
+  const { sender, modelName } = params
   const key = publishNonceKey(params.nonceKey)
-  const sequence = await readNonceSequence(entryPoint, params.sender, key)
+  const sequence = await readNonceSequence(entryPoint, sender, key)
   if (sequence === 0n) return { sequence }
-  const userOp = await findPinnedUserOp({ entryPoint, sender: params.sender, key, fromBlock: params.fromBlock })
-  return userOp ? { sequence, userOp } : { sequence }
+  const log = await findPinnedUserOpLog({ entryPoint, sender, key, fromBlock: params.fromBlock })
+  if (!log) return { sequence }
+  const userOp: NonNullable<PublishByNonceKey['userOp']> = {
+    transactionHash: log.transactionHash!,
+    success: log.args.success === true,
+  }
+  if (modelName && userOp.success && log.logIndex != null) {
+    userOp.seedUids = await seedUidsOfUserOp({
+      entryPoint,
+      sender,
+      transactionHash: userOp.transactionHash,
+      userOpLogIndex: log.logIndex,
+      modelName,
+    })
+    if (userOp.seedUids.length === 1) userOp.seedUid = userOp.seedUids[0]
+  }
+  return { sequence, userOp }
 }
