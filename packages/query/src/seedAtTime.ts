@@ -2,9 +2,9 @@ import {
   getItemPropertiesFromEas,
   getItemVersionsFromEas,
   getSeedsByUidsFromEas,
+  pickLatestPropertyAttestationsByRefAndSchema,
   type Attestation,
 } from '@seedprotocol/eas'
-import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 
 /** What EAS held for a seed at one moment. */
 export type SeedAtTime = {

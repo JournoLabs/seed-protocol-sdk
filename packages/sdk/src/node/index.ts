@@ -32,22 +32,6 @@ export { HtmlEmbeddedDataUriLimitError, HtmlSeedPropertyRefError } from '../help
 export { PublishUploadChangedError } from '../db/read/getPublishUploads'
 export { getEasSchemaUidForModel } from '../db/read/getSchemaUidForModel'
 
-// Archive export
-export {
-  ArchiveExportError,
-  exportArchive,
-  type ArchiveExportErrorCode,
-  type ArchiveOmission,
-  type ArchiveSeedRef,
-  type ExportableItem,
-  type ExportArchiveOptions,
-  type ExportArchiveResult,
-} from '../archive/exportArchive'
-export {
-  verifyArchiveAgainstChain,
-  type ArchiveChainVerification,
-} from '../archive/verifyArchiveAgainstChain'
-
 // Node.js specific exports
 export { NodeFileManager } from './helpers/FileManager'
 export { NodeDb, resolveSdkDrizzleMigrationsDir } from './db/Db'

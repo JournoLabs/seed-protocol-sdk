@@ -76,20 +76,6 @@ export type { IItem, IItemProperty } from './interfaces'
 export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
-export {
-  ArchiveExportError,
-  exportArchive,
-  type ArchiveExportErrorCode,
-  type ArchiveOmission,
-  type ArchiveSeedRef,
-  type ExportableItem,
-  type ExportArchiveOptions,
-  type ExportArchiveResult,
-} from './archive/exportArchive'
-export {
-  verifyArchiveAgainstChain,
-  type ArchiveChainVerification,
-} from './archive/verifyArchiveAgainstChain'
 export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {
@@ -379,6 +365,9 @@ export {
 
 export {
   getPublishGraph,
+  modelOfSeed,
+  publishPropertyKind,
+  refsOf,
   type PublishGraph,
   type PublishGraphNode,
   type PublishGraphProperty,
@@ -392,9 +381,30 @@ export {
   getPublishUploadData,
   readPublishUploadBytes,
   PublishUploadChangedError,
+  resolveItemStorageChildFile,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
 export type { PublishUploadData } from './types/publish'
+
+// Rows, values and files @seedprotocol/archive's exportArchive reads.
+export { findSeedRow } from './db/read/findSeedRow'
+export { getLatestPublishedVersionRow } from './db/read/getLatestPublishedVersionRow'
+export { getVersionHistoryRows, type VersionHistoryRow } from './db/read/getVersionHistoryRows'
+export { getMetadata } from './db/read/getMetadata'
+export { nameMatchLevels } from './db/read/nameMatchLevels'
+export { resolveModelRecordByNameOrType } from './db/read/resolveModelRecord'
+export { findRelatedSeedRow, isLivePublishedSeed, isUnpublishedSeed } from './db/read/resolveRelatedSeedRef'
+export { resolveSyncedPropertyName } from './events/item/syncDbWithEas'
+export { decodeCompositeUpload, isCompositeUpload } from './helpers/compositeUpload'
+export { syncedPropertyValue } from './helpers/easValueTypes'
+export { getExtensionForMimeType, resolveUploadMimeType } from './helpers/mimeTypes'
+export { getPropertyDefinitions, type PropertyDefinition } from './helpers/propertyDefinition'
+export {
+  resolveStorageDisplay,
+  storageSeedTransactionId,
+  storedValueKind,
+  type StoredValueKind,
+} from './storageValue/resolve'
 export {
   CONTENT_SHA256_TAG,
   CONTENT_TYPE_TAG,
@@ -423,6 +433,7 @@ export {
   replaceSeedPropertyRefsInHtml,
   HtmlSeedPropertyRefError,
   SEED_PROPERTY_REF_PREFIX,
+  findEmbeddedImageFilePath,
   HTML_EMBEDDED_MAX_IMAGES_PER_DOC,
   HTML_EMBEDDED_MAX_IMAGE_BYTES,
   HTML_EMBEDDED_MAX_TOTAL_BYTES,

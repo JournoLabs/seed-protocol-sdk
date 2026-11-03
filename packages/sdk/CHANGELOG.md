@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ArchiveSeedRef`, `ExportableItem`, `ExportArchiveOptions`, `ExportArchiveResult` and `ArchiveChainVerification` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
+- The main entry exports the reads `exportArchive` uses, among them `findSeedRow`, `getPropertyDefinitions`, `resolveSyncedPropertyName`, `storedValueKind` and the new `getVersionHistoryRows(seedLocalId)`, every Version row of a seed with its attestation and revocation times.
 - `getEasSchemaUidForModel(modelName)` is exported: the EAS schema uid of a model's Seeds, from the cache, `model_uids`, then EAS.
 - `readPublishUploadBytes` rejects a changed file with the new `PublishUploadChangedError` (code `UPLOAD_CHANGED_DURING_PUBLISH`, with `itemPropertyName`). It was a plain `Error` with the same message.
 - `exportArchive` takes `expectedAttestations`: with `reproducible`, it refuses with `not_synced` until EAS reports those uids, so a bag built right after a publish can't be silently incomplete. A seed with no Version on EAS is `not_synced`, not `not_published`. A reproducible bag holds attested properties only and no schema name, and its default time covers storage seeds. `VERIFY.txt` gives the rebuild command with the bag's `asOf`.

@@ -47,15 +47,27 @@
       "version": "0.8.0",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
+        "@seedprotocol/arweave": "workspace:*",
+        "@seedprotocol/eas": "workspace:*",
+        "@seedprotocol/query": "workspace:*",
         "parse5": "8.0.1",
       },
       "devDependencies": {
+        "@seedprotocol/sdk": "workspace:*",
         "@types/node": "^24.10.1",
+        "drizzle-orm": "^0.44.3",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
         "vite": "^8.0.0",
         "vitest": "^4.1.11",
+        "xstate": "^5.28.0",
       },
+      "peerDependencies": {
+        "@seedprotocol/sdk": "workspace:*",
+      },
+      "optionalPeers": [
+        "@seedprotocol/sdk",
+      ],
     },
     "packages/arweave": {
       "name": "@seedprotocol/arweave",
@@ -342,7 +354,6 @@
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
         "@libsql/client": "^0.15.15",
         "@noble/hashes": "^1.8.0",
-        "@seedprotocol/archive": "workspace:*",
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
         "@seedprotocol/query": "workspace:*",

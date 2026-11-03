@@ -4,27 +4,22 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { digestHex, getBagFile, validateBag, type Bag } from '@seedprotocol/archive'
-import { writeBagDirectory } from '@seedprotocol/archive/node'
+import { BaseDb, generateId, importJsonSchema, Item, rewriteHtmlEmbeddedImagesOnDisk, versions } from '@seedprotocol/sdk'
+import { digestHex, getBagFile, validateBag, type Bag } from '../../src'
+import { writeBagDirectory } from '../../src/node'
 import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
-import { Item } from '@/Item/Item'
-import { importJsonSchema } from '@/imports/json'
-import { generateId } from '@/helpers'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { versions } from '@/seedSchema'
-import { ArchiveExportError, exportArchive } from '@/archive/exportArchive'
-import { rewriteHtmlEmbeddedImagesOnDisk } from '@/helpers/htmlEmbeddedDataUriPublish'
-import { waitForPendingOutboxOps } from '@/outbox'
-import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { ArchiveExportError, exportArchive } from '../../src/seed/exportArchive'
+import { waitForPendingOutboxOps } from '../../../sdk/src/outbox'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../../sdk/__tests__/test-utils/client-init'
 import {
   ensureModelUidsForGetPublishPayloadTest,
   ensurePropertySchemaUidsForGetPublishPayloadTest,
   markPublished,
   UNPUBLISH_TEST_PUBLISHER,
   waitForPropertyInstances,
-} from '../test-utils/getPublishPayloadIntegrationHelpers'
-import { waitForIdle } from '../test-utils/waitForIdle'
-import { bagitPyRequired, findBagitPy, runBagitPy } from '../../../archive/__tests__/bagitPy'
+} from '../../../sdk/__tests__/test-utils/getPublishPayloadIntegrationHelpers'
+import { waitForIdle } from '../../../sdk/__tests__/test-utils/waitForIdle'
+import { bagitPyRequired, findBagitPy, runBagitPy } from '../bagitPy'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 

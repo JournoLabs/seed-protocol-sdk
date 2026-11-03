@@ -1,17 +1,10 @@
-import {
-  createBag,
-  digestHex,
-  dublinCoreXml,
-  parseArchiveDocument,
-  premisXml,
-  rewriteHtmlUrls,
-  verifyInstructions,
-  type Bag,
-  type BagFile,
-  type BagInfoEntry,
-  type PremisEvent,
-  type PremisFile,
-} from '@seedprotocol/archive'
+import { createBag, type Bag, type BagFile, type BagInfoEntry } from '../bag'
+import { digestHex } from '../bytes'
+import { dublinCoreXml } from '../dublinCore'
+import { parseArchiveDocument } from '../hEntry'
+import { rewriteHtmlUrls } from '../html'
+import { premisXml, type PremisEvent, type PremisFile } from '../premis'
+import { verifyInstructions } from '../verifyArchive'
 import {
   fetchArweaveRawBytesAcrossGateways,
   normalizeRelationPropertyValue,
@@ -27,29 +20,42 @@ import {
   isValidEasAttestationUid,
   type Attestation,
 } from '@seedprotocol/eas'
-import { parseEasPropertyMetadata } from '@seedprotocol/query'
-import { eq } from 'drizzle-orm'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { findSeedRow } from '@/db/read/findSeedRow'
-import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
-import { getMetadata } from '@/db/read/getMetadata'
-import { nameMatchLevels } from '@/db/read/nameMatchLevels'
-import { getPublishGraph, modelOfSeed, publishPropertyKind, refsOf, type PublishGraphProperty, type PublishPropertyKind } from '@/db/read/publishGraph'
-import { resolveItemStorageChildFile } from '@/db/read/getPublishUploads'
-import { resolveModelRecordByNameOrType } from '@/db/read/resolveModelRecord'
-import { findRelatedSeedRow, isLivePublishedSeed, isUnpublishedSeed } from '@/db/read/resolveRelatedSeedRef'
-import { resolveSyncedPropertyName } from '@/events/item/syncDbWithEas'
-import { decodeCompositeUpload, isCompositeUpload } from '@/helpers/compositeUpload'
-import { syncedPropertyValue } from '@/helpers/easValueTypes'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { findEmbeddedImageFilePath, SEED_PROPERTY_REF_PREFIX } from '@/helpers/htmlEmbeddedDataUriPublish'
-import { getExtensionForMimeType, resolveUploadMimeType } from '@/helpers/mimeTypes'
-import { normalizeDataType } from '@/helpers/property'
-import { getPropertyDefinitions, type PropertyDefinition } from '@/helpers/propertyDefinition'
-import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
-import { versions } from '@/seedSchema'
-import { resolveStorageDisplay, storageSeedTransactionId, storedValueKind, type StoredValueKind } from '@/storageValue/resolve'
-import { readSeedAtTime, type SeedAtTime } from './seedAtTime'
+import { parseEasPropertyMetadata, readSeedAtTime, type SeedAtTime } from '@seedprotocol/query'
+import {
+  BaseFileManager,
+  decodeCompositeUpload,
+  findEmbeddedImageFilePath,
+  findRelatedSeedRow,
+  findSeedRow,
+  getExtensionForMimeType,
+  getLatestPublishedVersionRow,
+  getMetadata,
+  getPropertyDefinitions,
+  getPublishGraph,
+  getVersionHistoryRows,
+  isCompositeUpload,
+  isLivePublishedSeed,
+  isPublishedSeedRef,
+  isUnpublishedSeed,
+  modelOfSeed,
+  nameMatchLevels,
+  normalizeDataType,
+  publishPropertyKind,
+  refsOf,
+  resolveItemStorageChildFile,
+  resolveModelRecordByNameOrType,
+  resolveStorageDisplay,
+  resolveSyncedPropertyName,
+  resolveUploadMimeType,
+  SEED_PROPERTY_REF_PREFIX,
+  storageSeedTransactionId,
+  storedValueKind,
+  syncedPropertyValue,
+  type PropertyDefinition,
+  type PublishGraphProperty,
+  type PublishPropertyKind,
+  type StoredValueKind,
+} from '@seedprotocol/sdk'
 
 /**
  * Exports a published item as a BagIt bag (RFC 8493) that an archive can ingest without Seed
@@ -864,18 +870,11 @@ async function localHistoryEvents(
   attester: string | undefined,
   chainId: number,
 ): Promise<PremisEvent[]> {
-  const db = BaseDb.getAppDb()
   const agents = historyAgents(attester)
   const objects = [{ type: 'Seed Protocol seed UID', value: seedUid }]
   const time = `Time: ${describeClock('local-record', chainId)}.`
 
-  type VersionRow = { uid: string | null; attestationCreatedAt: number | null; revokedAt: number | null }
-  const versionRows = (
-    (await db
-      .select({ uid: versions.uid, attestationCreatedAt: versions.attestationCreatedAt, revokedAt: versions.revokedAt })
-      .from(versions)
-      .where(eq(versions.seedLocalId, seedLocalId))) as VersionRow[]
-  )
+  const versionRows = (await getVersionHistoryRows(seedLocalId))
     .filter((v) => isValidEasAttestationUid(v.uid) && v.attestationCreatedAt)
     .sort((a, b) => a.attestationCreatedAt! - b.attestationCreatedAt!)
 

@@ -34,6 +34,17 @@ export { findHtmlUrls, rewriteHtmlAttributes, rewriteHtmlUrls } from './html'
 export { parseArchiveDocument, type ArchiveDocument, type ArchiveDocumentMethod } from './hEntry'
 export { dublinCoreXml, type DublinCore } from './dublinCore'
 export {
+  ArchiveExportError,
+  exportArchive,
+  type ArchiveExportErrorCode,
+  type ArchiveOmission,
+  type ArchiveSeedRef,
+  type ExportableItem,
+  type ExportArchiveOptions,
+  type ExportArchiveResult,
+} from './seed/exportArchive'
+export { verifyArchiveAgainstChain, type ArchiveChainVerification } from './seed/verifyArchiveAgainstChain'
+export {
   PREMIS_AGENT_TYPES,
   PREMIS_EVENT_TYPES,
   premisXml,

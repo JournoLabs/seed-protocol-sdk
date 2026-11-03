@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - `listRelationEasName(propertyName, ref)` is exported: the EAS name the SDK publishes a List relation under.
+- `readSeedAtTime(seedUid, asOf?)` reads what EAS held for a seed at `asOf` (unix seconds): its Versions from the seed's attester, the newest Version live then, and per property schema on that Version the attestation current then, from the Version's attester. The newest live attestation is current, else the newest one, which comes back `revoked` (a retraction). `revoked` means revoked by `asOf`. Without `asOf` it reads the latest state and reports the time of the last attestation or revocation on the Version. It moved from the SDK, where reproducible archive exports use it.
 
 ## 0.8.0 (2026-10-30)
 
