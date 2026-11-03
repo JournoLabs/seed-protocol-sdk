@@ -30,6 +30,7 @@ export { PublishValidationFailedError, type PublishValidationError } from '../db
 export { RelatedItemUnpublishedError, RELATED_ITEM_UNPUBLISHED_CODE } from '../db/read/publishErrors'
 export { HtmlEmbeddedDataUriLimitError, HtmlSeedPropertyRefError } from '../helpers/htmlEmbeddedDataUriPublish'
 export { PublishUploadChangedError } from '../db/read/getPublishUploads'
+export { getEasSchemaUidForModel } from '../db/read/getSchemaUidForModel'
 
 // Archive export
 export {

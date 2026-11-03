@@ -220,6 +220,12 @@ ahead. Otherwise `userOp` is the landed UserOp: with `success` its transaction h
 without it the try reverted and attested nothing. Save a block from before the first try with the job
 to use as `fromBlock`.
 
+Pass `modelName` with the published item's model to get its Seed uid with a successful UserOp:
+`userOp.seedUids` lists the new Seeds of that model the sender attested in that UserOp, and
+`userOp.seedUid` is set when there is exactly one. Other accounts' UserOps in the same bundle
+transaction are left out. A publish that creates other new Seeds of the same model, such as a related
+item of that model, gives more than one uid and no `seedUid`.
+
 A key is spent once a UserOp lands under it, reverted or not. A publish fails with
 `PublishNonceKeyError` before anything is uploaded when its key is spent (`NONCE_KEY_SPENT`), its sender
 doesn't pin (`NONCE_KEY_NOT_PINNED`), or it would attest directly to EAS (`NONCE_KEY_DIRECT_EAS`). After

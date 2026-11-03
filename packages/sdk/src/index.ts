@@ -132,6 +132,7 @@ export {
 export { listRelationEasPropertyName, easPropertyNameForPublish } from './helpers/metadataPropertyNames'
 
 export { getModelSchemasFromEas } from './eas'
+export { getEasSchemaUidForModel } from './db/read/getSchemaUidForModel'
 export {
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
