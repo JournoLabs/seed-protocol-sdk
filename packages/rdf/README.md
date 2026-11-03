@@ -31,6 +31,7 @@ toQuads(graph)    // RDF/JS quads for N3.js, Comunica, Oxigraph or rdf-ext
 
 | Option | |
 |---|---|
+| `asOf` | Unix seconds. The graph EAS held then: attestations made later are left out, and one revoked later counts. Reads EAS, so `source: 'local'` is refused. See [A graph beside an archive bag](#a-graph-beside-an-archive-bag). |
 | `chainId` | The chain the seeds were attested on. Required: EAS uids don't include it. |
 | `base` | Base of the minted IRIs, ending in `/`. Default `PROVISIONAL_BASE_IRI`. |
 | `contentUrl` | `(transactionId) => string`, an `https://` URL for stored content, written as `schema:contentUrl`. |
@@ -46,7 +47,8 @@ For each seed, at its head Version (or the pinned one):
 |---|---|
 | The seed | `{base}eas/{chainId}/{seedUid}`, typed `seed:Seed` and `{base}c/{model}` |
 | Its attester and creation time | `prov:wasAttributedTo <did:pkh:eip155:{chainId}:{address}>`, `prov:generatedAtTime` |
-| Its head Version | `seed:currentVersion`; the Version is a `seed:Version` with `seed:versionOf` the seed |
+| Its head Version | `seed:currentVersion` |
+| Its Versions up to the head | Each a `seed:Version` with `seed:versionOf` the seed, `prov:generatedAtTime`, `prov:wasAttributedTo` its attester and `prov:wasRevisionOf` the Version before. Revoked Versions and Versions from other attesters are left out. |
 | A property `string title` | `{base}p/string/title` with the newest value the seed's attester attested |
 | A relation | The related seed's IRI |
 | A list of relations | An RDF list of seed IRIs, in order |
@@ -59,6 +61,48 @@ as `xsd:string` and `xsd:integer`. A removed value (ADR 0021) is left out. The g
 nodes except the cells of lists.
 
 `seedVocabulary()` returns the `seed:` terms in Turtle.
+
+The same seeds, `asOf`, options and sidecar give the same bytes from `toJsonLd`, `toTurtle` and
+`toNQuads`, whatever order EAS returns attestations in. Seeds are written in the order you pass
+them.
+
+## A graph beside an archive bag
+
+A reproducible archive bag from `@seedprotocol/archive` records the seed, the time it covers and
+the chain in bag-info.txt. Export with that time and the graph holds the same attestations as the
+bag, plus the Version history. Anyone can rebuild it from EAS and compare bytes.
+
+```ts
+import { readBagInfo } from '@seedprotocol/archive'
+import { exportSeeds, toJsonLd } from '@seedprotocol/rdf'
+
+const info = readBagInfo(bag)
+const graph = await exportSeeds([info.get('Seed-Uid')!], {
+  chainId: Number(info.get('EAS-Chain-Id')),
+  asOf: Date.parse(info.get('Seed-Bag-As-Of')!) / 1000,
+  lens,
+})
+const jsonld = JSON.stringify(toJsonLd(graph))
+```
+
+The graph goes beside the bag, not in it: the bag's `tagmanifest-sha256.txt` hash and its anchor
+don't cover it, and its IRIs use the provisional base. Neither package imports the other; your
+app reads bag-info with archive and passes the three values to rdf.
+
+rdf doesn't read the Html's h-entry. To give a title as `dcterms:title`, map the property in the
+sidecar:
+
+```json
+{
+  "schemaId": "blog-schema-id",
+  "@context": { "dcterms": "http://purl.org/dc/terms/" },
+  "terms": {
+    "<title property id>": "dcterms:title",
+    "<author property id>": "dcterms:creator",
+    "<published at property id>": "dcterms:issued"
+  }
+}
+```
 
 ## Lens
 

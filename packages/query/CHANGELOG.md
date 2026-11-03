@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `getSeedAttestations` takes `asOf` (unix seconds) and reads what EAS held then, by `readSeedAtTime`'s rule: attestations made later are left out, and one revoked after `asOf` counts as live. It reads EAS, so `source: 'local'` throws and `'auto'` reads remote. A pin's own `asOf` or `versionUid` narrows it further. The new `GetSeedAttestationsOptions` type names the options.
+- `SeedAttestations` has `versions`: the seed attester's live Versions up to the record's Version, oldest first (`SeedVersionAttestation`: `attestationUid`, `attester`, `timeCreated`). Code that builds its own `SeedAttestations` (a mock, say) needs the field.
 - `listRelationEasName(propertyName, ref)` is exported: the EAS name the SDK publishes a List relation under.
 - `readSeedAtTime(seedUid, asOf?)` reads what EAS held for a seed at `asOf` (unix seconds): its Versions from the seed's attester, the newest Version live then, and per property schema on that Version the attestation current then, from the Version's attester. The newest live attestation is current, else the newest one, which comes back `revoked` (a retraction). `revoked` means revoked by `asOf`. Without `asOf` it reads the latest state and reports the time of the last attestation or revocation on the Version. It moved from the SDK, where reproducible archive exports use it.
 

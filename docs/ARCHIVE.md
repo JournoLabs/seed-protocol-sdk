@@ -122,6 +122,11 @@ const { bag } = await exportArchive(
 An ordinary export reads local rows only, works offline (with `fetch: false`), and can differ from
 device to device.
 
+`exportSeeds` in `@seedprotocol/rdf` builds an RDF graph of the same attestations from a bag's
+`Seed-Uid`, `Seed-Bag-As-Of` and `EAS-Chain-Id`, with the Version history in PROV-O. It goes beside
+the bag; the bag's hash and anchor don't cover it. See
+[A graph beside an archive bag](../packages/rdf/README.md#a-graph-beside-an-archive-bag).
+
 ## Verifying a bag
 
 `verifyArchive(bag, { expectedTagmanifestSha256 })` from `@seedprotocol/archive` reads no rows
