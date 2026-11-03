@@ -17,6 +17,7 @@ export {
   queryBySchema,
   queryBySchemaForMonth,
 } from './api.js'
+export type { GetSeedAttestationsOptions } from './api.js'
 
 export {
   registerLocalQuerySource,
@@ -29,7 +30,7 @@ export {
   normalizeSourceMode,
 } from './source/index.js'
 export type { QueryDataSource, ResolvedQuerySource, SeedListFilter } from './source/index.js'
-export type { SeedAttestations, SeedPropertyAttestation } from './seedAttestations.js'
+export type { SeedAttestations, SeedPropertyAttestation, SeedVersionAttestation } from './seedAttestations.js'
 export { readSeedAtTime } from './seedAtTime.js'
 export type { SeedAtTime } from './seedAtTime.js'
 

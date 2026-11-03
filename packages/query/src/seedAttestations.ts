@@ -23,11 +23,46 @@ export type SeedPropertyAttestation = {
   readonly timeCreated: number
 }
 
-/** A seed's assembled record and the property attestations it was assembled from. */
+/** One of a seed's Versions. */
+export type SeedVersionAttestation = {
+  readonly attestationUid: string
+  readonly attester?: string
+  readonly timeCreated: number
+}
+
+/** A seed's assembled record, the property attestations it was assembled from, and its Versions. */
 export type SeedAttestations = {
   /** Assembled with `relations: 'uids'` and no storage hydration. */
   readonly record: SeedRecord
   readonly properties: readonly SeedPropertyAttestation[]
+  /**
+   * The seed attester's live Versions up to the record's Version, oldest first; the last is
+   * `record.versionUid`. Revoked Versions are left out.
+   */
+  readonly versions: readonly SeedVersionAttestation[]
+}
+
+const sameAddress = (a: string | undefined, b: string | undefined): boolean =>
+  (a ?? '').toLowerCase() === (b ?? '').toLowerCase()
+
+/** `record`'s Versions from `versions` (any seeds, revoked ones included), as SeedAttestations.versions. */
+export function versionHistory(
+  record: SeedRecord,
+  seed: AttestationLike | undefined,
+  versions: readonly AttestationLike[],
+): SeedVersionAttestation[] {
+  const seedUid = record.seedUid.toLowerCase()
+  const live = versions.filter(
+    (v) => v.refUID.toLowerCase() === seedUid && v.revoked !== true && sameAddress(v.attester, seed?.attester),
+  )
+  const head = live.find((v) => v.id.toLowerCase() === record.versionUid.toLowerCase())
+  if (!head) return []
+  return [
+    ...live
+      .filter((v) => v !== head && v.timeCreated <= head.timeCreated)
+      .sort((a, b) => a.timeCreated - b.timeCreated || a.id.localeCompare(b.id)),
+    head,
+  ].map((v) => ({ attestationUid: v.id, attester: v.attester, timeCreated: v.timeCreated }))
 }
 
 function valueOf(easType: string | undefined, raw: unknown): SeedPropertyAttestation['value'] | undefined {

@@ -24,9 +24,11 @@ import {
   resolveQuerySource,
   getRemoteQueryDataSource,
 } from './source/index.js'
+import { createAsOfQueryDataSource } from './source/asOf.js'
 import type { QueryDataSource, SeedListFilter } from './source/types.js'
 import {
   toSeedPropertyAttestation,
+  versionHistory,
   type SeedAttestations,
   type SeedPropertyAttestation,
 } from './seedAttestations.js'
@@ -635,18 +637,36 @@ export async function getSeeds(
   return result
 }
 
+/** Options for getSeedAttestations. */
+export type GetSeedAttestationsOptions = Pick<GetSeedsOptions, 'source' | 'pins'> & {
+  /**
+   * Unix seconds. Read what EAS held then, by readSeedAtTime's rule: attestations made later are
+   * left out, and one revoked later counts as live. Reads EAS, so `source: 'local'` is refused
+   * (local rows don't record what EAS held at a time) and `'auto'` reads remote. Applies to every
+   * seed; a pin's own `asOf` or `versionUid` narrows it further.
+   */
+  asOf?: number
+}
+
 /**
  * Each seed's record with the property attestations it is assembled from, as attested: EAS field
- * name, type and value. For exports that need the on-chain types (`@seedprotocol/rdf`), which a
- * `SeedRecord` doesn't keep. Same seeds, versions and pins as getSeeds; records are assembled with
- * `relations: 'uids'`, without storage hydration, and never read from or written to the query cache.
- * Keyed as given; seeds that aren't found are left out.
+ * name, type and value, plus the seed's Version history. For exports that need the on-chain types
+ * (`@seedprotocol/rdf`), which a `SeedRecord` doesn't keep. Same seeds, versions and pins as
+ * getSeeds; records are assembled with `relations: 'uids'`, without storage hydration, and never
+ * read from or written to the query cache. Keyed as given; seeds that aren't found are left out.
  */
 export async function getSeedAttestations(
   seedUids: readonly string[],
-  options?: Pick<GetSeedsOptions, 'source' | 'pins'>,
+  options?: GetSeedAttestationsOptions,
 ): Promise<Map<string, SeedAttestations>> {
-  await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
+  const asOf = options?.asOf
+  if (asOf !== undefined) {
+    if (!Number.isFinite(asOf)) throw new RangeError(`asOf must be unix seconds, got ${asOf}`)
+    if (options?.source === 'local') {
+      throw new Error("getSeedAttestations: asOf reads EAS, so it can't be used with source: 'local'")
+    }
+  }
+  await initializeQueryPlatform({ source: asOf === undefined ? normalizeSourceMode(options?.source) : 'remote' })
 
   const givenByUid = new Map<string, string>()
   for (const given of seedUids) {
@@ -662,9 +682,16 @@ export async function getSeedAttestations(
     const active = pinOf(pin)
     if (active) pins.set(uid.trim().toLowerCase(), active)
   }
+  if (asOf !== undefined) {
+    for (const uid of requested) {
+      const pin = pins.get(uid)
+      pins.set(uid, { ...pin, asOf: Math.min(asOf, pin?.asOf ?? asOf) })
+    }
+  }
 
-  const mode = normalizeSourceMode(options?.source)
-  const resolved = resolveQuerySource(mode)
+  const mode = asOf === undefined ? normalizeSourceMode(options?.source) : 'remote'
+  const resolved =
+    asOf === undefined ? resolveQuerySource(mode) : { dataSource: createAsOfQueryDataSource(asOf) }
   const found = new Map<string, SeedAttestations>()
 
   /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
@@ -690,7 +717,11 @@ export async function getSeedAttestations(
       const properties = (assembled.properties.get(record.seedUid) ?? [])
         .map(toSeedPropertyAttestation)
         .filter((p): p is SeedPropertyAttestation => p !== null)
-      found.set(record.seedUid.toLowerCase(), { record, properties })
+      found.set(record.seedUid.toLowerCase(), {
+        record,
+        properties,
+        versions: versionHistory(record, seedByUid.get(record.seedUid.toLowerCase()), versions),
+      })
     }
     return uids.filter((uid) => !seedByUid.has(uid))
   }

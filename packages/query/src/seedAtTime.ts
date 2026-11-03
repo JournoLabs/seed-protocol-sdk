@@ -27,7 +27,8 @@ export type SeedAtTime = {
 
 const sameAddress = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
 
-const revokedBy = (attestation: Attestation, time: number): boolean =>
+/** Whether `attestation` was revoked by `time` (unix seconds). */
+export const revokedBy = (attestation: Attestation, time: number): boolean =>
   attestation.revoked && attestation.revocationTime <= time
 
 /** Reads `seedUid` from EAS as of `asOf` (unix seconds), default the latest state. Undefined: EAS has no such seed. */
