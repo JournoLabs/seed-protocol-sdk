@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
+import { BaseDb, importJsonSchema, Item, metadata, Model, seeds, versions } from '@seedprotocol/sdk'
 import {
   buildPathManifest,
   digestHex,
@@ -9,20 +10,15 @@ import {
   validateBag,
   verifyArchive,
   type Bag,
-} from '@seedprotocol/archive'
+} from '../../src'
 import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
 import { ARCHIVE_ANCHOR_SCHEMA_UID } from '@seedprotocol/eas'
-import { Item } from '@/Item/Item'
-import { importJsonSchema } from '@/imports/json'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { Model } from '@/Model/Model'
-import { metadata, seeds, versions } from '@/seedSchema'
-import { exportArchive } from '@/archive/exportArchive'
-import { verifyArchiveAgainstChain } from '@/archive/verifyArchiveAgainstChain'
-import { encodeCompositeUpload } from '@/helpers/compositeUpload'
-import { waitForPendingOutboxOps } from '@/outbox'
-import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
-import { waitForIdle } from '../test-utils/waitForIdle'
+import { exportArchive } from '../../src/seed/exportArchive'
+import { verifyArchiveAgainstChain } from '../../src/seed/verifyArchiveAgainstChain'
+import { encodeCompositeUpload } from '../../../sdk/src/helpers/compositeUpload'
+import { waitForPendingOutboxOps } from '../../../sdk/src/outbox'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../../sdk/__tests__/test-utils/client-init'
+import { waitForIdle } from '../../../sdk/__tests__/test-utils/waitForIdle'
 
 /**
  * A reproducible bag from EAS and Arweave alone: the fake chain and gateway below are the whole

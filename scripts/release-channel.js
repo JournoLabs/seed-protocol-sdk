@@ -18,13 +18,13 @@ import { execFileSync } from 'child_process'
  * Keep in sync with real @seedprotocol/* package.json dependencies.
  */
 export const PUBLISH_ORDER = [
-  'archive',
   'eas',
   'arweave',
   'vite',
   'next',
   'query',
   'sdk',
+  'archive',
   'feed',
   'feed-hyper',
   'gateway-hyper',

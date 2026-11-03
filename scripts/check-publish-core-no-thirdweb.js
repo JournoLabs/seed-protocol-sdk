@@ -25,11 +25,16 @@ function isFile(p) {
   }
 }
 
-/**
- * Static `thirdweb` imports reachable from `entry`, each with the import chain that reaches it
- * (paths relative to `srcDir`). Follows relative and `~/` (= `srcDir`) imports.
- */
+/** Static `thirdweb` imports reachable from `entry` (see findStaticImports). */
 export function findThirdwebImports(srcDir, entry) {
+  return findStaticImports(srcDir, entry, (spec) => /^thirdweb(\/|$)/.test(spec))
+}
+
+/**
+ * Static imports reachable from `entry` whose specifier `matches`, each with the import chain that
+ * reaches it (paths relative to `srcDir`). Follows relative and `~/` (= `srcDir`) imports.
+ */
+export function findStaticImports(srcDir, entry, matches) {
   const resolve = (fromFile, spec) => {
     const base = spec.startsWith('~/') ? path.join(srcDir, spec.slice(2)) : path.resolve(path.dirname(fromFile), spec)
     const candidates = [base, `${base}.ts`, `${base}.tsx`, path.join(base, 'index.ts'), path.join(base, 'index.tsx')]
@@ -42,7 +47,7 @@ export function findThirdwebImports(srcDir, entry) {
     const file = queue.shift()
     const src = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     for (const [, spec] of src.matchAll(STATIC_IMPORT)) {
-      if (/^thirdweb(\/|$)/.test(spec)) {
+      if (matches(spec)) {
         hits.push({ file, spec })
         continue
       }

@@ -31,22 +31,6 @@ export { RelatedItemUnpublishedError, RELATED_ITEM_UNPUBLISHED_CODE } from '../d
 export { HtmlEmbeddedDataUriLimitError, HtmlSeedPropertyRefError } from '../helpers/htmlEmbeddedDataUriPublish'
 export { PublishUploadChangedError } from '../db/read/getPublishUploads'
 
-// Archive export
-export {
-  ArchiveExportError,
-  exportArchive,
-  type ArchiveExportErrorCode,
-  type ArchiveOmission,
-  type ArchiveSeedRef,
-  type ExportableItem,
-  type ExportArchiveOptions,
-  type ExportArchiveResult,
-} from '../archive/exportArchive'
-export {
-  verifyArchiveAgainstChain,
-  type ArchiveChainVerification,
-} from '../archive/verifyArchiveAgainstChain'
-
 // Node.js specific exports
 export { NodeFileManager } from './helpers/FileManager'
 export { NodeDb, resolveSdkDrizzleMigrationsDir } from './db/Db'

@@ -76,20 +76,6 @@ export type { IItem, IItemProperty } from './interfaces'
 export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
-export {
-  ArchiveExportError,
-  exportArchive,
-  type ArchiveExportErrorCode,
-  type ArchiveOmission,
-  type ArchiveSeedRef,
-  type ExportableItem,
-  type ExportArchiveOptions,
-  type ExportArchiveResult,
-} from './archive/exportArchive'
-export {
-  verifyArchiveAgainstChain,
-  type ArchiveChainVerification,
-} from './archive/verifyArchiveAgainstChain'
 export { ItemProperty, ItemPropertySaveValidationError, ClearNotSupportedError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
 export {
@@ -402,6 +388,7 @@ export type { PublishUploadData } from './types/publish'
 // Rows, values and files @seedprotocol/archive's exportArchive reads.
 export { findSeedRow } from './db/read/findSeedRow'
 export { getLatestPublishedVersionRow } from './db/read/getLatestPublishedVersionRow'
+export { getVersionHistoryRows, type VersionHistoryRow } from './db/read/getVersionHistoryRows'
 export { getMetadata } from './db/read/getMetadata'
 export { nameMatchLevels } from './db/read/nameMatchLevels'
 export { resolveModelRecordByNameOrType } from './db/read/resolveModelRecord'

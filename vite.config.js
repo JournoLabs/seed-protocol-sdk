@@ -320,6 +320,8 @@ export default defineConfig({
             'packages/sdk/__tests__/**/*.test.ts',
             'packages/feed/__tests__/**/*.test.ts',
             'packages/mapping/__tests__/**/*.test.ts',
+            // The archive tests that export from the SDK; the rest run in the archive package.
+            'packages/archive/__tests__/seed/**/*.test.ts',
             // Other publish tests use bun:test and run via `bun run --filter @seedprotocol/publish test`.
             'packages/publish/src/services/publish/actors/createArweaveDataItemsPhase2.test.ts',
             'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',

@@ -6,8 +6,8 @@
  * Usage: node scripts/build-packages.js [package-dir...]
  *
  * Packages build from each other's dist, so the order matters: bundler-core before vite and
- * next, archive, eas, arweave and query before vite, sdk and rdf, and sdk before react, publish and
- * mapping. Callers wrap this in
+ * next, eas, arweave and query before vite, sdk and rdf, and sdk before archive, react, publish and
+ * mapping, and archive before publish. Callers wrap this in
  * with-monorepo-build-lock.js (directly or through build-with-tests.js) so a concurrent
  * build cannot delete a dist mid-build.
  */
@@ -21,8 +21,6 @@ const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUILD_ORDER = [
   // Inlined into vite and next at build time, so it builds first.
   'bundler-core',
-  // Depends on no other workspace package; sdk imports it.
-  'archive',
   'eas',
   'arweave',
   'query',
@@ -33,6 +31,8 @@ const BUILD_ORDER = [
   'vite',
   'next',
   'sdk',
+  // Its export reads the SDK; its verify entry reads no workspace package.
+  'archive',
   'react',
   'publish',
   'mapping',

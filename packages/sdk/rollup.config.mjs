@@ -162,7 +162,6 @@ const config = [
     // resolve for the browser and Vite warns about.
     treeshake: { moduleSideEffects: (id, external) => !(external && isBuiltin(id)) },
     external: [
-      '@seedprotocol/archive',
       '@seedprotocol/feed',
       '@seedprotocol/eas',
       '@seedprotocol/eas/node',
@@ -219,7 +218,6 @@ const config = [
       },
     ],
     external: (id) => {
-      if (id === '@seedprotocol/archive') return true
       if (id === '@seedprotocol/feed') return true
       if (id === '@seedprotocol/eas' || id === '@seedprotocol/eas/node') return true
       if (id === '@seedprotocol/arweave') return true

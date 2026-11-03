@@ -2,9 +2,12 @@ import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestatio
 import {
   PATH_MANIFEST_CONTENT_TYPE,
   buildPathManifest,
+  exportArchive,
   readBagInfo,
   verifyArchive,
+  type ArchiveSeedRef,
   type Bag,
+  type ExportableItem,
 } from '@seedprotocol/archive'
 import {
   ARCHIVE_ANCHOR_SCHEMA_DEF,
@@ -16,10 +19,7 @@ import {
 } from '@seedprotocol/eas'
 import {
   buildArweaveContentTags,
-  exportArchive,
   getContentSha256,
-  type ArchiveSeedRef,
-  type ExportableItem,
   type PublishUploadData,
   type TransactionTag,
 } from '@seedprotocol/sdk'

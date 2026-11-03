@@ -60,16 +60,30 @@
     "test": "vitest run --reporter=default",
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
+  "peerDependencies": {
+    "@seedprotocol/sdk": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@seedprotocol/sdk": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
+    "@seedprotocol/arweave": "workspace:*",
+    "@seedprotocol/eas": "workspace:*",
+    "@seedprotocol/query": "workspace:*",
     "parse5": "8.0.1"
   },
   "devDependencies": {
+    "@seedprotocol/sdk": "workspace:*",
     "@types/node": "^24.10.1",
+    "drizzle-orm": "^0.44.3",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "xstate": "^5.28.0"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

@@ -1,4 +1,5 @@
-import { readBagInfo, verifyArchive, type ArchiveCheck, type ArchiveVerification, type Bag } from '@seedprotocol/archive'
+import type { Bag } from '../bag'
+import { readBagInfo, verifyArchive, type ArchiveCheck, type ArchiveVerification } from '../verifyArchive'
 import { ArchiveExportError, exportArchive, type ArchiveSeedRef, type ExportableItem } from './exportArchive'
 
 export type ArchiveChainVerification = ArchiveVerification & {
