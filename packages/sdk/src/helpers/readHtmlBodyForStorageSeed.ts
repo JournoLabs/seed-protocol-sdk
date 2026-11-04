@@ -57,8 +57,11 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
   const { resolveBlobSource, fetchBlobBytes } = await import('@/storageValue/blobSources')
   const sourced = resolveBlobSource(txId)
   if (sourced) {
-    const bytes = await fetchBlobBytes(sourced)
-    return bytes ? new TextDecoder('utf-8').decode(bytes) : undefined
+    const fetched = await fetchBlobBytes(sourced)
+    if (!fetched) return undefined
+    const { transformArweaveContent, isEncryptedArweaveContent } = await import('@seedprotocol/arweave')
+    const { bytes } = await transformArweaveContent({ bytes: fetched }, { transactionId: txId })
+    return isEncryptedArweaveContent(bytes) ? undefined : new TextDecoder('utf-8').decode(bytes)
   }
 
   const rawHtml = await fetchHtmlViaRawAcrossGateways(txId)
@@ -69,7 +72,7 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
     const data = await BaseArweaveClient.getTransactionData(extractArweaveTransactionId(txId), {
       string: true,
     })
-    if (typeof data === 'string' && data.length > 0) return data
+    if (typeof data === 'string' && data.length > 0 && !data.startsWith('seed-private/v1\n')) return data
   } catch {
     /* offline / bad tx id */
   }

@@ -4,6 +4,7 @@ import type { IArweaveClient } from '../../src/ArweaveClient/IArweaveClient.js'
 import { resetArweaveReadGatewayForTests } from '../../src/ArweaveClient/selectReadGateway.js'
 import {
   hasArweaveContentReadTransform,
+  isEncryptedArweaveContent,
   readArweaveContentResponse,
   setArweaveContentReadTransform,
   type ArweaveContentReadTransform,
@@ -57,6 +58,33 @@ describe('Arweave content read seam', () => {
 
     await expect(fetchArweaveRawTextAcrossGateways(TX)).resolves.toBe('<P>HI</P>')
     expect(seen).toEqual([{ transactionId: TX, contentType: 'text/html' }])
+  })
+
+  describe('encrypted envelopes', () => {
+    const ENVELOPE = 'seed-private/v1\nbind e30\n-> x-test\nAQ\n--- AAAA\n\u0000\u0001ciphertext'
+    const envelopeResponse = () =>
+      vi.fn(async () => new Response(ENVELOPE, { status: 200, headers: { 'content-type': 'application/octet-stream' } }))
+
+    it('recognises the envelope version line only at the start', () => {
+      const enc = new TextEncoder()
+      expect(isEncryptedArweaveContent(enc.encode(ENVELOPE))).toBe(true)
+      expect(isEncryptedArweaveContent(enc.encode('seed-private/v1'))).toBe(false)
+      expect(isEncryptedArweaveContent(enc.encode(' seed-private/v1\n'))).toBe(false)
+      expect(isEncryptedArweaveContent(enc.encode('<p>seed-private/v1\n</p>'))).toBe(false)
+    })
+
+    it('a text read returns nothing for an envelope no transform opened', async () => {
+      vi.stubGlobal('fetch', envelopeResponse())
+      await expect(fetchArweaveRawTextAcrossGateways(TX)).resolves.toBeUndefined()
+    })
+
+    it('a text read returns what a transform decrypted', async () => {
+      vi.stubGlobal('fetch', envelopeResponse())
+      setArweaveContentReadTransform(({ bytes }) =>
+        isEncryptedArweaveContent(bytes) ? { bytes: new TextEncoder().encode('<p>opened</p>'), contentType: 'text/html' } : { bytes },
+      )
+      await expect(fetchArweaveRawTextAcrossGateways(TX)).resolves.toBe('<p>opened</p>')
+    })
   })
 
   describe('BaseArweaveClient.getTransactionData', () => {

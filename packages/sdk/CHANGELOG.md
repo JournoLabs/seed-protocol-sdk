@@ -4,6 +4,10 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Schema file properties take `private: true` (ADR 0033). It is stored in the property's definition (`getPropertyDefinition(...).private`) and kept when the schema is saved; a value other than `true` or `false` rejects the file. Nothing encrypts on it yet.
+- `GetPublishUploadsOptions.encryptUpload` (ADR 0033): called with each upload's plaintext, real MIME type and target; when it returns bytes, those are uploaded instead, `Content-SHA-256` hashes them, `Content-Type` is `application/octet-stream`, the returned tags are added and `arweaveUploadTags` are left off. Types `PublishUploadToEncrypt` and `EncryptedPublishUpload` are exported. Nothing passes it yet.
+- Downloads keep a `seed-private/v1` envelope (an encrypted upload, ADR 0033) whole as `encrypted/<txId>` instead of filing ciphertext as an image or file by its Content-Type or a sniff. `DownloadAllFilesResult` has `encryptedTransactionIds`; code that builds its own result (a mock, say) needs the field. The Html storage-seed fallback doesn't return an envelope as the body, and passes bytes from a blob source through the Arweave content read transform.
+
 - New `SeedConfig.blobSources`, `setBlobSources` and the `BlobSource` interface (ADR 0026, "Blob store reads"): where to read files whose `storage_transaction_id` isn't an Arweave transaction id, such as `ipfs://<cid>` ids from a publish `BlobStore`. The downloader fetches those from the source's URLs and checks the SHA-256 the source gives, and the file is named by the source's key. Ids no source claims are read from the Arweave gateways as before.
 
 ## 0.8.1 (2026-11-04)

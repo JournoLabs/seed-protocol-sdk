@@ -103,6 +103,21 @@ describe('hydrateArweaveRichTextInItems', () => {
     }
   })
 
+  it('leaves the URL in place for an encrypted envelope no transform opened', async () => {
+    const url = 'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/octet-stream' },
+        arrayBuffer: async () => new TextEncoder().encode('seed-private/v1\nbind e30\n-> x-test\nAQ\n--- AAAA\nciphertext').buffer,
+      }),
+    )
+    const items = [{ html: url }] as Record<string, unknown>[]
+    await hydrateArweaveRichTextInItems(items)
+    expect(items[0]!.html).toBe(url)
+  })
+
   it('fetches a transaction once, across calls, concurrent fields and gateways', async () => {
     const fetchMock = vi.fn().mockResolvedValue(htmlResponse('<p>body</p>'))
     vi.stubGlobal('fetch', fetchMock)

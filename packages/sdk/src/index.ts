@@ -383,6 +383,8 @@ export {
   PublishUploadChangedError,
   resolveItemStorageChildFile,
   type GetPublishUploadsOptions,
+  type PublishUploadToEncrypt,
+  type EncryptedPublishUpload,
 } from './db/read/getPublishUploads'
 export type { PublishUploadData } from './types/publish'
 

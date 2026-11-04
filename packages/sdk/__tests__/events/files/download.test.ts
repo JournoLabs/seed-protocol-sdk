@@ -289,6 +289,7 @@ describe('events/files/download dedupe', () => {
         verifiedTransactionIds: [VALID_ARWEAVE_TX],
         hashMismatchTransactionIds: [TX_B],
         failedTransactionIds: [],
+        encryptedTransactionIds: [],
       } as any)
 
       const mod = await import('@/events/files/download')
@@ -385,6 +386,7 @@ describe('events/files/download skips files on disk', () => {
       verifiedTransactionIds: params.transactionIds,
       hashMismatchTransactionIds: [],
       failedTransactionIds: [],
+      encryptedTransactionIds: [],
     })) as any)
   })
 

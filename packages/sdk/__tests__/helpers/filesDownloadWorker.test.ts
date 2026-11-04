@@ -339,6 +339,38 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     })
   })
 
+  describe('encrypted envelopes', () => {
+    // A seed-private/v1 envelope's first bytes (packages/encryption/SPEC.md); the rest is ciphertext.
+    const ENVELOPE = new Uint8Array([
+      ...new TextEncoder().encode('seed-private/v1\nbind e30\n-> x-test\nAQ\n--- AAAA\n'),
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3, 200, 17, 0, 255,
+    ])
+
+    it('keeps the bytes whole in encrypted/, whatever the Content-Type says, and reports them', async () => {
+      for (const headers of [{ 'content-type': 'application/octet-stream' }, { 'content-type': 'image/png' }, undefined]) {
+        const { posted, raw } = await runWorker({ transactionIds: [TX], arweaveHost: HOST }, async () =>
+          new Response(ENVELOPE as BodyInit, { status: 200, headers }),
+        )
+        expect(posted.filter((m) => m.message === 'fileSaved').map((m) => m.filePath)).toEqual([`/files/encrypted/${TX}`])
+        expect(posted.filter((m) => m.message === 'encryptedContent').map((m) => m.transactionId)).toEqual([TX])
+        expect(raw.get(TX)).toEqual(ENVELOPE)
+        vi.unstubAllGlobals()
+        delete (globalThis as any).onmessage
+      }
+    })
+
+    it('counts an envelope on disk as stored when skipping existing files', async () => {
+      const shared = newOpfsFiles()
+      const data = { transactionIds: [TX], arweaveHost: HOST, skipExisting: true }
+      const respond = async () => new Response(ENVELOPE as BodyInit, { status: 200 })
+      await runWorker(data, respond, { shared })
+      vi.unstubAllGlobals()
+      delete (globalThis as any).onmessage
+      const second = await runWorker(data, respond, { shared })
+      expect(second.fetched).toEqual([])
+    })
+  })
+
   describe('composite uploads', () => {
     const runComposite = async (body: Uint8Array) =>
       runWorker({ transactionIds: [TX], arweaveHost: HOST }, async () =>

@@ -34,7 +34,32 @@ export type GetPublishUploadsOptions = {
    * When set, only Html storage seeds in this list are included (phase 2). Non-Html storage uploads are omitted.
    */
   onlyHtmlStorageSeedLocalIds?: string[]
+  /**
+   * Encrypts an upload of a private Version (ADR 0033). Called once per upload with its plaintext
+   * and real MIME type; return undefined to upload it as is. An encrypted upload is hashed as the
+   * returned bytes, tagged `Content-Type: application/octet-stream` plus the returned tags, and
+   * gets no `arweaveUploadTags`, which would mark it as the app's.
+   */
+  encryptUpload?: (upload: PublishUploadToEncrypt) => Promise<EncryptedPublishUpload | undefined>
 }
+
+/** What {@link GetPublishUploadsOptions.encryptUpload} receives. */
+export type PublishUploadToEncrypt = Pick<
+  PublishUploadData,
+  'itemPropertyName' | 'itemPropertyLocalId' | 'seedLocalId' | 'versionLocalId'
+> & {
+  blob: Blob
+  /** The plaintext's MIME type, for the encrypted payload; the upload itself won't carry it. */
+  contentType: string | undefined
+}
+
+/** An encrypted upload's bytes and the tags that mark its format (e.g. `Seed-Encryption`). */
+export type EncryptedPublishUpload = {
+  blob: Blob
+  tags: TransactionTag[]
+}
+
+const ENCRYPTED_UPLOAD_CONTENT_TYPE = 'application/octet-stream'
 
 type UploadTarget = Pick<
   PublishUploadData,
@@ -68,8 +93,8 @@ const uploadFileMimeType = async (blob: Blob, fileName: string): Promise<string 
 /**
  * The one place an upload's content becomes a {@link PublishUploadData}: everything after this
  * (Content-SHA-256, tags, the L1 transaction or the bundler DataItem, signing) works from what it
- * returns. A future private-publish option that encrypts content belongs here, before the hash and
- * tags are computed, so both publish paths pick it up.
+ * returns. Private uploads are encrypted here, before the hash and tags are computed, so both
+ * publish paths upload and verify the ciphertext.
  */
 const buildPublishUploadData = async (
   blob: Blob,
@@ -77,6 +102,17 @@ const buildPublishUploadData = async (
   target: UploadTarget,
   options: GetPublishUploadsOptions | undefined,
 ): Promise<PublishUploadData> => {
+  const encrypted = await options?.encryptUpload?.({ ...target, blob, contentType })
+  if (encrypted) {
+    const contentHash = await getBlobSha256(encrypted.blob)
+    return {
+      blob: encrypted.blob,
+      contentHash,
+      contentType: ENCRYPTED_UPLOAD_CONTENT_TYPE,
+      tags: buildArweaveContentTags(contentHash, ENCRYPTED_UPLOAD_CONTENT_TYPE, encrypted.tags),
+      ...target,
+    }
+  }
   const contentHash = await getBlobSha256(blob)
   return {
     blob,

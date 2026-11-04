@@ -74,6 +74,7 @@ export class FileDownloader {
     const savedPaths: string[] = []
     const verified = new Set<string>()
     const hashMismatch = new Set<string>()
+    const encrypted = new Set<string>()
     const failed = new Set<string>()
     const inactivityTimeoutMs = this.options.inactivityTimeoutMs ?? FILE_DOWNLOAD_INACTIVITY_TIMEOUT_MS
 
@@ -116,6 +117,7 @@ export class FileDownloader {
               verifiedTransactionIds: [...verified].filter((id) => !failed.has(id)),
               hashMismatchTransactionIds: [...hashMismatch],
               failedTransactionIds: [...failed],
+              encryptedTransactionIds: [...encrypted].filter((id) => !failed.has(id)),
             }),
           )
           .catch(reject)
@@ -161,6 +163,10 @@ export class FileDownloader {
         if (data.message === 'compositeChildUnrouted') {
           // No local ItemStorage property for this child (e.g. its item is not synced yet).
           logger(`composite ${data.transactionId}: no local path for child "${data.name}"; not saved`)
+        }
+
+        if (data.message === 'encryptedContent') {
+          encrypted.add(data.transactionId)
         }
 
         if (data.message === 'contentVerified') {

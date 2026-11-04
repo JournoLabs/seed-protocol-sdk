@@ -80,6 +80,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       verifiedTransactionIds: [],
       hashMismatchTransactionIds: [],
       failedTransactionIds: [],
+      encryptedTransactionIds: [],
     })
 
     expect(mocks.addExcludedTransactions).toHaveBeenCalledWith(new Set(['tx-2']))
@@ -170,6 +171,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       verifiedTransactionIds: ['tx-1'],
       hashMismatchTransactionIds: ['tx-2'],
       failedTransactionIds: [],
+      encryptedTransactionIds: [],
     })
   })
 
@@ -184,6 +186,24 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       verifiedTransactionIds: [],
       hashMismatchTransactionIds: [],
       failedTransactionIds: [],
+      encryptedTransactionIds: [],
+    })
+  })
+
+  it('reports transactions the worker kept as encrypted envelopes, unless saving them failed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const p = new FileDownloader().downloadAll(params)
+    const worker = lastWorker()
+    worker.emit({ message: 'fileSaved', filePath: '/files/encrypted/tx-1' })
+    worker.emit({ message: 'encryptedContent', transactionId: 'tx-1' })
+    worker.emit({ message: 'encryptedContent', transactionId: 'tx-2' })
+    worker.emit({ message: 'fileError', transactionId: 'tx-2', error: { name: 'Error', message: 'x' } })
+    worker.emit({ done: true })
+    await expect(p).resolves.toEqual({
+      verifiedTransactionIds: [],
+      hashMismatchTransactionIds: [],
+      failedTransactionIds: ['tx-2'],
+      encryptedTransactionIds: ['tx-1'],
     })
   })
 })

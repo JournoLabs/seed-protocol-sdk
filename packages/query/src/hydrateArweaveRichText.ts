@@ -2,6 +2,7 @@ import {
   type ArweaveTransactionLink,
   buildArweaveTransactionLink,
   getArweaveReadBaseUrls,
+  isEncryptedArweaveContent,
   isGatewayHostCircuitOpen,
   parseArweaveTransactionLink,
   readArweaveContentResponse,
@@ -67,7 +68,8 @@ async function fetchGatewayPayloadAsUtf8(baseUrl: string, link: ArweaveTransacti
     const ct = res.headers.get('content-type') ?? ''
     if (/^(image|video|audio)\//i.test(ct)) return { kind: 'skip' }
     const { bytes } = await readArweaveContentResponse(res, { transactionId: link.transactionId })
-    if (bytes.byteLength > MAX_BODY_BYTES) return { kind: 'skip' }
+    // An encrypted envelope no transform opened: ciphertext, not a body to show.
+    if (bytes.byteLength > MAX_BODY_BYTES || isEncryptedArweaveContent(bytes)) return { kind: 'skip' }
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     if (text.length === 0 || text.includes('\0')) return { kind: 'skip' }
     return { kind: 'text', text }

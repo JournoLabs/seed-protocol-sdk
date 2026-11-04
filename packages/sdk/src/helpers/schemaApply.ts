@@ -167,6 +167,7 @@ export function schemaFilePropertyDefinition(
       required: def.required === undefined ? undefined : !!def.required,
       validation: def.validation && typeof def.validation === 'object' ? def.validation : undefined,
       htmlEmbeddedDataUriPolicy: def.htmlEmbeddedDataUriPolicy,
+      private: def.private,
     }).filter(([, value]) => value !== undefined),
   )
 }
@@ -177,6 +178,7 @@ type SchemaFilePropertyFields = {
   refValueType?: string
   items?: { type?: string }
   validation?: Record<string, unknown>
+  private?: unknown
 }
 
 /**
@@ -209,6 +211,9 @@ function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
       if (def.dataType === ModelPropertyDataTypes.List && rawRefValueType && !isKnownDataType(rawRefValueType)) {
         errors.push(`${at}: unknown refValueType "${rawRefValueType}". Expected one of: ${known}`)
         continue
+      }
+      if (raw.private !== undefined && typeof raw.private !== 'boolean') {
+        errors.push(`${at}: private must be true or false`)
       }
       for (const problem of validationRuleProblems(def.dataType, def.refValueType, def.validation)) {
         ;(problem.severity === 'error' ? errors : warnings).push(`${at}: ${problem.message}`)

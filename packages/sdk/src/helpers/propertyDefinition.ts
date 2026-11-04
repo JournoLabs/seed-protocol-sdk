@@ -165,7 +165,7 @@ export async function getPropertyDefinitionsByFileId(
 }
 
 /** Fields only a definition holds (no column), which code-defined properties can set. */
-export const DEFINITION_ONLY_FIELDS = ['validation', 'htmlEmbeddedDataUriPolicy', 'description'] as const
+export const DEFINITION_ONLY_FIELDS = ['validation', 'htmlEmbeddedDataUriPolicy', 'description', 'private'] as const
 
 /** The {@link DEFINITION_ONLY_FIELDS} a definition sets. */
 export const definitionOnlyFields = (def: Record<string, any>): Record<string, unknown> =>

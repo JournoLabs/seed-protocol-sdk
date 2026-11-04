@@ -3,7 +3,7 @@ import { ensureReadGatewaySelected } from '../ArweaveClient/selectReadGateway.js
 import { getArweaveReadGatewayHostsForPrimary } from '../constants.js'
 import { getPreferredArweaveReadBaseUrls, getResolvedSeedGatewayEndpoints } from './gatewayState.js'
 import { getReadGatewayHostsForConfig } from './resolveSeedGatewayEndpoints.js'
-import { readArweaveContentResponse } from '../content/arweaveContent.js'
+import { isEncryptedArweaveContent, readArweaveContentResponse } from '../content/arweaveContent.js'
 
 /** Per-gateway timeout for {@link fetchArweaveRawFromBaseUrl}; a hung gateway must not block the next one. */
 export const DEFAULT_ARWEAVE_RAW_READ_TIMEOUT_MS = 10_000
@@ -127,11 +127,12 @@ export async function fetchArweaveRawBytesAcrossGateways(
   return tryUrls(getResolvedArweaveReadBaseUrls(options))
 }
 
-/** {@link fetchArweaveRawBytesAcrossGateways} as text. */
+/** {@link fetchArweaveRawBytesAcrossGateways} as text; undefined for an encrypted envelope no transform opened. */
 export async function fetchArweaveRawTextAcrossGateways(
   transactionId: string,
   options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number },
 ): Promise<string | undefined> {
   const bytes = await fetchArweaveRawBytesAcrossGateways(transactionId, options)
-  return bytes ? new TextDecoder().decode(bytes) || undefined : undefined
+  if (!bytes || isEncryptedArweaveContent(bytes)) return undefined
+  return new TextDecoder().decode(bytes) || undefined
 }

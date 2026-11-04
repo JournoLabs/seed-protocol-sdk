@@ -236,7 +236,7 @@ testDescribe('applySchemaFile', () => {
           indexes: ['title'],
           properties: {
             title: { id: 'apply-next-fields-title', type: 'Text', validation: { maxLength: 80 }, description: 'Headline' },
-            body: { id: 'apply-next-fields-body', type: 'Html', htmlEmbeddedDataUriPolicy: 'preserve' },
+            body: { id: 'apply-next-fields-body', type: 'Html', htmlEmbeddedDataUriPolicy: 'preserve', private: true },
           },
         },
       },
@@ -259,7 +259,16 @@ testDescribe('applySchemaFile', () => {
       description: 'Headline',
     })
     expect(saved?.models.FieldsPost.properties.body.htmlEmbeddedDataUriPolicy).toBe('preserve')
+    expect(saved?.models.FieldsPost.properties.body.private).toBe(true)
+    expect(saved?.models.FieldsPost.properties.title.private).toBeUndefined()
     expect(Object.keys(saved?.models ?? {}).sort()).toEqual(['FieldsNote', 'FieldsPost'])
+
+    // The flag is part of the property's definition, where publish will read it.
+    const { getPropertyDefinitions } = await import('@/helpers/propertyDefinition')
+    const [modelRow] = await BaseDb.getAppDb()!.select().from(modelsTable).where(eq(modelsTable.schemaFileId, 'apply-next-fields-post'))
+    const definitions = await getPropertyDefinitions(modelRow!.id)
+    expect(definitions.get("body")?.private).toBe(true)
+    expect(definitions.get("title")?.private).toBeUndefined()
   }, 60_000)
 
   it('syncSchemaFromSource replaces a changed file of the same id and version', async () => {
