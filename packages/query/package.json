@@ -44,6 +44,16 @@
         "default": "./dist/node.js"
       }
     },
+    "./ens": {
+      "import": {
+        "types": "./dist/ens/index.d.ts",
+        "default": "./dist/ens.js"
+      },
+      "require": {
+        "types": "./dist/ens/index.d.ts",
+        "default": "./dist/ens.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -58,7 +68,9 @@
     "@noble/hashes": "^1.8.0",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
-    "pluralize": "^8.0.0"
+    "multiformats": "^13.4.2",
+    "pluralize": "^8.0.0",
+    "viem": "^2.46.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.3",

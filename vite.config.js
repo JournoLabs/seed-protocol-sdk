@@ -70,6 +70,7 @@ const workspaceSourceAliases = (platform) => {
     exact('@seedprotocol/arweave/node', 'arweave/src/node/index.ts'),
     exact('@seedprotocol/arweave', 'arweave/src/index.ts'),
     exact('@seedprotocol/query/node', 'query/src/node/index.ts'),
+    exact('@seedprotocol/query/ens', 'query/src/ens/index.ts'),
     exact('@seedprotocol/query', platform === 'browser' ? 'query/src/index.ts' : 'query/src/index.node.ts'),
     exact('@seedprotocol/react', 'react/src/index.ts'),
     exact('@seedprotocol/gateway-hyper', 'gateway-hyper/src/index.ts'),
