@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `buildPathManifest` lists `data/index.html` again as `index.html` and makes that the index. arweave.net served nested paths but 404'd at the root of the first OP Sepolia anchor's manifest: HyperBEAM splits the index path on `/`. `readBagFromManifest` leaves `index.html` out of the bag and still reads manifests whose index is `data/index.html`. New anchors get a different manifest; bags and their hashes don't change.
+
 ## 0.8.1 (2026-11-04)
 
 - `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and their types moved here from `@seedprotocol/sdk`, unchanged (ADR 0031). `@seedprotocol/sdk` is an optional peer: the main entry imports it, and `@seedprotocol/archive/verify` and `@seedprotocol/archive/node` don't. **Breaking** for code that imports the main entry without the SDK installed.

@@ -209,9 +209,11 @@ const copy = await readBagFromManifest(parsePathManifest(manifestBytes), fetchTr
 verifyArchive(copy, { expectedTagmanifestSha256 })
 ```
 
-The manifest is `arweave/paths` 0.2.0 with every bag file at its bag path and `data/index.html` as
-its index. A gateway serves the index at the manifest's root, so `assets/<file>` is listed as well,
-for the page's relative links; `readBagFromManifest` leaves those paths out of the bag. A bag with
+The manifest is `arweave/paths` 0.2.0 with every bag file at its bag path. `data/index.html` is
+listed again as `index.html`, which is the index: HyperBEAM gateways such as arweave.net split an
+index path on `/` and can't find a nested one. A gateway serves the index at the manifest's root, so
+`assets/<file>` is listed as well, for the page's relative links. `readBagFromManifest` leaves the
+`index.html` and `assets/` paths out of the bag. A bag with
 several Html properties has no index, and its pages work at `data/<property>.html`.
 
 The manifest says where files are, and doesn't vouch for them. Only the check against an outside
