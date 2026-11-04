@@ -192,6 +192,7 @@
       "version": "0.8.0",
       "devDependencies": {
         "@seedprotocol/publish": "workspace:*",
+        "@seedprotocol/sdk": "workspace:*",
         "@types/node": "^24.10.1",
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",

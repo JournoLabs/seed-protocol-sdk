@@ -1,7 +1,8 @@
 # IPFS
 
-`@seedprotocol/ipfs` writes the files of a publish (Image, File, Html and Json uploads) to IPFS. It
-plugs into `@seedprotocol/publish` as a blob store (`PublishConfig.blobStore`, ADR 0026). Arweave
+`@seedprotocol/ipfs` writes the files of a publish (Image, File, Html and Json uploads) to IPFS and
+reads them back. Writes plug into `@seedprotocol/publish` as a blob store (`PublishConfig.blobStore`),
+reads into the SDK as a blob source (`SeedConfig.blobSources`); ADR 0026 describes both. Arweave
 stays the default store; the usual setup keeps Arweave and adds an IPFS copy of each file.
 
 ```bash
@@ -45,14 +46,13 @@ blobStore: ipfsBlobStore({
 })
 ```
 
-Each file's `storage_transaction_id` is then `ipfs://<cidv1>`. Two parts of the SDK still assume
-Arweave ids, so this mode is not ready for apps yet:
+Each file's `storage_transaction_id` is then `ipfs://<cidv1>`. Every app that reads these Seeds
+needs `ipfsBlobSource` in its SDK config ([Reading files](#reading-files)); without it the SDK takes
+the id for an Arweave id and the download fails.
 
-- Readers on other devices download a `storage_transaction_id` from Arweave, so these files don't
-  download there until the SDK maps `ipfs://` ids to gateway URLs. `ipfsGatewayUrls` (below) is the
-  piece that mapping will call.
-- Html with embedded images or `seed:property/` references is rewritten with Arweave gateway URLs of
-  the images' ids, which gives broken links for `ipfs://` ids.
+Html with embedded images or `seed:property/` references is rewritten with Arweave gateway URLs of
+the images' ids, which gives broken links for `ipfs://` ids. Until that changes, use `ipfsMirror`
+for items with Html.
 
 ## Pinning providers
 
@@ -108,19 +108,37 @@ setting doesn't apply: a CAR upload keeps the blocks the store built.
 ids outside a publish. A file's DAG holds a copy of its bytes, so a large file is in memory twice
 while it is prepared.
 
-## Reading `ipfs://` ids
+## Reading files
+
+`ipfsBlobSource(options)` is the SDK's read half. Configure it beside the store, with the same
+gateways:
 
 ```ts
-import { ipfsGatewayUrls, parseIpfsId } from '@seedprotocol/ipfs'
+import { arweaveBlobStore, initPublish } from '@seedprotocol/publish'
+import { client } from '@seedprotocol/sdk'
+import { ipfsBlobSource, ipfsBlobStore, kuboRpcPinning } from '@seedprotocol/ipfs'
 
-ipfsGatewayUrls('ipfs://bafkrei…', ['https://example.mypinata.cloud'])
-// ['https://example.mypinata.cloud/ipfs/bafkrei…']
+const gateways = ['https://ipfs.example.com', 'https://ipfs.io']
 
-parseIpfsId('ipfs://bafkrei…')
-// { cid: 'bafkrei…', codec: 'raw', sha256: '…' }
+await client.init({
+  // ...
+  blobSources: [ipfsBlobSource({ gateways })],
+})
+
+initPublish({
+  // ...
+  blobStore: ipfsBlobStore({ pinning: kuboRpcPinning({ url: 'http://127.0.0.1:5001' }), gateways }),
+})
 ```
 
-`ipfsGatewayUrls(id, gateways = DEFAULT_GATEWAYS)` returns `<gateway>/ipfs/<cid>` for each gateway,
-in order, and an empty array for an id that isn't an `ipfs://` CIDv1. `parseIpfsId` gives the
-`sha256` of the file's bytes for a `raw` CID; a `dag-pb` root's digest covers the DAG's root node,
-not the bytes, so it has none.
+The source claims `ipfs://<cid>` ids (and the bare CID, which is its key and names the downloaded
+file), and downloads from `<gateway>/ipfs/<cid>` on each gateway in turn. For a `raw` CID, a file of
+at most 262144 bytes, it gives the SHA-256 the CID fixes, and the SDK skips a gateway that serves
+other bytes. A `dag-pb` root's digest covers the DAG's root node, not the file, so larger files are
+saved unverified. Ids the source doesn't claim, Arweave ids among them, are read from Arweave as
+before.
+
+With `ipfsMirror` the attested ids are Arweave ids, so readers need no source.
+
+`ipfsGatewayUrls(id, gateways = DEFAULT_GATEWAYS)` and `parseIpfsId(id)` give the same URLs and the
+CID's codec and SHA-256 for tools outside the SDK.

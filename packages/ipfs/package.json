@@ -1,7 +1,7 @@
 {
   "name": "@seedprotocol/ipfs",
   "version": "0.8.0",
-  "description": "IPFS blob store for @seedprotocol/publish: CIDs computed before upload, CAR uploads to a Kubo node or Pinata, and gateway URLs for ipfs:// ids",
+  "description": "IPFS for Seed Protocol: a publish blob store with CIDs computed before upload and CAR uploads to a Kubo node or Pinata, and an SDK blob source that reads ipfs:// ids from gateways",
   "keywords": [
     "seed-protocol",
     "ipfs",
@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@seedprotocol/publish": "workspace:*",
+    "@seedprotocol/sdk": "workspace:*",
     "@types/node": "^24.10.1",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
