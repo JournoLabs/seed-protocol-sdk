@@ -28,6 +28,7 @@ const SYNC_PACKAGES = [
   'next',
   'archive',
   'rdf',
+  'ipfs',
   // Private, but published manifests list it in devDependencies (workspace refs become this version).
   'bundler-core',
 ]

@@ -7,12 +7,13 @@
  *   node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] all
  *   node scripts/publish-package.js [-f] [-y]          # same as "all" (used by bun run publish:all)
  *
- * Packages: archive, eas, arweave, vite, query, sdk, rdf, feed, feed-hyper, gateway-hyper, react, publish, mapping
+ * Packages: archive, eas, arweave, vite, query, sdk, rdf, ipfs, feed, feed-hyper, gateway-hyper, react, publish, mapping
  *
  * Single-package mode:
  * - If publishing anything except 'sdk' / lean packages, checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
- * - If publishing 'feed' or 'rdf', also checks that @seedprotocol/query@<same version> is published
+ * - If publishing 'feed' or 'rdf', also checks that @seedprotocol/query@<same version> is published;
+ *   for 'ipfs', @seedprotocol/publish
  * - If publishing 'feed-hyper', also checks that @seedprotocol/feed@<same version> is published
  * - If publishing 'publish', also checks that @seedprotocol/react@<same version> is published
  * - If React version is not published, prompts to publish it first
@@ -47,7 +48,7 @@ const rootDir = join(__dirname, '..')
 
 // AWAITING_FIRST_PUBLISH packages can only be published one at a time, by hand.
 const VALID_PACKAGES = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
-const LEAN_PACKAGES = ['archive', 'eas', 'arweave', 'vite', 'next', 'rdf']
+const LEAN_PACKAGES = ['archive', 'eas', 'arweave', 'vite', 'next', 'rdf', 'ipfs']
 
 /** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
 const npmPublishOptions = { tag: null, provenance: false }
@@ -255,17 +256,17 @@ async function ensureSinglePackageDependencies(packageArg, { skipTests = false }
     }
   }
 
-  if (packageArg === 'feed' || packageArg === 'rdf') {
-    console.log('\n[Publish] Checking if @seedprotocol/query is published on npm...')
-    const queryPublished = isPackageVersionPublished('query', sdkVersion)
-
-    if (!queryPublished) {
-      console.log(`\n⚠️  @seedprotocol/query@${sdkVersion} is not published on npm.`)
+  // Lean packages that need one other internal package on npm first.
+  const prerequisite = { feed: 'query', rdf: 'query', ipfs: 'publish' }[packageArg]
+  if (prerequisite) {
+    console.log(`\n[Publish] Checking if @seedprotocol/${prerequisite} is published on npm...`)
+    if (!isPackageVersionPublished(prerequisite, sdkVersion)) {
+      console.log(`\n⚠️  @seedprotocol/${prerequisite}@${sdkVersion} is not published on npm.`)
       console.log(`   @seedprotocol/${packageArg} depends on it, so it must be published first.\n`)
-      console.log('Aborted. Publish @seedprotocol/query first, then run this script again.')
+      console.log(`Aborted. Publish @seedprotocol/${prerequisite} first, then run this script again.`)
       process.exit(1)
     }
-    console.log(`✅ @seedprotocol/query@${sdkVersion} is already published.\n`)
+    console.log(`✅ @seedprotocol/${prerequisite}@${sdkVersion} is already published.\n`)
   }
 
   if (packageArg === 'feed-hyper') {

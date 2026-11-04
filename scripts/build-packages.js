@@ -7,7 +7,7 @@
  *
  * Packages build from each other's dist, so the order matters: bundler-core before vite and
  * next, eas, arweave and query before vite, sdk and rdf, and sdk before archive, react, publish and
- * mapping, and archive before publish. Callers wrap this in
+ * mapping, archive before publish, and publish before ipfs. Callers wrap this in
  * with-monorepo-build-lock.js (directly or through build-with-tests.js) so a concurrent
  * build cannot delete a dist mid-build.
  */
@@ -35,6 +35,8 @@ const BUILD_ORDER = [
   'archive',
   'react',
   'publish',
+  // Reads only publish's types.
+  'ipfs',
   'mapping',
 ]
 

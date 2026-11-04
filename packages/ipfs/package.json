@@ -1,0 +1,66 @@
+{
+  "name": "@seedprotocol/ipfs",
+  "version": "0.8.0",
+  "description": "IPFS blob store for @seedprotocol/publish: CIDs computed before upload, CAR uploads to a Kubo node or Pinata, and gateway URLs for ipfs:// ids",
+  "keywords": [
+    "seed-protocol",
+    "ipfs",
+    "cid",
+    "car",
+    "pinning",
+    "publish"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+  },
+  "peerDependencies": {
+    "@seedprotocol/publish": "workspace:*"
+  },
+  "devDependencies": {
+    "@seedprotocol/publish": "workspace:*",
+    "@types/node": "^24.10.1",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/ipfs"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/ipfs#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
