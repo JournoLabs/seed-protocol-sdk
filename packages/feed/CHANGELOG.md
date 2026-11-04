@@ -2,9 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - `parseRssString` adds `creatorList` and `authorList` to an item, keeping a repeated `dc:creator` or `author` that `creator` and `author` collapse to the first.
+
+### Commits
+
+#### Features
+
+- mapping: a repeated dc:creator or author stays a list (0bcb9bee)
 
 ## 0.8.0 (2026-10-30)
 

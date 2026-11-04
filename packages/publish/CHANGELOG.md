@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - New `CreatePublishOptions.nonceKey`: the host's own id for a publish, such as a job id. Its `multiPublish` UserOp is sent under an EntryPoint nonce key derived from it (`publishNonceKey`), so tries from different processes or with new items land once. A key can't be used without a sender that pins its nonce, on a direct EAS publish, or after a UserOp landed under it: each fails with the new `PublishNonceKeyError` (`NONCE_KEY_NOT_PINNED`, `NONCE_KEY_DIRECT_EAS`, `NONCE_KEY_SPENT`) in `checking`, before any upload. New `findPublishByNonceKey({ sender, nonceKey, fromBlock })` reads what landed under a key from EntryPoint, with no local rows. With `modelName`, a successful UserOp also carries `seedUids`, the new Seeds of that model its sender attested in it, and `seedUid` when there is one.
 - `@seedprotocol/publish/thirdweb` exports `seedAccountNonce`, the `getAccountNonce` override `getManagedAccountWallet` uses. A thirdweb smart wallet built with it can be wrapped with `fromThirdwebAccount(account, { pinsNonce: true })` and pins its nonce.
@@ -24,6 +24,37 @@ All notable changes to this project will be documented in this file.
 - New `PublishManager.getRestoreStatus()` and `onRestoreStatus(listener)` say whether in-progress publishes were restored: `pending`, `restored`, `dbNotReady` or `failed` with the error, plus `unreadableSeedLocalIds` for saved publishes that can't be parsed. The type is exported as `PublishRestoreStatus`. `restoreFromDb` used to end silently when the database wasn't ready in 60 seconds or restore threw. It now also restores whenever the database does arrive, beside any publishes started in the meantime, which it leaves alone.
 - A publish fails when a seed uid can't be written, on both paths. It used to log the failure and reach `success`, and the next Publish from a fresh load attested a second Seed.
 - **Breaking:** `signDataItems` and `getPublishUploadData` give each upload as `blob: Blob` instead of `data: Uint8Array`. Use the SDK's new `readPublishUploadBytes(upload)` where you need the bytes. For a file the Blob is disk-backed, so a publish no longer loads every upload before signing the first one. A file edited during the publish now fails it with "the file changed during the publish"; before, the publish signed the bytes it had already read.
+
+### Commits
+
+#### Breaking
+
+- read uploads as disk-backed Blobs (c8ef0992)
+
+#### Features
+
+- findPublishByNonceKey returns the Seed uid with modelName (5e23fef2)
+- host-supplied nonce key for attestation UserOps (a6e95797)
+- codes on the attempt errors and the changed-upload error (0246ae41)
+- anchorArchive resumes without paying for uploads twice (8aa1afa3)
+- report restore outcomes, and restore when the database arrives (0968d9a0)
+- journal each direct EAS transaction (c458a58d)
+- pin each UserOp attempt to its own EntryPoint nonce key (5d9fbee8)
+- reconcile open attempts before any retry or restore sends (ec41d7f5)
+- archive: verifyPublishedArchive, a browser entry that checks a bag against its anchor (7e95bff1)
+- journal attestation sends, refuse one that may double-attest (7243e1a0)
+- anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
+
+#### Fixes
+
+- sdk: a reproducible bag describes the record, and can wait for it (946566a9)
+- record a landed multiPublish once, from its receipt (6fe1a60d)
+- refuse a publish too large for one transaction before simulating (c2417091)
+
+#### Other
+
+- archive: exportArchive moves from the SDK into archive (38df2da0)
+- ADR 0030 and recovery docs for attestation attempts (c8cc9b3f)
 
 ## 0.8.0 (2026-10-30)
 

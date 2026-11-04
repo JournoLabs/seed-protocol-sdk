@@ -2,11 +2,22 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - New `getReportedAttestationUids(uids)`: which uids EAS reports, uncached.
 - New `getArchiveAnchorsFromEas({ versionUid, attester })`, `arweaveTxIdToBytes32` and `bytes32ToArweaveTxId`.
 - New `ARCHIVE_ANCHOR_SCHEMA_DEF`, `ARCHIVE_ANCHOR_SCHEMA_UID` and `ARCHIVE_ANCHOR_SCHEMA_NAME`, the schema of a bag anchor (ADR 0029). `getItemPropertiesFromEas`, and so `getCanonicalItemPropertiesFromEas`, sync and Query's remote source, leave anchors out, and `getAttestationChangesSince` doesn't report them.
+
+### Commits
+
+#### Features
+
+- publish: anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
+- bag anchor schema, left out of property reads (d5773848)
+
+#### Fixes
+
+- sdk: a reproducible bag describes the record, and can wait for it (946566a9)
 
 ## 0.8.0 (2026-10-30)
 
