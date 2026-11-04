@@ -65,14 +65,32 @@ describe('path manifest', () => {
     const bag = makeBag()
     const { transactions } = upload(bag)
     const { manifest } = buildPathManifest(bag, transactions)
-    expect(manifest).toMatchObject({ manifest: 'arweave/paths', version: '0.2.0', index: { path: 'data/index.html' } })
+    expect(manifest).toMatchObject({ manifest: 'arweave/paths', version: '0.2.0' })
+    expect(manifest.paths[manifest.index!.path]?.id).toBe(transactions['data/index.html'])
     expect(manifest.paths[asset]?.id).toBe(transactions[`data/${asset}`])
+  })
+
+  it('names an index path with no slash, which HyperBEAM gateways can look up', () => {
+    const bag = makeBag()
+    const { manifest } = buildPathManifest(bag, upload(bag).transactions)
+    expect(manifest.index?.path).not.toContain('/')
+  })
+
+  it('still reads a manifest whose index is data/index.html', async () => {
+    const bag = makeBag()
+    const { stored, transactions } = upload(bag)
+    const { manifest } = buildPathManifest(bag, transactions)
+    const { 'index.html': _, ...paths } = manifest.paths
+    const older = parsePathManifest(JSON.stringify({ ...manifest, index: { path: 'data/index.html' }, paths }))
+    const rebuilt = await readBagFromManifest(older, async (id) => stored.get(id))
+    expect(rebuilt.files.map((f) => f.path).sort()).toEqual(bag.files.map((f) => f.path).sort())
   })
 
   it('has no index or asset aliases without data/index.html', () => {
     const bag = makeBag(false)
     const { manifest } = buildPathManifest(bag, upload(bag).transactions)
     expect(manifest.index).toBeUndefined()
+    expect(manifest.paths['index.html']).toBeUndefined()
     expect(manifest.paths[asset]).toBeUndefined()
   })
 
