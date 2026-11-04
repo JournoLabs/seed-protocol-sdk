@@ -123,6 +123,17 @@
         "vitest": "^4.1.11",
       },
     },
+    "packages/encryption": {
+      "name": "@seedprotocol/encryption",
+      "version": "0.8.1",
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "rimraf": "^6.0.1",
+        "typescript": "~5.9.3",
+        "vite": "^8.0.0",
+        "vitest": "^4.1.11",
+      },
+    },
     "packages/feed": {
       "name": "@seedprotocol/feed",
       "version": "0.8.1",
@@ -1444,6 +1455,8 @@
     "@seedprotocol/bundler-core": ["@seedprotocol/bundler-core@workspace:packages/bundler-core"],
 
     "@seedprotocol/eas": ["@seedprotocol/eas@workspace:packages/eas"],
+
+    "@seedprotocol/encryption": ["@seedprotocol/encryption@workspace:packages/encryption"],
 
     "@seedprotocol/feed": ["@seedprotocol/feed@workspace:packages/feed"],
 
