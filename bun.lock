@@ -187,6 +187,22 @@
         "vitest": "^4.1.11",
       },
     },
+    "packages/ipfs": {
+      "name": "@seedprotocol/ipfs",
+      "version": "0.8.0",
+      "devDependencies": {
+        "@seedprotocol/publish": "workspace:*",
+        "@seedprotocol/sdk": "workspace:*",
+        "@types/node": "^24.10.1",
+        "rimraf": "^6.0.1",
+        "typescript": "~5.9.3",
+        "vite": "^8.0.0",
+        "vitest": "^4.1.11",
+      },
+      "peerDependencies": {
+        "@seedprotocol/publish": "workspace:*",
+      },
+    },
     "packages/mapping": {
       "name": "@seedprotocol/mapping",
       "version": "0.8.0",
@@ -1432,6 +1448,8 @@
     "@seedprotocol/feed-hyper": ["@seedprotocol/feed-hyper@workspace:packages/feed-hyper"],
 
     "@seedprotocol/gateway-hyper": ["@seedprotocol/gateway-hyper@workspace:packages/gateway-hyper"],
+
+    "@seedprotocol/ipfs": ["@seedprotocol/ipfs@workspace:packages/ipfs"],
 
     "@seedprotocol/mapping": ["@seedprotocol/mapping@workspace:packages/mapping"],
 

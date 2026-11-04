@@ -26,6 +26,7 @@ export const PACKAGE_TESTS = [
   '@seedprotocol/gateway-hyper',
   '@seedprotocol/next',
   '@seedprotocol/publish',
+  '@seedprotocol/ipfs',
 ]
 
 const STEPS = [
