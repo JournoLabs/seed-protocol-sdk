@@ -44,9 +44,10 @@ export class StagedValueMissingError extends Error {
  * Makes sure an op's staged file is there before it applies: written from `source` (an assigned
  * string the op carries) when it's missing. Throws OutboxOpDeferredError while the appending tab
  * still writes it, and StagedValueMissingError when it's missing with no source and no writer.
+ * A file that exists isn't finished until its lock is free: Node's `fs.promises.writeFile` creates
+ * the file, then writes it in chunks.
  */
 export async function requireStagedFile(path: string, source?: string): Promise<void> {
-  if (await BaseFileManager.pathExists(path)) return
   const outcome = await tryWithTabLock(stagingLockName(path), async () => {
     if (await BaseFileManager.pathExists(path)) return true
     if (source === undefined) return false

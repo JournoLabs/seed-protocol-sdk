@@ -5,6 +5,7 @@ import { generateId } from '@/helpers'
 import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishUploadData, getPublishUploads, readPublishUploadBytes } from '@/db/read/getPublishUploads'
 import { getContentSha256 } from '@/helpers/arweaveContentTags'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   ensureModelUidsForGetPublishPayloadTest,
@@ -101,6 +102,24 @@ testDescribe('publish upload Content-Type', () => {
     const txs = await getPublishUploads(item as any)
     expect(txs.map((t) => t.itemPropertyLocalId)).toEqual(uploads.map((u) => u.itemPropertyLocalId))
     expect(txs.map((t) => (t.transactionToSign as any).tags)).toEqual(uploads.map((u) => u.tags))
+  }, 90000)
+
+  it('a file rewritten after the publish opened it rejects with PublishUploadChangedError', async () => {
+    const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'UploadTypesDoc', title: 'changed' } as any)
+    await waitForIdle(item, 'Item', 15000)
+    await waitForPropertyInstances(item)
+    await setFile(item, 'report', new File([PDF], `report-${generateId()}.pdf`))
+    const fileName = (item.allProperties.report!.getService().getSnapshot() as any).context.refResolvedValue
+    const [report] = (await getPublishUploadData(item as any)).filter((u) => u.itemPropertyName === 'report')
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await BaseFileManager.saveFile(BaseFileManager.getFilesPath('files', fileName), '%PDF-1.4 edited elsewhere')
+
+    await expect(readPublishUploadBytes(report!)).rejects.toMatchObject({
+      name: 'PublishUploadChangedError',
+      code: 'UPLOAD_CHANGED_DURING_PUBLISH',
+      itemPropertyName: 'report',
+    })
   }, 90000)
 
   it('encryptUpload replaces the bytes, hashes and tags the ciphertext, and hides the real type', async () => {

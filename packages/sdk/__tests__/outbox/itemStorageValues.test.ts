@@ -152,6 +152,52 @@ testDescribe('storage values through the outbox', () => {
     post.unload()
   }, 30000)
 
+  it('a File value whose staged file is still being written applies with all its bytes', async () => {
+    const post = await createPost()
+    const attachment = propertyOf(post, 'attachment')
+    const bytes = new Uint8Array(64 * 1024).map((_, i) => i % 251)
+    const original = BaseFileManager.saveFile.bind(BaseFileManager)
+    let releaseStaging!: () => void
+    const stagingHeld = new Promise<void>((resolve) => (releaseStaging = resolve))
+    let stagingStarted!: () => void
+    const started = new Promise<void>((resolve) => (stagingStarted = resolve))
+    // Node's fs.promises.writeFile creates the file, then writes it in chunks: the staged path
+    // exists with part of the bytes before the write is done
+    const spy = vi.spyOn(BaseFileManager, 'saveFile').mockImplementation(async (filePath, content) => {
+      if (filePath.includes('/staging/')) {
+        await original(filePath, bytes.slice(0, 1024).buffer)
+        stagingStarted()
+        await stagingHeld
+      }
+      return original(filePath, content)
+    })
+    try {
+      attachment.value = new File([bytes], `staged-${generateId()}.bin`, { type: 'application/octet-stream' }) as never
+      await started
+      const [op] = await vi.waitFor(
+        async () => {
+          const ops = await storageOps(post.seedLocalId)
+          expect(ops).toHaveLength(1)
+          return ops
+        },
+        { timeout: 10000 },
+      )
+      // Give the drainer time to reach the op while the staged file is short
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      releaseStaging()
+      await waitForOutboxOp(op.opId)
+      const [applied] = await storageOps(post.seedLocalId)
+      expect(applied.status).toBe('applied')
+      const fileName = outboxOpValue<StorageValueOp>(applied)!.row!.refResolvedValue
+      const stored = await (await BaseFileManager.readFile(BaseFileManager.getFilesPath('files', fileName))).arrayBuffer()
+      expect(stored.byteLength).toBe(bytes.byteLength)
+    } finally {
+      releaseStaging()
+      spy.mockRestore()
+    }
+    post.unload()
+  }, 30000)
+
   it('a newer Html value assigned while the older one’s file is written applies after it', async () => {
     const post = await createPost()
     const html = propertyOf(post, 'html')
