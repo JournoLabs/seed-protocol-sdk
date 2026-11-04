@@ -53,6 +53,14 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
   const txId = await storageSeedTransactionId({ seedLocalId })
   if (!txId || SEED_UID_HEX_RE.test(txId)) return undefined
 
+  // An id a configured blob source reads (e.g. `ipfs://<cid>`) is fetched from that source only.
+  const { resolveBlobSource, fetchBlobBytes } = await import('@/storageValue/blobSources')
+  const sourced = resolveBlobSource(txId)
+  if (sourced) {
+    const bytes = await fetchBlobBytes(sourced)
+    return bytes ? new TextDecoder('utf-8').decode(bytes) : undefined
+  }
+
   const rawHtml = await fetchHtmlViaRawAcrossGateways(txId)
   if (rawHtml) return rawHtml
 

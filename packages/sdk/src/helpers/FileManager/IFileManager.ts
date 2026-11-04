@@ -3,6 +3,11 @@ export type DownloadAllFilesParams = {
   arweaveHost: string
   /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
   arweaveBaseUrls?: string[]
+  /**
+   * URLs to fetch from instead of the Arweave gateways, by transaction id (download key): set for
+   * ids a configured `BlobSource` reads. See `resolveBlobSource`.
+   */
+  blobUrls?: Record<string, string[]>
   excludedTransactions: Set<string>
   /**
    * Content-SHA-256 tag values by transaction id. A download with one is saved only when its bytes
@@ -37,6 +42,8 @@ export type DownloadSingleFileParams = {
   arweaveHost: string
   /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
   arweaveBaseUrls?: string[]
+  /** URLs to fetch from instead of the Arweave gateways; see {@link DownloadAllFilesParams}. */
+  blobUrls?: string[]
   excludedTransactions: Set<string>
   /** Content-SHA-256 tag value to verify the download against; see {@link DownloadAllFilesParams}. */
   expectedContentHash?: string

@@ -4,6 +4,7 @@ import { ImageSize } from '@/helpers/constants'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { findFileInDir } from '@/storageValue/findFile'
+import { resolveBlobSource } from '@/storageValue/blobSources'
 
 const logger = debug('seedSdk:helpers:ensureImageLocal')
 
@@ -19,7 +20,7 @@ const IMAGE_SIZES = [
 ] as const
 
 export type EnsureImageLocalParams = {
-  /** 43-char tx id, or a URL/path containing one */
+  /** 43-char tx id, or a URL/path containing one, or an id a configured blob source reads */
   transactionId?: string
   /** Local basename / refResolvedValue under images/ */
   fileName?: string
@@ -51,6 +52,10 @@ export const normalizeArweaveTxIdForEnsure = (
   }
   return undefined
 }
+
+/** A configured blob source's key (checked first: a CID's first 43 characters look like a tx id), else the Arweave tx id. */
+const downloadKeyOf = (raw: string | null | undefined): string | undefined =>
+  resolveBlobSource(raw)?.key ?? normalizeArweaveTxIdForEnsure(raw)
 
 export const closestImageSize = (width: number): ImageSize => {
   let best: ImageSize = ImageSize.EXTRA_SMALL
@@ -113,9 +118,7 @@ const runEnsureImageLocal = async (
   }
 
   const fileName = params.fileName?.trim() || undefined
-  const txId =
-    normalizeArweaveTxIdForEnsure(params.transactionId) ??
-    normalizeArweaveTxIdForEnsure(fileName)
+  const txId = downloadKeyOf(params.transactionId) ?? downloadKeyOf(fileName)
 
   if (!txId && !fileName) {
     return { status: 'missing-id' }
@@ -173,9 +176,7 @@ export const ensureImageLocal = async (
   }
 
   const fileName = params.fileName?.trim() || undefined
-  const txId =
-    normalizeArweaveTxIdForEnsure(params.transactionId) ??
-    normalizeArweaveTxIdForEnsure(fileName)
+  const txId = downloadKeyOf(params.transactionId) ?? downloadKeyOf(fileName)
 
   if (!txId && !fileName) {
     return { status: 'missing-id' }

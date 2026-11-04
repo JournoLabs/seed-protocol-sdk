@@ -22,6 +22,7 @@ import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
 import { getCompositeChildPaths } from '@/db/read/getCompositeChildPaths'
 import { throttle } from 'lodash-es'
+import { resolveBlobSource } from '@/storageValue/blobSources'
 import type { DownloadAllFilesResult } from '@/helpers/FileManager/IFileManager'
 
 
@@ -73,6 +74,13 @@ const normalizeArweaveTxId = (raw: string | null | undefined): string | undefine
   return embedded?.[0]
 }
 
+/**
+ * The download key for a stored id: a configured blob source's key (e.g. a CID for `ipfs://<cid>`),
+ * else the Arweave transaction id in it.
+ */
+const toDownloadKey = (raw: string | null | undefined): string | undefined =>
+  resolveBlobSource(raw)?.key ?? normalizeArweaveTxId(raw)
+
 const mergeAddressLists = (a: string[] | undefined, b: string[] | undefined): string[] => {
   const seen = new Set<string>()
   const out: string[] = []
@@ -110,11 +118,11 @@ const collectTransactionIdsFromLocalMetadata = async (): Promise<string[]> => {
 
   const ids = new Set<string>()
   for (const row of propRows) {
-    const id = normalizeArweaveTxId(row.propertyValue ?? undefined)
+    const id = toDownloadKey(row.propertyValue ?? undefined)
     if (id) ids.add(id)
   }
   for (const row of refRows) {
-    const id = normalizeArweaveTxId(row.refResolvedValue ?? undefined)
+    const id = toDownloadKey(row.refResolvedValue ?? undefined)
     if (id) ids.add(id)
   }
   return Array.from(ids)
@@ -157,7 +165,7 @@ const parseTransactionIdsFromMetadata = (filesMetadata: any[], excludedTransacti
     if (typeof rawTx !== 'string' || rawTx.trim().length === 0) {
       continue
     }
-    const transactionId = normalizeArweaveTxId(rawTx.trim())
+    const transactionId = toDownloadKey(rawTx.trim())
     if (!transactionId) {
       continue
     }
@@ -231,8 +239,6 @@ const downloadTransactionIds = async (
 
   const excludedTransactions = await getExcludedTransactions()
 
-  await ensureReadGatewaySelected()
-
   // Browser: do not call getTransactionStatus() — many gateways (e.g. g8way.io) redirect or omit
   // CORS headers, so fetch() fails and we would wrongly exclude txs. The OPFS worker fetch decides success.
   const transactionIdsToDownload = transactionIds.filter((id) => !excludedTransactions.has(id))
@@ -240,9 +246,30 @@ const downloadTransactionIds = async (
     return false
   }
 
-  // One batched lookup for every upload's Content-SHA-256 tag; downloads are verified against it.
-  // Missing tags (old uploads, or a just-published one not indexed yet) just mean no verification.
-  const expectedContentHashes = await getExpectedContentHashes(transactionIdsToDownload)
+  // Keys a configured blob source reads are fetched from its URLs; the rest from Arweave gateways.
+  const blobUrls: Record<string, string[]> = {}
+  const sourcedHashes: Record<string, string> = {}
+  const arweaveIds: string[] = []
+  for (const key of transactionIdsToDownload) {
+    const resolved = resolveBlobSource(key)
+    if (!resolved) {
+      arweaveIds.push(key)
+      continue
+    }
+    blobUrls[key] = resolved.source.urls(resolved.key)
+    const sha256 = resolved.source.sha256?.(resolved.key)
+    if (sha256) sourcedHashes[key] = sha256
+  }
+
+  if (arweaveIds.length > 0) await ensureReadGatewaySelected()
+
+  // One batched lookup for every Arweave upload's Content-SHA-256 tag; downloads are verified
+  // against it. Missing tags (old uploads, or a just-published one not indexed yet) mean no
+  // verification. Other sources give the hash from the id, when it fixes one.
+  const expectedContentHashes = {
+    ...(arweaveIds.length > 0 ? await getExpectedContentHashes(arweaveIds) : {}),
+    ...sourcedHashes,
+  }
 
   // Preferred gateways first: a just-published item is only on the gateway it was uploaded through.
   const arweaveBaseUrls = getArweaveReadBaseUrls()
@@ -260,6 +287,7 @@ const downloadTransactionIds = async (
       transactionId,
       arweaveHost: BaseArweaveClient.getBaseUrl(),
       arweaveBaseUrls,
+      blobUrls: blobUrls[transactionId],
       excludedTransactions,
       expectedContentHash: expectedContentHashes[transactionId],
       compositeChildPaths: compositeChildPaths[transactionId],
@@ -270,6 +298,7 @@ const downloadTransactionIds = async (
       transactionIds: transactionIdsToDownload,
       arweaveHost: BaseArweaveClient.getBaseUrl(),
       arweaveBaseUrls,
+      blobUrls,
       excludedTransactions,
       expectedContentHashes,
       compositeChildPaths,
@@ -373,9 +402,9 @@ export const downloadTransactionIdWithDedupe = async (transactionId: string): Pr
     return false
   }
 
-  const normalizedTxId = normalizeArweaveTxId(transactionId)
+  const normalizedTxId = toDownloadKey(transactionId)
   if (!normalizedTxId) {
-    logger(`[download] not an Arweave transaction id: ${transactionId}`)
+    logger(`[download] not an Arweave transaction id or a configured blob source's id: ${transactionId}`)
     return false
   }
 

@@ -70,6 +70,10 @@ export async function platformClassesInit({ event }: { event: InitEvent }): Prom
   if (gatewayConfig.preferredReadBaseUrls) {
     setPreferredArweaveReadBaseUrls(gatewayConfig.preferredReadBaseUrls)
   }
+  if (config.blobSources) {
+    const { setBlobSources } = await import('@/storageValue/blobSources')
+    setBlobSources(config.blobSources)
+  }
   const resolvedGateway = await resolveSeedGatewayEndpoints(gatewayConfig)
   setResolvedSeedGatewayEndpoints(resolvedGateway)
   BaseArweaveClient.setHost(`${resolvedGateway.arweaveProtocol}://${resolvedGateway.arweaveHost}`)
