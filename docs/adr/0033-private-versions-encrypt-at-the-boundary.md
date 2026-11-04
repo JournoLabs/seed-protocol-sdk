@@ -4,7 +4,7 @@
 - **Date:** 2026-11-04
 - **Scope:** new `@seedprotocol/encryption`; `@seedprotocol/sdk` (upload builder, EAS sync, file
   downloads, schema files); `@seedprotocol/arweave` (content reads); `@seedprotocol/query`
-  (attestation parsing); `@seedprotocol/react` (image URLs)
+  (rich-text hydration); `@seedprotocol/react` (image URLs)
 
 ## Context
 
@@ -40,9 +40,11 @@ seams on the way in:
 - Out: `buildPublishUploadData` (`db/read/getPublishUploads.ts`), after the plaintext MIME type is
   known and before the upload is hashed and tagged, so `Content-SHA-256` is the hash of the
   ciphertext.
-- In: the Arweave content read transform (`@seedprotocol/arweave`), the download worker's
-  `transformDownloadedContent`, and a property metadata transform applied after
-  `parseEasPropertyMetadata` (`@seedprotocol/query`), which EAS sync and seed assembly both use.
+- In: the Arweave content read transform (`@seedprotocol/arweave`) and the download worker's
+  `transformDownloadedContent`. Attestation values need no decrypt step: a private Version's
+  private values travel in one encrypted storage seed, and the attestation holds its pointer.
+  Bytes that are still an envelope after these steps (no key on the device) are never decoded as
+  text or sniffed as media: downloads keep them in `encrypted/`, and text reads return nothing.
 
 Local rows and files stay plaintext. A synced row whose content is encrypted and whose key this
 device doesn't hold is stored with its envelope id and no value, distinct from a draft and from a

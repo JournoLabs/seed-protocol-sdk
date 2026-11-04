@@ -35,6 +35,11 @@ export type DownloadAllFilesResult = {
   hashMismatchTransactionIds: string[]
   /** Saving failed (e.g. an OPFS write error). */
   failedTransactionIds: string[]
+  /**
+   * Bytes were a `seed-private/v1` envelope (ADR 0033) and were saved unchanged as
+   * `encrypted/<txId>`, not filed as an image, text or other file. Using them needs a key.
+   */
+  encryptedTransactionIds: string[]
 }
 
 export type DownloadSingleFileParams = {

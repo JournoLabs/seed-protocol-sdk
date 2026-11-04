@@ -250,6 +250,20 @@ const transformDownloadedContent = async (
   _context: { transactionId: string; contentType: string },
 ): Promise<Uint8Array> => bytes
 
+/**
+ * First line of a `seed-private/v1` envelope (`packages/encryption/SPEC.md`, ADR 0033). Envelope
+ * bytes are ciphertext: sniffing them would misfile them, so they are kept as they are.
+ */
+const ENVELOPE_VERSION_LINE = 'seed-private/v1\n'
+
+const startsWithEnvelope = (bytes: Uint8Array): boolean => {
+  if (bytes.length < ENVELOPE_VERSION_LINE.length) return false
+  for (let i = 0; i < ENVELOPE_VERSION_LINE.length; i++) {
+    if (bytes[i] !== ENVELOPE_VERSION_LINE.charCodeAt(i)) return false
+  }
+  return true
+}
+
 /** True when the bytes start with the signature of an image format the SDK stores in `images/`. */
 const hasImageSignature = (bytes: Uint8Array): boolean => (seedSniffMimeType(bytes) || '').startsWith('image/')
 
@@ -366,12 +380,12 @@ const isNonEmptyFile = async (filePath: string): Promise<boolean> => {
 
 /**
  * Which of `transactionIds` already have a non-empty file where a download would put them:
- * `<txId>` or `<txId>.<ext>` in images/, html/, json/ or files/. Each directory is listed once.
+ * `<txId>` or `<txId>.<ext>` in images/, html/, json/, files/ or encrypted/. Each directory is listed once.
  */
 const listStoredTransactionIds = async (filesRoot: string, transactionIds: string[]): Promise<Set<string>> => {
   const wanted = new Set(transactionIds)
   const stored = new Set<string>()
-  for (const dirName of ['images', 'html', 'json', 'files']) {
+  for (const dirName of ['images', 'html', 'json', 'files', 'encrypted']) {
     const dir = await getExistingDirectory(getFilesPath(filesRoot, dirName))
     if (!dir) continue
     for await (const handle of (dir as any).values() as AsyncIterable<FileSystemHandle>) {
@@ -512,6 +526,14 @@ const downloadFile = async (
       getFilesPath(filesRoot, 'files', fileNameForFiles(transactionId, contentType)),
       data,
     )
+
+  // Encrypted upload, still encrypted after the transform (no key here): keep it whole in
+  // encrypted/ for the page to decrypt once it holds the key.
+  if (startsWithEnvelope(bytes)) {
+    await saveBufferToOPFS(getFilesPath(filesRoot, 'encrypted', transactionId), bytes)
+    globalThis.postMessage({ message: 'encryptedContent', transactionId })
+    return
+  }
 
   // Composite upload (several ItemStorage files in one transaction, uploaded as
   // application/octet-stream). Detected on the bytes: a composite of mostly non-ASCII text (e.g.

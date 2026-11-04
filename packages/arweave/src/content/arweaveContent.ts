@@ -7,7 +7,8 @@
  *
  * Readers routed through it:
  * - {@link fetchArweaveRawTextAcrossGateways} (`readBaseUrls.ts`): the SDK's Html storage-seed
- *   fallback (`readHtmlBodyForStorageSeed`) and other text reads.
+ *   fallback (`readHtmlBodyForStorageSeed`, which also passes blob-source bytes through) and other
+ *   text reads.
  * - `BaseArweaveClient.getTransactionData` (every platform client; `decode: false` reads are left
  *   alone, they are not content bytes).
  * - `@seedprotocol/query`'s `hydrateArweaveRichTextInItems` (also re-exported by `@seedprotocol/feed`).
@@ -15,6 +16,9 @@
  * Not routed (they cannot be, as things stand):
  * - The SDK's OPFS download worker runs from a string and cannot import this module; it has its own
  *   `transformDownloadedContent` hook.
+ * Text readers return nothing for bytes that are still an encrypted envelope after the transform
+ * ({@link isEncryptedArweaveContent}).
+ *
  * - Places that hand a gateway URL straight to the browser (`SeedImage` / `useEnsureLocalImage`'s
  *   progressive `gatewayHref`, `mediaRef` hrefs, feed image URLs). Encrypted content would need
  *   those to fetch, transform and use a blob URL instead.
@@ -57,6 +61,21 @@ export async function transformArweaveContent(
   context: ArweaveContentReadContext,
 ): Promise<ArweaveContent> {
   return readTransform ? readTransform(content, context) : content
+}
+
+/** First line of a `seed-private/v1` envelope (`packages/encryption/SPEC.md`, ADR 0033). */
+const ENVELOPE_VERSION_LINE = 'seed-private/v1\n'
+
+/**
+ * True when `bytes` are a private Version's encrypted envelope that no transform decrypted. Readers
+ * that want text or media skip such bytes instead of decoding ciphertext.
+ */
+export function isEncryptedArweaveContent(bytes: Uint8Array): boolean {
+  if (bytes.length < ENVELOPE_VERSION_LINE.length) return false
+  for (let i = 0; i < ENVELOPE_VERSION_LINE.length; i++) {
+    if (bytes[i] !== ENVELOPE_VERSION_LINE.charCodeAt(i)) return false
+  }
+  return true
 }
 
 /** `Content-Type` header without parameters, lowercased; undefined when absent. */

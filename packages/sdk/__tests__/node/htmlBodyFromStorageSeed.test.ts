@@ -50,10 +50,8 @@ testDescribe('Html body from its storage seed', () => {
     await teardownTestEnvironment()
   })
 
-  it('reads a downloaded body named after the transaction when the local file is gone', async () => {
-    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
-    vi.spyOn(BaseArweaveClient, 'getTransactionData').mockRejectedValue(new Error('offline'))
-
+  /** An Html storage seed whose local file is gone and whose published transaction is TX_ID. */
+  async function htmlSeedWithOnlyItsTransaction(): Promise<string> {
     const author = await createPublishedTestAuthor()
     const item = await Item.create({ modelName: 'Post', title: 'Html body', author: author.seedLocalId } as any)
     await waitForEntityReady(item, { timeout: WAIT_TIMEOUT_MS })
@@ -74,7 +72,25 @@ testDescribe('Html body from its storage seed', () => {
     })
     const fs = await BaseFileManager.getFs()
     await fs.promises.unlink(BaseFileManager.getFilesPath('html', `${htmlSeedLocalId}.html`))
+    return htmlSeedLocalId
+  }
 
+  it('reads a downloaded body named after the transaction when the local file is gone', async () => {
+    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
+    vi.spyOn(BaseArweaveClient, 'getTransactionData').mockRejectedValue(new Error('offline'))
+
+    const htmlSeedLocalId = await htmlSeedWithOnlyItsTransaction()
+    expect(await readHtmlBodyForStorageSeedPropertyValue(htmlSeedLocalId)).toBe(BODY)
+  }, 30000)
+
+  it('does not take an encrypted envelope from the Arweave client as the body', async () => {
+    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
+    vi.spyOn(BaseArweaveClient, 'getTransactionData').mockResolvedValue(
+      'seed-private/v1\nbind e30\n-> x-test\nAQ\n--- AAAA\nciphertext',
+    )
+
+    const htmlSeedLocalId = await htmlSeedWithOnlyItsTransaction()
+    // Falls through to the download tier instead of returning ciphertext.
     expect(await readHtmlBodyForStorageSeedPropertyValue(htmlSeedLocalId)).toBe(BODY)
   }, 30000)
 })
