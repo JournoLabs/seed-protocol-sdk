@@ -140,10 +140,21 @@ export class PublishUploadChangedError extends Error {
 /**
  * An upload's bytes, checked against its hash. The Blob of a file reads what is on disk now, so a
  * file edited during the publish would otherwise sign bytes other than those its tags describe.
- * @throws PublishUploadChangedError when the bytes no longer match `contentHash`
+ * @throws PublishUploadChangedError when the bytes no longer match `contentHash`, or the file
+ * changed in a way its Blob refuses to read (Node's `fs.openAsBlob` rejects with `NotReadableError`
+ * once the file's modification time changes)
  */
 export const readPublishUploadBytes = async (upload: PublishUploadData): Promise<Uint8Array> => {
-  const bytes = new Uint8Array(await upload.blob.arrayBuffer())
+  let buffer: ArrayBuffer
+  try {
+    buffer = await upload.blob.arrayBuffer()
+  } catch (error) {
+    if ((error as DOMException | null)?.name === 'NotReadableError') {
+      throw new PublishUploadChangedError(upload.itemPropertyName)
+    }
+    throw error
+  }
+  const bytes = new Uint8Array(buffer)
   if (upload.contentHash && getContentSha256(bytes) !== upload.contentHash) {
     throw new PublishUploadChangedError(upload.itemPropertyName)
   }
