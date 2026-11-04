@@ -27,6 +27,8 @@ export type JsonImportSchema = {
           /** {@link SchemaNameMatch} for this property's name. */
           nameMatch?: SchemaNameMatch
           description?: string
+          /** Encrypted when its Version is published privately (ADR 0033). */
+          private?: boolean
           storage?: {
             type: string
             path?: string
@@ -79,6 +81,11 @@ export type SchemaFileFormat = {
           id?: string // Property ID generated when first written to JSON file
           /** {@link SchemaNameMatch} for this property's name. */
           nameMatch?: SchemaNameMatch
+          /**
+           * The property's values are encrypted when its Version is published privately (ADR 0033).
+           * Stored in the property's definition; nothing encrypts yet.
+           */
+          private?: boolean
           [key: string]: any
         }
       }

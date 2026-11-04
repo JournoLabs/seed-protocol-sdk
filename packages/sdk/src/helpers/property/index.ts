@@ -183,6 +183,8 @@ export const TProperty = Type.Object({
   required: Type.Optional(Type.Boolean()),
   /** When set on an Html property: `materialize` uploads embedded images as Image seeds and rewrites src; `preserve` leaves data URIs. */
   htmlEmbeddedDataUriPolicy: Type.Optional(THtmlEmbeddedDataUriPolicy),
+  /** Encrypted when its Version is published privately (ADR 0033). Nothing encrypts yet. */
+  private: Type.Optional(Type.Boolean()),
 })
 
 export const TPropertyConstructor = Type.Function(

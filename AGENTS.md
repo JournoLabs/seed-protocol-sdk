@@ -23,6 +23,10 @@ Each concept has one home. Use it; don't add a parallel one.
 - **A property's current row:** `currentPropertyRow` (`packages/sdk/src/db/read/currentPropertyRow.ts`).
 - **Image, File and Html saves:** `packages/sdk/src/storageValue/save.ts`.
 - **Schema files:** `applySchemaFile` (`packages/sdk/src/helpers/schemaApply.ts`).
+- **Encrypted content:** the `seed-private/v1` envelope and entitlement adapters live in
+  `@seedprotocol/encryption` (`packages/encryption/SPEC.md`, ADR 0033), which never imports the SDK.
+  The SDK encrypts only through `GetPublishUploadsOptions.encryptUpload` and decrypts only through
+  the Arweave content read transform and the download worker. "Draft" means local and unattested.
 - **Archive bags:** `exportArchive` (`packages/archive/src/seed/exportArchive.ts`, ADR 0031). Archive
   builds on the SDK, never the reverse; `@seedprotocol/archive/verify` stays free of the SDK.
 

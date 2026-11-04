@@ -48,6 +48,16 @@ testDescribe('schema file validation rules', () => {
     )
   })
 
+  it('rejects a private flag that is not a boolean', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    const file = schemaFile('rules-private-flag', 'Rules Private Flag', {
+      body: { id: 'rules-private-flag-body', type: 'Html', private: 'yes' },
+    })
+    await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).rejects.toThrow(
+      'RuleNote.body: private must be true or false',
+    )
+  })
+
   it('rejects a property whose EAS name is a reserved ABI word', async () => {
     const { importJsonSchema } = await import('@/imports/json')
     const file = schemaFile('rules-reserved-property', 'Rules Reserved Property', {
