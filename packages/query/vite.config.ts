@@ -9,6 +9,7 @@ export default defineConfig({
         index: resolve(__dirname, 'src/index.ts'),
         'index.node': resolve(__dirname, 'src/index.node.ts'),
         node: resolve(__dirname, 'src/node/index.ts'),
+        ens: resolve(__dirname, 'src/ens/index.ts'),
       },
       formats: ['es'],
     },

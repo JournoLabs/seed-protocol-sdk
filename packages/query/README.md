@@ -17,6 +17,7 @@ SDK EAS sync (`client.syncFromEas()`) persists the same EAS graph into SQLite us
 - Resolve mode: **latest Version** (or a pinned one), then newest property attestation per `(version, schemaId)`
 - **`source: 'local' | 'remote' | 'auto'`** — pluggable backends (default `'remote'`)
 - **Shared collection + item cache** for **remote** reads (memory → disk)
+- `@seedprotocol/query/ens` — ENS contenthash, the `io.seedprotocol.publication` text record and attester names ([docs/ENS.md](../../docs/ENS.md))
 
 ### Published vs authoring
 
@@ -228,6 +229,17 @@ Init only fills in what is missing. EAS and Arweave clients that are already reg
 `source: 'remote'` (the default) always reads EAS, even when a local source is registered.
 
 For local reads, also ensure the SDK client has initialized (registers `registerLocalQuerySource`) or call `registerSeedQueryLocalSource()` / `registerLocalQuerySource` yourself.
+
+## ENS (`@seedprotocol/query/ens`)
+
+Go from an ENS name to its publication's Seeds, decode a contenthash, and show attesters by name. Every function takes a viem client on the ENS chain. See [docs/ENS.md](../../docs/ENS.md).
+
+```ts
+import { getSeedPublication } from '@seedprotocol/query/ens'
+
+const pub = await getSeedPublication(mainnetClient, { name: 'alice.eth' })
+if (pub) await queryBySchema(pub.schemaName, { attesters: [pub.publisher] })
+```
 
 ## License
 

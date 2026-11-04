@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `@seedprotocol/query/ens` reads ENS names through a viem client you pass in (ADR 0032, [docs/ENS.md](../../docs/ENS.md)). `getSeedPublication` reads the `io.seedprotocol.publication` text record (JSON: `schema`, `publisher`, `feed`, `chainId`) and the contenthash, and returns the `schemaName` and `publisher` to pass to `queryBySchema`. `getEnsContenthash` and `decodeContenthash` decode EIP-1577 contenthashes for IPFS, IPNS, Swarm and Arweave. `getEnsNames` maps attester addresses to primary names. Wildcard names and CCIP-Read resolvers work through the Universal Resolver. viem and `multiformats` are now dependencies; the package root doesn't import them.
+
 ## 0.8.1 (2026-11-04)
 
 - `getSeedAttestations` takes `asOf` (unix seconds) and reads what EAS held then, by `readSeedAtTime`'s rule: attestations made later are left out, and one revoked after `asOf` counts as live. It reads EAS, so `source: 'local'` throws and `'auto'` reads remote. A pin's own `asOf` or `versionUid` narrows it further. The new `GetSeedAttestationsOptions` type names the options.

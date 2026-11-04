@@ -88,7 +88,7 @@
       "project": ["src/**/*.{ts,tsx}", "test-utils/**/*.ts"]
     },
     "packages/query": {
-      "entry": ["src/index.ts", "src/index.node.ts", "src/node/index.ts", "__tests__/**/*.test.ts"],
+      "entry": ["src/index.ts", "src/index.node.ts", "src/node/index.ts", "src/ens/index.ts", "__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
     },
     "packages/react": {
