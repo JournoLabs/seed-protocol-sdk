@@ -37,6 +37,7 @@ export {
 } from './payment'
 export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
 export { MissingSignedDataItemsError } from './services/publish/actors/uploadViaBundler'
+export { arweaveBlobStore, type BlobStore, type BlobStoreContext, type PreparedBlobs } from './blobStore'
 export {
   PublishNotAuthorizedError,
   PUBLISH_AUTHORIZATION_HEADER,

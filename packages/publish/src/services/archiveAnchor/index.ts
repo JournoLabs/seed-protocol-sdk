@@ -34,9 +34,8 @@ import { isPublishWallet, isSeedTxSender, type PublishWallet, type SeedTxSender 
 import { directEasProblem } from '../publish/helpers/undeployedSmartAccount'
 import { verifyArweaveTransactionsExist } from '../publish/helpers/verifyArweaveTransactionsExist'
 import { directEasRefusal, resolveAttestationStrategy } from '../publish/actors/checking'
-import { signBundlerUploadDataList } from '../publish/actors/createArweaveDataItems'
 import { resolveMultiPublishSender } from '../publish/actors/createAttestations'
-import { uploadSignedDataItems } from '../publish/actors/uploadViaBundler'
+import { arweaveBlobStore } from '~/blobStore/arweave'
 import { estimatePublishCost } from '../publishCost/estimatePublishCost'
 import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummary } from '../publishCost/types'
 import type { PublishMachineContext } from '../../types'
@@ -123,16 +122,21 @@ function uploadData(upload: PackageUpload, versionUid: string, policy: ArchiveTa
   }
 }
 
-/** Signs and uploads `uploads`, returning their transaction ids in order. They may not be readable yet. */
+/**
+ * Signs and uploads `uploads` to Arweave, returning their transaction ids in order. They may not be
+ * readable yet. Always Arweave, whatever `blobStore` says: the path manifest names Arweave ids.
+ */
 async function uploadAll(uploads: PublishUploadData[], options: AnchorArchiveOptions): Promise<string[]> {
   if (uploads.length === 0) return []
   const config = getPublishConfig()
-  const dataItemSigner = options.dataItemSigner ?? config.dataItemSigner
-  const signed = await signBundlerUploadDataList(uploads, options.signDataItems ?? config.signDataItems, dataItemSigner)
-  if (signed.signedDataItems) {
-    await uploadSignedDataItems(signed.signedDataItems, { dataItemSigner, publishAuthorization: options.publishAuthorization })
+  const ctx = {
+    signDataItems: options.signDataItems ?? config.signDataItems,
+    dataItemSigner: options.dataItemSigner ?? config.dataItemSigner,
+    publishAuthorization: options.publishAuthorization,
   }
-  return signed.arweaveTransactions.map((t) => (t.transaction as { id: string }).id)
+  const prepared = await arweaveBlobStore.prepare(uploads, ctx)
+  if (prepared.pending) await arweaveBlobStore.send(prepared.pending, ctx)
+  return prepared.ids
 }
 
 const transactionExists = (id: string): Promise<boolean> =>

@@ -85,15 +85,41 @@ type PublishReceipt = {
   raw?: unknown                      // stored in attestation_raw
 }
 
+// Amended 2026-11-04: the write half, as built in @seedprotocol/publish (see "Blob store writes").
 interface BlobStore {
-  readonly id: string                // 'arweave', 's3', ...
-  put(uploads: PublishUploadData[], ctx: PublishContext): Promise<BlobRef[]>
-  exists(refs: BlobRef[]): Promise<boolean[]>
-  get(ref: BlobRef, opts?: { signal?: AbortSignal }): Promise<Uint8Array>
-  url(ref: BlobRef): string | null
+  readonly id: string                // 'arweave', 'ipfs', ...
+  prepare(uploads: PublishUploadData[], ctx: BlobStoreContext): Promise<PreparedBlobs>
+  send(pending: unknown[], ctx: BlobStoreContext): Promise<void>
+  assertStored(ids: string[]): Promise<void>
 }
+type PreparedBlobs = { ids: string[]; pending?: unknown[] }
 type BlobRef = { id: string; sha256: string }
 ```
+
+### Blob store writes
+
+Added 2026-11-04. The first draft had one `put` that returned refs. Publish can't use that, because
+it needs an upload's id before the upload is sent: Html with embedded images is uploaded in a second
+pass, after the images' ids are spliced into it, and the ids go into the publish record before
+anything is sent. So a write is three calls:
+
+- `prepare` fixes each upload's id. Arweave signs ANS-104 data items, whose id is the signature's
+  hash. A content-addressed store computes it from the bytes (an IPFS CID, a Swarm reference).
+  An app's `signDataItems` signs and uploads in one step, so `prepare` returns no `pending`.
+- `send` uploads what `prepare` left pending. `pending` stays in memory and isn't saved with the
+  publish, as signed data items aren't today.
+- `assertStored` throws unless each id can be read back. Publish calls it before any attestation
+  names an id.
+
+The interface lives in `@seedprotocol/publish`, beside the code that calls it, and
+`PublishConfig.blobStore` selects one; the default is `arweaveBlobStore` (the upload API's bundler,
+or Turbo with `payment.storage: 'user'`). `anchorArchive` always uses Arweave, since the path
+manifest it uploads names Arweave ids.
+
+Reads are not part of this interface. File downloads run in a worker, which can't be passed a store
+object, and every reader today treats a `storage_transaction_id` as an Arweave id. Until readers
+resolve other ids, a Seed whose blobs went to another store publishes but doesn't hydrate on other
+devices. The read half is the next step and needs its own amendment.
 
 A Seed has one **home store**, the store its Seed statement was first published to. Its Versions
 and properties are published there. It reaches other stores through proxy Seeds (below).

@@ -18,7 +18,7 @@ import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
 import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
-import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
+import { getBlobStore } from '~/blobStore'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { assertPublishFits } from '~/helpers/publishSize'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
@@ -204,7 +204,7 @@ async function executeCreateAttestationsDirectToEas(
       },
     )
 
-    await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
+    await getBlobStore().assertStored(uploadDataWithTxIds.map((u) => u.txId))
 
     const requestData = await (
       item.getPublishPayload as (

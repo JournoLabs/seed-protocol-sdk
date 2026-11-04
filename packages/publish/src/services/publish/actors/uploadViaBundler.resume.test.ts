@@ -74,11 +74,13 @@ describe('uploadViaBundler batch body', () => {
   })
 })
 
-describe('signBundlerUploadDataList', () => {
+describe('prepareUploads', () => {
   test('marks the upload not needed when signDataItems uploaded, or there was nothing', async () => {
-    const { signBundlerUploadDataList } = await import('./createArweaveDataItems')
+    const { prepareUploads } = await import('./createArweaveDataItems')
     const upload = { blob: new Blob([new Uint8Array([1])]), tags: [], itemPropertyName: 'body' } as never
-    const viaSigner = await signBundlerUploadDataList([upload], async () => [{ transaction: { id: 'x' } }] as never, undefined)
+    const viaSigner = await prepareUploads([upload], { signDataItems: async () => [{ transaction: { id: 'x' } }] as never })
     expect(viaSigner.bundlerUploadNotNeeded).toBe(true)
+    expect(viaSigner.arweaveTransactions.map((t) => t.transaction.id)).toEqual(['x'])
+    expect((await prepareUploads([], { signDataItems: async () => [] })).bundlerUploadNotNeeded).toBe(true)
   })
 })

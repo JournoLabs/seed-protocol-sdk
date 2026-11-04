@@ -2,8 +2,7 @@ import type { GetPublishUploadDataOptions } from '../helpers/getPublishUploadDat
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { getPublishUploadData } from '../helpers/getPublishUploadData'
-import { getPublishConfig } from '~/config'
-import { signBundlerUploadDataList, type CreateArweaveDataItemsResult } from './createArweaveDataItems'
+import { prepareUploads, type CreateArweaveDataItemsResult } from './createArweaveDataItems'
 
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
 
@@ -31,10 +30,6 @@ export async function executeCreateArweaveDataItemsPhase2(
     Object.keys(uploadDataOpts).length ? uploadDataOpts : undefined,
   )
 
-  const config = getPublishConfig()
-  const signDataItems = context.signDataItems ?? config.signDataItems
-  const dataItemSigner = context.dataItemSigner ?? config.dataItemSigner
-
   if (uploadDataList.length === 0) {
     return {
       arweaveTransactions: [],
@@ -44,7 +39,7 @@ export async function executeCreateArweaveDataItemsPhase2(
     }
   }
 
-  return signBundlerUploadDataList(uploadDataList, signDataItems, dataItemSigner)
+  return prepareUploads(uploadDataList, context)
 }
 
 export const createArweaveDataItemsPhase2 = fromPromise(

@@ -4,7 +4,7 @@ import '../config'
 import { ethers } from 'ethers'
 import { fromEthersWallet, type SeedSigner } from './seedSigner'
 import { defaultDataItemSigner } from './publishWalletRegistry'
-import { signBundlerUploadDataList } from '../services/publish/actors/createArweaveDataItems'
+import { arweaveBlobStore } from '../blobStore/arweave'
 
 const upload = {
   blob: new Blob([new TextEncoder().encode('<p>hello</p>')]),
@@ -30,9 +30,9 @@ describe('defaultDataItemSigner', () => {
 describe('signing data items', () => {
   test("an EOA's signature verifies", async () => {
     const { signer } = fromEthersWallet(ethers.Wallet.createRandom())
-    const result = await signBundlerUploadDataList([upload], undefined, signer)
-    expect(result.signedDataItems).toHaveLength(1)
-    expect(result.bundlerUploadNotNeeded).toBe(false)
+    const result = await arweaveBlobStore.prepare([upload], { dataItemSigner: signer })
+    expect(result.ids).toHaveLength(1)
+    expect(result.pending).toHaveLength(1)
   })
 
   test("a smart account's signature (not ECDSA from the owner address) is refused", async () => {
@@ -46,12 +46,12 @@ describe('signing data items', () => {
         return (await admin.signMessage(ethers.concat(['0x1901', ethers.keccak256(bytes)]))) as `0x${string}`
       },
     } as SeedSigner
-    await expect(signBundlerUploadDataList([upload], undefined, smartAccountSigner)).rejects.toThrow(
+    await expect(arweaveBlobStore.prepare([upload], { dataItemSigner: smartAccountSigner })).rejects.toThrow(
       "can't sign Arweave data items",
     )
   })
 
   test('with no signer, the error says data items need an EOA key', async () => {
-    await expect(signBundlerUploadDataList([upload], undefined, undefined)).rejects.toThrow("EOA's key")
+    await expect(arweaveBlobStore.prepare([upload], {})).rejects.toThrow("EOA's key")
   })
 })

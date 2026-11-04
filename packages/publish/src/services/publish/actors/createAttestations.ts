@@ -23,7 +23,7 @@ import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { sendsAsManagedAccount, type PublishWallet, type SeedTxSender } from '~/helpers/seedSigner'
 import type { Address, Hash, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
-import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
+import { getBlobStore } from '~/blobStore'
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
@@ -317,7 +317,7 @@ async function executeCreateAttestations(
       },
     )
 
-    await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
+    await getBlobStore().assertStored(uploadDataWithTxIds.map((u) => u.txId))
 
     // The contract creates every seed before it attests any property, so a relation back to an item
     // this publish creates is filled now rather than left for a later publish.

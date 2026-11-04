@@ -199,6 +199,11 @@ export interface PublishConfig {
    */
   useArweaveBundler?: boolean
   /**
+   * Where Image, File, Html and Json bytes go. Default: Arweave, through the upload API's bundler or
+   * Turbo (`payment.storage`). The ids it returns are what storage seeds attest.
+   */
+  blobStore?: import('./blobStore/types').BlobStore
+  /**
    * Tags appended to every Arweave upload after Content-SHA-256 / Content-Type (e.g. App-Name).
    * Merged at publish time with {@link CreatePublishOptions.arweaveUploadTags} as
    * `[...config, ...options]`.
