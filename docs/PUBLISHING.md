@@ -36,7 +36,7 @@ When using the publish package with `ConnectButton` and its publish flow:
    stops the publish with `RelatedItemUnpublishedError`. The graph is read once from the local rows
    (`getPublishGraph`): each seed's model definitions and the current row of each property, after
    pending edits are written. The payload, uploads (`getPublishUploads`, the publish package's
-   `getPublishUploadData`), `summarizePublishWork`, `getUnpublishedRelatedItems`, the Html passes and
+   `getPublishUploadData`), `summarizePublishWork`, `summarizePublishUploads`, the Html passes and
    `ensureEasSchemasForItem` read that graph; none of them reads a loaded Item. In a cycle (A ↔ B, or a draft pointing back at the draft
    being published), a publish through the contract attests both sides, since the contract creates
    every seed first (`getPublishPayload` option `backReferences: 'link'`). Direct EAS can only attest

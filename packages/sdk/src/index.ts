@@ -32,6 +32,7 @@ export {
   type NewPublishAttempt,
   type PublishAttemptStatus,
 } from './db/write/publishAttempts'
+export type { PublishAttemptType } from './seedSchema/PublishAttemptSchema'
 export {
   applyPropertyAttestationUidsFromPublish,
 } from './db/write/applyPropertyAttestationUidsFromPublish'
@@ -389,14 +390,14 @@ export {
 export type { PublishUploadData } from './types/publish'
 
 // Rows, values and files @seedprotocol/archive's exportArchive reads.
-export { findSeedRow } from './db/read/findSeedRow'
+export { findSeedRow, type FoundSeedRow } from './db/read/findSeedRow'
 export { getLatestPublishedVersionRow } from './db/read/getLatestPublishedVersionRow'
 export { getVersionHistoryRows, type VersionHistoryRow } from './db/read/getVersionHistoryRows'
 export { getMetadata } from './db/read/getMetadata'
 export { nameMatchLevels } from './db/read/nameMatchLevels'
-export { resolveModelRecordByNameOrType } from './db/read/resolveModelRecord'
+export { resolveModelRecordByNameOrType, type ResolvedModelRecord } from './db/read/resolveModelRecord'
 export { findRelatedSeedRow, isLivePublishedSeed, isUnpublishedSeed } from './db/read/resolveRelatedSeedRef'
-export { resolveSyncedPropertyName } from './events/item/syncDbWithEas'
+export { resolveSyncedPropertyName, type SyncedPropertyName } from './events/item/syncDbWithEas'
 export { decodeCompositeUpload, isCompositeUpload } from './helpers/compositeUpload'
 export { syncedPropertyValue } from './helpers/easValueTypes'
 export { getExtensionForMimeType, resolveUploadMimeType } from './helpers/mimeTypes'
