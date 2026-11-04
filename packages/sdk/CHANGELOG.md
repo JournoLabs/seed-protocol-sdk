@@ -2,9 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
-## 0.8.1 (2026-11-04)
+## Unreleased
 
 - New `SeedConfig.blobSources`, `setBlobSources` and the `BlobSource` interface (ADR 0026, "Blob store reads"): where to read files whose `storage_transaction_id` isn't an Arweave transaction id, such as `ipfs://<cid>` ids from a publish `BlobStore`. The downloader fetches those from the source's URLs and checks the SHA-256 the source gives, and the file is named by the source's key. Ids no source claims are read from the Arweave gateways as before.
+
+## 0.8.1 (2026-11-04)
+
 - **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ArchiveSeedRef`, `ExportableItem`, `ExportArchiveOptions`, `ExportArchiveResult` and `ArchiveChainVerification` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
 - The main entry exports the reads `exportArchive` uses, among them `findSeedRow`, `getPropertyDefinitions`, `resolveSyncedPropertyName`, `storedValueKind` and the new `getVersionHistoryRows(seedLocalId)`, every Version row of a seed with its attestation and revocation times.
 - `getEasSchemaUidForModel(modelName)` is exported: the EAS schema uid of a model's Seeds, from the cache, `model_uids`, then EAS.
