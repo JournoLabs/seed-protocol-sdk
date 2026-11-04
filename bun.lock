@@ -189,7 +189,7 @@
     },
     "packages/ipfs": {
       "name": "@seedprotocol/ipfs",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "devDependencies": {
         "@seedprotocol/publish": "workspace:*",
         "@seedprotocol/sdk": "workspace:*",
@@ -297,7 +297,7 @@
         "@noble/hashes": "^1.8.0",
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
-        "multiformats": "^13",
+        "multiformats": "^13.4.2",
         "pluralize": "^8.0.0",
         "viem": "^2.46.2",
       },

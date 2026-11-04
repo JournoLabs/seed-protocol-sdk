@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/ipfs",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "IPFS for Seed Protocol: a publish blob store with CIDs computed before upload and CAR uploads to a Kubo node or Pinata, and an SDK blob source that reads ipfs:// ids from gateways",
   "keywords": [
     "seed-protocol",
