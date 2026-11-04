@@ -124,7 +124,7 @@ const getFilesPath = (filesRoot: string, ...parts: string[]) => {
   return [root, ...parts].filter(Boolean).join('/').replace(/\/+/g, '/')
 }
 
-/** Per-gateway limit for one `/raw/{id}` request, body included. */
+/** Per-URL limit for one download request, body included. */
 const RAW_FETCH_TIMEOUT_MS = 60_000
 
 const errorInfo = (error: unknown): { name: string; message: string } => {
@@ -185,14 +185,14 @@ const contentMatchesTag = async (transactionId: string, bytes: ArrayBuffer, expe
 }
 
 /**
- * GET /raw/{id} from each gateway in order. `networkFailedEverywhere` is true only when no gateway
- * answered at all; a non-2xx (e.g. not yet propagated) is not a reason to exclude the transaction.
+ * GET each URL in order (`{gateway}/raw/{id}` for Arweave, a blob source's URLs otherwise).
+ * `networkFailedEverywhere` is true only when no URL answered at all; a non-2xx (e.g. not yet propagated) is not a reason to exclude the transaction.
  * `contentType` is the response's Content-Type (gateways serve the upload's Content-Type tag).
  * With `expectedHash` (the upload's Content-SHA-256 tag), a body that does not match it is skipped
  * and the next gateway tried; `hashMismatch` says that happened and no gateway served matching bytes.
  */
 const fetchRaw = async (
-  baseUrls: string[],
+  urls: string[],
   transactionId: string,
   expectedHash?: string,
 ): Promise<{
@@ -204,14 +204,14 @@ const fetchRaw = async (
 }> => {
   let answered = false
   let hashMismatch = false
-  for (const base of baseUrls) {
+  for (const url of urls) {
     let arrayBuffer: ArrayBuffer | undefined
     let contentType = ''
     // A hung gateway must not stall the batch: abort the request (body included) after a while.
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
     const timer = controller ? setTimeout(() => controller.abort(), RAW_FETCH_TIMEOUT_MS) : undefined
     try {
-      const response = await fetch(`${base}/raw/${transactionId}`, controller ? { signal: controller.signal } : undefined)
+      const response = await fetch(url, controller ? { signal: controller.signal } : undefined)
       answered = true
       if (!response.ok) continue
       arrayBuffer = await response.arrayBuffer()
@@ -376,7 +376,7 @@ const listStoredTransactionIds = async (filesRoot: string, transactionIds: strin
     if (!dir) continue
     for await (const handle of (dir as any).values() as AsyncIterable<FileSystemHandle>) {
       if (handle.kind !== 'file') continue
-      // Transaction ids never contain a dot.
+      // Transaction ids and blob source keys never contain a dot.
       const transactionId = handle.name.split('.')[0]
       if (!wanted.has(transactionId) || stored.has(transactionId)) continue
       try {
@@ -413,6 +413,7 @@ const downloadFiles = async ({
   transactionIds,
   arweaveHost,
   arweaveBaseUrls,
+  blobUrls,
   filesRoot = '/files',
   expectedContentHashes,
   compositeChildPaths,
@@ -421,6 +422,8 @@ const downloadFiles = async ({
   transactionIds: string[],
   arweaveHost: string,
   arweaveBaseUrls?: string[],
+  /** URLs to fetch instead of the gateways' `/raw/{id}`, by id: ids a configured blob source reads. */
+  blobUrls?: Record<string, string[]>,
   filesRoot?: string,
   /** Content-SHA-256 tag values by transaction id; downloads with one are verified before saving. */
   expectedContentHashes?: Record<string, string>,
@@ -453,9 +456,12 @@ const downloadFiles = async ({
       const skip =
         skipExisting &&
         (await isAlreadyStored(transactionId, stored, filesRoot, compositeChildPaths?.[transactionId]))
+      const sourced = blobUrls && Object.prototype.hasOwnProperty.call(blobUrls, transactionId)
+        ? blobUrls[transactionId]
+        : undefined
       if (!skip) await downloadFile(
         transactionId,
-        baseUrls,
+        sourced ?? baseUrls.map((base) => `${base}/raw/${transactionId}`),
         filesRoot,
         expectedContentHashes?.[transactionId],
         compositeChildPaths?.[transactionId],
@@ -470,13 +476,13 @@ const downloadFiles = async ({
 
 const downloadFile = async (
   transactionId: string,
-  baseUrls: string[],
+  urls: string[],
   filesRoot: string,
   expectedHash: string | undefined,
   childPaths: Record<string, string> | undefined,
 ) => {
   const encoder = new TextEncoder()
-  const fetched = await fetchRaw(baseUrls, transactionId, expectedHash)
+  const fetched = await fetchRaw(urls, transactionId, expectedHash)
 
   if (fetched.verified) {
     globalThis.postMessage({ message: 'contentVerified', transactionId })

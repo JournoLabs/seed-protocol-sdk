@@ -497,6 +497,26 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     })
   })
 
+  it('fetches an id a blob source reads from its URLs, not the gateways, and verifies it', async () => {
+    const KEY = 'bafk' + 'q'.repeat(55)
+    const BODY = '{"from":"ipfs"}'
+    const sha256 = getContentSha256(new TextEncoder().encode(BODY))
+    const first = `https://ipfs.example.com/ipfs/${KEY}`
+    const second = `https://gw.example.org/ipfs/${KEY}`
+    const { saved, fetched, posted } = await runWorker(
+      {
+        transactionIds: [KEY, TX],
+        arweaveHost: HOST,
+        blobUrls: { [KEY]: [first, second] },
+        expectedContentHashes: { [KEY]: sha256 },
+      },
+      async (url) => new Response(url === first ? '<html>pinning error</html>' : BODY, { status: 200 }),
+    )
+    expect(fetched).toEqual([first, second, `${HOST}/raw/${TX}`])
+    expect(saved.get(`${KEY}.json`)).toBe(BODY)
+    expect(posted.filter((m) => m.message === 'contentVerified').map((m) => m.transactionId)).toEqual([KEY])
+  })
+
   it('still works with only arweaveHost (no base URL list)', async () => {
     const { fetched } = await runWorker(
       { transactionIds: [TX], arweaveHost: 'arweave.net' },

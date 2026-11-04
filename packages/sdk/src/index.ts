@@ -405,6 +405,7 @@ export {
   storedValueKind,
   type StoredValueKind,
 } from './storageValue/resolve'
+export { setBlobSources, type BlobSource } from './storageValue/blobSources'
 export {
   CONTENT_SHA256_TAG,
   CONTENT_TYPE_TAG,

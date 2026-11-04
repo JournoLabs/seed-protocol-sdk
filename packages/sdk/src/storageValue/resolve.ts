@@ -5,6 +5,7 @@ import { getItemStorageSubdir, getStorageSubdirForDataType } from '@/helpers/sto
 import { ImageSize } from '@/helpers/constants'
 import { STORAGE_SUBDIR, type StorageKind } from './content'
 import { findFileInDir } from './findFile'
+import { blobFileKey } from './blobSources'
 
 /** A property whose value is held in a file: a storage seed of its own, or the item's own file. */
 export type StoredValueKind = StorageKind | 'itemStorage'
@@ -89,6 +90,10 @@ export async function resolveStorageRef(kind: StoredValueKind, row: StorageRef):
     if (out.refResolvedValue && !out.localStorageDir) out.localStorageDir = '/html'
   }
   if (kind === 'image' && out.refResolvedValue && !out.localStorageDir) out.localStorageDir = '/images'
+  // A configured blob source's id (e.g. `ipfs://<cid>`) names its downloaded file by its key.
+  if ((kind === 'image' || kind === 'file') && out.refResolvedValue) {
+    out.refResolvedValue = blobFileKey(out.refResolvedValue)
+  }
   return out
 }
 

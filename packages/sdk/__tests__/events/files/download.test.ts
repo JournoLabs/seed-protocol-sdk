@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 const VALID_ARWEAVE_TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
@@ -406,6 +406,70 @@ describe('events/files/download skips files on disk', () => {
 
     expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
       expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, skipExisting: undefined }),
+    )
+  })
+})
+
+/** ADR 0026, "Blob store reads": ids a configured blob source reads skip the Arweave path. */
+describe('events/files/download with a blob source', () => {
+  const KEY = 'bafk' + 'q'.repeat(55)
+  const SHA = 'c'.repeat(64)
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { setBlobSources } = await import('@/storageValue/blobSources')
+    setBlobSources([
+      {
+        id: 'ipfs',
+        key: (id) => (id.startsWith('ipfs://') ? id.slice(7) : id.startsWith('bafk') ? id : undefined),
+        urls: (key) => [`https://ipfs.example.com/ipfs/${key}`],
+        sha256: () => SHA,
+      },
+    ])
+    mocks.fetchQuery.mockImplementation(async ({ queryKey, queryFn }: { queryKey: unknown[]; queryFn?: () => unknown }) => {
+      if (queryKey[0] === 'getFilesMetadata') {
+        return {
+          filesMetadata: [`ipfs://${KEY}`, VALID_ARWEAVE_TX].map((id, i) => ({
+            id: `meta-${i}`,
+            decodedDataJson: JSON.stringify([{ value: { value: id } }]),
+          })),
+        }
+      }
+      return queryFn ? queryFn() : []
+    })
+  })
+
+  afterEach(async () => {
+    const { setBlobSources } = await import('@/storageValue/blobSources')
+    setBlobSources([])
+  })
+
+  it('downloads by key from the source URLs with the hash the source gives', async () => {
+    const mod = await import('@/events/files/download')
+    expect(await mod.downloadTransactionIdWithDedupe(`ipfs://${KEY}`)).toBe(true)
+
+    expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionId: KEY,
+        blobUrls: [`https://ipfs.example.com/ipfs/${KEY}`],
+        expectedContentHash: SHA,
+      }),
+    )
+    expect(mocks.getTransactionTagsByIds).not.toHaveBeenCalled()
+    expect(mocks.ensureReadGatewaySelected).not.toHaveBeenCalled()
+  })
+
+  it('bulk runs send sourced keys beside Arweave ids, tag lookups only for Arweave', async () => {
+    const mod = await import('@/events/files/download')
+    await mod.downloadAllFilesBinaryRequestHandler()
+
+    expect(mocks.getTransactionTagsByIds.mock.calls[0]![0]).toEqual([VALID_ARWEAVE_TX])
+    expect(mocks.downloadAllFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionIds: [KEY, VALID_ARWEAVE_TX],
+        blobUrls: { [KEY]: [`https://ipfs.example.com/ipfs/${KEY}`] },
+        expectedContentHashes: expect.objectContaining({ [KEY]: SHA }),
+      }),
     )
   })
 })

@@ -116,10 +116,37 @@ The interface lives in `@seedprotocol/publish`, beside the code that calls it, a
 or Turbo with `payment.storage: 'user'`). `anchorArchive` always uses Arweave, since the path
 manifest it uploads names Arweave ids.
 
-Reads are not part of this interface. File downloads run in a worker, which can't be passed a store
-object, and every reader today treats a `storage_transaction_id` as an Arweave id. Until readers
-resolve other ids, a Seed whose blobs went to another store publishes but doesn't hydrate on other
-devices. The read half is the next step and needs its own amendment.
+Reads are not part of this interface; see "Blob store reads".
+
+### Blob store reads
+
+Added 2026-11-04. Readers live in the SDK, which can't depend on `@seedprotocol/publish`, and file
+downloads run in a worker built from a string, which can't be passed a store object. So the read
+half is a separate SDK interface, `BlobSource`, set with `SeedConfig.blobSources` (or
+`setBlobSources`):
+
+```ts
+interface BlobSource {
+  readonly id: string
+  key(storageId: string): string | undefined   // 'ipfs://<cid>' -> '<cid>'; undefined if not ours
+  urls(key: string): string[]                  // tried in order
+  sha256?(key: string): string | undefined     // when the id fixes the bytes' hash
+}
+```
+
+A store package other than Arweave exports both halves, a `BlobStore` for publish and a `BlobSource`
+for the SDK. An id no source claims is an Arweave transaction id and is read as before: the
+gateway list's `/raw/<id>`, verified against the Content-SHA-256 tag.
+
+The page resolves each id before it posts to the worker. The worker gets the key in place of the
+transaction id and the source's URLs in place of the gateway list, and checks `sha256` the same way
+it checks the tag. The key also names the local file (`images/<key>`, `html/<key>.html`, a synced
+ItemStorage row's `<key><extension>`), so it may not hold `.`, `/`, `\` or `:`, and `key` must
+accept its own keys. Sources are tried before the Arweave id match, since the first 43 characters
+of a base32 CID also look like a transaction id.
+
+Without `sha256`, a source's downloads are saved unverified. Html link rehosting (ADR 0025) still
+moves only Arweave links.
 
 A Seed has one **home store**, the store its Seed statement was first published to. Its Versions
 and properties are published there. It reaches other stores through proxy Seeds (below).

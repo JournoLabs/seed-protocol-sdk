@@ -1,4 +1,5 @@
 import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
+import { blobFileKey } from '@/storageValue/blobSources'
 import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { camelCase } from 'lodash-es'
 import {
@@ -641,7 +642,7 @@ const createMetadataRecordsForStorageTransactionId = async (
       versionLocalId,
       versionUid,
       refValueType: 'file',
-      refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix ?? ''}`,
+      refResolvedValue: `${blobFileKey(propertyValue)}${propertyDef.filenameSuffix ?? ''}`,
       modelType: seedUidToModelType.get(seedUid),
       derivedFromUid: storageTransactionIdProperty.id,
       // Ranked like a synced row, at its attestation's time: a local edit made after that

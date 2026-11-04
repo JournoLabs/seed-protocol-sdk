@@ -54,6 +54,12 @@ export interface SeedConfig {
   /** Gateway + upload transport (`http-gateway` default). */
   gateway?: import('@seedprotocol/arweave').SeedGatewayConfig
   /**
+   * Where to read files whose storage id is not an Arweave transaction id: one source per publish
+   * `BlobStore` other than Arweave (e.g. `ipfs://` ids). Ids no source claims are read from the
+   * Arweave gateways. Init replaces the sources only when this is set.
+   */
+  blobSources?: readonly import('@/storageValue/blobSources').BlobSource[]
+  /**
    * EAS chain the SDK reads from (sync, schema lookups). Defaults to Optimism Sepolia, or to
    * `PublishConfig.chain` when `@seedprotocol/publish` is initialized. Must match the publish chain.
    */

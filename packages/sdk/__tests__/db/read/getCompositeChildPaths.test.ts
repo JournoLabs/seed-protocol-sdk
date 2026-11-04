@@ -64,6 +64,31 @@ describe.sequential('getCompositeChildPaths', () => {
     })
   })
 
+  it('finds the rows of an id a blob source reads by its key', async () => {
+    const { setBlobSources } = await import('@/storageValue/blobSources')
+    const key = 'bafk' + 'q'.repeat(55)
+    setBlobSources([
+      { id: 'ipfs', key: (id) => (id.startsWith('ipfs://') ? id.slice(7) : id.startsWith('bafk') ? id : undefined), urls: () => [] },
+    ])
+    try {
+      await BaseDb.getAppDb().insert(metadata).values({
+        localId: generateId(),
+        propertyName: 'html',
+        propertyValue: `ipfs://${key}`,
+        localStorageDir: '/html',
+        refValueType: 'file',
+        refResolvedValue: `${key}.html`,
+        seedLocalId: generateId(),
+        derivedFromUid: '0x' + '2'.repeat(64),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      expect(await getCompositeChildPaths([key])).toEqual({ [key]: { html: `html/${key}.html` } })
+    } finally {
+      setBlobSources([])
+    }
+  })
+
   it('returns nothing for no transactions', async () => {
     expect(await getCompositeChildPaths([])).toEqual({})
   })
