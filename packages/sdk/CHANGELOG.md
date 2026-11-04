@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - New `SeedConfig.blobSources`, `setBlobSources` and the `BlobSource` interface (ADR 0026, "Blob store reads"): where to read files whose `storage_transaction_id` isn't an Arweave transaction id, such as `ipfs://<cid>` ids from a publish `BlobStore`. The downloader fetches those from the source's URLs and checks the SHA-256 the source gives, and the file is named by the source's key. Ids no source claims are read from the Arweave gateways as before.
 - **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ArchiveSeedRef`, `ExportableItem`, `ExportArchiveOptions`, `ExportArchiveResult` and `ArchiveChainVerification` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
@@ -20,6 +20,39 @@ All notable changes to this package are documented in this file.
 - New `publish_attempts` table, with `claimPublishAttempt`, `findOpenPublishAttempts` and `updatePublishAttempt`, for `@seedprotocol/publish`. `recordPublishRequests` takes `{ attemptId }` and ends that attempt in its own transaction.
 - **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`; `updateSeedUid` takes `{ db }`.
 - `client.stop()`, `client.unload()` and `client.resetLocalData()` end a running EAS sync before closing the database. Network waits end at once, a database write in progress finishes first, and a pending `client.syncFromEas()` rejects with `EAS sync stopped: the client stopped`. The sync used to keep running, and a queued one started, against a closed or deleted database.
+
+### Commits
+
+#### Features
+
+- publish: findPublishByNonceKey returns the Seed uid with modelName (5e23fef2)
+- export the reads exportArchive uses (f41a6e4a)
+- publish: codes on the attempt errors and the changed-upload error (0246ae41)
+- publish: journal each direct EAS transaction (c458a58d)
+- publish: pin each UserOp attempt to its own EntryPoint nonce key (5d9fbee8)
+- publish: reconcile open attempts before any retry or restore sends (ec41d7f5)
+- publish: journal attestation sends, refuse one that may double-attest (7243e1a0)
+- publish: anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
+- publish: read uploads as disk-backed Blobs (c8ef0992)
+- archive: a bag on Arweave as a path manifest (ac1f80da)
+- eas: bag anchor schema, left out of property reads (d5773848)
+- reproducible bags from EAS and Arweave, with asOf (046de15a)
+- archive: verifyArchive, VERIFY.txt and verifyArchiveAgainstChain (a20bd6e5)
+- reproducible archive bags and clock sources (a584ba15)
+
+#### Fixes
+
+- a reproducible bag describes the record, and can wait for it (946566a9)
+- publish: record a landed multiPublish once, from its receipt (6fe1a60d)
+- stopping the client ends a running EAS sync (a958da87)
+- reproducible bags ignore revocations and local file names (8aac4ad7)
+- exportArchive keeps published relations, as seed uids (2f54a005)
+
+#### Other
+
+- archive: exportArchive moves from the SDK into archive (38df2da0)
+- query: readSeedAtTime moves from the SDK (e1631af4)
+- ADR 0028 for the reproducible bag format, and Seed-Bag-Format in bag-info (cc103c79)
 
 ## 0.8.0 (2026-10-30)
 

@@ -1,5 +1,9 @@
 # Changelog — @seedprotocol/feed-hyper
 
+## 0.8.1 (2026-11-04)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.8.0 (2026-10-30)
 
 No user-facing changes; released at the same version as the other packages.

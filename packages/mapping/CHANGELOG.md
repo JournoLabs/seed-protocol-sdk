@@ -1,8 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - A repeated `dc:creator` or `author` stays a list. `rssXmlToSources` used to keep the first; `SourceNode.values` now holds them all (`value` is still the first), and lookup edges, `collectLookupValues`, lookup row state and `LookupEditor` read each one. Copy edges still read `value`.
+
+### Commits
+
+#### Features
+
+- a repeated dc:creator or author stays a list (0bcb9bee)
 
 ## 0.8.0 (2026-10-30)
 

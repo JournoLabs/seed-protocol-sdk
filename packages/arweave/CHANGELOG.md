@@ -2,9 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - New `fetchArweaveRawBytesAcrossGateways(transactionId, options)`: `fetchArweaveRawTextAcrossGateways` without the decoding, for callers that need the transaction's exact bytes.
+
+### Commits
+
+#### Features
+
+- sdk: reproducible bags from EAS and Arweave, with asOf (046de15a)
 
 ## 0.8.0 (2026-10-30)
 

@@ -1,8 +1,18 @@
 # @seedprotocol/vite
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - The dev server checks an RDF sidecar (`seedSchema.context.jsonld`) against `seedSchema.json` at startup and when either changes, and warns about stale terms and an out-of-date `@context`. It runs only when the sidecar exists and the app has `@seedprotocol/rdf`; `rdfSidecar` sets the paths, or `false` turns it off.
+
+### Commits
+
+#### Features
+
+- warn on a stale RDF sidecar in dev (f76d3775)
+
+#### Other
+
+- rdf: SHACL, sidecar tooling and the dev check (4651475e)
 
 ## 0.8.0 (2026-10-30)
 

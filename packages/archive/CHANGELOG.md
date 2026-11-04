@@ -2,13 +2,31 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.1 (2026-11-04)
 
 - `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and their types moved here from `@seedprotocol/sdk`, unchanged (ADR 0031). `@seedprotocol/sdk` is an optional peer: the main entry imports it, and `@seedprotocol/archive/verify` and `@seedprotocol/archive/node` don't. **Breaking** for code that imports the main entry without the SDK installed.
 - New entry `@seedprotocol/archive/verify`: `verifyPublishedArchive({ versionUid, easEndpoint, gateways, asOf })` finds a Version's anchor on EAS, rebuilds its bag from the path manifest and reports `attestation`, `fixity`, `anchor`, `identity`, `record`, `revocation` and `timestamp` separately. `attestation` is `no_anchor` for a Version with no anchor from its attester, and `not_checked` for one EAS hasn't reported. `record` checks that the attestations in `data/item.json` are on the Version from its attester, and `recorded` returns them with their Arweave transactions. `revocation` also fails for a revoked seed. Options `maxBytes`, `onProgress` and `signal`; `size` reports `Payload-Oxum`. Also `findArchiveAnchors`, which reads EAS only, and `decodeArchiveAnchorData`.
 - `readBagFromManifest` takes `{ only }` to read some paths.
 - New `buildPathManifest(bag, transactions)`, `parsePathManifest(bytes)` and `readBagFromManifest(manifest, fetchTransaction)`, with `PATH_MANIFEST_CONTENT_TYPE`: a bag on Arweave as an `arweave/paths` 0.2.0 manifest, and back. `ArchiveErrorCode` gains `invalid_manifest` and `missing_file`.
 - New `verifyArchive(bag, { expectedTagmanifestSha256 })` reports `fixity` and `anchor` separately, and fails `fixity` for a bag with no `tagmanifest-sha256.txt`. `readBagInfo` reads bag-info.txt, and `verifyInstructions` writes the text of VERIFY.txt.
+
+### Commits
+
+#### Features
+
+- no_anchor, record check, maxBytes and progress in verifyPublishedArchive; findArchiveAnchors (fd040a79)
+- verifyPublishedArchive, a browser entry that checks a bag against its anchor (7e95bff1)
+- a bag on Arweave as a path manifest (ac1f80da)
+- verifyArchive, VERIFY.txt and verifyArchiveAgainstChain (a20bd6e5)
+
+#### Fixes
+
+- sdk: a reproducible bag describes the record, and can wait for it (946566a9)
+
+#### Other
+
+- archive is an add-on over the SDK (ADR 0031) (a142092d)
+- exportArchive moves from the SDK into archive (38df2da0)
 
 ## 0.8.0 (2026-10-30)
 
