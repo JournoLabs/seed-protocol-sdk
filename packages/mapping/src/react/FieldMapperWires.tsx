@@ -30,7 +30,7 @@ import type {
   FieldMapperLookupRow,
   UseFieldMapperResult,
 } from './fieldMapperTypes'
-import { LookupEditor } from './LookupEditor'
+import { RowLookup, SectionLookups } from './LookupSlots'
 import {
   connectionStrokeForIndex,
   pairSlot,
@@ -327,6 +327,8 @@ export function FieldMapperWires({
           {targets.map((prop) => {
             const mapped = mappingForProp(prop.name)
             const mappingIndex = mappingIndexByProp.get(prop.name)
+            const lookupRow =
+              mapped?.resolve === 'lookup' ? mapper.rows.find((r) => r.id === prop.name) : undefined
             const isHi =
               hoveredProp === prop.name ||
               (hoveredSource != null &&
@@ -379,45 +381,32 @@ export function FieldMapperWires({
                     {mapped.resolve ? ` (${mapped.resolve})` : ''}
                   </div>
                 )}
+                {slots.lookups === 'row' && lookupRow && (
+                  // A click in the editor isn't a click on the card, which picks the property to wire
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <RowLookup
+                      row={lookupRow}
+                      sources={sources}
+                      targets={targets}
+                      mapper={mapper}
+                      renderLookup={renderLookup}
+                      classNames={classNames}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       </div>
 
-      {slots.lookups === 'section' &&
-        renderLookup &&
-        mapper.rows
-          .filter((row) => row.mapping?.resolve === 'lookup')
-          .map((row) => (
-            <div
-              key={row.id}
-              className={slotClass('lookupEditor', classNames)}
-            >
-              {renderLookup({
-                ...row,
-                sampleValue: row.sampleValue ?? '',
-                onLookupChange: (entries) =>
-                  mapper.setLookupEntries(row.id, entries),
-                onSplitChange: (separators) =>
-                  mapper.setLookupSplit(row.id, separators),
-              })}
-            </div>
-          ))}
-      {slots.lookups === 'section' && !renderLookup && (
-        <LookupEditor
-          mode="section"
+      {slots.lookups === 'section' && (
+        <SectionLookups
           mappings={mappings}
           sources={sources}
           targets={targets}
-          onLookupChange={(mapping, entries) => {
-            const row = mapper.rows.find(
-              (r) =>
-                r.mapping?.sourceId === mapping.sourceId &&
-                r.mapping?.propertyName === mapping.propertyName,
-            )
-            if (row) mapper.setLookupEntries(row.id, entries)
-          }}
+          mapper={mapper}
+          renderLookup={renderLookup}
           classNames={classNames}
         />
       )}

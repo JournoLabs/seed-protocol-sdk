@@ -32,7 +32,7 @@ import {
   resolveTransformOptions,
   showTransformSelect,
 } from './fieldMapperTransforms'
-import { LookupEditor } from './LookupEditor'
+import { RowLookup, SectionLookups } from './LookupSlots'
 
 export type SourceRowsProps = {
   sources: SourceNode[]
@@ -90,7 +90,7 @@ export function SourceRows({
   const jsonPreview = showJsonPreview(slots.preview)
   const rowPreview = showRowPreview(slots.preview)
   const showRowLookups = slots.lookups === 'row'
-  const showSectionLookups = slots.lookups === 'section' && !renderLookup
+  const showSectionLookups = slots.lookups === 'section'
 
   return (
     <>
@@ -231,32 +231,16 @@ export function SourceRows({
                   property already mapped by another row
                 </div>
               )}
-              {showRowLookups &&
-                row.mapping?.resolve === 'lookup' &&
-                row.mapping &&
-                (renderLookup ? (
-                  <div className={slotClass('lookupEditor', classNames)}>
-                    {renderLookup({
-                      ...row,
-                      sampleValue: row.sampleValue ?? '',
-                      onLookupChange: (entries) =>
-                        mapper.setLookupEntries(row.id, entries),
-                      onSplitChange: (separators) =>
-                        mapper.setLookupSplit(row.id, separators),
-                    })}
-                  </div>
-                ) : (
-                  <LookupEditor
-                    mode="row"
-                    mappings={[row.mapping]}
-                    sources={sources}
-                    targets={targets}
-                    onLookupChange={(_mapping, entries) =>
-                      mapper.setLookupEntries(row.id, entries)
-                    }
-                    classNames={classNames}
-                  />
-                ))}
+              {showRowLookups && (
+                <RowLookup
+                  row={row}
+                  sources={sources}
+                  targets={targets}
+                  mapper={mapper}
+                  renderLookup={renderLookup}
+                  classNames={classNames}
+                />
+              )}
               <div className={slotClass('rowExpansion', classNames)}>
                 {renderRowExpansion?.(row) ?? null}
               </div>
@@ -275,19 +259,12 @@ export function SourceRows({
       </div>
 
       {showSectionLookups && (
-        <LookupEditor
-          mode="section"
+        <SectionLookups
           mappings={mappings}
           sources={sources}
           targets={targets}
-          onLookupChange={(mapping, entries) => {
-            const match = mapper.rows.find(
-              (r) =>
-                r.mapping?.sourceId === mapping.sourceId &&
-                r.mapping?.propertyName === mapping.propertyName,
-            )
-            if (match) mapper.setLookupEntries(match.id, entries)
-          }}
+          mapper={mapper}
+          renderLookup={renderLookup}
           classNames={classNames}
         />
       )}

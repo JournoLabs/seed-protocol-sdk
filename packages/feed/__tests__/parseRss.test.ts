@@ -30,6 +30,23 @@ describe('parseRssString', () => {
     expect(parsed.items[0]!['creatorList']).toEqual(['Mira Chen', 'Sam Ortiz'])
   })
 
+  it("lists an Atom entry's authors as names, each once", async () => {
+    const parsed = await parseRssString(`<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><id>urn:t</id><updated>2026-11-01T00:00:00Z</updated>
+<entry><title>e</title><id>urn:e</id><updated>2026-11-01T00:00:00Z</updated>
+<author><name>Mira Chen</name></author><author><name>Sam Ortiz</name></author><author><name>mira chen</name></author>
+</entry></feed>`)
+    expect(parsed.items[0]!['authorList']).toEqual(['Mira Chen', 'Sam Ortiz'])
+  })
+
+  it('lists a repeated dc:creator once per name', async () => {
+    const parsed = await parseRssString(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>t</title>
+<item><dc:creator>Mira Chen</dc:creator><dc:creator>Mira  Chen</dc:creator></item>
+</channel></rss>`)
+    expect(parsed.items[0]!['creatorList']).toEqual(['Mira Chen'])
+  })
+
   it('parses channel and items', async () => {
     const parsed = await parseRssString(MINIMAL_RSS)
     expect(parsed.title).toBe('Test Channel')

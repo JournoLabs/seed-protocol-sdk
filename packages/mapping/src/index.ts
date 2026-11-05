@@ -46,6 +46,7 @@ export {
   withLookupSplit,
 } from './relationLookup'
 export type { LookupResolution } from './relationLookup'
+export { migrateMappingLookups } from './migrateMappingLookups'
 export { autoMap } from './autoMap'
 export { classifyUrl, looksLikeUrl } from './classifyUrl'
 export type { ClassifyUrlInput } from './classifyUrl'

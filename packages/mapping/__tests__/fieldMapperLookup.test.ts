@@ -97,6 +97,13 @@ describe('a source that repeats', () => {
     expect(state([{ value: 'Mira Chen', refs: ['mira'] }, { value: 'Sam Ortiz', refs: ['sam'] }])).toBe('mapped')
   })
 
+  it('a single Relation target is mapped once one value has an entry, and previews no miss', () => {
+    const author: TargetProperty = { name: 'author', dataType: 'Relation', ref: 'Identity' }
+    const edge = { ...mapping([{ value: 'Sam Ortiz', refs: ['sam'] }]), propertyName: 'author' }
+    expect(rowState({ mapping: edge, requiredResolve: 'lookup', source: byline, target: author })).toBe('mapped')
+    expect(previewForEdge(byline, 'lookup', { mapping: edge, target: author, propertyName: 'author' })).toBe('sam')
+  })
+
   it('previews every value', () => {
     const preview = (entries: LookupEntry[]) =>
       previewForEdge(byline, 'lookup', { mapping: mapping(entries), target: targets[0] })
@@ -198,5 +205,38 @@ describe('renderLookup', () => {
     expect(html).toContain('seed-field-mapper--unstyled')
     expect(html).toContain('data-theme="none"')
     expect(html).not.toContain('sfm-color-well')
+  })
+})
+
+describe('renderLookup in every layout', () => {
+  const byline: SourceNode = { id: 'rss-author', label: 'author', kind: 'rssField', value: 'Mira Chen', values: ['Mira Chen', 'Sam Ortiz'] }
+  const seen: FieldMapperLookupRow[] = []
+  const render = (props: { layout?: 'rows' | 'wires'; rowKey?: 'property' | 'source'; lookups: 'row' | 'section' }) =>
+    renderToStaticMarkup(
+      React.createElement(FieldMapper, {
+        sources: [byline],
+        targets,
+        mappings: [{ sourceId: 'rss-author', propertyName: 'authors', resolve: 'lookup' }],
+        onChange: () => {},
+        theme: 'none',
+        defaultRows: 'all',
+        layout: props.layout,
+        rowKey: props.rowKey,
+        slots: { lookups: props.lookups },
+        renderLookup: (row) => {
+          seen.push(row)
+          return React.createElement('span', null, `picker:${row.sampleValues.join('|')}`)
+        },
+      } as React.ComponentProps<typeof FieldMapper>),
+    )
+
+  it.each([
+    ['rows, by property, section', { lookups: 'section' as const }],
+    ['rows, by source, section', { rowKey: 'source' as const, lookups: 'section' as const }],
+    ['rows, by property, row', { lookups: 'row' as const }],
+    ['wires, section', { layout: 'wires' as const, lookups: 'section' as const }],
+    ['wires, row', { layout: 'wires' as const, lookups: 'row' as const }],
+  ])('%s renders the host editor with every value', (_name, props) => {
+    expect(render(props)).toContain('picker:Mira Chen|Sam Ortiz')
   })
 })

@@ -24,6 +24,22 @@ describe('createFeed item ids', () => {
     expect(entry).toContain('href="https://example.com/posts/1"')
   })
 
+  it.each([
+    ['an empty string', ''],
+    ['text that is no date', 'garbage'],
+    ['zero', 0],
+  ])("writes the entry's published time as <updated> for %s", async (_name, updated) => {
+    const xml = await createFeed([{ ...post, updated } as any], 'post', 'atom')
+    const entry = xml.slice(xml.indexOf('<entry>'))
+    // RFC 4287 requires one valid date-time per entry; the item's own date is the closest one
+    expect(entry).toContain('<updated>2026-10-21T12:00:00.000Z</updated>')
+  })
+
+  it('keeps a valid updated time of the item', async () => {
+    const xml = await createFeed([{ ...post, updated: '2026-10-22T08:30:00Z' } as any], 'post', 'atom')
+    expect(xml.slice(xml.indexOf('<entry>'))).toContain('<updated>2026-10-22T08:30:00.000Z</updated>')
+  })
+
   it('uses the RSS guid as the JSON Feed item id', async () => {
     const json = JSON.parse(await createFeed([post as any], 'post', 'json'))
     expect(json.items[0].id).toBe('urn:example:post-1')

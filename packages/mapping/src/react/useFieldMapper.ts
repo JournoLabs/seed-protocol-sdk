@@ -197,14 +197,10 @@ export function useFieldMapper({
             const next = [...current]
             next[edgeIndex] = clearSourceKeepDerive(prev)
             commitMappings(next)
-            if (prev.resolve === 'lookup') {
-            }
             return
           }
           const next = current.filter((_, i) => i !== edgeIndex)
           commitMappings(next)
-          if (prev?.resolve === 'lookup') {
-          }
           return
         }
         const prev = current[edgeIndex]!
@@ -223,8 +219,6 @@ export function useFieldMapper({
         const next = [...current]
         next[edgeIndex] = edge
         commitMappings(next)
-        if (prev.resolve === 'lookup' && edge.resolve !== 'lookup') {
-        }
         return
       }
 
@@ -316,8 +310,6 @@ export function useFieldMapper({
         const next = [...current]
         next[edgeIndex] = edge
         commitMappings(next)
-        if (prev.resolve === 'lookup' && edge.resolve !== 'lookup') {
-        }
         if (
           prev.propertyName !== propertyName &&
           prev.resolve === 'lookup' &&
@@ -465,8 +457,6 @@ export function useFieldMapper({
           return
         }
         commitMappings(upsertPropertyMapping(current, applyResolveToEdge(prev, resolve)))
-        if (prev.resolve === 'lookup' && resolve !== 'lookup') {
-        }
         return
       }
 
@@ -476,8 +466,6 @@ export function useFieldMapper({
         const next = [...current]
         next[edgeIndex] = applyResolveToEdge(prev, resolve)
         commitMappings(next)
-        if (prev.resolve === 'lookup' && resolve !== 'lookup') {
-        }
         return
       }
 
@@ -551,10 +539,7 @@ export function useFieldMapper({
 
       const edgeIndex = edgeIdsRef.current.ids.indexOf(rowId)
       if (edgeIndex >= 0) {
-        const prev = current[edgeIndex]
         commitMappings(current.filter((_, i) => i !== edgeIndex))
-        if (prev?.resolve === 'lookup') {
-        }
         return
       }
 
