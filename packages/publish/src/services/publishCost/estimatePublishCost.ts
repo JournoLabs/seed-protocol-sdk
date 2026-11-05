@@ -1,6 +1,7 @@
 import type { IItem } from '@seedprotocol/sdk'
 import type { TransactionTag } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
+import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { signedDataItemByteLength } from '~/helpers/arweave'
 import { getTurboFreeUploadLimitBytes } from '~/helpers/turbo'
 import { getPublishViemChain } from '~/helpers/chainConfig'
@@ -50,7 +51,7 @@ function readPublishFlags(): PublishCostFlags & {
   }
   try {
     const config = getPublishConfig()
-    const payment = resolvePublishPayment(config)
+    const payment = resolvePublishPayment(config, getPublishWallet())
     return {
       evmUserPays: payment.gas.payer === 'user',
       arweaveUserPays: payment.storage.payer === 'user',

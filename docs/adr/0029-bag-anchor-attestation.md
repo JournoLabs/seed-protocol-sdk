@@ -1,6 +1,6 @@
 # 0029. A bag is anchored by its own attestation on the Version
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped in `@seedprotocol/publish` 0.8.1, 2026-11-04)
 - **Date:** 2026-10-30
 - **Scope:** `@seedprotocol/eas`, `@seedprotocol/publish`, `packages/sdk/src/archive`
 

@@ -65,6 +65,12 @@ type Attestations = MultiPublishRequest['listOfAttestations']
  */
 const placeholder = (sourceIndex: number): Hex => toHex(BigInt(sourceIndex + 1), { size: 32 })
 
+const ZERO_WORD: Hex = `0x${'0'.repeat(64)}`
+
+/** A local id as getPublishPayload writes a relation to a draft; undefined past 32 bytes. */
+const localIdWordOf = (localId: string): Hex | undefined =>
+  new TextEncoder().encode(localId).length <= 32 ? stringToHex(localId, { size: 32 }) : undefined
+
 const byteLength = (data: Hex): number => (data.length - 2) / 2
 const wordAt = (data: Hex, offset: number): Hex => `0x${data.slice(2 + offset * 2, 2 + (offset + 32) * 2)}`
 const withWordAt = (data: Hex, offset: number, word: Hex): Hex =>
@@ -137,6 +143,15 @@ function prepareReferences(requests: MultiPublishRequest[]) {
       const slot = `${publishIndex}:${schema}:${offset}`
       if (filled.has(slot)) throw new Error(`multiPublish: ${where}, a slot another reference already fills`)
       filled.add(slot)
+      // The contract checks only that the slot holds the placeholder, so anything else here would
+      // be overwritten without a trace: the slot must hold the draft's local id, its placeholder or zero.
+      const held = (offset === 0 ? entry.data : wordAt(entry.data, offset)).toLowerCase()
+      const expected = [localIdWordOf(r.localId), placeholder(sourceIndex), ZERO_WORD].map((w) => w?.toLowerCase())
+      if (!expected.includes(held)) {
+        throw new Error(
+          `multiPublish: ${where}, a slot that holds ${held}, not the local id of "${r.localId}"; the reference would overwrite it`,
+        )
+      }
       entry.data = withWordAt(entry.data, offset, placeholder(sourceIndex))
 
       return { publishIndex: BigInt(publishIndex), propertySchemaUid: pu.propertySchemaUid, listElement, elementIndex }

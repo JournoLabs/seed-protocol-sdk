@@ -49,8 +49,12 @@ export async function publishGasLimit(from: string, tx: SeedTxRequest, localEsti
     return lower(local > PUBLISH_GAS_FALLBACK ? local : PUBLISH_GAS_FALLBACK, maxPublishGas())
   }
   const gas = withHeadroom(estimated)
-  const { gasLimit: blockGasLimit } = await client.getBlock()
-  const limit = lower(maxPublishGas(), blockGasLimit)
+  // A failed block read keeps a good estimate: the configured limit still caps it.
+  const blockGasLimit = await client.getBlock().then(
+    (block) => block.gasLimit,
+    () => undefined,
+  )
+  const limit = blockGasLimit === undefined ? maxPublishGas() : lower(maxPublishGas(), blockGasLimit)
   if (gas > limit) {
     throw new ManagedAccountPublishError(
       `This publish needs about ${gas} gas, over the limit of ${limit}; nothing was sent. ` +

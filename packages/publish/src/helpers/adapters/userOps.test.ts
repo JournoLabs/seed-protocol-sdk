@@ -3,12 +3,19 @@ import type { Hash } from 'viem'
 import { bundlerFeesPerGas, CALL_GAS_HEADROOM_BPS, sendUserOpWithHeadroom, type UserOpClient } from './userOps'
 
 let pimlicoAnswers = true
+/** Set to answer the next request with this HTTP status and no JSON-RPC body. */
+let failNextWith: number | undefined
 const methods: string[] = []
 const bundler = Bun.serve({
   port: 0,
   fetch: async (req) => {
     const { id, method } = (await req.json()) as { id: number; method: string }
     methods.push(method)
+    if (failNextWith !== undefined) {
+      const status = failNextWith
+      failNextWith = undefined
+      return new Response('bad gateway', { status })
+    }
     if (!pimlicoAnswers) {
       return Response.json({ jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } })
     }
@@ -46,6 +53,24 @@ describe('bundlerFeesPerGas', () => {
     await expect(fees()).resolves.toEqual({ maxFeePerGas: 7n, maxPriorityFeePerGas: 3n })
     await expect(fees()).resolves.toEqual({ maxFeePerGas: 7n, maxPriorityFeePerGas: 3n })
     expect(methods).toEqual(['pimlico_getUserOperationGasPrice'])
+  })
+
+  // Batch 16 item 16
+  test('an HTTP error falls back once and asks the bundler again next time', async () => {
+    pimlicoAnswers = true
+    methods.length = 0
+    failNextWith = 502
+    const fees = bundlerFeesPerGas(bundlerUrl, chainFees)
+    await expect(fees()).resolves.toEqual({ maxFeePerGas: 7n, maxPriorityFeePerGas: 3n })
+    await expect(fees()).resolves.toEqual({ maxFeePerGas: 100n, maxPriorityFeePerGas: 10n })
+    expect(methods).toEqual(['pimlico_getUserOperationGasPrice', 'pimlico_getUserOperationGasPrice'])
+  })
+
+  test('an unreachable bundler falls back to the chain estimate', async () => {
+    await expect(bundlerFeesPerGas('http://127.0.0.1:9', chainFees)()).resolves.toEqual({
+      maxFeePerGas: 7n,
+      maxPriorityFeePerGas: 3n,
+    })
   })
 })
 

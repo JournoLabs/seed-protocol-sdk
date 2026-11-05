@@ -59,6 +59,13 @@ describe('estimateUpload', () => {
     expect(estimate.requiresConfirm).toBe(false)
   })
 
+  // Batch 16 item 9 (D46): Infinity opts out of the prompt; risk stays on the estimate
+  test('confirmUploadAboveBytes Infinity never asks, even when memory risk is high', () => {
+    const estimate = estimateUpload(work([50 * MIB]), { confirmUploadAboveBytes: Infinity, deviceMemoryBytes: GIB })
+    expect(estimate.memory.risk).toBe('high')
+    expect(estimate.requiresConfirm).toBe(false)
+  })
+
   test('reads navigator.deviceMemory (GiB) when no device memory is given', () => {
     const navigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
     Object.defineProperty(globalThis, 'navigator', { value: { deviceMemory: 4 }, configurable: true })

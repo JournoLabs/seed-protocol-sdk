@@ -79,6 +79,15 @@ describe('waitForPublishActor', () => {
     await expect(done).rejects.toBe(error)
   })
 
+  test('rejects with PublishWalletMissingError itself when checking finds no wallet', async () => {
+    const { PublishWalletMissingError } = await import('../errors')
+    const error = new PublishWalletMissingError()
+    const actor = fakePublishActor('failure', { error, errorStep: 'checking' })
+    const done = waitForPublishActor(actor, 'seed-1')
+    actor.send({ type: 'finish' })
+    await expect(done).rejects.toBe(error)
+  })
+
   test('rejects, pointing at retryAttestations, when attestation waits for a retry', async () => {
     const actor = fakePublishActor('attestationFailureRecoverable', { error: { message: 'nonce too low' } }, false)
     const done = waitForPublishActor(actor, 'seed-1')
@@ -122,9 +131,11 @@ describe('publishItem', () => {
     expect(ensureMock).toHaveBeenCalledWith(item, { publishMode: 'new_version' })
   })
 
-  test('rejects when no wallet is connected', async () => {
+  // Batch 16 item 10
+  test('rejects with PublishWalletMissingError when no wallet is connected', async () => {
+    const { PublishWalletMissingError } = await import('../errors')
     ensureResult = { outcome: 'no_wallet' }
-    await expect(publishItem(item)).rejects.toThrow('No publish wallet is connected.')
+    await expect(publishItem(item)).rejects.toBeInstanceOf(PublishWalletMissingError)
   })
 
   test('rejects with the managed-account error', async () => {

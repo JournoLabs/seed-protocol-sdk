@@ -11,6 +11,7 @@ import {
 } from './ensureAutomationSessionKey'
 import {
   attestPublishAuthorization,
+  findLivePublishAuthorizationUids,
   revokePublishAuthorization,
   type AttestPublishAuthorizationResult,
 } from '../services/publishAuthorization'
@@ -35,15 +36,22 @@ export type EnrollPublishAutomationParams = {
   userWallet: PublishWallet
   /**
    * The account's admin EOA, sending from itself. Needed only when the Seed executor isn't
-   * installed yet: `installSeedExecutor` is rejected as a self-call from the account.
+   * installed yet: `installSeedExecutor` is rejected as a self-call from the account. A function is
+   * called only then.
    */
-  admin?: PublishWallet
+  admin?: PublishWallet | (() => Promise<PublishWallet>)
 }
 
 export type EnrollPublishAutomationResult = {
   managedAddress: string
   sessionKeyAddress: string
   authorization: AttestPublishAuthorizationResult
+  /**
+   * Earlier PublishAuthorizations for the same session key and app that this enroll revoked once
+   * the new one landed. One that failed to revoke is logged and left out; it stays live until it
+   * expires.
+   */
+  revokedAuthorizationUids: string[]
 }
 
 export type RevokePublishAutomationParams = {
@@ -54,7 +62,10 @@ export type RevokePublishAutomationParams = {
   userWallet: PublishWallet
 }
 
-async function assertExecutorModuleInstalled(managedAddress: string, admin?: PublishWallet): Promise<void> {
+async function assertExecutorModuleInstalled(
+  managedAddress: string,
+  admin?: PublishWallet | (() => Promise<PublishWallet>),
+): Promise<void> {
   const config = getPublishConfig()
   const moduleAddr = config.modularAccountModuleContract?.trim()
   if (!moduleAddr) {
@@ -64,6 +75,7 @@ async function assertExecutorModuleInstalled(managedAddress: string, admin?: Pub
   }
 
   const getAdmin = async () => {
+    if (typeof admin === 'function') return admin()
     if (admin) return admin
     throw new ManagedAccountPublishError(
       `The Seed executor isn't installed on ${managedAddress}; pass the account's admin EOA as \`admin\` so it can send installSeedExecutor.`,
@@ -108,7 +120,8 @@ function assertSendsAsAccount(managedAddress: string, userWallet: PublishWallet)
 /**
  * Enroll an app automation key: install the Seed executor (`installSeedExecutor` on Router
  * accounts with the executor router extension), add an executor-only session key, then attest
- * the PublishAuthorization sidecar (ManagedAccount attester).
+ * the PublishAuthorization sidecar (ManagedAccount attester). A renewal then revokes the earlier
+ * live sidecars for the same session key and app, one transaction each, best-effort.
  *
  * @throws ManagedAccountPublishError `MANAGED_ACCOUNT_UNAVAILABLE` before sending anything when
  * `userWallet` doesn't send as `managedAddress`
@@ -137,6 +150,17 @@ export async function enrollPublishAutomation(
     admin: userWallet,
   })
 
+  // Read before attesting: the indexer may not show the new grant yet, and the earlier ones are
+  // what a renewal replaces.
+  const earlier = await findLivePublishAuthorizationUids({
+    identity: managedAddress,
+    sessionKey: sessionKeyAddress,
+    app: appAddress,
+  }).catch((err: unknown) => {
+    console.warn('[@seedprotocol/publish] enrollPublishAutomation: could not list earlier PublishAuthorizations; none revoked', err)
+    return [] as string[]
+  })
+
   const authorization = await attestPublishAuthorization({
     wallet: userWallet,
     identity: managedAddress,
@@ -145,10 +169,22 @@ export async function enrollPublishAutomation(
     expiresAt,
   })
 
+  const revokedAuthorizationUids: string[] = []
+  for (const uid of earlier) {
+    if (uid.toLowerCase() === authorization.uid.toLowerCase()) continue
+    try {
+      await revokePublishAuthorization({ wallet: userWallet, uid })
+      revokedAuthorizationUids.push(uid)
+    } catch (err) {
+      console.warn(`[@seedprotocol/publish] enrollPublishAutomation: revoking the earlier PublishAuthorization ${uid} failed; it stays live until it expires`, err)
+    }
+  }
+
   return {
     managedAddress,
     sessionKeyAddress,
     authorization,
+    revokedAuthorizationUids,
   }
 }
 

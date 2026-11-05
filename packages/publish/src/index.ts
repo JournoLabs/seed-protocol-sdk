@@ -69,6 +69,7 @@ export {
   UploadTooLargeError,
   UploadNeedsConfirmError,
   PublishWalletMissingError,
+  EthersAuthorizeUnsupportedError,
   Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
   type Eip7702ModularAccountPublishErrorCode,

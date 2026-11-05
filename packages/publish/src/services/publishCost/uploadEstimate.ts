@@ -84,6 +84,8 @@ export function estimateUpload(
     maxUploadBytes,
     confirmUploadAboveBytes,
     tooLarge: work.uploadBytes > maxUploadBytes,
-    requiresConfirm: work.uploadBytes > confirmUploadAboveBytes || risk === 'high',
+    // Infinity opts out of the prompt altogether; memory.risk still says when a caller may want to warn
+    requiresConfirm:
+      confirmUploadAboveBytes !== Infinity && (work.uploadBytes > confirmUploadAboveBytes || risk === 'high'),
   }
 }

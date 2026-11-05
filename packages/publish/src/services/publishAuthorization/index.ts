@@ -280,6 +280,32 @@ export async function revokePublishAuthorization(params: {
   }
 }
 
+/**
+ * The uids of the live (unrevoked) PublishAuthorizations `identity` attested for `sessionKey` and
+ * `app` (zero address when omitted), from the EAS indexer, which may trail the chain.
+ */
+export async function findLivePublishAuthorizationUids(params: {
+  identity: string
+  sessionKey: string
+  app?: string
+}): Promise<string[]> {
+  const app = (params.app?.trim() || ZERO_ADDRESS).toLowerCase()
+  const rows = await getPublishAuthorizationFromEas({
+    identities: [params.identity],
+    sessionKeys: [params.sessionKey],
+    excludeRevoked: true,
+  })
+  return rows
+    .filter((row) => {
+      try {
+        return decodePublishAuthorizationData(row.decodedDataJson ?? '[]').app.toLowerCase() === app
+      } catch {
+        return false
+      }
+    })
+    .map((row) => row.id)
+}
+
 export type AssessPublishAuthorizationLiveResult = {
   uid: string
   decoded: PublishAuthorizationDecoded

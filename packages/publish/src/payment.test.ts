@@ -26,6 +26,25 @@ describe('resolvePublishPayment', () => {
   test('modular: Thirdweb sponsors by default', () => {
     expect(resolvePublishPayment({ useModularExecutor: true }).gas).toEqual({ payer: 'sponsored', sponsor: 'thirdweb' })
   })
+  // Batch 16 item 11 (D58): a wallet that sends as the ManagedAccount says who pays its gas
+  test('modular: a wallet sending as the ManagedAccount reports its own payer, not Thirdweb', () => {
+    const MANAGED = '0x' + '6'.repeat(40)
+    const sendsAsManaged = (gas: unknown) => ({
+      signer: { address: '0x' + '1'.repeat(40) },
+      txSender: { address: MANAGED, gas },
+      publisherAddress: MANAGED,
+    })
+    const config = { useModularExecutor: true }
+    expect(resolvePublishPayment(config, sendsAsManaged({ payer: 'user' }) as never).gas).toEqual({ payer: 'user' })
+    expect(resolvePublishPayment(config, sendsAsManaged({ payer: 'sponsored', sponsor: 'paymaster' }) as never).gas).toEqual({
+      payer: 'sponsored',
+      sponsor: 'paymaster',
+    })
+    // ConnectButton's in-app wallet doesn't send as the ManagedAccount: Thirdweb sponsors
+    const inApp = { signer: { address: '0x' + '8'.repeat(40) }, txSender: { address: '0x' + '8'.repeat(40) } }
+    expect(resolvePublishPayment(config, inApp as never).gas).toEqual({ payer: 'sponsored', sponsor: 'thirdweb' })
+  })
+
   test('modular: sponsorGas false means the user pays', () => {
     expect(resolvePublishPayment({ useModularExecutor: true, thirdweb: { sponsorGas: false } }).gas.payer).toBe('user')
   })
