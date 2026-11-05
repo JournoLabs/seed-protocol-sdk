@@ -37,7 +37,8 @@
     "build": "rimraf dist && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "cd ../.. && vitest run --reporter=default --config vite.config.js --project=browser-react",
     "test:watch": "cd ../.. && vitest --config vite.config.js --project=browser-react",
-    "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser"
+    "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser",
+    "prepublishOnly": "node ../../scripts/check-publish-manifest.js"
   },
   "peerDependencies": {
     "@seedprotocol/sdk": "workspace:*",

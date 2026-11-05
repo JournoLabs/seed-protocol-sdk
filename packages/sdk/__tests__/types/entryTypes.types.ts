@@ -25,3 +25,8 @@ export async function returnTypes(): Promise<
     resolveSyncedPropertyName('title', 'x', {} as never),
   ]
 }
+
+// The vite entry exports the type of the plugin's rdfSidecar option (batch 16 item 64)
+import type { RdfSidecarOptions, SeedVitePluginOptions } from '@/vite/index'
+
+export const rdfSidecar: RdfSidecarOptions | false | undefined = ({} as SeedVitePluginOptions).rdfSidecar

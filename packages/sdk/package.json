@@ -39,7 +39,8 @@
     "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/fix-dts-specifiers.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
     "test": "vitest run --reporter=default",
     "test:watch": "vitest",
-    "test:browser": "vitest --project=browser"
+    "test:browser": "vitest --project=browser",
+    "prepublishOnly": "node ../../scripts/check-publish-manifest.js"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

@@ -1,5 +1,9 @@
 # @seedprotocol/vite
 
+## Unreleased
+
+- The RDF sidecar check runs again when the app's `package.json` changes while `@seedprotocol/rdf` is missing, so installing rdf with the dev server running checks the sidecar. It used to wait for the next edit to the schema or the sidecar.
+
 ## 0.8.1 (2026-11-04)
 
 - The dev server checks an RDF sidecar (`seedSchema.context.jsonld`) against `seedSchema.json` at startup and when either changes, and warns about stale terms and an out-of-date `@context`. It runs only when the sidecar exists and the app has `@seedprotocol/rdf`; `rdfSidecar` sets the paths, or `false` turns it off.
