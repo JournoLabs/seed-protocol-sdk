@@ -41,9 +41,11 @@ waits out an indexer part way through a publish. Relations are recorded as seed 
 is the transaction's bytes unchanged. An export that can't meet this refuses (`not_synced`,
 `chain_unavailable`, `incomplete`, `invalid_options`).
 
-bag-info.txt's `Seed-Bag-Format` holds the format version, now `1`. A change that would alter the
-bytes for the same inputs raises it, and the SDK keeps writing and checking every version that has
-anchored hashes.
+bag-info.txt's `Seed-Bag-Format` holds the format version, now `2`. A change that would alter the
+bytes for the same inputs raises it, and archive keeps writing and checking every version that has
+anchored hashes on a chain whose anchors gate a release. Format 2 checksums `EAS-Attester` and names
+`@seedprotocol/archive` as the bag's software agent ([ADR 0031](0031-archive-is-an-add-on-over-the-sdk.md#amendment-2026-11-05));
+format 1, whose only anchor is on OP Sepolia, isn't written any more.
 
 ## Consequences
 

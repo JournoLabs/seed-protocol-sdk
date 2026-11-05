@@ -4,8 +4,11 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ViteDevServer } from 'vite'
 
+/** @seedprotocol/rdf's DEFAULT_SCHEMA_FILE; rdf isn't a dependency, so a test keeps the two equal. */
+export const DEFAULT_SCHEMA_FILE = 'seed.schema.json'
+
 export type RdfSidecarOptions = {
-  /** The schema file, relative to the Vite root. @default 'seedSchema.json' */
+  /** The schema file, relative to the Vite root. @default 'seed.schema.json' */
   schema?: string
   /** The RDF sidecar, relative to the Vite root. @default the schema's path with `.context.jsonld` for `.json` */
   sidecar?: string
@@ -56,7 +59,7 @@ function sidecarMessages(report: SidecarReport): { warnings: string[]; notes: st
  */
 export function watchRdfSidecar(server: ViteDevServer, options: RdfSidecarOptions): Promise<void> {
   const { root, logger } = server.config
-  const schemaFile = path.resolve(root, options.schema ?? 'seedSchema.json')
+  const schemaFile = path.resolve(root, options.schema ?? DEFAULT_SCHEMA_FILE)
   const sidecarFile = options.sidecar
     ? path.resolve(root, options.sidecar)
     : schemaFile.replace(/(\.json)?$/, '.context.jsonld')

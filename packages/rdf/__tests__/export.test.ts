@@ -225,6 +225,10 @@ describe('writers agree, checked by independent parsers', () => {
     const vocabulary = parse(seedVocabulary(), 'Turtle')
     expect(vocabulary.map((q) => q.subject.value)).toContain(`${B}ns#currentVersion`)
   })
+
+  it('refuses a vocabulary base without the trailing "/" the graph IRIs use', () => {
+    expect(() => seedVocabulary('https://example.com/seed')).toThrow(/must end with "\/"/)
+  })
 })
 
 describe('SHACL', () => {

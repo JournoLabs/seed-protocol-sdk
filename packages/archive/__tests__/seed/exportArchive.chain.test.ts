@@ -11,8 +11,8 @@ import {
   verifyArchive,
   type Bag,
 } from '../../src'
-import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
-import { ARCHIVE_ANCHOR_SCHEMA_UID } from '@seedprotocol/eas'
+import { setArweaveContentReadTransform, setPreferredArweaveReadBaseUrls } from '@seedprotocol/arweave'
+import { ARCHIVE_ANCHOR_SCHEMA_UID, checksumAddress } from '@seedprotocol/eas'
 import { exportArchive } from '../../src/seed/exportArchive'
 import { verifyArchiveAgainstChain } from '../../src/seed/verifyArchiveAgainstChain'
 import { encodeCompositeUpload } from '../../../sdk/src/helpers/compositeUpload'
@@ -70,7 +70,8 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
 })
 
 const SCHEMA_NAME = 'Test Schema exportArchive chain'
-const ATTESTER = '0xDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDd'
+// EIP-55 form, as EAS reports an attester
+const ATTESTER = checksumAddress(`0x${'d'.repeat(40)}`)
 const OTHER = '0xEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEe'
 const GATEWAY = 'https://gateway.test'
 const T0 = 1791500000
@@ -234,6 +235,10 @@ testDescribe('exportArchive from the chain', () => {
 
     const { properties, seedUid, versionUid, attester, asOf } = itemJson(bag)
     expect({ seedUid, versionUid, attester }).toEqual({ seedUid: POST, versionUid: VERSION, attester: ATTESTER })
+    const info = text(bag, 'bag-info.txt')
+    expect(info).toContain('Seed-Bag-Format: 2\n')
+    expect(info).toContain(`EAS-Attester: ${ATTESTER}\n`)
+    expect(info).toContain('Bag-Software-Agent: @seedprotocol/archive exportArchive (')
     expect(asOf).toBe(new Date(T0 * 1000).toISOString())
     expect(properties.title).toMatchObject({ value: 'First title', attestedAtClock: 'chain-block' })
     expect(properties.wordCount.value).toBe('1200')
@@ -255,6 +260,16 @@ testDescribe('exportArchive from the chain', () => {
     const embedded = `assets/${digestHex('sha256', EMBEDDED_PNG)}.png`
     expect(getBagFile(bag, `data/${embedded}`)?.bytes).toEqual(EMBEDDED_PNG)
     expect(text(bag, 'data/index.html')).toContain(`src="${embedded}"`)
+  }, 120000)
+
+  it("keeps the transaction's bytes when a read transform is registered", async () => {
+    setArweaveContentReadTransform(async (content) => ({ ...content, bytes: new TextEncoder().encode('opened') }))
+    try {
+      const bag = await exported()
+      expect(getBagFile(bag, 'data/source/body.html')!.bytes).toEqual(HTML_BYTES)
+    } finally {
+      setArweaveContentReadTransform(undefined)
+    }
   }, 120000)
 
   it('gives the same bag at a time after a patch comes later', async () => {

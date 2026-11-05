@@ -22,11 +22,11 @@ Archive depends on the SDK, and the SDK doesn't depend on archive, as with publi
 mapping.
 
 - `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and their types are exported
-  from `@seedprotocol/archive` (`packages/archive/src/seed/`). The SDK exports the reads they use
-  from its main entry.
-- `@seedprotocol/sdk` is an optional peer of archive. Archive's main entry imports it;
+  from `@seedprotocol/archive/seed` (`packages/archive/src/seed/`). The SDK exports the reads they
+  use from its main entry.
+- `@seedprotocol/sdk` is an optional peer of archive. Only `/seed` imports it; the main entry,
   `@seedprotocol/archive/verify` and `@seedprotocol/archive/node` don't.
-  `scripts/check-archive-verify-no-sdk.js` fails when `src/verify.ts` reaches the SDK.
+  `scripts/check-archive-no-sdk.js` fails when one of those three reaches the SDK.
 - `readSeedAtTime`, what EAS held for a seed at a time, is in `@seedprotocol/query`. It reads only
   EAS, and other add-ons need the same reads.
 - Archive installs no SDK runtime dependencies (`check-tier1-package-boundary.js` still covers
@@ -38,9 +38,8 @@ An app that never archives doesn't install archive. Archive builds and publishes
 (`BUILD_ORDER`, `PUBLISH_ORDER`).
 
 Breaking: these names move from `@seedprotocol/sdk` and `@seedprotocol/sdk/node` to
-`@seedprotocol/archive`, and an app that archives installs it. Importing archive's main entry
-without the SDK installed fails, so a tool that only builds or checks bags without the SDK uses
-`@seedprotocol/archive/verify` or `/node`.
+`@seedprotocol/archive/seed`, and an app that archives installs it. A tool that only builds or
+checks bags uses the main entry, `/verify` or `/node`, without the SDK.
 
 The SDK's main entry exports 25 more reads. Every package releases at the same version, so the
 wider surface costs no compatibility.
@@ -56,3 +55,20 @@ would need another SDK subpath.
 
 Exporting the reads from an `@seedprotocol/sdk/internal` subpath: publish already reads through
 the main entry, and two ways in would split the surface for no gain.
+
+## Amendment (2026-11-05)
+
+0.8.1 exported `exportArchive` and `verifyArchiveAgainstChain` from the main entry, so the main
+entry imported the SDK and `createBag`, `validateBag`, `verifyArchive` and the other bag functions
+failed to load without it (batch 16 item 50). They move to `@seedprotocol/archive/seed`, and the
+main entry is SDK-free again, as it was in 0.8.0.
+
+The move also changes what a bag names as its maker, since the SDK no longer makes it:
+`Bag-Software-Agent` is `@seedprotocol/archive exportArchive (...)` and the PREMIS software agent is
+`@seedprotocol/archive`. `EAS-Attester` and the PREMIS attester agent are EIP-55 checksummed in
+every bag; an ordinary bag wrote the address in the case its row held. Both change a reproducible
+bag's bytes, so `Seed-Bag-Format` is `2` ([ADR 0028](0028-reproducible-bag-format.md)). Format 1 is
+not written any more. Its one anchored bag is on OP Sepolia, where trial anchors don't gate a
+release; `verifyArchiveAgainstChain` reports a format 1 bag as `not_checked`, and
+`verifyPublishedArchive`, which compares a bag with its anchor and doesn't rebuild it, still checks
+it.

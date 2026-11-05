@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - `updatePublishAttempt` takes `{ nonceKey: null, entryPoint: null }`, which records that an attempt's send went out under a key of the wallet's own.
 - `@seedprotocol/sdk/vite` exports `RdfSidecarOptions`, the type of the plugin's `rdfSidecar` option.
+- **Breaking:** `seedVitePlugin`'s RDF sidecar check (from `@seedprotocol/sdk/vite`) defaults to `seed.schema.json` and `seed.schema.context.jsonld`; it read `seedSchema.json` and `seedSchema.context.jsonld` (see the @seedprotocol/vite changelog).
 - **Breaking:** `Model.create` refuses a model or property name EAS can't use (a reserved Solidity ABI word) when given an `id` or `modelFileId` too. It resolved, wrote no row and left the model in `schema.models`, and the next `saveNewVersion()` rejected.
 - `Model.create` takes property definitions in schema-file shape (`type`, `items`, `model`) as well as `dataType`/`refValueType`/`ref`. A List of relations given as `{ type: 'List', items: { type: 'Relation', model: 'Tag' } }` was refused when its name was a reserved word, though the same property loads from a schema file.
 - `saveNewVersion()` and `renameModelProperty()` check names, types and rules before writing anything. A reserved rename used to leave a version file the next init couldn't apply; `renameModelProperty` resolved with that file's path, and `saveNewVersion` rejected after writing it.

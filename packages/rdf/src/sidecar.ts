@@ -197,9 +197,10 @@ const RELATION_TERMS = keyed(
   featuredimage: 'schema:image',
   cover: 'schema:image',
   thumbnail: 'schema:thumbnail',
-  html: 'schema:text',
-  body: 'schema:text',
-  content: 'schema:text',
+  // An Html (or other storage) property's value is a seed IRI, so a media term, not schema:text
+  html: 'schema:associatedMedia',
+  body: 'schema:associatedMedia',
+  content: 'schema:associatedMedia',
   tag: 'dcterms:subject',
   category: 'dcterms:subject',
   categories: 'dcterms:subject',

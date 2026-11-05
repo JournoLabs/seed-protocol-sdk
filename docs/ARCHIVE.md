@@ -5,10 +5,10 @@ bag: a directory of files with checksum manifests that BagIt tools (the Library 
 `bagit.py`, Archivematica's bag transfers) can validate without Seed code. The bag holds
 the item's Html, its files and its attested values, with Dublin Core and PREMIS metadata.
 
-`exportArchive` is in `@seedprotocol/archive`, which builds on the SDK: install both.
+`exportArchive` is in `@seedprotocol/archive/seed`, which builds on the SDK: install both.
 
 ```ts
-import { exportArchive } from '@seedprotocol/archive'
+import { exportArchive } from '@seedprotocol/archive/seed'
 import { writeBagDirectory } from '@seedprotocol/archive/node'
 
 const { bag, omitted } = await exportArchive(post, { sourceOrganization: 'The Daily Example' })
@@ -140,7 +140,7 @@ reproducible export of the item at the bag's `Seed-Bag-As-Of` and compares the t
 what differs in `differingFiles`. `item` can be `{ seedUid, modelName, schemaName }`.
 
 ```ts
-import { verifyArchiveAgainstChain } from '@seedprotocol/archive'
+import { verifyArchiveAgainstChain } from '@seedprotocol/archive/seed'
 
 const { fixity, rebuilt, differingFiles } = await verifyArchiveAgainstChain(bag, post)
 ```

@@ -1,11 +1,11 @@
-import { PROVISIONAL_BASE_IRI, assertIri } from './iri.js'
+import { PROVISIONAL_BASE_IRI, assertBaseIri } from './iri.js'
 
 /**
  * The Seed vocabulary (`{base}ns#`) in Turtle: the classes and properties the state graph uses
  * that PROV-O and schema.org don't already have.
  */
 export function seedVocabulary(base: string = PROVISIONAL_BASE_IRI): string {
-  assertIri(base, 'base')
+  assertBaseIri(base)
   return `@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix seed: <${base}ns#> .

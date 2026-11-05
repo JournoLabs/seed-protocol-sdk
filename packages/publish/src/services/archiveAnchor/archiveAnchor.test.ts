@@ -48,9 +48,9 @@ const sent: any[][] = []
 const sentDirect: any[] = []
 let uploads: { name: string; tags: { name: string; value: string }[]; bytes: Uint8Array }[] = []
 
-const realArchive = await import('@seedprotocol/archive')
-mock.module('@seedprotocol/archive', () => ({
-  ...realArchive,
+const realArchiveSeed = await import('@seedprotocol/archive/seed')
+mock.module('@seedprotocol/archive/seed', () => ({
+  ...realArchiveSeed,
   exportArchive: async () => {
     if (state.exportError) throw state.exportError
     return { bag: bagFor(state.asOf), omitted: [], arweaveTransactions: { 'data/source/body.html': SOURCE_TX } }

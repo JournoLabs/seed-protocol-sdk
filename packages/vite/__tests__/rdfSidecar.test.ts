@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Plugin, ViteDevServer } from 'vite'
 import { seedVitePlugin } from '../src/index.js'
-import { watchRdfSidecar } from '../src/rdfSidecar.js'
+import { DEFAULT_SCHEMA_FILE, watchRdfSidecar } from '../src/rdfSidecar.js'
 
 // The workspace package, as an app installs it: the plugin loads it with Node's own import, so its dist.
 const rdfPackage = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../rdf')
@@ -37,8 +37,8 @@ function app({ withSidecar = true, withRdf = true } = {}): string {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-rdf-')))
   tempDirs.push(root)
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'app' }))
-  fs.writeFileSync(path.join(root, 'seedSchema.json'), JSON.stringify(schema))
-  if (withSidecar) fs.writeFileSync(path.join(root, 'seedSchema.context.jsonld'), JSON.stringify(sidecar))
+  fs.writeFileSync(path.join(root, 'seed.schema.json'), JSON.stringify(schema))
+  if (withSidecar) fs.writeFileSync(path.join(root, 'seed.schema.context.jsonld'), JSON.stringify(sidecar))
   if (withRdf) {
     fs.mkdirSync(path.join(root, 'node_modules/@seedprotocol'), { recursive: true })
     fs.symlinkSync(rdfPackage, path.join(root, 'node_modules/@seedprotocol/rdf'), 'dir')
@@ -63,8 +63,8 @@ describe('rdfSidecar dev check', () => {
     await watchRdfSidecar(server, {})
     expect(logged).toEqual([])
     expect(watcher.add).toHaveBeenCalledWith([
-      path.join(root, 'seedSchema.json'),
-      path.join(root, 'seedSchema.context.jsonld'),
+      path.join(root, 'seed.schema.json'),
+      path.join(root, 'seed.schema.context.jsonld'),
       path.join(root, 'package.json'),
     ])
   })
@@ -73,17 +73,17 @@ describe('rdfSidecar dev check', () => {
     const root = app()
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
-    writeJson(root, 'seedSchema.json', {
+    writeJson(root, 'seed.schema.json', {
       ...schema,
       version: 2,
       models: { Post: { id: 'model-post', properties: { headline: { id: 'prop-headline', type: 'Text' } } } },
     })
-    watcher.emit('change', path.join(root, 'seedSchema.json'))
+    watcher.emit('change', path.join(root, 'seed.schema.json'))
     await vi.waitFor(() => expect(logged.length).toBeGreaterThan(0))
     expect(logged).toEqual([
-      'warn [seed-protocol] seedSchema.context.jsonld: term "schema:headline" names prop-title, which is no model or property in the schema',
-      'warn [seed-protocol] seedSchema.context.jsonld: @context is behind the schema; run `seed-rdf sync --write`',
-      'info [seed-protocol] seedSchema.context.jsonld: 1 property has no RDF term; `seed-rdf check` lists them',
+      'warn [seed-protocol] seed.schema.context.jsonld: term "schema:headline" names prop-title, which is no model or property in the schema',
+      'warn [seed-protocol] seed.schema.context.jsonld: @context is behind the schema; run `seed-rdf sync --write`',
+      'info [seed-protocol] seed.schema.context.jsonld: 1 property has no RDF term; `seed-rdf check` lists them',
     ])
   })
 
@@ -91,7 +91,7 @@ describe('rdfSidecar dev check', () => {
     const root = app()
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
-    writeJson(root, 'seedSchema.context.jsonld', { ...sidecar, schemaId: 'other' })
+    writeJson(root, 'seed.schema.context.jsonld', { ...sidecar, schemaId: 'other' })
     watcher.emit('change', path.join(root, 'src/main.ts'))
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(logged).toEqual([])
@@ -107,14 +107,14 @@ describe('rdfSidecar dev check', () => {
     const root = app({ withRdf: false })
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
-    watcher.emit('change', path.join(root, 'seedSchema.json'))
+    watcher.emit('change', path.join(root, 'seed.schema.json'))
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(logged).toEqual(['warn [seed-protocol] seedSchema.context.jsonld: install @seedprotocol/rdf to check this sidecar against the schema'])
+    expect(logged).toEqual(['warn [seed-protocol] seed.schema.context.jsonld: install @seedprotocol/rdf to check this sidecar against the schema'])
   })
 
   it('checks the sidecar once @seedprotocol/rdf is installed while the server runs', async () => {
     const root = app({ withRdf: false })
-    writeJson(root, 'seedSchema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
+    writeJson(root, 'seed.schema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
     expect(logged).toHaveLength(1)
@@ -136,7 +136,7 @@ describe('rdfSidecar dev check', () => {
 
   it('is on by default in the plugin and off with rdfSidecar: false', async () => {
     const root = app()
-    writeJson(root, 'seedSchema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
+    writeJson(root, 'seed.schema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
     const configure = (plugin: Plugin) => (plugin.configureServer as (server: ViteDevServer) => void).bind(plugin)
     const plugin = (options = {}) => seedVitePlugin({ isolationHeaders: false, ...options }).find((p) => p.name === 'seed-protocol:config')!
 
@@ -149,5 +149,12 @@ describe('rdfSidecar dev check', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(off.logged).toEqual([])
     expect(off.watcher.add).not.toHaveBeenCalled()
+  })
+})
+
+describe('DEFAULT_SCHEMA_FILE', () => {
+  it("is @seedprotocol/rdf's default, so the dev-server check and seed-rdf read the same file", async () => {
+    const rdf = await import('../../rdf/src/defaults.js')
+    expect(DEFAULT_SCHEMA_FILE).toBe(rdf.DEFAULT_SCHEMA_FILE)
   })
 })

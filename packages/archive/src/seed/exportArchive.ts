@@ -11,6 +11,7 @@ import {
   resolveSeedIdsFromRefString,
 } from '@seedprotocol/arweave'
 import {
+  checksumAddress,
   getEasAttestationExplorerUrl,
   getEasChainDeployment,
   getEasReadChainId,
@@ -141,10 +142,16 @@ export class ArchiveExportError extends Error {
  */
 export type ArchiveClockSource = 'chain-block' | 'local-record' | 'export-device'
 
+const snapshotSchemaName = (snapshot: object | undefined): string | undefined => {
+  const context = snapshot && 'context' in snapshot ? (snapshot.context as { schemaName?: unknown } | undefined) : undefined
+  return typeof context?.schemaName === 'string' ? context.schemaName : undefined
+}
+
 export type ExportableItem = {
   seedLocalId: string
   modelName?: string
-  getService?: () => { getSnapshot: () => { context: { schemaName?: string } } }
+  /** An Item's actor; its snapshot's `context.schemaName` names the schema when it has one. */
+  getService?: () => { getSnapshot: () => object }
 }
 
 /**
@@ -199,9 +206,10 @@ type ArchiveSource = {
 }
 
 const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
-const SOFTWARE_AGENT = '@seedprotocol/sdk exportArchive (https://github.com/JournoLabs/seed-protocol-sdk)'
+const SOFTWARE_AGENT = '@seedprotocol/archive exportArchive (https://github.com/JournoLabs/seed-protocol-sdk)'
 /** Raise it when a change would alter a reproducible bag's bytes (ADR 0028). */
-const REPRODUCIBLE_BAG_FORMAT = '1'
+// 2: checksummed EAS-Attester and the @seedprotocol/archive agents (ADR 0031); 1 named the SDK
+const REPRODUCIBLE_BAG_FORMAT = '2'
 
 const isoFromMs = (ms: number | null | undefined): string | undefined =>
   typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : undefined
@@ -283,7 +291,7 @@ async function localSource(item: ExportableItem, fetch: boolean): Promise<Archiv
     versionUid: version.uid,
     versionMs: version.attestationCreatedAt,
     modelName: root.modelName,
-    attester: seedRow?.publisher ?? undefined,
+    attester: seedRow?.publisher ? checksumAddress(seedRow.publisher) : undefined,
     properties: root.properties.map((property) => ({
       key: property.key,
       definition: property.definition,
@@ -472,7 +480,8 @@ async function chainSource(
 
   const downloads = new Map<string, Promise<Uint8Array | undefined>>()
   const readTransaction = (txId: string): Promise<Uint8Array | undefined> => {
-    const download = downloads.get(txId) ?? fetchArweaveRawBytesAcrossGateways(txId)
+    // The transaction's bytes, not a read transform's output: a bag keeps what was published (ADR 0028)
+    const download = downloads.get(txId) ?? fetchArweaveRawBytesAcrossGateways(txId, { decode: false })
     downloads.set(txId, download)
     return download
   }
@@ -481,7 +490,7 @@ async function chainSource(
     seedUid,
     versionUid: version.id,
     modelName: model.name,
-    attester: chainState.seed.attester,
+    attester: checksumAddress(chainState.seed.attester),
     chain: chainState,
     // Attested properties only: a bag describes the record, not the schema around it, so a property
     // added to the schema later doesn't change it.
@@ -581,7 +590,7 @@ export async function exportArchive(
   const chain = getEasChainDeployment(chainId)
   const explorerUrl = (uid: string) => (chain ? getEasAttestationExplorerUrl(chain, uid) : undefined)
   // Left out of a reproducible bag: it's the caller's name for the schema, and isn't on chain.
-  const localSchemaName = 'seedLocalId' in item ? item.getService?.().getSnapshot().context.schemaName : item.schemaName
+  const localSchemaName = 'seedLocalId' in item ? snapshotSchemaName(item.getService?.().getSnapshot()) : item.schemaName
   const schemaName = reproducible ? undefined : localSchemaName
 
   const omitted: ArchiveOmission[] = []
@@ -782,7 +791,7 @@ export async function exportArchive(
       ...(attester
         ? [{ identifiers: [{ type: 'EVM address', value: attester }], note: `EAS attester on chain ${chainId}` }]
         : []),
-      { identifiers: [{ type: 'software', value: '@seedprotocol/sdk' }], name: '@seedprotocol/sdk', type: 'software' as const },
+      { identifiers: [{ type: 'software', value: '@seedprotocol/archive' }], name: '@seedprotocol/archive', type: 'software' as const },
     ],
   })
 
@@ -918,7 +927,7 @@ async function localHistoryEvents(
 
 /** The bag's own events: its checksums and the package itself. */
 const bagEvents = (stamp: Stamp, seedUid: string, chainId: number, reproducible: boolean): PremisEvent[] => {
-  const agents = [{ type: 'software', value: '@seedprotocol/sdk', role: 'executing program' }]
+  const agents = [{ type: 'software', value: '@seedprotocol/archive', role: 'executing program' }]
   const objects = [{ type: 'Seed Protocol seed UID', value: seedUid }]
   const time = reproducible
     ? `Dated with the time the bag covers so every client builds the same bag; time: ${describeClock(stamp.clock, chainId)}.`

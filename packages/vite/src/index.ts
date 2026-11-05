@@ -57,7 +57,7 @@ export interface SeedVitePluginOptions {
    * `@context` a rename left behind. Runs only when the sidecar exists and the app has
    * @seedprotocol/rdf installed; never writes either file. Set `false` to turn it off, or pass the
    * paths, relative to the Vite root.
-   * @default { schema: 'seedSchema.json', sidecar: 'seedSchema.context.jsonld' }
+   * @default { schema: 'seed.schema.json', sidecar: 'seed.schema.context.jsonld' }
    */
   rdfSidecar?: false | RdfSidecarOptions
 }

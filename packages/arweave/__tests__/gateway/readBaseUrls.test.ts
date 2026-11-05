@@ -8,9 +8,11 @@ import {
   setResolvedSeedGatewayEndpoints,
 } from '../../src/gateway/gatewayState.js'
 import {
+  fetchArweaveRawBytesAcrossGateways,
   fetchArweaveRawTextAcrossGateways,
   getArweaveReadBaseUrls,
 } from '../../src/gateway/readBaseUrls.js'
+import { setArweaveContentReadTransform } from '../../src/content/arweaveContent.js'
 import type { ResolvedSeedGatewayEndpoints } from '../../src/types/gateway.js'
 import { DEFAULT_ARWEAVE_GATEWAYS } from '../../src/constants.js'
 
@@ -242,5 +244,26 @@ describe('BaseArweaveClient.getArweaveJsApiConfig', () => {
     // Without a port, arweave web init inherits location.port — the bug this guards against.
     expect(ArweaveWeb.init({ host: 'arweave.net', protocol: 'https' }).api.config.port).toBe(43844)
     expect(ArweaveWeb.init(BaseArweaveClient.getArweaveJsApiConfig()).api.config.port).toBe(443)
+  })
+})
+
+describe('fetchArweaveRawBytesAcrossGateways', () => {
+  beforeEach(() => {
+    BaseArweaveClient.setHost('https://arweave.net')
+    setResolvedSeedGatewayEndpoints(resolved({ activePath: 'http' }))
+    setPreferredArweaveReadBaseUrls([PROXY])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('stored', { status: 200 })))
+    setArweaveContentReadTransform(async (content) => ({ ...content, bytes: new TextEncoder().encode('opened') }))
+  })
+  afterEach(() => setArweaveContentReadTransform(undefined))
+
+  it('runs the read transform by default', async () => {
+    const bytes = await fetchArweaveRawBytesAcrossGateways(TX)
+    expect(new TextDecoder().decode(bytes)).toBe('opened')
+  })
+
+  it("returns the transaction's bytes with decode: false", async () => {
+    const bytes = await fetchArweaveRawBytesAcrossGateways(TX, { decode: false })
+    expect(new TextDecoder().decode(bytes)).toBe('stored')
   })
 })

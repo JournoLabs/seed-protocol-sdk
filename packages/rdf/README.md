@@ -183,7 +183,7 @@ seed-rdf suggest            # draft schema.org / dcterms terms for unmapped name
 seed-rdf suggest --write    # add them to the sidecar, creating it if needed
 ```
 
-Each command reads `seedSchema.json` and `seedSchema.context.jsonld` in the working directory;
+Each command reads `seed.schema.json` and `seed.schema.context.jsonld` in the working directory;
 `--schema` and `--sidecar` take other paths. `sync` and `suggest` print what they would write
 unless given `--write`, and `sync` keeps stale terms: removing a mapping is your call. The same
 functions are exported as `checkSidecar`, `syncSidecar`, `suggestTerms` and `sidecarContext`.
