@@ -156,6 +156,25 @@ describe('sendAttested: a sender that pins its nonce', () => {
     expect(rows[0]!.nonceKey).not.toBe(rows[1]!.nonceKey)
   })
 
+  // Batch 16 item 40: a thirdweb smart wallet built without seedAccountNonce sends under its own key
+  test('a send whose nonce key went unused leaves the attempt open with no key: reconcile must not resend', async () => {
+    send.mockImplementationOnce((async (_key: bigint, onNonceKeyIgnored: () => void) => {
+      onNonceKeyIgnored()
+      throw new Error('Timeout waiting for userOp to be mined')
+    }) as never)
+    await expect(sendAttested(pinned())).rejects.toThrow('Timeout')
+    expect(rows[0]).toMatchObject({ status: 'sending', nonceKey: null, entryPoint: null })
+  })
+
+  test('a landed send whose nonce key went unused keeps its hash and no key', async () => {
+    send.mockImplementationOnce((async (_key: bigint, onNonceKeyIgnored: () => void) => {
+      onNonceKeyIgnored()
+      return { transactionHash: HASH }
+    }) as never)
+    await sendAttested(pinned())
+    expect(rows[0]).toMatchObject({ status: 'sent', txHash: HASH, nonceKey: null, entryPoint: null })
+  })
+
   test('a sender with no pin sends no key', async () => {
     await sendAttested(attempt())
     expect(send.mock.calls[0]).toEqual([undefined] as never)

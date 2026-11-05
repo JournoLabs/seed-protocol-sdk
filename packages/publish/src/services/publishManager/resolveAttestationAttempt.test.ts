@@ -25,6 +25,14 @@ describe('PublishManager.resolveAttestationAttempt', () => {
     expect(updatePublishAttempt.mock.calls).toEqual([['attempt1', { status: 'sent', txHash: HASH }]])
   })
 
+  // Batch 16 item 45: reconcile would wait on a receipt for whatever was recorded
+  test('refuses a txHash that is not a 32-byte hex string, and records nothing', async () => {
+    for (const txHash of ['abc', `0x${'a'.repeat(40)}`, 'a'.repeat(64), `0x${'g'.repeat(64)}`]) {
+      await expect(PublishManager.resolveAttestationAttempt('seed1', { txHash })).rejects.toThrow(TypeError)
+    }
+    expect(updatePublishAttempt).not.toHaveBeenCalled()
+  })
+
   test('resend gives the attempt up', async () => {
     await PublishManager.resolveAttestationAttempt('seed1', { resend: true })
     expect(updatePublishAttempt.mock.calls).toEqual([['attempt1', { status: 'abandoned' }]])

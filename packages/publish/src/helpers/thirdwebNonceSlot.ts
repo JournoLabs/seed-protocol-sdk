@@ -11,10 +11,16 @@ type Slot = { key: bigint | undefined; release: () => void }
 const slots = new Map<string, Slot>()
 const tails = new Map<string, Promise<void>>()
 
+/**
+ * Runs `send` with `key` offered to the account's nonce hook. `onKeyUnused` runs when `send`
+ * settles, sent or not, if a key was offered and the hook never took it: the wallet asked for no
+ * nonce through `seedAccountNonce`, so whatever it sent went under a key of its own.
+ */
 export async function withNonceSlot<T>(
   account: string,
   key: bigint | undefined,
   send: () => Promise<T>,
+  onKeyUnused?: () => void,
 ): Promise<T> {
   const id = account.toLowerCase()
   const previous = tails.get(id) ?? Promise.resolve()
@@ -26,7 +32,10 @@ export async function withNonceSlot<T>(
   try {
     return await send()
   } finally {
-    if (slots.get(id) === slot) slots.delete(id)
+    if (slots.get(id) === slot) {
+      slots.delete(id)
+      if (key !== undefined) onKeyUnused?.()
+    }
     release()
   }
 }

@@ -112,7 +112,7 @@ export const createAttestations = fromPromise(
   },
 )
 
-type SendTx = (nonceKey?: bigint) => Promise<{ transactionHash: Hash }>
+type SendTx = (nonceKey?: bigint, onNonceKeyIgnored?: () => void) => Promise<{ transactionHash: Hash }>
 
 /**
  * Checks and sends a `multiPublish`. `through` gets the send once every preflight has passed, and
@@ -200,6 +200,7 @@ export async function resolveMultiPublishSender(source: {
       const { ensureModularPublishBootstrap } = await import(
         '~/helpers/ensureModularPublishBootstrap'
       )
+      // nonceKeySender (helpers/hostNonceKey.ts) mirrors this swap for checking: keep them in step.
       const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
       activeWallet = fromThirdwebAccount(
         await ensureModularPublishBootstrap(prep.managedAddress),
@@ -241,9 +242,11 @@ export async function resolveMultiPublishSender(source: {
           },
     )
     const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
-    const send: SendTx = async (nonceKey) => {
+    const send: SendTx = async (nonceKey, onNonceKeyIgnored) => {
       try {
-        return await activeWallet.txSender.sendTransaction(nonceKey === undefined ? tx : { ...tx, nonceKey })
+        return await activeWallet.txSender.sendTransaction(
+          nonceKey === undefined ? tx : { ...tx, nonceKey, onNonceKeyIgnored },
+        )
       } catch (err) {
         throw explainUserOpError(err, activeWallet.txSender.address)
       }

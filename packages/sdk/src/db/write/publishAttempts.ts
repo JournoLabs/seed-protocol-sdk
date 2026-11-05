@@ -69,10 +69,16 @@ export async function claimPublishAttempt(
   })
 }
 
-/** Moves an attempt on, in `db` when given (a transaction). */
+/**
+ * Moves an attempt on, in `db` when given (a transaction). `nonceKey: null` and `entryPoint: null`
+ * record that the send went out under a key of the wallet's own, so reconcile doesn't read the
+ * attempt's key.
+ */
 export async function updatePublishAttempt(
   id: string,
-  update: { status: PublishAttemptStatus; txHash?: string },
+  update:
+    | { status: PublishAttemptStatus; txHash?: string }
+    | { nonceKey: null; entryPoint: null },
   { db = BaseDb.getAppDb() }: { db?: NonNullable<ReturnType<typeof BaseDb.getAppDb>> | null } = {},
 ): Promise<void> {
   if (!db) throw new Error('updatePublishAttempt: the database is not ready')

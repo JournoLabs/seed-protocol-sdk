@@ -76,7 +76,7 @@ export {
 } from './errors'
 export { PublishModeButtons } from './react/PublishModeButtons'
 export type { PublishModeButtonsProps } from './react/PublishModeButtons'
-export type { PublishMode } from './types'
+export type { PublishMode, UnrecordedAttestation } from './types'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider'
 export type { PublishProviderProps } from './react/PublishProvider'
 export { useSeedWallet } from './react/useSeedWallet'

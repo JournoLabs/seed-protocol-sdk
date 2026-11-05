@@ -64,6 +64,10 @@ const checks = `
 import { useItems, useItem, useItemProperty, useCreateItem } from '@seedprotocol/react'
 import { client, Item } from '@seedprotocol/sdk'
 import { importJsonSchema } from '@seedprotocol/sdk/node'
+import type { AttestationRecordError, UnrecordedAttestation } from '@seedprotocol/publish'
+
+// The type of a public error's field is exported (batch 16 item 46)
+export const unrecorded = (error: AttestationRecordError): UnrecordedAttestation => error.unrecorded
 
 ${notAny('useItems')}
 ${notAny('useItem')}

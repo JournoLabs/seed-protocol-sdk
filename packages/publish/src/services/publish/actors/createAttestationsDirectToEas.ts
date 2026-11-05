@@ -336,7 +336,8 @@ async function executeCreateAttestationsDirectToEas(
         sender: txSender,
         attester: txSender.address,
         step,
-        send: (nonceKey) => txSender.sendTransaction(nonceKey === undefined ? tx : { ...tx, nonceKey }),
+        send: (nonceKey, onNonceKeyIgnored) =>
+          txSender.sendTransaction(nonceKey === undefined ? tx : { ...tx, nonceKey, onNonceKeyIgnored }),
         ...(resumeAttemptId ? { resumeAttemptId } : {}),
       })
       resumeAttemptId = undefined

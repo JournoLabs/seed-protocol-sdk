@@ -13,6 +13,11 @@ export type SeedTxRequest = {
    * is repeated. Honoured by a sender with `pinsNonceOn`.
    */
   nonceKey?: bigint
+  /**
+   * Called by a sender with `pinsNonceOn` when it knows `nonceKey` wasn't used: whatever it sent, or
+   * may have sent, went under another key, so the key's sequence can't say whether it landed.
+   */
+  onNonceKeyIgnored?: () => void
 }
 
 /**

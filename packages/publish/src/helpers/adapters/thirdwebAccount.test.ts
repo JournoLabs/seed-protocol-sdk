@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import type { ThirdwebClient } from 'thirdweb'
 
 const prepareTransaction = mock((opts: { client: unknown }) => ({ client: opts.client }))
@@ -92,6 +92,39 @@ describe('fromThirdwebAccount nonce keys', () => {
     })
     await fromThirdwebAccount(account).txSender.sendTransaction(tx)
     expect(offered).toBeUndefined()
+  })
+
+  // Batch 16 item 40
+  test('a pinning wallet whose nonce hook never runs reports the key unused, sent or not', async () => {
+    const onNonceKeyIgnored = mock(() => {})
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      sendTransaction.mockImplementationOnce(async () => ({ transactionHash: '0x01' }))
+      await fromThirdwebAccount(account, { pinsNonce: true }).txSender.sendTransaction({ ...tx, onNonceKeyIgnored })
+      expect(onNonceKeyIgnored).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+
+      sendTransaction.mockImplementationOnce(async () => {
+        throw new Error('Timeout waiting for userOp to be mined')
+      })
+      await expect(
+        fromThirdwebAccount(account, { pinsNonce: true }).txSender.sendTransaction({ ...tx, onNonceKeyIgnored }),
+      ).rejects.toThrow('Timeout')
+      expect(onNonceKeyIgnored).toHaveBeenCalledTimes(2)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('a send whose hook took the key reports nothing', async () => {
+    const onNonceKeyIgnored = mock(() => {})
+    sendTransaction.mockImplementationOnce(async () => {
+      takeNonceSlot(account.address)
+      return { transactionHash: '0x01' }
+    })
+    await fromThirdwebAccount(account, { pinsNonce: true }).txSender.sendTransaction({ ...tx, onNonceKeyIgnored })
+    expect(onNonceKeyIgnored).not.toHaveBeenCalled()
   })
 
   test('a pinned send is not retried on a nonce error: a retry would land under a random key', async () => {

@@ -58,19 +58,30 @@ type PinnedUserOpParams = {
   fromBlock: bigint
 }
 
+/** The widest block range one `eth_getLogs` asks for: public RPCs such as sepolia.optimism.io refuse more. */
+const LOG_SPAN = 10_000n
+
 async function findPinnedUserOpLog(params: PinnedUserOpParams) {
   const { entryPoint, sender, key, fromBlock } = params
-  const logs = await getPublishPublicClient().getLogs({
-    address: entryPoint,
-    event: entryPointAbi[1],
-    args: { sender },
-    fromBlock,
-  })
-  const log = logs.find((l) => l.args.nonce === pinnedNonce(key))
-  return log?.transactionHash ? log : undefined
+  const client = getPublishPublicClient()
+  const head = await client.getBlockNumber()
+  const nonce = pinnedNonce(key)
+  for (let from = fromBlock; from <= head; from += LOG_SPAN) {
+    const to = from + LOG_SPAN - 1n < head ? from + LOG_SPAN - 1n : head
+    const logs = await client.getLogs({
+      address: entryPoint,
+      event: entryPointAbi[1],
+      args: { sender },
+      fromBlock: from,
+      toBlock: to,
+    })
+    const log = logs.find((l) => l.args.nonce === nonce)
+    if (log?.transactionHash) return log
+  }
+  return undefined
 }
 
-/** The landed UserOp under `key`, from the logs since `fromBlock`. */
+/** The landed UserOp under `key`, from the logs since `fromBlock`, read 10,000 blocks at a time. */
 export async function findPinnedUserOp(
   params: PinnedUserOpParams,
 ): Promise<{ transactionHash: Hex; success: boolean } | undefined> {
