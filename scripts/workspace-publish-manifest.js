@@ -57,6 +57,17 @@ function applyWorkspaceReplacements(manifest, rootDir) {
 }
 
 /**
+ * The manifest npm should publish: a copy with internal workspace: refs pinned.
+ * @param {Record<string, unknown>} manifest
+ * @param {string} rootDir
+ */
+export function publishableManifest(manifest, rootDir) {
+  const copy = structuredClone(manifest)
+  applyWorkspaceReplacements(copy, rootDir)
+  return copy
+}
+
+/**
  * Write package.json with stable formatting (matches sync-versions.js).
  * @param {string} manifestPath
  * @param {Record<string, unknown>} data
@@ -74,9 +85,7 @@ function writePackageJson(manifestPath, data) {
 export function preparePublishManifest(rootDir, packageDir) {
   const manifestPath = join(rootDir, packageDir, 'package.json')
   const backup = readFileSync(manifestPath, 'utf-8')
-  const manifest = JSON.parse(backup)
-  applyWorkspaceReplacements(manifest, rootDir)
-  writePackageJson(manifestPath, manifest)
+  writePackageJson(manifestPath, publishableManifest(JSON.parse(backup), rootDir))
   return { manifestPath, backup }
 }
 

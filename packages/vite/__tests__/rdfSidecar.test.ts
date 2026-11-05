@@ -62,7 +62,11 @@ describe('rdfSidecar dev check', () => {
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
     expect(logged).toEqual([])
-    expect(watcher.add).toHaveBeenCalledWith([path.join(root, 'seedSchema.json'), path.join(root, 'seedSchema.context.jsonld')])
+    expect(watcher.add).toHaveBeenCalledWith([
+      path.join(root, 'seedSchema.json'),
+      path.join(root, 'seedSchema.context.jsonld'),
+      path.join(root, 'package.json'),
+    ])
   })
 
   it('warns after a rename or deletion in the schema, on the file change', async () => {
@@ -106,6 +110,19 @@ describe('rdfSidecar dev check', () => {
     watcher.emit('change', path.join(root, 'seedSchema.json'))
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(logged).toEqual(['warn [seed-protocol] seedSchema.context.jsonld: install @seedprotocol/rdf to check this sidecar against the schema'])
+  })
+
+  it('checks the sidecar once @seedprotocol/rdf is installed while the server runs', async () => {
+    const root = app({ withRdf: false })
+    writeJson(root, 'seedSchema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
+    const { server, logged, watcher } = devServer(root)
+    await watchRdfSidecar(server, {})
+    expect(logged).toHaveLength(1)
+    fs.mkdirSync(path.join(root, 'node_modules/@seedprotocol'), { recursive: true })
+    fs.symlinkSync(rdfPackage, path.join(root, 'node_modules/@seedprotocol/rdf'), 'dir')
+    watcher.emit('change', path.join(root, 'package.json'))
+    await vi.waitFor(() => expect(logged.join()).toMatch(/schema:gone/))
+    expect(logged.filter((m) => m.includes('install @seedprotocol/rdf'))).toHaveLength(1)
   })
 
   it('reports a sidecar for another schema, and reads the paths it is given', async () => {

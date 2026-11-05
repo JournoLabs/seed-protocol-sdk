@@ -49,8 +49,9 @@ function sidecarMessages(report: SidecarReport): { warnings: string[]; notes: st
 
 /**
  * Checks the app's RDF sidecar against its schema when the dev server starts and whenever either
- * file changes, and prints what's stale. Does nothing when there's no sidecar, and asks for
- * @seedprotocol/rdf when there is one but the app doesn't have it. Never writes either file.
+ * file changes, and prints what's stale. Does nothing when there's no sidecar, and asks once for
+ * @seedprotocol/rdf when there is one but the app doesn't have it, then checks again when the app's
+ * package.json changes. Never writes either file.
  * Resolves when the first check is done.
  */
 export function watchRdfSidecar(server: ViteDevServer, options: RdfSidecarOptions): Promise<void> {
@@ -82,9 +83,13 @@ export function watchRdfSidecar(server: ViteDevServer, options: RdfSidecarOption
   }
   const run = () => check().catch((error: unknown) => logger.warn(`${prefix} couldn't check the sidecar: ${(error as Error).message}`))
 
-  server.watcher.add([schemaFile, sidecarFile])
+  // Installing @seedprotocol/rdf rewrites the app's package.json, so a change there looks again
+  // while the package is missing.
+  const appManifest = path.resolve(root, 'package.json')
+  server.watcher.add([schemaFile, sidecarFile, appManifest])
   const onFile = (file: string) => {
-    if (path.resolve(file) === schemaFile || path.resolve(file) === sidecarFile) void run()
+    const changed = path.resolve(file)
+    if (changed === schemaFile || changed === sidecarFile || (changed === appManifest && !checkSidecar)) void run()
   }
   server.watcher.on('change', onFile)
   server.watcher.on('add', onFile)

@@ -62,7 +62,7 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js && node ../../scripts/check-publish-manifest.js"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",

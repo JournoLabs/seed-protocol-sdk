@@ -245,6 +245,13 @@ the SDK couldn't be installed until `archive` was published by hand. `scripts/ch
 `PUBLISH_ORDER` has a dependency or peer dependency on an internal package that isn't in
 `PUBLISH_ORDER`, or that comes after it there.
 
+Publish by hand only through `scripts/publish-package.js`, which pins `workspace:` ranges to
+versions before it runs `npm publish` and puts them back afterwards. npm packs `package.json` as it
+is, so `@seedprotocol/rdf@0.8.1`, published with a plain `npm publish`, kept `workspace:*` and
+`npm install` refuses it. Every public package's `prepublishOnly` ends with
+`scripts/check-publish-manifest.js`, which fails the publish while a `workspace:` range is left. A
+new package needs that step too; `scripts/__tests__/check-publish-manifest.test.js` fails without it.
+
 ## Troubleshooting
 
 - **"Tag vX.Y.Z does not match the committed version":** bump with `new-version`,

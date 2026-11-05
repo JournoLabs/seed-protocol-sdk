@@ -42,7 +42,7 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
     "test": "vitest run --reporter=default",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js && node ../../scripts/check-publish-manifest.js",
     "codegen": "graphql-codegen --config codegen.ts && node ../../scripts/fix-graphql-codegen-imports.js",
     "codegen:watch": "graphql-codegen -w --config codegen.ts"
   },
