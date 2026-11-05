@@ -4,6 +4,7 @@ import type { GraphQLClient } from 'graphql-request'
 import {
   getSchemaNamesBySchemaUids,
   getSeedsBySchemaName,
+  getReportedAttestationUids,
   getSeedsByUidsFromEas,
   resetSchemaNamesCache,
 } from '../src/api.js'
@@ -81,6 +82,16 @@ describe('lean seed queries', () => {
 
     expect(seeds.map((s) => s.schema.schemaNames.map((n) => n.name))).toEqual([['post'], ['image'], []])
     expect(requests.map((r) => r.operation)).toEqual(['GetSeedsLean', 'GetSchemas'])
+  })
+
+  // Batch 16 item 49: the indexer's uids are lower case
+  it('getSeedsByUidsFromEas and getReportedAttestationUids ask with lower-case uids', async () => {
+    const upper = '0x' + 'AB'.repeat(32)
+    await getSeedsByUidsFromEas({ uids: [upper] })
+    expect(JSON.stringify(requests[0]!.variables.where)).toContain(upper.toLowerCase())
+    requests = []
+    await getReportedAttestationUids([upper])
+    expect(requests[0]!.variables.where.id.in).toEqual([upper.toLowerCase()])
   })
 
   it('caches found schema names and asks again for unnamed schemas', async () => {

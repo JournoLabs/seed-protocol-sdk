@@ -34,8 +34,19 @@ const property = (versionUid: string, type: string, name: string, value: unknown
     decodedDataJson: JSON.stringify([{ value: { name, type, value } }]),
   })
 
-const seeds = [attestation({ id: SEED, schema: { schemaNames: [{ name: 'post' }] } })]
-const versions = [attestation({ id: V1, refUID: SEED, timeCreated: 100 }), attestation({ id: V2, refUID: SEED, timeCreated: 200 })]
+/** A seed whose publisher left reference slots unfilled (batch 16 item 22). */
+const UNFILLED_SEED = uid('a2')
+const V3 = uid('b3')
+const PLACEHOLDER = '0x' + '0'.repeat(63) + '2'
+const seeds = [
+  attestation({ id: SEED, schema: { schemaNames: [{ name: 'post' }] } }),
+  attestation({ id: UNFILLED_SEED, schema: { schemaNames: [{ name: 'post' }] } }),
+]
+const versions = [
+  attestation({ id: V1, refUID: SEED, timeCreated: 100 }),
+  attestation({ id: V2, refUID: SEED, timeCreated: 200 }),
+  attestation({ id: V3, refUID: UNFILLED_SEED, timeCreated: 300 }),
+]
 const properties = [
   property(V1, 'string', 'title', 'First', 101),
   property(V2, 'string', 'title', 'Second', 201),
@@ -45,6 +56,9 @@ const properties = [
   property(V2, 'uint256', 'published_at', { type: 'BigNumber', hex: '0x10' }, 205),
   property(V2, 'bytes32', 'author_identity_id', AUTHOR, 206),
   property(V2, 'string', 'external_id', 'ext-42', 207),
+  property(V3, 'string', 'title', 'Unfilled', 301),
+  property(V3, 'bytes32', 'author_identity_id', PLACEHOLDER, 302),
+  property(V3, 'bytes32[]', 'tag_ids', [AUTHOR, PLACEHOLDER], 303),
 ]
 
 beforeAll(() =>
@@ -79,6 +93,13 @@ describe('getSeedAttestations', () => {
     // Only bytes32 properties are relations, whatever the name
     expect(props.external_id).toMatchObject({ easType: 'string', value: 'ext-42', isRelation: false })
     expect(entry.record.data.external_id).toBe('ext-42')
+  })
+
+  it('leaves out a relation holding an unfilled reference, and drops one from a list, as the record does', async () => {
+    const entry = (await getSeedAttestations([UNFILLED_SEED], { source: 'local' })).get(UNFILLED_SEED)!
+    const props = byName(entry)
+    expect(props.author_identity_id).toBeUndefined()
+    expect(props.tag_ids).toMatchObject({ value: [AUTHOR], isRelation: true })
   })
 
   it('reads a pinned version', async () => {

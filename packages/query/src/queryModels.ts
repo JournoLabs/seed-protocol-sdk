@@ -2,7 +2,10 @@ import pluralize from 'pluralize'
 import { easName } from '@seedprotocol/eas'
 import { generateETag } from './cache/etag.js'
 
+// The index signature keeps this from being a weak type: a schema file's property, whose own
+// fields are all optional, then passes without a cast.
 type QueryModelProperty = {
+  readonly [field: string]: unknown
   readonly name?: string
   readonly type?: string
   readonly dataType?: string
@@ -13,6 +16,7 @@ type QueryModelProperty = {
 }
 
 type QueryModel = {
+  readonly [field: string]: unknown
   readonly name?: string
   readonly properties: { readonly [propertyName: string]: QueryModelProperty } | readonly QueryModelProperty[]
 }

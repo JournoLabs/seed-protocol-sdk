@@ -3,7 +3,7 @@ import { Parser, Store } from 'n3'
 import jsonld from 'jsonld'
 import { canonize } from 'rdf-canonize'
 import SHACLValidator from 'rdf-validate-shacl'
-import { clearLocalQuerySource, registerLocalQuerySource } from '@seedprotocol/query'
+import { clearLocalQuerySource, getSeedAttestations, registerLocalQuerySource } from '@seedprotocol/query'
 import {
   PROVISIONAL_BASE_IRI,
   exportSeeds,
@@ -142,6 +142,19 @@ describe('state graph', () => {
       items.push(store.getObjects(cell, `${RDF}first`, null)[0]!.value)
     }
     expect(items).toEqual([at(AUTHOR_1), at(AUTHOR_2)])
+  })
+
+  // Batch 16 item 22: stateGraph takes SeedAttestations from anywhere, not only getSeedAttestations
+  it('links no seed for an unfilled reference, in a relation or a list', async () => {
+    const placeholder = `0x${'0'.repeat(63)}2`
+    const post = (await getSeedAttestations([POST], { source: 'local' })).get(POST)!
+    const properties = post.properties.map((p) =>
+      p.easName === 'html' ? { ...p, value: placeholder } : p.easName === 'author_identity_ids' ? { ...p, value: [AUTHOR_1, placeholder] } : p,
+    )
+    const changed = stateGraph([{ ...post, properties }], { chainId: CHAIN_ID })
+    const quads = toNQuads(changed)
+    expect(quads).not.toContain(placeholder.slice(2))
+    expect(quads).toContain(AUTHOR_1.slice(2))
   })
 
   it("gives a storage seed's transaction as an ar:// content IRI beside the attested value", () => {
