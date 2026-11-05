@@ -4,6 +4,12 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `Model.create` refuses a model or property name EAS can't use (a reserved Solidity ABI word) when given an `id` or `modelFileId` too. It resolved, wrote no row and left the model in `schema.models`, and the next `saveNewVersion()` rejected.
+- `Model.create` takes property definitions in schema-file shape (`type`, `items`, `model`) as well as `dataType`/`refValueType`/`ref`. A List of relations given as `{ type: 'List', items: { type: 'Relation', model: 'Tag' } }` was refused when its name was a reserved word, though the same property loads from a schema file.
+- `saveNewVersion()` and `renameModelProperty()` check names, types and rules before writing anything. A reserved rename used to leave a version file the next init couldn't apply; `renameModelProperty` resolved with that file's path, and `saveNewVersion` rejected after writing it.
+- `summarizePublishWork` takes `backReferences` (`'link'` or `'defer'`, the default), as `getPublishPayload` does. With `'defer'` it left out the reference back to an item the publish creates, which a publish through the contract attests.
+- The types `FoundSeedRow`, `PublishAttemptType`, `ResolvedModelRecord` and `SyncedPropertyName`, which exported functions return, are exported.
+
 - An Image or File value assigned as a `File` or `Blob` could be saved short, with no error: the outbox read its staged copy while the copy was still being written (Node's `fs.promises.writeFile` creates the file, then writes it 512 KiB at a time), and stored those bytes as the final file. `await property.save()` resolved and publish uploaded the short file with a matching `Content-SHA-256`. The outbox now waits until the staged copy's write is done.
 - On Node, `readPublishUploadBytes` rejects a file changed during the publish with `PublishUploadChangedError`. It rejected with the `NotReadableError` from `fs.openAsBlob`'s Blob, so the documented error never came.
 - Schema file properties take `private: true` (ADR 0033). It is stored in the property's definition (`getPropertyDefinition(...).private`) and kept when the schema is saved; a value other than `true` or `false` rejects the file. Nothing encrypts on it yet.
@@ -17,20 +23,19 @@ All notable changes to this package are documented in this file.
 - **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ArchiveSeedRef`, `ExportableItem`, `ExportArchiveOptions`, `ExportArchiveResult` and `ArchiveChainVerification` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
 - The main entry exports the reads `exportArchive` uses, among them `findSeedRow`, `getPropertyDefinitions`, `resolveSyncedPropertyName`, `storedValueKind` and the new `getVersionHistoryRows(seedLocalId)`, every Version row of a seed with its attestation and revocation times.
 - `getEasSchemaUidForModel(modelName)` is exported: the EAS schema uid of a model's Seeds, from the cache, `model_uids`, then EAS.
-- `readPublishUploadBytes` rejects a changed file with the new `PublishUploadChangedError` (code `UPLOAD_CHANGED_DURING_PUBLISH`, with `itemPropertyName`). It was a plain `Error` with the same message.
-- `exportArchive` takes `expectedAttestations`: with `reproducible`, it refuses with `not_synced` until EAS reports those uids, so a bag built right after a publish can't be silently incomplete. A seed with no Version on EAS is `not_synced`, not `not_published`. A reproducible bag holds attested properties only and no schema name, and its default time covers storage seeds. `VERIFY.txt` gives the rebuild command with the bag's `asOf`.
-- `ExportableItem` and `ArchiveSeedRef` are exported.
-- `exportArchive` returns `arweaveTransactions`: with `reproducible`, each bag path whose bytes a published transaction already holds, for `buildPathManifest`.
+- `readPublishUploadBytes` rejects a changed file with `PublishUploadChangedError` (code `UPLOAD_CHANGED_DURING_PUBLISH`, with `itemPropertyName`).
 - **Breaking:** `PublishUploadData` has `blob: Blob` instead of `data: Uint8Array`. `getPublishUploadData` opens each file without reading it into memory: OPFS `getFile()` in the browser, `fs.openAsBlob` in Node, through the new `BaseFileManager.openBlob`. Content-SHA-256 is computed in chunks and the MIME sniff reads the first 4 KiB. New `readPublishUploadBytes(upload)` loads an upload and rejects when its bytes no longer match `contentHash`, because a Blob of a file that changed can return other bytes without an error.
-- `exportArchive` takes `reproducible`: every client with the same schema gets the same bytes and the same tagmanifest hash for a seed at one time. Values, times and the attester come from EAS and file bytes from their Arweave transactions, with no rows read, so `item` can be `{ seedUid, modelName, schemaName }` on a device that holds nothing for the seed. `asOf` (unix seconds) pins the time: a later patch, Version, retraction or revocation doesn't change that bag. It throws `not_synced`, `chain_unavailable`, `incomplete` or `invalid_options` instead of writing a bag another client couldn't reproduce. Files are typed by their bytes, and bag-info.txt carries `Seed-Bag-Format` and `Seed-Bag-As-Of`. Every time in a bag, reproducible or not, now says whose clock it came from (`chain-block`, `local-record`, `export-device`), in PREMIS event details, `item.json` and `bag-info.txt`.
-- New `verifyArchiveAgainstChain(bag, item)` checks a bag against a fresh reproducible export of the item at the time the bag covers, on top of `verifyArchive`'s checks. Every bag from `exportArchive` now carries `VERIFY.txt`.
-- `exportArchive` writes each Html to `data/source/` byte for byte. It decoded and encoded the text again, which dropped a BOM and replaced invalid UTF-8.
-- `exportArchive` records a published Relation or List of relations in `item.json` as seed uids. It wrote `null` for them. A related seed with no uid stays as its local id and is listed in `omitted`.
 - New `publish_attempts` table, with `claimPublishAttempt`, `findOpenPublishAttempts` and `updatePublishAttempt`, for `@seedprotocol/publish`. `recordPublishRequests` takes `{ attemptId }` and ends that attempt in its own transaction.
-- **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`; `updateSeedUid` takes `{ db }`.
+- **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`.
 - `client.stop()`, `client.unload()` and `client.resetLocalData()` end a running EAS sync before closing the database. Network waits end at once, a database write in progress finishes first, and a pending `client.syncFromEas()` rejects with `EAS sync stopped: the client stopped`. The sync used to keep running, and a queued one started, against a closed or deleted database.
 
 ### Commits
+
+#### Breaking
+
+- publish: read uploads as disk-backed Blobs (c8ef0992)
+- publish: record a landed multiPublish once, from its receipt (6fe1a60d)
+- archive: exportArchive moves from the SDK into archive (38df2da0)
 
 #### Features
 
@@ -42,7 +47,6 @@ All notable changes to this package are documented in this file.
 - publish: reconcile open attempts before any retry or restore sends (ec41d7f5)
 - publish: journal attestation sends, refuse one that may double-attest (7243e1a0)
 - publish: anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
-- publish: read uploads as disk-backed Blobs (c8ef0992)
 - archive: a bag on Arweave as a path manifest (ac1f80da)
 - eas: bag anchor schema, left out of property reads (d5773848)
 - reproducible bags from EAS and Arweave, with asOf (046de15a)
@@ -52,15 +56,12 @@ All notable changes to this package are documented in this file.
 #### Fixes
 
 - a reproducible bag describes the record, and can wait for it (946566a9)
-- publish: record a landed multiPublish once, from its receipt (6fe1a60d)
 - stopping the client ends a running EAS sync (a958da87)
 - reproducible bags ignore revocations and local file names (8aac4ad7)
 - exportArchive keeps published relations, as seed uids (2f54a005)
 
 #### Other
 
-- archive: exportArchive moves from the SDK into archive (38df2da0)
-- query: readSeedAtTime moves from the SDK (e1631af4)
 - ADR 0028 for the reproducible bag format, and Seed-Bag-Format in bag-info (cc103c79)
 
 ## 0.8.0 (2026-10-30)

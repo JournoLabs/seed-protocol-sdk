@@ -6,13 +6,25 @@ import { BaseFileManager } from '@/helpers'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { getPropertyClear } from '@/db/read/getPropertyClear'
 import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
-import { getPublishGraph, type PublishGraphNode, type PublishGraphProperty, type PublishMode } from '@/db/read/publishGraph'
+import {
+  getPublishGraph,
+  type PublishBackReferences,
+  type PublishGraphNode,
+  type PublishGraphProperty,
+  type PublishMode,
+} from '@/db/read/publishGraph'
 import { getPublishUploadSources, type PublishUploadSource } from '@/db/read/getPublishUploads'
 
 export type { PublishMode }
 
 export type SummarizePublishWorkOptions = {
   publishMode?: PublishMode
+  /**
+   * How a reference back to an item this publish creates is counted, as `getPublishPayload` takes
+   * it: `'link'` (the publish contract) attests it now; `'defer'` (the default; direct EAS) leaves
+   * it for the item's next publish and doesn't count it.
+   */
+  backReferences?: PublishBackReferences
 }
 
 export type PublishWorkSummary = {
@@ -133,7 +145,7 @@ export const summarizePublishWork = async (
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishWorkSummary> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const graph = await getPublishGraph(item, { publishMode })
+  const graph = await getPublishGraph(item, { publishMode, backReferences: options?.backReferences })
   const sources = await getPublishUploadSources(graph)
   const acc: PublishWorkSummary = {
     publishMode,

@@ -217,6 +217,19 @@ function priceEstimate(
   }
 }
 
+/**
+ * How the estimate counts a reference back to an item the publish creates: deferred (not counted)
+ * with `useDirectEas`, else linked (counted), as the publish contract attests it. An EOA publisher
+ * without `useDirectEas` also attests directly, so its estimate can count references it defers.
+ */
+function defaultBackReferences(): 'link' | 'defer' {
+  try {
+    return getPublishConfig().useDirectEas ? 'defer' : 'link'
+  } catch {
+    return 'link'
+  }
+}
+
 export async function estimatePublishCost(
   item: IItem<any>,
   options?: EstimatePublishCostOptions,
@@ -226,7 +239,10 @@ export async function estimatePublishCost(
   let work = options?.work
   if (!work) {
     const { summarizePublishWork } = await import('@seedprotocol/sdk')
-    work = await summarizePublishWork(item, { publishMode: options?.publishMode })
+    work = await summarizePublishWork(item, {
+      publishMode: options?.publishMode,
+      backReferences: options?.backReferences ?? defaultBackReferences(),
+    })
   }
   const rates = options?.rates ?? (await getCachedMarketRates())
   return combinePublishCostEstimate(work, rates, flags)

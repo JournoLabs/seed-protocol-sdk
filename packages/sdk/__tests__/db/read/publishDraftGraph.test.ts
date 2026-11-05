@@ -303,6 +303,9 @@ testDescribe('publish carries the full graph of related drafts', () => {
 
     const graph = await getPublishGraph(root as any, { backReferences: 'link' })
     expect(graph.nodes.some((n) => n.properties.some((p) => p.deferred))).toBe(false)
+    // The summary counts what the payload attests, back reference included
+    const summary = await summarizePublishWork(root as any, { backReferences: 'link' })
+    expect(summary.attestationCount).toBe(totalAttestations(payload))
   }, 90000)
 
   it('with linked back references, a draft referring back to the root fills it in this publish', async () => {

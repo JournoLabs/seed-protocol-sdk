@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `estimatePublishCost` counts a reference back to an item the publish creates, as a publish through the contract attests it, unless `useDirectEas` is set. New option `backReferences` (`'link'` or `'defer'`) overrides that. It counted one attestation too few per back reference.
 - Cost estimates take the storage price from Turbo's `/v1/price/bytes`, the payment service in `payment.userStorage` or ArDrive's. If Turbo doesn't answer, they use Arweave's `/price` on the configured gateway, then on arweave.net. They used to ask only the configured gateway, so `estimatePublishCost` and `estimateArchiveAnchorCost` threw behind an upload proxy with no `/price` route.
 - New `PublishConfig.blobStore` and the `BlobStore` interface (ADR 0026): where Image, File, Html and Json bytes go. Publish calls its `prepare` for the ids, `send` for the uploads, and `assertStored` before attesting. The default, exported as `arweaveBlobStore`, does what publish did before. `anchorArchive` always uploads to Arweave. Readers on other devices need the store's `BlobSource` in `SeedConfig.blobSources` to load the files.
 

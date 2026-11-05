@@ -1,7 +1,7 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { loadAllSchemasFromDb } from '@/helpers/schema'
-import { mergeSchemaFiles, writeNextSchemaVersion } from '@/helpers/schemaApply'
+import { assertSchemaFileCanApply, mergeSchemaFiles, writeNextSchemaVersion } from '@/helpers/schemaApply'
 import { Model } from '@/Model/Model'
 import { getDraftSaveError, queueDraftSave, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
@@ -908,6 +908,9 @@ export class Schema {
       logger('No valid property updates to save')
       return ''
     }
+
+    // Refused before the draft row or a version file holds it: a name EAS can't use, an unknown type
+    assertSchemaFileCanApply(currentSchema)
 
     // The draft row holds the current state until the version file is written
     await addSchemaToDb(

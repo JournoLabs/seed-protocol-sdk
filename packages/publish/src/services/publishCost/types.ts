@@ -70,6 +70,11 @@ export type PublishCostEstimate = {
 
 export type EstimatePublishCostOptions = {
   publishMode?: PublishMode
+  /**
+   * How references back to items this publish creates are counted (`summarizePublishWork`'s
+   * option). Defaults to `'defer'` with `useDirectEas`, else `'link'`, the publish contract's rule.
+   */
+  backReferences?: 'link' | 'defer'
   /** Skip summarize + network; used by tests and the watcher reprice path. */
   work?: PublishWorkSummary
   rates?: {

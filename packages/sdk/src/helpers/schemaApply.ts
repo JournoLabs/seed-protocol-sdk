@@ -224,6 +224,17 @@ function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
 }
 
 /**
+ * Throws when a schema file can't be applied: a model or property name EAS can't use, an unknown
+ * type, or a rule that doesn't apply to its type. Run it before writing a version file, so a file
+ * that would be refused is never written. Returns the file's warnings.
+ */
+export function assertSchemaFileCanApply(file: Pick<SchemaFileFormat, 'models' | 'metadata'>): { warnings: string[] } {
+  const { errors, warnings } = schemaFilePropertyProblems(file)
+  if (errors.length > 0) throw new Error(`Schema ${file.metadata.name}: ${errors.join('; ')}`)
+  return { warnings }
+}
+
+/**
  * Every model's property definitions ({@link schemaFilePropertyDefinition}), by model name.
  * The property rows' columns are written from these; their `definition` column from the file's
  * property objects.
@@ -361,10 +372,7 @@ export async function applySchemaFile(
   if (!db) throw new Error('Database not found')
 
   const file = toSchemaFile(source)
-  const propertyProblems = schemaFilePropertyProblems(file)
-  if (propertyProblems.errors.length > 0) {
-    throw new Error(`Schema ${file.metadata.name}: ${propertyProblems.errors.join('; ')}`)
-  }
+  const propertyProblems = assertSchemaFileCanApply(file)
   const internal = isInternalSchema(file.metadata.name, file.id)
   await assignSchemaIds(db, file)
 
@@ -650,6 +658,7 @@ export async function writeNextSchemaVersion(
       { version, timestamp: now, description: change.description, changes: change.changes },
     ],
   }
+  assertSchemaFileCanApply(schemaFile)
   const filePath = await writeSchemaFile(schemaFile)
   logger(`Wrote schema ${schemaFile.metadata.name} v${version} at ${filePath}`)
 

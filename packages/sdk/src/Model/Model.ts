@@ -31,6 +31,7 @@ import {
   waitForEntityReady,
 } from '@/helpers/entity/entityLifecycle'
 import { assertModelNameCanPublish, assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
+import { normalizePropertyRecordSchema } from '@/helpers/property'
 import { loadModel } from './loadModel'
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
@@ -137,7 +138,7 @@ function assertNewModelCanPublish(modelName: string, properties?: { [propertyNam
   assertModelNameCanPublish(modelName)
   for (const [name, definition] of Object.entries(properties ?? {})) {
     assertPropertyNameCanPublish(name, {
-      dataType: definition?.dataType ?? definition?.type,
+      dataType: definition?.dataType,
       refValueType: definition?.refValueType,
       ref: definition?.ref ?? definition?.refModelName,
       name,
@@ -431,20 +432,28 @@ export class Model {
     }
     const resolvedId = id ?? generateId()
 
-    // A runtime create refuses a name that can't publish before there's an instance to leave behind.
-    // Schema files are checked when they load (a model with an id).
-    if (!id) {
-      try {
-        assertNewModelCanPublish(uniqueModelName, options?.properties)
-      } catch (error) {
-        if (!waitForReady) throw error
-        return Promise.reject(error)
-      }
+    // Definitions in either shape: `dataType`/`refValueType`/`ref`, or a schema file's
+    // `type`/`items`/`model`
+    const propertyDefinitions = options?.properties
+      ? Object.fromEntries(
+          Object.entries(JSON.parse(JSON.stringify(options.properties)) as Record<string, unknown>).map(
+            ([name, definition]) => [name, normalizePropertyRecordSchema(definition)],
+          ),
+        )
+      : undefined
+
+    // Refuses a name that can't publish before there's an instance to leave behind. A model from a
+    // schema file (an id) passes: loading the file already refused such names.
+    try {
+      assertNewModelCanPublish(uniqueModelName, propertyDefinitions)
+    } catch (error) {
+      if (!waitForReady) throw error
+      return Promise.reject(error)
     }
 
     // The id and the properties to create go in the initial context, so the load sees them
-    const initialContext = options?.properties 
-      ? { _pendingPropertyDefinitions: JSON.parse(JSON.stringify(options.properties)) } as Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
+    const initialContext = propertyDefinitions
+      ? { _pendingPropertyDefinitions: propertyDefinitions } as Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
       : undefined
     
     // Use the unique model name for the instance (idFromSchema: true when id was provided, so schema model is not renamed)

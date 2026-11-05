@@ -142,7 +142,7 @@ const isRelationPropertyName = (propertyNameSnake: string): boolean =>
   propertyNameSnake !== 'storage_transaction_id' &&
   propertyNameSnake !== 'storage_provider_transaction_id'
 
-type SyncedPropertyName = {
+export type SyncedPropertyName = {
   /** The matched local property's schema key; undefined when no local property matched. */
   key?: string
   /** metadata.property_name for the row. */
