@@ -20,7 +20,11 @@ export const EAS_CONTRACT_ADDRESS =
   '0x4200000000000000000000000000000000000021' as const
 
 /**
- * Optimism Sepolia address of the deployment the **`multiPublish` ABI** was generated from.
+ * Optimism Sepolia ManagedAccount used as the reference deployment for the **`multiPublish` ABI**.
+ * It is an EIP-1167 clone of the ManagedAccount implementation `0x3ae2…688f`, whose own dispatcher
+ * has no `multiPublish`. The account routes selector 0xa1263421 to the extension at `0x851c…4437`
+ * (`getImplementationForFunction`), which the factory in `MANAGED_ACCOUNT_FACTORY_ADDRESSES`
+ * registers and whose code has the selector (OP Sepolia RPC, 2026-11-05).
  *
  * **Do not use as the transaction `to` for user publishes.** Runtime `multiPublish` targets the
  * publisher’s deployed ManagedAccount (non-modular), `managedAddress` (modular), or is not used

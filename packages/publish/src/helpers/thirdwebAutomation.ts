@@ -81,7 +81,8 @@ export async function enrollPublishAutomation(
   params: EnrollPublishAutomationParams,
 ): Promise<EnrollPublishAutomationResult> {
   const userWallet = params.userWallet ?? (await connectManagedAccountWallet(params.managedAddress))
-  const admin = params.admin ?? (await getManagedAccountAdminWallet(params.managedAddress))
+  // Connected only when the executor has to be installed
+  const admin = params.admin ?? (() => getManagedAccountAdminWallet(params.managedAddress))
   return enrollPublishAutomationCore({ ...params, userWallet, admin })
 }
 

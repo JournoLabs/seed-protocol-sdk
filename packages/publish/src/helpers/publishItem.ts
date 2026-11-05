@@ -4,7 +4,7 @@ import type { CreatePublishOptions } from '../config'
 import { PublishManager } from '../services/publishManager'
 import { PublishMachineStates } from './constants'
 import { ensureWalletThenPublish } from './ensureWalletThenPublish'
-import { PublishRetractionError, UploadNeedsConfirmError, UploadTooLargeError } from '../errors'
+import { PublishRetractionError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../errors'
 
 /**
  * States where attestation failed but the actor stays alive waiting for a `retry`
@@ -57,8 +57,12 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
       if (value === PublishMachineStates.SUCCESS) {
         finish()
       } else if (value === PublishMachineStates.FAILURE) {
-        // Passed through as-is, so the app can check instanceof and show the estimate they carry
-        if (cause instanceof UploadTooLargeError || cause instanceof UploadNeedsConfirmError) {
+        // Passed through as-is, so the app can check instanceof (and show the upload estimate)
+        if (
+          cause instanceof UploadTooLargeError ||
+          cause instanceof UploadNeedsConfirmError ||
+          cause instanceof PublishWalletMissingError
+        ) {
           finish(cause)
           return
         }
@@ -138,9 +142,7 @@ async function runPublishItem(item: IItem<any>, options?: ItemPublishOptions): P
     case 'already_publishing':
       throw new Error(`Publish of ${item.seedLocalId} did not start: it is already publishing in this tab or another.`)
     case 'no_wallet':
-      throw new Error(
-        'No publish wallet is connected. Connect one (useSeedWallet().connect, or setPublishWallet) before publishing.',
-      )
+      throw new PublishWalletMissingError()
     case 'no_address':
       throw new Error('The publish wallet has no publisher address.')
     case 'needs_deploy':

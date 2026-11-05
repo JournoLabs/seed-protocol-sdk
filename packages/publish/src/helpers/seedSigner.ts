@@ -1,6 +1,7 @@
 import type { Address, Hex, SignableMessage, SignedAuthorization, TypedData, TypedDataDefinition } from 'viem'
 import { retryNonceTooLow } from './retryNonceTooLow'
 import { ethers } from 'ethers'
+import { EthersAuthorizeUnsupportedError } from '../errors'
 
 /** Encoded calldata ready for submission (viem path). */
 export type SeedTxRequest = {
@@ -78,6 +79,12 @@ export interface SeedTxSender {
    * the key would read as not landed.
    */
   readonly pinsNonceOn?: Address
+
+  /**
+   * Who pays this sender's gas, when it knows: `createManagedAccountTxSender` sets it from
+   * `sponsored`. `resolvePublishPayment` reports it for a wallet that sends as the ManagedAccount.
+   */
+  readonly gas?: { payer: 'sponsored' | 'user'; sponsor?: 'thirdweb' | 'paymaster' }
 
   /** Submit already-encoded calldata. */
   sendTransaction(tx: SeedTxRequest): Promise<{ transactionHash: Hex }>
@@ -180,6 +187,9 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
       )) as Hex
     },
     signAuthorization: async ({ address: delegate, chainId, nonce }) => {
+      if (typeof wallet.authorize !== 'function') {
+        throw new EthersAuthorizeUnsupportedError(address)
+      }
       const { signature } = await wallet.authorize({ address: delegate, chainId, nonce })
       return {
         address: delegate,

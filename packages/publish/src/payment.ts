@@ -1,4 +1,5 @@
 import type { PublishConfig } from './config'
+import { sendsAsManagedAccount, type PublishWallet } from './helpers/seedSigner'
 
 /**
  * Who pays a publish's EVM gas: `'sponsored'` (a Thirdweb or ERC-4337 paymaster) or `'user'`
@@ -107,7 +108,9 @@ export function resolveSponsorGas(config: Pick<PublishConfig, 'payment' | 'third
  * Who pays gas and storage for this config, from the sender it selects. The publish flow and
  * {@link estimatePublishCost} both use this, so a cost estimate reports what a publish does.
  *
- * - modular: Thirdweb sponsors when `thirdweb.sponsorGas` (default true)
+ * - modular: Thirdweb sponsors when `thirdweb.sponsorGas` (default true). A `wallet` that sends as
+ *   the ManagedAccount itself (`createManagedAccountTxSender`) reports its own payer instead: its
+ *   sender's `gas`, else `'sponsored'` with no sponsor named
  * - eip7702: a paymaster sponsors (`paymasterUrl`, else the bundler), unless `payment.gas` is
  *   `'user'`, which sends without one
  * - wallet: the user pays
@@ -116,10 +119,15 @@ export function resolveSponsorGas(config: Pick<PublishConfig, 'payment' | 'third
  * upload API's bundler routes, which pay for them. User-paid storage goes to Turbo, charged to
  * the signer's credits.
  */
-export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPayment {
+export function resolvePublishPayment(
+  config: PaymentInputs,
+  wallet?: (PublishWallet & { publisherAddress?: string }) | null,
+): ResolvedPublishPayment {
   const sender = resolvePublishSender(config)
   let gas: ResolvedPublishPayment['gas']
-  if (sender === 'modular') {
+  if (sender === 'modular' && wallet && sendsAsManagedAccount(wallet, wallet.publisherAddress ?? wallet.txSender.address)) {
+    gas = wallet.txSender.gas ? { ...wallet.txSender.gas } : { payer: 'sponsored' }
+  } else if (sender === 'modular') {
     gas = resolveSponsorGas(config) ? { payer: 'sponsored', sponsor: 'thirdweb' } : { payer: 'user' }
   } else if (sender === 'eip7702') {
     gas = config.payment?.gas === 'user' ? { payer: 'user' } : { payer: 'sponsored', sponsor: 'paymaster' }

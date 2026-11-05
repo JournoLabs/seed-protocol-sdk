@@ -17,7 +17,8 @@ export type FeesPerGas = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }
 /**
  * Fee estimate for a UserOp. Asks the bundler with `pimlico_getUserOperationGasPrice` (Pimlico and
  * its Alto bundler answer it, and reject lower fees), and falls back to `fallback` (the chain's own
- * estimate) for a bundler without the method. A bundler that lacks it is remembered per URL.
+ * estimate) when it gets no price. Only a JSON-RPC "method not found" (-32601) stops this estimator
+ * asking again; an HTTP error, a network error or another answer falls back for that one call.
  */
 export function bundlerFeesPerGas(
   bundlerUrl: string,
@@ -26,23 +27,31 @@ export function bundlerFeesPerGas(
   let hasPimlicoMethod = true
   return async () => {
     if (hasPimlicoMethod) {
-      const fast = await pimlicoGasPrice(bundlerUrl)
-      if (fast) return fast
-      hasPimlicoMethod = false
+      const answer = await pimlicoGasPrice(bundlerUrl)
+      if (answer === 'unsupported') hasPimlicoMethod = false
+      else if (answer) return answer
     }
     return fallback()
   }
 }
 
-async function pimlicoGasPrice(bundlerUrl: string): Promise<FeesPerGas | undefined> {
-  const res = await fetch(bundlerUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'pimlico_getUserOperationGasPrice', params: [] }),
-  })
-  const body = (await res.json().catch(() => undefined)) as
-    | { result?: { fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex } } }
+const JSON_RPC_METHOD_NOT_FOUND = -32601
+
+async function pimlicoGasPrice(bundlerUrl: string): Promise<FeesPerGas | 'unsupported' | undefined> {
+  let body:
+    | { result?: { fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex } }; error?: { code?: number } }
     | undefined
+  try {
+    const res = await fetch(bundlerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'pimlico_getUserOperationGasPrice', params: [] }),
+    })
+    body = await res.json().catch(() => undefined)
+  } catch {
+    return undefined
+  }
+  if (body?.error?.code === JSON_RPC_METHOD_NOT_FOUND) return 'unsupported'
   const fast = body?.result?.fast
   if (!fast) return undefined
   return { maxFeePerGas: BigInt(fast.maxFeePerGas), maxPriorityFeePerGas: BigInt(fast.maxPriorityFeePerGas) }

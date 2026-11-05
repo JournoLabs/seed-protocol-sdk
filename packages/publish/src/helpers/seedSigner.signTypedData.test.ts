@@ -99,3 +99,26 @@ describe('SeedSigner.signTypedData', () => {
     expect(() => requireSignTypedData(signer)).toThrow(/has no signTypedData/)
   })
 })
+
+// Batch 16 item 12 (D47): ethers added Wallet.authorize in 6.14; an app on 6.13 has none
+describe('fromEthersWallet signAuthorization', () => {
+  test('a wallet without authorize rejects with EthersAuthorizeUnsupportedError', async () => {
+    const { EthersAuthorizeUnsupportedError } = await import('../errors')
+    const wallet = Wallet.createRandom()
+    Object.defineProperty(wallet, 'authorize', { value: undefined })
+    const { signer } = fromEthersWallet(wallet)
+    await expect(
+      signer.signAuthorization!({ address: `0x${'1'.repeat(40)}`, chainId: optimismSepolia.id, nonce: 0 }),
+    ).rejects.toBeInstanceOf(EthersAuthorizeUnsupportedError)
+  })
+
+  test('a wallet with authorize signs the authorization', async () => {
+    const wallet = Wallet.createRandom()
+    const signed = await fromEthersWallet(wallet).signer.signAuthorization!({
+      address: `0x${'1'.repeat(40)}`,
+      chainId: optimismSepolia.id,
+      nonce: 0,
+    })
+    expect(signed).toMatchObject({ address: `0x${'1'.repeat(40)}`, chainId: optimismSepolia.id, nonce: 0 })
+  })
+})

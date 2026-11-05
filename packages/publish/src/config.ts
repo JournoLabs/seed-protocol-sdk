@@ -266,8 +266,9 @@ export interface PublishConfig {
    */
   maxUploadBytes?: number
   /**
-   * Above this many upload bytes (default 25 MiB; `Infinity` never asks) a publish fails with
-   * `UploadNeedsConfirmError` unless it is given `confirmUpload: true`.
+   * Above this many upload bytes (default 25 MiB) a publish fails with `UploadNeedsConfirmError`
+   * unless it is given `confirmUpload: true`. It also asks when the publish would use over a quarter
+   * of the device's memory. `Infinity` never asks; the estimate's `memory.risk` still reports it.
    */
   confirmUploadAboveBytes?: number
   /** Uplink speed used for upload time estimates. Default 5 Mbit/s. */

@@ -57,6 +57,14 @@ describe('publishGasLimit', () => {
     expect(await publishGasLimit(FROM, TX, 15_000_000n)).toBe(PUBLISH_MAX_GAS)
   })
 
+  // Batch 16 item 13
+  test('a failed block read keeps the estimate, capped at the configured limit', async () => {
+    getBlock.mockImplementation(async () => {
+      throw new HttpRequestError({ url: 'http://rpc', details: 'fetch failed' })
+    })
+    expect(await publishGasLimit(FROM, TX)).toBe(1_300_000n)
+  })
+
   test('refuses a publish over the default limit on a chain with bigger blocks', async () => {
     estimateGas.mockImplementation(async () => 13_000_000n)
     await expect(publishGasLimit(FROM, TX)).rejects.toMatchObject({

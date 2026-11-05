@@ -339,6 +339,22 @@ export class UploadNeedsConfirmError extends Error {
  * anything is uploaded or sent. Connect one (useSeedWallet().connect, or setPublishWallet) and
  * publish again.
  */
+/**
+ * The ethers wallet has no `authorize` (added in ethers 6.14), so it can't sign the EIP-7702
+ * authorization a first send from an EOA needs. Upgrade the app's ethers to 6.14 or later.
+ */
+export class EthersAuthorizeUnsupportedError extends Error {
+  readonly code = 'ETHERS_AUTHORIZE_UNSUPPORTED'
+
+  constructor(readonly address: string) {
+    super(
+      `The ethers wallet ${address} has no authorize(), so it can't sign an EIP-7702 authorization. ` +
+        'Upgrade ethers to 6.14 or later.',
+    )
+    this.name = 'EthersAuthorizeUnsupportedError'
+  }
+}
+
 export class PublishWalletMissingError extends Error {
   readonly code = 'PUBLISH_WALLET_MISSING'
 

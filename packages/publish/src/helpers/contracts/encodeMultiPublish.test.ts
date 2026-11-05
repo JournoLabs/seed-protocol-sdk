@@ -216,6 +216,27 @@ describe.each(encoders)('%s refuses what the contract would revert on', (_, enco
     expect(() => encode([r, target(relation('a'))])).toThrow(/isn't a bytes32\[\]/)
   })
 
+  // Batch 16 item 18 (D49): the contract only checks the placeholder, so a wrong SDK-side value
+  // in the slot would be overwritten without a trace
+  test('a slot holding another value, naming it', () => {
+    const other = b32('ee')
+    expect(() => encode([request('author', [ref('post')]), request('post', [], [attestation(RELATION, other)])])).toThrow(
+      new RegExp(`holds ${other}`),
+    )
+    expect(() =>
+      encode([
+        request('tag', [ref('post', { propertySchemaUid: LIST, listElement: true, elementIndex: 0 })]),
+        request('post', [], [list(other)]),
+      ]),
+    ).toThrow(new RegExp(`holds ${other}`))
+  })
+
+  test('a slot holding zero or its placeholder takes the reference', () => {
+    for (const held of [b32('00'), ph(0)]) {
+      expect(() => encode([request('author', [ref('post')]), request('post', [], [attestation(RELATION, held)])])).not.toThrow()
+    }
+  })
+
   test('two references to one slot', () => {
     const batch = [request('a', [ref('post')]), request('b', [ref('post')]), target(relation('a'))]
     expect(() => encode(batch)).toThrow(/"b" references .* a slot another reference already fills/)

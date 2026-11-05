@@ -25,7 +25,7 @@ Apps can bring a wallet and a bundler or paymaster with no Thirdweb install. The
 
 Without Thirdweb, an app does more itself: it deploys the account with a first UserOp, installs the executor from the admin EOA, which needs gas for that transaction, and registers the session with `publisherAddress`.
 
-Breaking under `## Unreleased` in `packages/publish/CHANGELOG.md`: `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `enrollPublishAutomation`, `revokePublishAutomation` and `ensureExecutorModuleInstalled` take wallets in the core entry, and `ensureManagedSignerSessionKey`, `defaultApprovedTargetsForModularPublish` and `toThirdwebSessionKeyPermissions` are gone.
+Breaking in `@seedprotocol/publish` 0.8.0 (`## 0.8.0` in `packages/publish/CHANGELOG.md`): `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `enrollPublishAutomation`, `revokePublishAutomation` and `ensureExecutorModuleInstalled` take wallets in the core entry, and `ensureManagedSignerSessionKey`, `defaultApprovedTargetsForModularPublish` and `toThirdwebSessionKeyPermissions` are gone.
 
 Watch EntryPoint v0.6: a provider that drops it can't serve a ManagedAccount. Thirdweb's account contracts are still the on-chain dependency, so this ADR makes the SDK vendor-neutral, not the contracts. Other account types (Safe, Kernel, Nexus) need Seed's executor to work as an ERC-7579 module, which is contract work and a separate decision.
 

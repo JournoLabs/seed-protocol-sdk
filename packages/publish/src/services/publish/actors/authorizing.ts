@@ -2,6 +2,7 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { getPublishConfig } from '~/config'
 import { resolvePublishPayment } from '~/payment'
+import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { runAuthorizePublish, type PublishAuthorization } from '~/authorization'
 import { estimatePublishCost } from '~/services/publishCost/estimatePublishCost'
 
@@ -28,7 +29,7 @@ export const authorizing = fromPromise(
       item,
       seedLocalId: item.seedLocalId,
       publishMode,
-      payment: resolvePublishPayment(getPublishConfig()),
+      payment: resolvePublishPayment(getPublishConfig(), context.wallet ?? getPublishWallet()),
       getEstimate: () => estimatePublishCost(item, { publishMode }),
     })
   },
