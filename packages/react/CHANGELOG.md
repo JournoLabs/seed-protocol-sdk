@@ -20,10 +20,6 @@ No user-facing changes; released at the same version as the other packages.
 
 - a repeat client.init leaves the stored addresses alone (0417ee9f)
 
-#### Fixes
-
-- sdk: use seedprotocol.io for the schema file $schema URL (ea2d96e3)
-
 ## 0.7.13 (2026-10-29)
 
 - `useGlobalServiceStatus()` returns `stopReason`: `'reset'` when `client.resetLocalData()`, in this tab or another, stopped the client, `'stop'` for `client.stop()` or `client.unload()`, undefined while the client isn't stopped.

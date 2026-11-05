@@ -255,4 +255,18 @@ describe('planReleaseChangelogs for a release', () => {
     const mapping = plan.find((p) => p.path === 'packages/mapping/CHANGELOG.md')
     assert.match(mapping.text, new RegExp(`## 0\\.8\\.0 \\(2026-11-01\\)\\n\\n${NO_CHANGES.replace(/[.;]/g, '\\$&')}`))
   })
+
+  it("doesn't list a commit for a package whose tests are all it touched", () => {
+    for (const file of ['packages/next/__tests__/fixtures/app/gate.jsx', 'packages/publish/src/x.test.ts', 'packages/sdk/a.js']) {
+      mkdirSync(join(root, file, '..'), { recursive: true })
+      writeFileSync(join(root, file), '2')
+    }
+    run('add', '-A')
+    run('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--quiet', '-m', 'fix(sdk): schema URL')
+    const plan = planReleaseChangelogs({ rootDir: root, packages: ['sdk', 'next', 'publish'], version: '0.8.0', date: '2026-11-01', range: 'HEAD~1..HEAD' })
+    const lines = Object.fromEntries(plan.map((p) => [p.path, p.commitLines]))
+    assert.equal(lines['packages/sdk/CHANGELOG.md'].length, 1)
+    assert.deepEqual(lines['packages/next/CHANGELOG.md'], [])
+    assert.deepEqual(lines['packages/publish/CHANGELOG.md'], [])
+  })
 })
