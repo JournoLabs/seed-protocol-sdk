@@ -33,6 +33,8 @@ type PublishCostFlags = {
   freeBytes?: number
   /** Tags every upload carries beyond Content-SHA-256 and Content-Type (`arweaveUploadTags`). */
   uploadTags?: TransactionTag[]
+  /** Uploads per bundle, in order; each bundle pays the minimum. Default one bundle. */
+  uploadBatches?: number[]
   /** The publish chain is a testnet. */
   testnet?: boolean
   /** PublishConfig's upload limits, for `upload`. */
@@ -104,7 +106,7 @@ function sizingTags(uploadTags: TransactionTag[] | undefined): TransactionTag[] 
 export function chargedUploadBytes(
   work: Pick<PublishWorkSummary, 'uploadCount' | 'uploadBytes' | 'uploadSizes'>,
   uploadTo: 'upload-api' | 'turbo' = 'upload-api',
-  options?: { freeBytes?: number; uploadTags?: TransactionTag[] },
+  options?: { freeBytes?: number; uploadTags?: TransactionTag[]; uploadBatches?: number[] },
 ): number {
   const sizes =
     work.uploadSizes ??
@@ -116,7 +118,16 @@ export function chargedUploadBytes(
     const freeBytes = options?.freeBytes ?? TURBO_FREE_BYTES
     return signed.filter((size) => size > freeBytes).reduce((a, b) => a + b, 0)
   }
-  return Math.max(signed.reduce((a, b) => a + b, 0), ARWEAVE_MIN_CHARGED_BYTES)
+  // Each bundle is one Arweave transaction, charged for at least the minimum.
+  const batches = options?.uploadBatches ?? [signed.length]
+  let charged = 0
+  let start = 0
+  for (const count of batches) {
+    const bundle = signed.slice(start, start + count)
+    start += count
+    if (bundle.length > 0) charged += Math.max(bundle.reduce((a, b) => a + b, 0), ARWEAVE_MIN_CHARGED_BYTES)
+  }
+  return charged
 }
 
 function roundUsd(n: number): number {
@@ -133,7 +144,7 @@ export function combinePublishCostEstimate(
   return priceEstimate(
     work,
     heuristicPublishGas(work),
-    chargedUploadBytes(work, uploadTo, { freeBytes, uploadTags: flags?.uploadTags }),
+    chargedUploadBytes(work, uploadTo, { freeBytes, uploadTags: flags?.uploadTags, uploadBatches: flags?.uploadBatches }),
     rates,
     {
       evmUserPays: flags?.evmUserPays ?? true,
@@ -245,6 +256,8 @@ export async function estimatePublishCost(
       backReferences: options?.backReferences ?? defaultBackReferences(),
     })
   }
+  if (options?.uploadTags) flags.uploadTags = options.uploadTags
+  if (options?.uploadBatches) flags.uploadBatches = options.uploadBatches
   const rates = options?.rates ?? (await getCachedMarketRates())
   return combinePublishCostEstimate(work, rates, flags)
 }
