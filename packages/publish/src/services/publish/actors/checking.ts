@@ -223,11 +223,12 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         // Before any upload: a host's nonce key that can't be used, or that an earlier try spent,
         // would fail the publish at the send after paying for the uploads.
         if (context.nonceKey !== undefined) {
-          const { usableHostNonceKey } = await import('~/helpers/hostNonceKey')
+          const { nonceKeySender, usableHostNonceKey } = await import('~/helpers/hostNonceKey')
+          const directEas = attestationStrategy === 'directEas'
           await usableHostNonceKey({
             nonceKey: context.nonceKey,
-            sender: publishWallet.txSender,
-            directEas: attestationStrategy === 'directEas',
+            sender: directEas ? publishWallet.txSender : await nonceKeySender(publishWallet, address.trim()),
+            directEas,
           })
         }
 

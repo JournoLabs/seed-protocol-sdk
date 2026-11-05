@@ -8,11 +8,17 @@ const ENTRY_POINT = `0x${'e'.repeat(40)}` as `0x${string}`
 const TX = `0x${'1'.repeat(64)}` as `0x${string}`
 
 let chainNonce = 0n
-let logs: unknown[] = []
-const getLogs = mock(async (_: unknown) => logs)
+let head = 100n
+let logs: { blockNumber?: bigint }[] = []
+/** Like sepolia.optimism.io: refuses a range over 10,000 blocks, and a range with no end. */
+const MAX_SPAN = 10_000n
+const getLogs = mock(async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock?: bigint }) => {
+  if (toBlock === undefined || toBlock - fromBlock + 1n > MAX_SPAN) throw new Error('block range too large')
+  return logs.filter((l) => l.blockNumber === undefined || (l.blockNumber >= fromBlock && l.blockNumber <= toBlock))
+})
 mock.module('./chainClient', () => ({
   ...realChainClient,
-  getPublishPublicClient: () => ({ readContract: async () => chainNonce, getLogs }),
+  getPublishPublicClient: () => ({ readContract: async () => chainNonce, getLogs, getBlockNumber: async () => head }),
 }))
 
 const { findPinnedUserOp, findPublishByNonceKey, nonceKeyForAttempt, pinnedNonce, publishNonceKey, readNonceSequence } =
@@ -42,6 +48,16 @@ describe('pinned nonces', () => {
     const found = await findPinnedUserOp({ entryPoint: ENTRY_POINT, sender: SENDER, key: 2n, fromBlock: 5n })
     expect(found).toEqual({ transactionHash: TX, success: false })
     expect(getLogs.mock.calls.at(-1)![0]).toMatchObject({ address: ENTRY_POINT, args: { sender: SENDER }, fromBlock: 5n })
+  })
+
+  test('finds a UserOp more than 10,000 blocks after fromBlock, reading no range over 10,000', async () => {
+    head = 25_000n
+    logs = [{ ...log(pinnedNonce(3n), true), blockNumber: 22_500n }]
+    getLogs.mockClear()
+    const found = await findPinnedUserOp({ entryPoint: ENTRY_POINT, sender: SENDER, key: 3n, fromBlock: 1_000n })
+    expect(found).toEqual({ transactionHash: TX, success: true })
+    for (const [{ fromBlock, toBlock }] of getLogs.mock.calls) expect(toBlock! - fromBlock + 1n).toBeLessThanOrEqual(MAX_SPAN)
+    head = 100n
   })
 
   test('no such UserOp: undefined', async () => {

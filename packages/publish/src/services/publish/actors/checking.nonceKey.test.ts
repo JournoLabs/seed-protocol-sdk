@@ -11,7 +11,13 @@ const PUBLISHER = '0x' + '5'.repeat(40)
 const EOA = '0x' + 'e'.repeat(40)
 const ENTRY_POINT = '0x' + '7'.repeat(40)
 
+const MANAGED = '0x' + '6'.repeat(40)
+const IN_APP = '0x' + '8'.repeat(40)
+
 const harness = {
+  useModularExecutor: false,
+  /** Arguments of each EntryPoint getNonce read. */
+  nonceReads: [] as unknown[][],
   codeKind: 'contract' as 'none' | 'contract',
   /** The EntryPoint nonce under the key: its low 64 bits are how many UserOps landed. */
   chainNonce: 0n,
@@ -27,13 +33,21 @@ mock.module('@seedprotocol/sdk', () => ({
 mock.module('~/helpers/chainClient', () => ({
   getAccountCodeKind: async () => harness.codeKind,
   readUntil: async <T,>(read: () => Promise<T>) => read(),
-  getPublishPublicClient: () => ({ readContract: async () => harness.chainNonce }),
+  getPublishPublicClient: () => ({
+    readContract: async ({ args }: { args: unknown[] }) => {
+      harness.nonceReads.push(args)
+      return harness.chainNonce
+    },
+  }),
 }))
+mock.module('~/helpers/ensureAutomationSessionKey', () => ({ isAutomationSessionActive: async () => false }))
+mock.module('~/helpers/thirdweb', () => ({ getConnectedManagedAccountAddress: async () => MANAGED }))
+mock.module('~/helpers/thirdwebChain', () => ({ getPublishThirdwebChain: () => ({ id: 84532 }) }))
 mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => null }))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => true }))
 mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem: async () => {} }))
 mock.module('~/config', () => ({
-  getPublishConfig: () => ({ useModularExecutor: false, useDirectEas: false }),
+  getPublishConfig: () => ({ useModularExecutor: harness.useModularExecutor, useDirectEas: false }),
 }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
 mock.module('../../../helpers/verifyPublishChain', () => ({ verifyPublishChain: async () => {} }))
@@ -84,6 +98,21 @@ describe('checking: CreatePublishOptions.nonceKey', () => {
     const event = await runChecking(PUBLISHER, pinning)
     expect(event.type).toBe('checkingFailed')
     expect(event.error).toMatchObject({ code: 'NONCE_KEY_SPENT', sender: PUBLISHER })
+  }, TEST_TIMEOUT_MS)
+
+  // Batch 16 item 41: ConnectButton's in-app wallet; the publish sends from the ManagedAccount
+  test('with useModularExecutor, checks the ManagedAccount sender the publish sends from', async () => {
+    harness.codeKind = 'contract'
+    harness.useModularExecutor = true
+    harness.nonceReads = []
+    harness.chainNonce = pinnedNonce(publishNonceKey('run-7'))
+    try {
+      const inApp = { signer: { address: IN_APP }, txSender: { address: IN_APP } }
+      expect((await runChecking(PUBLISHER, inApp)).type).toBe('validPublishProcess')
+      expect(harness.nonceReads).toEqual([[MANAGED, publishNonceKey('run-7')]])
+    } finally {
+      harness.useModularExecutor = false
+    }
   }, TEST_TIMEOUT_MS)
 
   test('a direct EAS publish fails before any upload', async () => {

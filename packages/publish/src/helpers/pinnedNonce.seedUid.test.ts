@@ -31,6 +31,7 @@ mock.module('./chainClient', () => ({
   getPublishPublicClient: () => ({
     readContract: async () => chainNonce,
     getLogs: async () => [userOpLog],
+    getBlockNumber: async () => 100n,
     getTransactionReceipt,
   }),
 }))

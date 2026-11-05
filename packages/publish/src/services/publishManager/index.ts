@@ -267,7 +267,8 @@ export const PublishManager = {
   /**
    * Settles a seed's open attempt, for a publish in `attestationOutcomeUnknown`, then retries.
    * `txHash` names the transaction, found on a block explorer or from the wallet: it is read and
-   * recorded. `resend: true` gives the attempt up and sends again, which attests a second time if
+   * recorded; anything but `0x` and 64 hex digits throws a `TypeError` and records nothing. It isn't
+   * checked against the attempt's sender. `resend: true` gives the attempt up and sends again, which attests a second time if
    * it did land, so this is for an author who knows it didn't or accepts that.
    */
   resolveAttestationAttempt: async (
@@ -275,6 +276,11 @@ export const PublishManager = {
     resolution: { txHash: string } | { resend: true },
     account?: import('../../helpers/seedSigner').PublishWallet,
   ) => {
+    if ('txHash' in resolution && !/^0x[0-9a-fA-F]{64}$/.test(resolution.txHash)) {
+      throw new TypeError(
+        `resolveAttestationAttempt: txHash must be a transaction hash, 0x and 64 hex digits; got ${JSON.stringify(resolution.txHash)}`,
+      )
+    }
     const [attempt] = await findOpenPublishAttempts([seedLocalId])
     if (attempt) {
       await updatePublishAttempt(

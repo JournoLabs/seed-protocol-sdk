@@ -27,7 +27,8 @@ export type FromThirdwebAccountOptions = {
   /**
    * The account's wallet honours `SeedTxRequest.nonceKey`: it comes from `getManagedAccountWallet`,
    * or is a smart wallet built with `overrides.getAccountNonce: seedAccountNonce`. Any other
-   * account gets its nonce from Thirdweb.
+   * account gets its nonce from Thirdweb. A send whose wallet never asks `seedAccountNonce` warns
+   * and calls `SeedTxRequest.onNonceKeyIgnored`, so publish records the attempt as unpinned.
    */
   pinsNonce?: boolean
 }
@@ -79,7 +80,25 @@ export function fromThirdwebAccount(
         const nonceKey = options?.pinsNonce ? tx.nonceKey : undefined
         const send = () => sendTransaction({ account, transaction })
         // A pinned send is never retried here: the slot is spent, so a retry would get a random key.
-        result = await withNonceSlot(address, nonceKey, nonceKey === undefined ? () => retryNonceTooLow(send) : send)
+        let keyUnused = false
+        result = await withNonceSlot(
+          address,
+          nonceKey,
+          nonceKey === undefined ? () => retryNonceTooLow(send) : send,
+          () => {
+            keyUnused = true
+            tx.onNonceKeyIgnored?.()
+          },
+        )
+        if (keyUnused) {
+          // Sent without asking for a nonce: the wallet wasn't built with seedAccountNonce. (A send
+          // that fails before the hook also leaves the key unused, so only a sent one says so.)
+          console.warn(
+            `[@seedprotocol/publish] fromThirdwebAccount(account, { pinsNonce: true }): ${address} sent without asking ` +
+              'seedAccountNonce for its nonce, so the send is not pinned. Build the smart wallet with ' +
+              '`overrides.getAccountNonce: seedAccountNonce`, or drop pinsNonce.',
+          )
+        }
       } catch (error) {
         logGas('thirdweb sendTransaction failed', {
           account: address,

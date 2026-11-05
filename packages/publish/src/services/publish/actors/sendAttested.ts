@@ -56,7 +56,12 @@ export type AttestedSend = {
   requests: Array<{ localId?: string }>
   sender: Pick<SeedTxSender, 'address' | 'pinsNonceOn'>
   attester: string
-  send: (nonceKey?: bigint) => Promise<{ transactionHash: Hex }>
+  /**
+   * Sends under `nonceKey`. Gets `onNonceKeyIgnored` with a key, for `SeedTxRequest.onNonceKeyIgnored`:
+   * the attempt is then recorded with no key, so reconcile reads its hash, or reports the outcome
+   * unknown, rather than trusting a sequence the send never used.
+   */
+  send: (nonceKey?: bigint, onNonceKeyIgnored?: () => void) => Promise<{ transactionHash: Hex }>
   /** Which transaction this is: a direct EAS publish sends several per request. */
   step?: 'multiPublish' | DirectAttestationStep
   /**
@@ -131,9 +136,20 @@ export async function sendAttested({
   }
 
   let transactionHash: Hex
+  let nonceKeyIgnored = false
+  const unpin = async () => {
+    if (!nonceKeyIgnored) return
+    await updatePublishAttemptPin(attemptId)
+    nonceKey = undefined
+  }
   try {
-    ;({ transactionHash } = await send(nonceKey))
+    ;({ transactionHash } = await (nonceKey === undefined
+      ? send(nonceKey)
+      : send(nonceKey, () => {
+          nonceKeyIgnored = true
+        })))
   } catch (err) {
+    await unpin()
     const status = attemptStatusAfterFailedSend(err)
     // A rejected resend says nothing about the first send, which may still be pending, and a used
     // pinned nonce can be this very send having landed.
@@ -141,8 +157,16 @@ export async function sendAttested({
     if (status && !inconclusive) await moveAttempt(attemptId, status)
     throw err
   }
+  await unpin()
   await moveAttempt(attemptId, 'sent', transactionHash)
   return { attemptId, transactionHash }
+}
+
+/** Clears an attempt's nonce key and EntryPoint after a send that didn't use them. */
+async function updatePublishAttemptPin(attemptId: string) {
+  await updatePublishAttempt(attemptId, { nonceKey: null, entryPoint: null }).catch((err) => {
+    logger('attempt %s keeps a nonce key its send did not use: %O', attemptId, err)
+  })
 }
 
 /** Waits for a sent attempt's receipt. A lost receipt leaves the attempt open: it may still land. */
