@@ -19,7 +19,8 @@ export type SeedProviderProps = {
   /**
    * Addresses passed to `client.init` with `config`. See `SeedConstructorOptions.addresses`. When
    * the prop later holds different addresses the provider calls `client.setAddresses` with them,
-   * so `[]` after a disconnect clears them. Leaving it out keeps the stored ones.
+   * so `[]` after a disconnect clears them. A remount with addresses that differ from the stored
+   * ones applies them; a remount with `[]` keeps the stored ones. Leaving it out keeps the stored ones.
    */
   addresses?: SeedConstructorOptions['addresses']
   /**

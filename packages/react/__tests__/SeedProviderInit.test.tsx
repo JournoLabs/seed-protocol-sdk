@@ -114,6 +114,53 @@ describe('SeedProvider config', () => {
     expect(initSpy).toHaveBeenCalledTimes(1)
   })
 
+  // Batch 16 item 2: an app that unmounts its provider or gate across a user switch
+  it.each(['SeedProvider', 'SeedClientGate'] as const)(
+    '%s remounted with other addresses applies them',
+    async (component) => {
+      const { client } = await import('@seedprotocol/sdk')
+      const first = '0x' + '1'.repeat(40)
+      const second = '0x' + '2'.repeat(40)
+      const mount = (addresses: string[], target: HTMLElement) =>
+        render(
+          component === 'SeedProvider' ? (
+            <SeedProvider config={config} addresses={addresses}><div /></SeedProvider>
+          ) : (
+            <SeedClientGate initConfig={{ config, addresses }}><div /></SeedClientGate>
+          ),
+          { container: target },
+        )
+      const owned = async () => (client.isInitialized() ? (await client.getAddresses()).owned : undefined)
+
+      const firstMount = mount([first], container)
+      await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: 30_000 })
+      await client.setAddresses([first])
+      firstMount.unmount()
+
+      const remounted = document.createElement('div')
+      document.body.appendChild(remounted)
+      mount([second], remounted)
+      await waitFor(async () => expect(await owned()).toEqual([second]), { timeout: 10_000 })
+    },
+    60_000,
+  )
+
+  it('a remount with no addresses leaves the stored ones', async () => {
+    const { client } = await import('@seedprotocol/sdk')
+    const stored = '0x' + '3'.repeat(40)
+    const first = render(<SeedProvider config={config} addresses={[]}><div /></SeedProvider>, { container })
+    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: 30_000 })
+    await client.setAddresses([stored])
+    first.unmount()
+    const setSpy = vi.spyOn(client, 'setAddresses')
+    const remounted = document.createElement('div')
+    document.body.appendChild(remounted)
+    render(<SeedProvider config={config} addresses={[]}><div /></SeedProvider>, { container: remounted })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(setSpy).not.toHaveBeenCalled()
+    expect((await client.getAddresses()).owned).toEqual([stored])
+  }, 60_000)
+
   it('does not start the client without config', async () => {
     const sdk = await import('@seedprotocol/sdk')
     const initSpy = vi.spyOn(sdk.client, 'init').mockResolvedValue(undefined as never)

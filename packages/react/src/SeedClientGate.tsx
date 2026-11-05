@@ -26,8 +26,8 @@ function DefaultLoading() {
 export type SeedClientGateProps = {
   /**
    * Seed client init options (config + addresses). Required. When `addresses` later holds
-   * different addresses the gate calls `client.setAddresses` with them; a remount runs init again,
-   * which leaves the stored addresses alone.
+   * different addresses the gate calls `client.setAddresses` with them. A remount applies
+   * addresses that differ from the stored ones; a remount with `[]` keeps the stored ones.
    */
   initConfig: SeedConstructorOptions
   /** Optional canonical schema. When provided, merged into config.schema and loaded at init (no separate import). */
