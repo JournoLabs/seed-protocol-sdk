@@ -29,6 +29,7 @@ import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { getAttestedUidsFromReceipt, prepareEasAttest, ZERO_ADDRESS } from '~/helpers/easDirect'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
+import { dataItemSignerForPublish, getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { getSchemaRecord, registerSchema } from '~/helpers/schemaRegistry'
 import { isPublishWallet, isSeedTxSender, type PublishWallet, type SeedTxSender } from '~/helpers/seedSigner'
 import { directEasProblem } from '../publish/helpers/undeployedSmartAccount'
@@ -61,7 +62,7 @@ export type ArchivePackageOptions = {
 export type AnchorArchiveOptions = ArchivePackageOptions & {
   /** Sends the attestation, as the Version's attester. Default the registered wallet. */
   wallet?: PublishWallet
-  /** Signs the uploads. Default the publish config's. */
+  /** Signs the uploads. Default the publish config's, else the wallet's, as a publish does. */
   dataItemSigner?: PublishMachineContext['dataItemSigner']
   signDataItems?: PublishMachineContext['signDataItems']
   publishAuthorization?: PublishMachineContext['publishAuthorization']
@@ -126,12 +127,20 @@ function uploadData(upload: PackageUpload, versionUid: string, policy: ArchiveTa
  * Signs and uploads `uploads` to Arweave, returning their transaction ids in order. They may not be
  * readable yet. Always Arweave, whatever `blobStore` says: the path manifest names Arweave ids.
  */
-async function uploadAll(uploads: PublishUploadData[], options: AnchorArchiveOptions): Promise<string[]> {
+async function uploadAll(
+  uploads: PublishUploadData[],
+  options: AnchorArchiveOptions,
+  attester: string,
+): Promise<string[]> {
   if (uploads.length === 0) return []
   const config = getPublishConfig()
   const ctx = {
     signDataItems: options.signDataItems ?? config.signDataItems,
-    dataItemSigner: options.dataItemSigner ?? config.dataItemSigner,
+    // As a publish does: the caller's signer, else the config's, else the wallet's
+    dataItemSigner:
+      options.dataItemSigner ??
+      config.dataItemSigner ??
+      dataItemSignerForPublish(options.wallet ?? getPublishWallet(), attester),
     publishAuthorization: options.publishAuthorization,
   }
   const prepared = await arweaveBlobStore.prepare(uploads, ctx)
@@ -220,6 +229,26 @@ async function attestAnchor(
   return created.uid
 }
 
+/** What an anchor of `bag` records, read from its bag-info.txt and tag manifest. */
+function bagAnchorFields(bag: Bag) {
+  const info = readBagInfo(bag)
+  return {
+    seedUid: info.get('Seed-Uid')!,
+    versionUid: info.get('Seed-Version-Uid')!,
+    attester: info.get('EAS-Attester') as `0x${string}`,
+    coveredUntil: Date.parse(info.get('Seed-Bag-As-Of')!) / 1000,
+    tagmanifestSha256: verifyArchive(bag).tagmanifestSha256!,
+  }
+}
+
+/** The attester's anchor of this same bag, if EAS has one. */
+async function existingAnchor(bag: Bag) {
+  const { versionUid, attester, coveredUntil, tagmanifestSha256 } = bagAnchorFields(bag)
+  return (await getArchiveAnchorsFromEas({ versionUid, attester })).find(
+    (a) => a.coveredUntil === coveredUntil && a.tagmanifestSha256 === tagmanifestSha256,
+  )
+}
+
 /**
  * Puts a reproducible bag of `item` on Arweave as a path manifest and attests it on the Version
  * (ADR 0029). Separate from publish, which never depends on it. Safe to repeat: the same bag with an
@@ -228,6 +257,11 @@ async function attestAnchor(
  *
  * Throws `ArchiveExportError`, whose `not_synced` means retry once the indexer has the Version, and
  * {@link ArchiveAnchorSchemaNotRegisteredError} before uploading anything when the schema is missing.
+ *
+ * The attestation isn't journaled as a publish's is: no attempt row and no pinned nonce. A receipt
+ * lost after the send throws, and a retry before the indexer shows that anchor sends a second one.
+ * That is accepted: both anchors name the same bag, readers treat them as equivalent (ADR 0029),
+ * and the second costs one attestation.
  */
 export async function anchorArchive(
   item: ExportableItem | ArchiveSeedRef,
@@ -238,16 +272,8 @@ export async function anchorArchive(
     asOf: options.asOf,
     expectedAttestations: options.expectedAttestations,
   })
-  const info = readBagInfo(bag)
-  const seedUid = info.get('Seed-Uid')!
-  const versionUid = info.get('Seed-Version-Uid')!
-  const attester = info.get('EAS-Attester') as `0x${string}`
-  const coveredUntil = Date.parse(info.get('Seed-Bag-As-Of')!) / 1000
-  const tagmanifestSha256 = verifyArchive(bag).tagmanifestSha256!
-
-  const existing = (await getArchiveAnchorsFromEas({ versionUid, attester })).find(
-    (a) => a.coveredUntil === coveredUntil && a.tagmanifestSha256 === tagmanifestSha256,
-  )
+  const { seedUid, versionUid, attester, coveredUntil, tagmanifestSha256 } = bagAnchorFields(bag)
+  const existing = await existingAnchor(bag)
   if (existing) {
     return { uid: existing.uid, coveredUntil, manifestTx: existing.manifestTx, tagmanifestSha256, alreadyAnchored: true }
   }
@@ -260,14 +286,14 @@ export async function anchorArchive(
     if (files.length > 0) {
       // New files mean a new manifest.
       progress.manifestTx = undefined
-      const ids = await uploadAll(files.map((f) => uploadData(f, versionUid, policy)), options)
+      const ids = await uploadAll(files.map((f) => uploadData(f, versionUid, policy)), options, attester)
       files.forEach((file, i) => (progress.transactions[file.path] = ids[i]!))
       await verifyArweaveTransactionsExist(ids)
     }
     if (!progress.manifestTx) {
       const { bytes } = buildPathManifest(bag, { ...arweaveTransactions, ...progress.transactions })
       const manifest = { path: 'manifest', bytes, contentType: PATH_MANIFEST_CONTENT_TYPE, part: 'manifest' }
-      ;[progress.manifestTx] = await uploadAll([uploadData(manifest, versionUid, policy)], options)
+      ;[progress.manifestTx] = await uploadAll([uploadData(manifest, versionUid, policy)], options, attester)
       await verifyArweaveTransactionsExist([progress.manifestTx!])
     }
     const manifestTx = progress.manifestTx!
@@ -280,32 +306,72 @@ export async function anchorArchive(
   }
 }
 
-/** What an anchor of this bag would cost: its uploads, and one attestation. */
+/** {@link estimateArchiveAnchorCost}'s answer. */
+export type ArchiveAnchorCostEstimate = PublishCostEstimate & {
+  /** The attester already anchored this bag, so `anchorArchive` would send nothing: every cost is 0. */
+  alreadyAnchored: boolean
+}
+
+/**
+ * What an anchor of this bag would cost: its uploads, in the two bundles `anchorArchive` sends (the
+ * files, then the path manifest), each charged Arweave's minimum, with the tags `tagPolicy` adds,
+ * and one attestation. Nothing for a bag the attester already anchored.
+ */
 export async function estimateArchiveAnchorCost(
   item: ExportableItem | ArchiveSeedRef,
   options: ArchivePackageOptions & Pick<EstimatePublishCostOptions, 'rates'> = {},
-): Promise<PublishCostEstimate> {
+): Promise<ArchiveAnchorCostEstimate> {
   const { bag, arweaveTransactions } = await exportArchive(item, {
     reproducible: true,
     asOf: options.asOf,
     expectedAttestations: options.expectedAttestations,
   })
-  const files = filesToUpload(bag, arweaveTransactions)
-  // Only the size matters here, and a manifest's ids are all the same length.
-  const placeholders = Object.fromEntries(bag.files.map((file) => [file.path, 'A'.repeat(43)]))
-  const manifestBytes = buildPathManifest(bag, placeholders).bytes.byteLength
-  const uploadSizes = [...files.map((f) => f.bytes.byteLength), manifestBytes]
   const work: PublishWorkSummary = {
     publishMode: 'patch',
     seedCount: 0,
     newSeedCount: 0,
     newVersionCount: 0,
+    attestationCount: 0,
+    uploadCount: 0,
+    uploadBytes: 0,
+    uploadSizes: [],
+  }
+  if (await existingAnchor(bag)) {
+    const base = await estimatePublishCost(item as never, { work, rates: options.rates })
+    const zero = (0).toPrecision(6)
+    return {
+      ...base,
+      totalUsd: 0,
+      evm: { ...base.evm, gas: 0n, eth: zero, usd: 0 },
+      arweave: { ...base.arweave, chargedBytes: 0, ar: zero, usd: 0 },
+      alreadyAnchored: true,
+    }
+  }
+
+  const files = filesToUpload(bag, arweaveTransactions)
+  // Only the size matters here, and a manifest's ids are all the same length.
+  const placeholders = Object.fromEntries(bag.files.map((file) => [file.path, 'A'.repeat(43)]))
+  const manifestBytes = buildPathManifest(bag, placeholders).bytes.byteLength
+  const uploadSizes = [...files.map((f) => f.bytes.byteLength), manifestBytes]
+  Object.assign(work, {
     attestationCount: 1,
     uploadCount: uploadSizes.length,
     uploadBytes: uploadSizes.reduce((a, b) => a + b, 0),
     uploadSizes,
-  }
-  return estimatePublishCost(item as never, { work, rates: options.rates })
+  })
+  const { versionUid } = bagAnchorFields(bag)
+  // The longest Archive-Part value, as sizing uses the longest Content-Type.
+  const uploadTags: TransactionTag[] =
+    (options.tagPolicy ?? 'discoverable') === 'discoverable'
+      ? [
+          { name: 'Archive-Part', value: 'manifest' },
+          { name: 'Seed-Version-Uid', value: versionUid },
+          ...(getPublishConfig().arweaveUploadTags ?? []),
+        ]
+      : []
+  const uploadBatches = files.length > 0 ? [files.length, 1] : [1]
+  const estimate = await estimatePublishCost(item as never, { work, rates: options.rates, uploadTags, uploadBatches })
+  return { ...estimate, alreadyAnchored: false }
 }
 
 /**

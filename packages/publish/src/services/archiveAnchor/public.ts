@@ -8,6 +8,7 @@ export {
   estimateArchiveAnchorCost,
   type AnchorArchiveOptions,
   type AnchorArchiveResult,
+  type ArchiveAnchorCostEstimate,
   type ArchivePackageOptions,
   type ArchiveTagPolicy,
 } from './index'

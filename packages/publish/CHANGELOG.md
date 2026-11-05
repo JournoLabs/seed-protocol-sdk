@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- `estimateArchiveAnchorCost` prices the files and the path manifest as the two bundles `anchorArchive` sends, each charged Arweave's 256 KiB minimum, sizes the tags `tagPolicy` adds, and returns `alreadyAnchored: true` with every cost 0 for a bag the attester already anchored. It priced one bundle, ignored `tagPolicy`, and priced a bag `anchorArchive` would send nothing for. It returns the new `ArchiveAnchorCostEstimate`. `estimatePublishCost` takes `uploadTags` and `uploadBatches` for this.
+- `anchorArchive` signs uploads with the publish wallet's data item signer when neither the options nor the config give one, as a publish does. With ConnectButton and no `dataItemSigner` in the config, its uploads failed.
+- `anchorArchive`'s JSDoc says that a retry before the indexer shows a sent anchor can send a second one, and why that's accepted (ADR 0029).
 - The `ethers` dependency is `^6.14.0`. `fromEthersWallet` signs EIP-7702 authorizations with `Wallet.authorize`, which ethers added in 6.14. A `Wallet` from an app's own ethers 6.13 failed its first UserOp with `wallet.authorize is not a function`; it now rejects with the new `EthersAuthorizeUnsupportedError` (code `ETHERS_AUTHORIZE_UNSUPPORTED`).
 - `enrollPublishAutomation` revokes the earlier live PublishAuthorizations for the same session key and app once the new one lands, one transaction each. A failed lookup or revoke logs a warning and leaves that grant live until it expires. The result has the new `revokedAuthorizationUids`. A 90-day renewal used to leave one live grant per enroll.
 - `enrollPublishAutomation` from `@seedprotocol/publish/thirdweb` connects the in-app admin wallet only when the Seed executor has to be installed. The core `admin` option takes a function for that.

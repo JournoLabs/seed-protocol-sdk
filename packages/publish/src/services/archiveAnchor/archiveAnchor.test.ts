@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { SchemaEncoder } from '@ethereum-attestation-service/eas-sdk'
 import { createBag, parsePathManifest, verifyArchive, type Bag } from '@seedprotocol/archive'
 import * as verifyEntry from '@seedprotocol/archive/verify'
@@ -13,11 +13,14 @@ const SOURCE_TX = 'A'.repeat(43)
 const ANCHOR_UID = uid('13')
 
 const encoder = new TextEncoder()
+/** Bytes of an extra payload file, past Arweave's 256 KiB minimum when set. */
+let extraBytes = 0
 const bagFor = (asOf: number): Bag =>
   createBag({
     payload: [
       { path: 'index.html', bytes: encoder.encode('<p>view</p>') },
       { path: 'source/body.html', bytes: encoder.encode('<p>published</p>') },
+      ...(extraBytes > 0 ? [{ path: 'source/big.bin', bytes: new Uint8Array(extraBytes) }] : []),
     ],
     info: [
       ['Seed-Uid', SEED],
@@ -135,6 +138,7 @@ const decode = (data: string) =>
 beforeEach(() => {
   Object.assign(state, { exportError: undefined, asOf: AS_OF, anchors: [], schema: true, strategy: 'multiPublish', attester: ATTESTER, unreadable: new Set(), sendError: undefined, failSign: undefined })
   signCalls = 0
+  extraBytes = 0
   sent.length = 0
   sentDirect.length = 0
   uploads = []
@@ -317,6 +321,49 @@ describe('estimateArchiveAnchorCost', () => {
     expect(work.attestationCount).toBe(1)
     expect(work.newSeedCount).toBe(0)
     expect(work.uploadSizes!.slice(0, -1)).toEqual(toUpload.map((f) => f.bytes.byteLength))
+  })
+
+  // Batch 16 item 44
+  const rates = { gasPriceWei: 1n, ethUsd: 1, arUsd: 1, winstonPerByte: 1, fetchedAt: 0 }
+  const MIN = 256 * 1024
+
+  test('prices the files and the manifest as two bundles, each charged at least 256 KiB', async () => {
+    const estimate = await estimateArchiveAnchorCost(REF, { rates } as never)
+    expect(estimate.arweave.chargedBytes).toBe(2 * MIN)
+  })
+
+  test('sizes the tags tagPolicy puts on the uploads', async () => {
+    extraBytes = 300 * 1024
+    const discoverable = await estimateArchiveAnchorCost(REF, { rates } as never)
+    const hashOnly = await estimateArchiveAnchorCost(REF, { rates, tagPolicy: 'hash-only' } as never)
+    expect(discoverable.arweave.chargedBytes).toBeGreaterThan(hashOnly.arweave.chargedBytes)
+  })
+
+  test('a bag that is already anchored costs nothing', async () => {
+    const bag = bagFor(AS_OF)
+    state.anchors = [
+      { uid: ANCHOR_UID, coveredUntil: AS_OF, manifestTx: 'M'.repeat(43), tagmanifestSha256: verifyArchive(bag).tagmanifestSha256! },
+    ]
+    const estimate = await estimateArchiveAnchorCost(REF, { rates } as never)
+    expect(estimate).toMatchObject({ alreadyAnchored: true, totalUsd: 0, evm: { gas: 0n }, arweave: { chargedBytes: 0, uploadCount: 0 } })
+  })
+})
+
+// Batch 16 item 43: ConnectButton registers a wallet whose dataItemSigner signs the uploads
+describe('anchorArchive data item signer', () => {
+  test("falls back to the wallet's dataItemSigner when neither the options nor the config give one", async () => {
+    const { arweaveBlobStore } = await import('../../blobStore/arweave')
+    const dataItemSigner = { address: ATTESTER, signMessage: async () => '0x' }
+    const prepare = spyOn(arweaveBlobStore, 'prepare').mockImplementation(
+      async (list: unknown[]) => ({ ids: list.map((_, i) => txFor(90 + i + prepare.mock.calls.length)) }) as never,
+    )
+    try {
+      state.strategy = 'directEas'
+      await anchorArchive(REF, { wallet: { ...(eoa as object), dataItemSigner } } as never)
+      expect(prepare.mock.calls[0]![1]).toMatchObject({ dataItemSigner })
+    } finally {
+      prepare.mockRestore()
+    }
   })
 })
 

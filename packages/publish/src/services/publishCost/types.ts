@@ -77,6 +77,13 @@ export type EstimatePublishCostOptions = {
   backReferences?: 'link' | 'defer'
   /** Skip summarize + network; used by tests and the watcher reprice path. */
   work?: PublishWorkSummary
+  /** Tags each upload carries beyond Content-SHA-256 and Content-Type. Default `arweaveUploadTags`. */
+  uploadTags?: import('@seedprotocol/sdk').TransactionTag[]
+  /**
+   * How many of `work.uploadSizes`, in order, go in each bundle, when the uploads are sent in more
+   * than one. Each bundle is charged Arweave's 256 KiB minimum. Default one bundle.
+   */
+  uploadBatches?: number[]
   rates?: {
     ethUsd: number
     arUsd: number
