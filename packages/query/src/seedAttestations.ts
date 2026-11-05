@@ -1,4 +1,4 @@
-import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
+import { decodeEasNumber, isEasEmptyValue, isNumericEasType, isUnfilledReference } from '@seedprotocol/eas'
 import { isRelationProperty } from './listRelationKey.js'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
 import type { AttestationLike, SeedRecord } from './types.js'
@@ -83,7 +83,10 @@ export function toSeedPropertyAttestation(property: AttestationLike): SeedProper
   const { name, type, value: raw } = parsed.metadata
   if (!name || !type) return null
   if (isEasEmptyValue(type, raw)) return null
-  const value = valueOf(type, raw)
+  const isRelation = isRelationProperty(name, type)
+  // An unfilled reference slot names no seed: left out, as assembly leaves it out of the record
+  if (isRelation && isUnfilledReference(raw)) return null
+  const value = valueOf(type, isRelation && Array.isArray(raw) ? raw.filter((v) => !isUnfilledReference(v)) : raw)
   if (value === undefined) return null
   return {
     attestationUid: property.id,
@@ -91,7 +94,7 @@ export function toSeedPropertyAttestation(property: AttestationLike): SeedProper
     easName: name,
     easType: type,
     value,
-    isRelation: isRelationProperty(name, type),
+    isRelation,
     attester: property.attester,
     timeCreated: property.timeCreated,
   }

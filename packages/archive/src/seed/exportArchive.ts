@@ -413,6 +413,13 @@ async function chainSource(
   // First, so everything read after it includes what the caller is waiting for.
   await assertChainReports(expectedAttestations)
   let state = await readSeedFromChain(seedUid, asOf)
+  if (asOf !== undefined && (!state || state.versions.length === 0)) {
+    // Nothing at asOf: the indexer may be behind, or the seed may have had no Version yet then.
+    const latest = await readSeedFromChain(seedUid)
+    if (latest && latest.versions.length > 0) {
+      throw new ArchiveExportError('not_published', `${model.name} ${seedUid} has no live Version at ${asOf}`)
+    }
+  }
   if (!state) throw new ArchiveExportError('not_synced', `EAS has no seed attestation ${seedUid}`)
   if (state.versions.length === 0) throw new ArchiveExportError('not_synced', `EAS reports no Version of ${seedUid} yet`)
   const seedRevoked = state.seed.revoked && (asOf === undefined || state.seed.revocationTime <= asOf)

@@ -1,4 +1,5 @@
 import { ARCHIVE_ANCHOR_SCHEMA_UID } from './constants.js'
+import { indexerUid } from './indexerUid.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { decodeEasNumber } from './easValues.js'
 import { GET_PROPERTIES } from './queries.js'
@@ -79,7 +80,7 @@ export async function getArchiveAnchorsFromEas({
 }): Promise<ArchiveAnchor[]> {
   const { itemProperties } = (await BaseEasClient.getEasClient().request(GET_PROPERTIES, {
     where: withExcludeRevokedFilter({
-      refUID: { equals: versionUid },
+      refUID: { equals: indexerUid(versionUid) },
       schemaId: { equals: ARCHIVE_ANCHOR_SCHEMA_UID },
     }),
   })) as { itemProperties: Attestation[] }

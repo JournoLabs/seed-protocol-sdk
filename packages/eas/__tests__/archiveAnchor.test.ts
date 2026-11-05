@@ -55,4 +55,21 @@ describe('archive anchors', () => {
       AND: [{ revoked: { equals: false } }],
     })
   })
+
+  // Batch 16 item 49
+  it('asks with a lower-case Version uid', async () => {
+    let where: any
+    BaseEasClient.configure({
+      getEasClient: () =>
+        ({
+          request: async (_doc: unknown, vars: { where: unknown }) => {
+            where = vars.where
+            return { itemProperties: [] }
+          },
+        }) as never,
+    })
+    const upper = '0x' + 'AB'.repeat(32)
+    await getArchiveAnchorsFromEas({ versionUid: upper, attester: ATTESTER })
+    expect(where.refUID).toEqual({ equals: upper.toLowerCase() })
+  })
 })

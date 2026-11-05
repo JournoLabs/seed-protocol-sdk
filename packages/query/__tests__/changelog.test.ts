@@ -53,6 +53,24 @@ describe('decodePropertyAttestation / buildFlatSnapshotFromProperties', () => {
     })
   })
 
+  // Batch 16 item 22: an unfilled reference names no seed, as in records
+  it('leaves out a relation holding an unfilled reference, and drops one from a list', () => {
+    const placeholder = `0x${'0'.repeat(63)}2`
+    const seed = `0x${'ab'.repeat(32)}`
+    const single = propAttestation({ id: 'p1', refUID: 'v1', schemaId: 's', timeCreated: 10, name: 'author_id', value: placeholder, type: 'bytes32' })
+    expect(decodePropertyAttestation(single)).toBeNull()
+    const list = propAttestation({
+      id: 'p2',
+      refUID: 'v1',
+      schemaId: 's',
+      timeCreated: 10,
+      name: 'tag_ids',
+      value: [seed, placeholder],
+      type: 'bytes32[]',
+    })
+    expect(decodePropertyAttestation(list)?.value).toEqual([seed])
+  })
+
   // ADR 0010: the indexer gives uint8 as a number and uint256 as { type: 'BigNumber', hex }.
   it.each([
     ['uint8', 42, '42'],

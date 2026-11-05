@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The state graph links no seed for any unfilled reference slot (a relation value below 2^32). It skipped only `0x…20`, so `stateGraph` given another placeholder linked it as a seed.
 - `engines.node` is `>=20.18.1`, the floor of its dependencies `@seedprotocol/eas` and `@seedprotocol/query`. It said `>=20.12.0`, where those dependencies don't install.
 
 ## 0.8.1 (2026-11-04)

@@ -1,4 +1,5 @@
 import { checksumAddresses } from './utils.js'
+import { indexerUid } from './indexerUid.js'
 import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanonical.js'
 import { keepAttestationsFromRefAttester } from './easRefAttester.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
@@ -296,6 +297,7 @@ export const getSeedsByUidsFromEas = async ({
   excludeRevoked?: boolean
 }): Promise<Attestation[]> => {
   if (uids.length === 0) return []
+  uids = [...new Set(uids.map(indexerUid))]
   const where = excludeRevoked ? withExcludeRevokedFilter({ id: { in: uids } }) : { id: { in: uids } }
 
   const queryClient = BaseQueryClient.getQueryClient()
@@ -373,7 +375,7 @@ export const getAttestationChangesSince = async ({
  */
 export const getReportedAttestationUids = async (uids: readonly string[]): Promise<Set<string>> => {
   const easClient = BaseEasClient.getEasClient()
-  const unique = [...new Set(uids)]
+  const unique = [...new Set(uids.map(indexerUid))]
   const reported = new Set<string>()
   for (let i = 0; i < unique.length; i += CHANGES_UIDS_PER_REQUEST) {
     const { changes } = (await easClient.request(GET_ATTESTATION_CHANGES, {

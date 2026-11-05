@@ -1,4 +1,4 @@
-import { decodeEasNumber, isEasEmptyValue, isNumericEasType } from '@seedprotocol/eas'
+import { decodeEasNumber, isEasEmptyValue, isNumericEasType, isUnfilledReference } from '@seedprotocol/eas'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
 import { isRelationProperty, relationPropertyKey } from './listRelationKey.js'
 import type {
@@ -63,8 +63,10 @@ export function decodePropertyAttestation(
   }
 
   let propertyValue: string | string[] = metadata.value as string | string[]
+  // An unfilled reference slot names no seed: absent, as in records
+  if (isRelation && !isList && isUnfilledReference(propertyValue)) return null
   if (isRelation && isList && Array.isArray(propertyValue)) {
-    propertyValue = propertyValue.map((v) => String(v))
+    propertyValue = propertyValue.map((v) => String(v)).filter((v) => !isUnfilledReference(v))
   } else if (typeof propertyValue !== 'string') {
     // ADR 0010: an integer value as its decimal string, not the indexer's `{ type: 'BigNumber', hex }`.
     const decimal = isNumericEasType(easType) ? decodeEasNumber(propertyValue) : undefined

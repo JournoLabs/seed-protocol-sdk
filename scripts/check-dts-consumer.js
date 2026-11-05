@@ -65,6 +65,11 @@ import { useItems, useItem, useItemProperty, useCreateItem } from '@seedprotocol
 import { client, Item } from '@seedprotocol/sdk'
 import { importJsonSchema } from '@seedprotocol/sdk/node'
 import type { AttestationRecordError, UnrecordedAttestation } from '@seedprotocol/publish'
+import type { SchemaFileFormat } from '@seedprotocol/sdk'
+import type { QueryModels } from '@seedprotocol/query'
+
+// A schema file's models pass as query's models with no cast (batch 16 item 21)
+export const queryModels = (models: SchemaFileFormat['models']): QueryModels => models
 
 // The type of a public error's field is exported (batch 16 item 46)
 export const unrecorded = (error: AttestationRecordError): UnrecordedAttestation => error.unrecorded

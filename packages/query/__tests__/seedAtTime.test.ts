@@ -16,6 +16,9 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => ({
     fakeEas.properties.filter((p) => versionUids.includes(p.refUID)),
 }))
 
+const initializeQueryPlatform = vi.hoisted(() => vi.fn(async (_options?: unknown) => {}))
+vi.mock('../src/bootstrap.js', () => ({ initializeQueryPlatform }))
+
 import { readSeedAtTime } from '../src/seedAtTime'
 
 const OWNER = '0x' + '1'.repeat(40)
@@ -57,6 +60,37 @@ beforeEach(() => {
 })
 
 describe('readSeedAtTime', () => {
+  // Batch 16 item 48: as getSeedAttestations({ asOf }) reads
+  describe('agrees with getSeedAttestations({ asOf })', () => {
+    it('reads a uid in any case', async () => {
+      const lettered = uid('ab')
+      fakeEas.seeds = [attestation(lettered, '0x0', 100)]
+      fakeEas.versions = [attestation(V1, lettered, 110)]
+      expect((await readSeedAtTime(lettered.toUpperCase().replace('0X', '0x')))?.version?.id).toBe(V1)
+    })
+
+    it('refuses a time that is not unix seconds', async () => {
+      await expect(readSeedAtTime(SEED, Number.NaN)).rejects.toThrow(RangeError)
+      await expect(readSeedAtTime(SEED, Number.POSITIVE_INFINITY)).rejects.toThrow(RangeError)
+    })
+
+    it('is undefined before the seed was created', async () => {
+      expect(await readSeedAtTime(SEED, 99)).toBeUndefined()
+    })
+
+    it('lists only the Versions made by asOf', async () => {
+      fakeEas.versions = [attestation(V1, SEED, 110), attestation(V2, SEED, 200)]
+      expect((await readSeedAtTime(SEED, 150))!.versions.map((v) => v.id)).toEqual([V1])
+      expect((await readSeedAtTime(SEED))!.versions.map((v) => v.id)).toEqual([V1, V2])
+    })
+
+    it('starts the query platform for EAS, with its one-copy check', async () => {
+      initializeQueryPlatform.mockClear()
+      await readSeedAtTime(SEED)
+      expect(initializeQueryPlatform).toHaveBeenCalledWith({ source: 'remote' })
+    })
+  })
+
   it('is undefined for a seed EAS does not have', async () => {
     expect(await readSeedAtTime(uid('77'))).toBeUndefined()
   })

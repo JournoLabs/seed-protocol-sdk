@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `getArchiveAnchorsFromEas`, `getReportedAttestationUids` and `getSeedsByUidsFromEas` ask the indexer with lower-case uids. An upper-case uid found nothing.
+
 ## 0.8.1 (2026-11-04)
 
 - New `getReportedAttestationUids(uids)`: which uids EAS reports, uncached.

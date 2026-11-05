@@ -1,6 +1,7 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
 import type { SeedAttestations, SeedPropertyAttestation, SeedVersionAttestation } from '@seedprotocol/query'
+import { isUnfilledReference } from '@seedprotocol/eas'
 import { PROV, RDF_TYPE, XSD, assertIri, iriScheme, type IriScheme } from './iri.js'
 import { canonicalJson, compileLens, type CompiledLens, type RdfLens, type RdfSidecar } from './lens.js'
 
@@ -49,8 +50,6 @@ export type StateGraphOptions = {
 const SCHEMA_CONTENT_URL = 'https://schema.org/contentUrl'
 const STORAGE_TRANSACTION = 'storage_transaction_id'
 const STORAGE_NAMES = new Set([STORAGE_TRANSACTION, 'storage_provider_transaction_id'])
-// Assembly skips this value as a relation (see relationValuesToExclude in @seedprotocol/query).
-const NOT_A_SEED = '0x0000000000000000000000000000000000000000000000000000000000000020'
 
 /**
  * The SHA-256 of the parts of a sidecar the lens reads (`schemaId`, `terms`, `@context`), as
@@ -140,8 +139,9 @@ function propertyObject(
 ): RdfObject | null {
   const { easType, value } = property
   if (property.isRelation) {
+    // An unfilled reference slot (a small number, 0x…20 among them) names no seed
     const seeds = (typeof value === 'string' ? [value] : Array.isArray(value) ? value : []).filter(
-      (uid) => uid !== NOT_A_SEED,
+      (uid) => !isUnfilledReference(uid),
     )
     if (typeof value === 'string') return seeds[0] ? iri(iris.attestation(seeds[0])) : null
     return { kind: 'list', items: seeds.map((uid) => iri(iris.attestation(uid))) }
