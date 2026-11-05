@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `fetchArweaveRawBytesAcrossGateways(id, { decode: false })` returns the transaction's bytes as a gateway serves them, without the registered content read transform, as `getTransactionData` does. The default still applies the transform.
 - `isEncryptedArweaveContent(bytes)`: true for a `seed-private/v1` envelope (ADR 0033). `fetchArweaveRawTextAcrossGateways` returns undefined for an envelope that no read transform decrypted, rather than decoding ciphertext as text.
 
 ## 0.8.1 (2026-11-04)

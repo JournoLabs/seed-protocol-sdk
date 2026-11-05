@@ -64,6 +64,7 @@ const workspaceSourceAliases = (platform) => {
   })
   return [
     exact('@seedprotocol/archive/node', 'archive/src/node/index.ts'),
+    exact('@seedprotocol/archive/seed', 'archive/src/seed/index.ts'),
     exact('@seedprotocol/archive', 'archive/src/index.ts'),
     exact('@seedprotocol/eas/node', 'eas/src/node/index.ts'),
     exact('@seedprotocol/eas', 'eas/src/index.ts'),

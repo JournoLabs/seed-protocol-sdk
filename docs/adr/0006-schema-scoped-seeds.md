@@ -368,3 +368,10 @@ schema's model, and the error is thrown only when there's no active schema, no
 replaced by per-schema evaluation. Sync evaluates a seed against every local model of
 its type and links it to each schema it matches, so a shared name is no longer
 ambiguous there.
+
+## Amendment (2026-11-05): the project-root file is `seed.schema.json`
+
+The project-root schema file in "Choosing the active schema" is `seed.schema.json`, the name the
+docs use, not `seedSchema.json`. The SDK doesn't read either name at init yet (step 5 above isn't
+built). `seed-rdf` and `@seedprotocol/vite`'s RDF sidecar check default to `seed.schema.json`
+(`DEFAULT_SCHEMA_FILE` in `@seedprotocol/rdf`), with the sidecar at `seed.schema.context.jsonld`.

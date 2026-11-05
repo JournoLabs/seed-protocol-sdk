@@ -1,14 +1,6 @@
 import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
-import {
-  PATH_MANIFEST_CONTENT_TYPE,
-  buildPathManifest,
-  exportArchive,
-  readBagInfo,
-  verifyArchive,
-  type ArchiveSeedRef,
-  type Bag,
-  type ExportableItem,
-} from '@seedprotocol/archive'
+import { PATH_MANIFEST_CONTENT_TYPE, buildPathManifest, readBagInfo, verifyArchive, type Bag } from '@seedprotocol/archive'
+import { exportArchive, type ArchiveSeedRef, type ExportableItem } from '@seedprotocol/archive/seed'
 import {
   ARCHIVE_ANCHOR_SCHEMA_DEF,
   ARCHIVE_ANCHOR_SCHEMA_NAME,

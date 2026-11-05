@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
+import { DEFAULT_SCHEMA_FILE } from './defaults.js'
 import type { RdfSidecar } from './lens.js'
 import { SUGGESTED_PREFIXES, checkSidecar, suggestTerms, syncSidecar, type SidecarSchema } from './sidecar.js'
 
@@ -17,7 +18,7 @@ const USAGE = `Usage:
       Draft schema.org and dcterms terms for unmapped names with a common meaning. Prints them,
       or adds them to the sidecar (creating it if needed) with --write. Review before committing.
 
-Default --schema: seedSchema.json. Default --sidecar: the schema's path with .context.jsonld
+Default --schema: ${DEFAULT_SCHEMA_FILE}. Default --sidecar: the schema's path with .context.jsonld
 in place of .json.`
 
 export type CliIo = {
@@ -80,7 +81,7 @@ export async function runRdfCli(args: readonly string[], io: CliIo): Promise<num
     }
     if (command === 'check' && values.write) throw new UsageError('check never writes; use sync --write')
 
-    const schemaFile = path.resolve(io.cwd, values.schema ?? 'seedSchema.json')
+    const schemaFile = path.resolve(io.cwd, values.schema ?? DEFAULT_SCHEMA_FILE)
     const sidecarFile = values.sidecar
       ? path.resolve(io.cwd, values.sidecar)
       : schemaFile.replace(/(\.json)?$/, '.context.jsonld')

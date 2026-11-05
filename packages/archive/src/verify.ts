@@ -45,7 +45,10 @@ export type FindArchiveAnchorsOptions = {
 export type VerifyPublishedArchiveOptions = FindArchiveAnchorsOptions & {
   /** Read gateways, tried in order. Default arweave.net. */
   gateways?: readonly string[]
-  /** Check the anchor of this time, unix seconds. Default the newest. */
+  /**
+   * Check the anchor whose `covered_until` is exactly this time, unix seconds; any other value finds
+   * no anchor (`no_anchor`). Default the newest anchor.
+   */
   asOf?: number
   /**
    * Fetch the payload only when `Payload-Oxum` says it is at most this many bytes. Over it, the tag
@@ -256,7 +259,16 @@ export async function verifyPublishedArchive(options: VerifyPublishedArchiveOpti
     info = readBagInfo(tagFiles)
   } catch (error) {
     rethrowAbort(error)
-    return { ...blocked(attestation, revocation), archiveAnchor, fixity: { ...notChecked((error as Error).message), errors: [] } }
+    // The anchor was found: say why its hash wasn't compared, not that there is none
+    const unread = notChecked(`The bag's tag files couldn't be read: ${(error as Error).message}`)
+    return {
+      ...blocked(attestation, revocation),
+      archiveAnchor,
+      fixity: { ...unread, errors: [] },
+      anchor: unread,
+      identity: unread,
+      record: unread,
+    }
   }
 
   const oxum = /^(\d+)\.(\d+)$/.exec(info.get('Payload-Oxum') ?? '')

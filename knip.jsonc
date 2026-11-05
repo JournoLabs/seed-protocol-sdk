@@ -19,7 +19,7 @@
       "project": ["scripts/**/*.{js,ts,mjs}"]
     },
     "packages/archive": {
-      "entry": ["src/index.ts", "src/node/index.ts", "__tests__/**/*.test.ts"],
+      "entry": ["src/index.ts", "src/node/index.ts", "src/seed/index.ts", "__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
     },
     "packages/arweave": {

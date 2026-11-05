@@ -41,12 +41,17 @@ export type IriScheme = {
   account(address: string): string
 }
 
+/** Throws unless `base` is an absolute IRI ending in `/`, as `{base}ns#` and `{base}eas/...` need. */
+export function assertBaseIri(base: string): void {
+  assertIri(base, 'base')
+  if (!base.endsWith('/')) throw new TypeError(`base must end with "/": ${base}`)
+}
+
 export function iriScheme(chainId: number, base: string = PROVISIONAL_BASE_IRI): IriScheme {
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new TypeError(`chainId must be a positive integer, got ${chainId}`)
   }
-  assertIri(base, 'base')
-  if (!base.endsWith('/')) throw new TypeError(`base must end with "/": ${base}`)
+  assertBaseIri(base)
   const segment = (s: string) => encodeURIComponent(s)
   return {
     base,

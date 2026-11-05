@@ -9,9 +9,10 @@ and Dublin Core metadata, and a reader for [h-entry](https://microformats.org/wi
 documents, and `exportArchive`, which writes a Seed item as a bag. The bag's layout is described in
 [docs/ARCHIVE.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/ARCHIVE.md).
 
-The main entry needs [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk), an
-optional peer. `@seedprotocol/archive/verify`, which checks a published bag, and
-`@seedprotocol/archive/node` don't, so a reader without the SDK can use them.
+`exportArchive` and `verifyArchiveAgainstChain` are in `@seedprotocol/archive/seed`, which needs
+[`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk), an optional peer. The main
+entry, `@seedprotocol/archive/verify` (which checks a published bag) and `@seedprotocol/archive/node`
+don't import it, so a reader without the SDK can use them.
 
 ## Installation
 
@@ -59,8 +60,9 @@ The body is read from `.h-entry .e-content`, then `[itemprop=articleBody]`, then
 properties archives use are read (p-name, p-summary, p-author, dt-published, u-featured, u-url,
 e-content); implied properties and value-class patterns are not applied.
 
-`rewriteHtmlUrls(html, map)` replaces whole `src`, `href` and `poster` values that `map` returns a
-new URL for, by splicing them into the original string. `srcset` is not rewritten.
+`rewriteHtmlUrls(html, replace)` calls `replace(url)` for each whole `src`, `href` and `poster`
+value and splices in the URL it returns, leaving the value as it is when it returns undefined.
+`replace` is a function; for a `Map`, pass `(url) => map.get(url)`. `srcset` is not rewritten.
 
 ## Metadata
 

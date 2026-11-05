@@ -67,9 +67,19 @@ import { importJsonSchema } from '@seedprotocol/sdk/node'
 import type { AttestationRecordError, UnrecordedAttestation } from '@seedprotocol/publish'
 import type { SchemaFileFormat } from '@seedprotocol/sdk'
 import type { QueryModels } from '@seedprotocol/query'
+import { exportArchive, type ArchiveClockSource } from '@seedprotocol/archive/seed'
 
 // A schema file's models pass as query's models with no cast (batch 16 item 21)
 export const queryModels = (models: SchemaFileFormat['models']): QueryModels => models
+
+// Item.find's result passes to exportArchive with no cast (batch 16 item 54)
+export const exportFound = async (seedLocalId: string) => {
+  const item = await Item.find({ seedLocalId })
+  return item ? exportArchive(item) : undefined
+}
+
+// The clock item.json names is exported (batch 16 item 52)
+export const clock: ArchiveClockSource = 'chain-block'
 
 // The type of a public error's field is exported (batch 16 item 46)
 export const unrecorded = (error: AttestationRecordError): UnrecordedAttestation => error.unrecorded

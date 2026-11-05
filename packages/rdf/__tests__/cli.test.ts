@@ -35,26 +35,26 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'seed-rdf-cli-'))
   out = []
   err = []
-  await write('seedSchema.json', schema)
+  await write('seed.schema.json', schema)
 })
 afterEach(() => rm(dir, { recursive: true, force: true }))
 
 describe('seed-rdf check', () => {
   it('passes a synced sidecar and lists unmapped properties', async () => {
-    await write('seedSchema.context.jsonld', syncSidecar({ schema, sidecar }))
+    await write('seed.schema.context.jsonld', syncSidecar({ schema, sidecar }))
     expect(await run('check')).toBe(0)
     expect(out).toEqual(['Unmapped (exported under protocol IRIs):', '  Post.summary (prop-summary)'])
     expect(err).toEqual([])
   })
 
   it('fails on a stale term, so CI catches it', async () => {
-    await write('seedSchema.context.jsonld', syncSidecar({ schema, sidecar: { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } } }))
+    await write('seed.schema.context.jsonld', syncSidecar({ schema, sidecar: { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } } }))
     expect(await run('check')).toBe(1)
     expect(err).toEqual(['Stale terms (no model or property in the schema has this id):', '  gone: schema:gone'])
   })
 
   it('passes, with a note, when only a rename left the context behind', async () => {
-    await write('seedSchema.context.jsonld', sidecar)
+    await write('seed.schema.context.jsonld', sidecar)
     expect(await run('check')).toBe(0)
     expect(out.at(-1)).toMatch(/seed-rdf sync --write/)
   })
@@ -67,8 +67,8 @@ describe('seed-rdf check', () => {
 
   it('exits 2 when the sidecar is missing or for another schema', async () => {
     expect(await run('check')).toBe(2)
-    expect(err[0]).toMatch(/No sidecar at .*seedSchema\.context\.jsonld/)
-    await write('seedSchema.context.jsonld', { ...sidecar, schemaId: 'other' })
+    expect(err[0]).toMatch(/No sidecar at .*seed\.schema\.context\.jsonld/)
+    await write('seed.schema.context.jsonld', { ...sidecar, schemaId: 'other' })
     expect(await run('check')).toBe(2)
   })
 
@@ -80,16 +80,16 @@ describe('seed-rdf check', () => {
 
 describe('seed-rdf sync', () => {
   it('prints the synced sidecar and leaves the file alone without --write', async () => {
-    await write('seedSchema.context.jsonld', sidecar)
+    await write('seed.schema.context.jsonld', sidecar)
     expect(await run('sync')).toBe(0)
     expect(JSON.parse(out.join('\n'))).toEqual(syncSidecar({ schema, sidecar }))
-    expect(await read('seedSchema.context.jsonld')).toEqual(sidecar)
+    expect(await read('seed.schema.context.jsonld')).toEqual(sidecar)
   })
 
   it('writes it with --write', async () => {
-    await write('seedSchema.context.jsonld', sidecar)
+    await write('seed.schema.context.jsonld', sidecar)
     expect(await run('sync', '--write')).toBe(0)
-    const written = await read('seedSchema.context.jsonld')
+    const written = await read('seed.schema.context.jsonld')
     expect(written.schemaVersion).toBe(2)
     expect(written['@context']).toMatchObject({ Post: { '@id': 'schema:BlogPosting', '@context': { title: 'schema:headline' } } })
     expect(await run('check')).toBe(0)
@@ -98,14 +98,14 @@ describe('seed-rdf sync', () => {
 
 describe('seed-rdf suggest', () => {
   it('prints suggestions for unmapped properties', async () => {
-    await write('seedSchema.context.jsonld', sidecar)
+    await write('seed.schema.context.jsonld', sidecar)
     expect(await run('suggest')).toBe(0)
     expect(out).toEqual(['Post.summary (prop-summary): dcterms:abstract'])
   })
 
   it('creates a sidecar from the suggestions with --write', async () => {
     expect(await run('suggest', '--write')).toBe(0)
-    const written = await read('seedSchema.context.jsonld')
+    const written = await read('seed.schema.context.jsonld')
     expect(written.terms).toEqual({ 'model-post': 'schema:BlogPosting', 'prop-title': 'dcterms:title', 'prop-summary': 'dcterms:abstract' })
     expect(written['@context']).toMatchObject({ dcterms: 'http://purl.org/dc/terms/', schema: 'https://schema.org/' })
     expect(await run('check')).toBe(0)

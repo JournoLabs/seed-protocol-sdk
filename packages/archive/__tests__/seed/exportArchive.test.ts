@@ -8,6 +8,7 @@ import { BaseDb, generateId, importJsonSchema, Item, rewriteHtmlEmbeddedImagesOn
 import { digestHex, getBagFile, validateBag, type Bag } from '../../src'
 import { writeBagDirectory } from '../../src/node'
 import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
+import { checksumAddress } from '@seedprotocol/eas'
 import { ArchiveExportError, exportArchive } from '../../src/seed/exportArchive'
 import { waitForPendingOutboxOps } from '../../../sdk/src/outbox'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../../sdk/__tests__/test-utils/client-init'
@@ -198,6 +199,13 @@ testDescribe('exportArchive', () => {
     expect(info).toContain('Source-Organization: Test Desk\n')
     expect(info).toContain(`Seed-Uid: ${post.seedUid}\n`)
     expect(info).toContain('Seed-Bag-Times: local-record\n')
+    // Checksummed, as a reproducible bag writes it; the agent is the package that made the bag
+    expect(checksumAddress(UNPUBLISH_TEST_PUBLISHER)).not.toBe(UNPUBLISH_TEST_PUBLISHER)
+    expect(info).toContain(`EAS-Attester: ${checksumAddress(UNPUBLISH_TEST_PUBLISHER)}\n`)
+    expect(info).toContain('Bag-Software-Agent: @seedprotocol/archive exportArchive (')
+    expect(premis).toContain(`<premis:agentIdentifierValue>${checksumAddress(UNPUBLISH_TEST_PUBLISHER)}</premis:agentIdentifierValue>`)
+    expect(premis).toContain('<premis:agentIdentifierValue>@seedprotocol/archive</premis:agentIdentifierValue>')
+    expect(premis).not.toContain('@seedprotocol/sdk')
 
     const bagitPy = findBagitPy()
     if (bagitPy || bagitPyRequired()) {

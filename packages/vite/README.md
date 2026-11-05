@@ -38,7 +38,7 @@ Don't list `@seedprotocol/*` packages, `sqlocal`, `drizzle-orm` or `@sqlite.org/
 - **`optimizeDeps.rolldownOptions.output.strictExecutionOrder: true`**, unless you set it. drizzle-orm's modules import each other in a cycle; when your app imports both `@seedprotocol/sdk` and `@seedprotocol/sdk/drizzle`, the dev pre-bundle can otherwise run them out of order and fail with `Cannot read properties of undefined (reading 'Symbol')`.
 - **`resolve.dedupe`** for React, thirdweb, xstate, ZenFS and the Seed packages, each only when your app root resolves it. A linked Seed package otherwise loads its own React (hooks fail) or its own copy of a Seed package.
 - **`server.fs.allow`** for the SDK, sqlocal and SQLite WASM directories when they are outside your app, so `vite dev` can serve the database worker and WASM file of a linked SDK.
-- **An RDF sidecar check** on the dev server, when `seedSchema.context.jsonld` sits beside `seedSchema.json` and the app has `@seedprotocol/rdf`. It runs at startup and whenever either file changes, and warns about terms whose model or property is gone and about an `@context` a rename left behind. It never writes either file; `seed-rdf sync --write` does.
+- **An RDF sidecar check** on the dev server, when `seed.schema.context.jsonld` sits beside `seed.schema.json` and the app has `@seedprotocol/rdf`. It runs at startup and whenever either file changes, and warns about terms whose model or property is gone and about an `@context` a rename left behind. It never writes either file; `seed-rdf sync --write` does.
 
 With an SDK installed from npm in the app itself, only the first three matter, and you can set them without the plugin:
 
@@ -67,7 +67,7 @@ seedVitePlugin({
   includeNodePolyfills: false,
   fsModules: [],
   debug: false,
-  rdfSidecar: { schema: 'seedSchema.json', sidecar: 'seedSchema.context.jsonld' },
+  rdfSidecar: { schema: 'seed.schema.json', sidecar: 'seed.schema.context.jsonld' },
 })
 ```
 
@@ -77,7 +77,7 @@ seedVitePlugin({
 | `includeNodePolyfills` | `false` | Add `vite-plugin-node-polyfills` for `path`, `buffer`, `events`, `string_decoder` and `util` and the `Buffer` / `process` / `global` globals, a minimal `stream` stub, and inline `global` / `process` shims in `index.html`. The SDK doesn't need them; turn this on when another dependency uses Node built-ins in the browser. Full `stream` and `crypto` polyfills are left out because they break Vite SSR and React Router prerender. |
 | `fsModules` | `[]` | Modules aliased to ZenFS (`@zenfs/core`, or `@zenfs/core/promises` for ids containing "promises"), for app code or other dependencies that import `fs` in the browser. The SDK doesn't. For example `['fs', 'fs/promises', 'node:fs', 'node:fs/promises']`. |
 | `debug` | `false` | Log what the plugin adds, and warn about Node-only globals (`process`, `Buffer`, `global`, `__dirname`, `__filename`) left in production chunks. |
-| `rdfSidecar` | `{ schema: 'seedSchema.json', sidecar: 'seedSchema.context.jsonld' }` | Paths, relative to the Vite root, of the schema and RDF sidecar the dev server checks. Without `sidecar`, it's the schema's path with `.context.jsonld` in place of `.json`. `false` turns the check off. |
+| `rdfSidecar` | `{ schema: 'seed.schema.json', sidecar: 'seed.schema.context.jsonld' }` | Paths, relative to the Vite root, of the schema and RDF sidecar the dev server checks. Without `sidecar`, it's the schema's path with `.context.jsonld` in place of `.json`. `false` turns the check off. |
 
 The options type is exported as `SeedVitePluginOptions`.
 

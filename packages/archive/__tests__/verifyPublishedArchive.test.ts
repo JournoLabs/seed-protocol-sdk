@@ -250,6 +250,10 @@ describe('verifyPublishedArchive', () => {
     expect(gatewayDown.attestation.status).toBe('passed')
     expect(gatewayDown.fixity.status).toBe('not_checked')
     expect(gatewayDown.fixity.detail).toContain("Couldn't read manifest")
+    // The anchor was found; the gateway, not the anchor, is why its hash wasn't compared
+    expect(gatewayDown.anchor.status).toBe('not_checked')
+    expect(gatewayDown.anchor.detail).toContain("Couldn't read manifest")
+    expect(gatewayDown.anchor.detail).not.toContain('no anchored hash')
   })
 
   it('falls through to the next gateway', async () => {

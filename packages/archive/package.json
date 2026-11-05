@@ -49,6 +49,16 @@
         "default": "./dist/verify.js"
       }
     },
+    "./seed": {
+      "import": {
+        "types": "./dist/seed/index.d.ts",
+        "default": "./dist/seed.js"
+      },
+      "require": {
+        "types": "./dist/seed/index.d.ts",
+        "default": "./dist/seed.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -149,7 +149,8 @@ describe('suggestTerms', () => {
       { model: 'Post', id: 'model-post', term: 'schema:BlogPosting' },
       { model: 'Post', property: 'title', id: 'prop-title', term: 'dcterms:title' },
       { model: 'Post', property: 'publishedAt', id: 'prop-published', term: 'dcterms:issued' },
-      { model: 'Post', property: 'html', id: 'prop-html', term: 'schema:text' },
+      // An Html property's value is a storage seed's IRI, so not schema:text, whose range is Text
+      { model: 'Post', property: 'html', id: 'prop-html', term: 'schema:associatedMedia' },
       { model: 'Post', property: 'authors', id: 'prop-authors', term: 'dcterms:creator' },
     ])
   })

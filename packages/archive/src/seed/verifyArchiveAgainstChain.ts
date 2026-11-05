@@ -49,7 +49,7 @@ export async function verifyArchiveAgainstChain(
     }
   }
   if (info.get('Seed-Bag-Format') !== current.get('Seed-Bag-Format')) {
-    return notChecked(`The bag uses format ${info.get('Seed-Bag-Format')}, and this SDK writes ${current.get('Seed-Bag-Format')}`)
+    return notChecked(`The bag uses format ${info.get('Seed-Bag-Format')}, and this @seedprotocol/archive writes ${current.get('Seed-Bag-Format')}`)
   }
 
   const expected = verifyArchive(rebuilt).tagmanifestSha256

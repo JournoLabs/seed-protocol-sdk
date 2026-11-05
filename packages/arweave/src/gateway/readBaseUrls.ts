@@ -97,11 +97,12 @@ export async function fetchArweaveRawFromBaseUrl(
  * GET `/raw/{id}` across read gateways and return the first non-empty body. Preferred gateways go
  * first and are tried before any read-gateway probe; a just-published item is served by the
  * gateway it was uploaded through well before it reaches L1 or the public hosts.
- * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`).
+ * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`); `decode: false`
+ * returns the transaction's bytes as stored, as `getTransactionData` does.
  */
 export async function fetchArweaveRawBytesAcrossGateways(
   transactionId: string,
-  options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number },
+  options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number; decode?: boolean },
 ): Promise<Uint8Array | undefined> {
   const tried = new Set<string>()
   const tryUrls = async (urls: string[]): Promise<Uint8Array | undefined> => {
@@ -111,7 +112,10 @@ export async function fetchArweaveRawBytesAcrossGateways(
       const res = await fetchArweaveRawFromBaseUrl(base, transactionId, options)
       if (!res) continue
       try {
-        const { bytes } = await readArweaveContentResponse(res, { transactionId })
+        const bytes =
+          options?.decode === false
+            ? new Uint8Array(await res.arrayBuffer())
+            : (await readArweaveContentResponse(res, { transactionId })).bytes
         if (bytes.byteLength > 0) return bytes
       } catch {
         /* body read failed — next gateway */
