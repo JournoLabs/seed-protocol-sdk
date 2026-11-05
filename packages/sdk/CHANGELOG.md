@@ -50,7 +50,6 @@ All notable changes to this package are documented in this file.
 - publish: journal attestation sends, refuse one that may double-attest (7243e1a0)
 - publish: anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
 - archive: a bag on Arweave as a path manifest (ac1f80da)
-- eas: bag anchor schema, left out of property reads (d5773848)
 - reproducible bags from EAS and Arweave, with asOf (046de15a)
 - archive: verifyArchive, VERIFY.txt and verifyArchiveAgainstChain (a20bd6e5)
 - reproducible archive bags and clock sources (a584ba15)
@@ -91,9 +90,7 @@ All notable changes to this package are documented in this file.
 #### Features
 
 - eas, query: readers treat an unfilled reference as no related seed (de73cdfc)
-- publish: decode the three-phase multiPublish's reference errors (1c8bb4e8)
 - publish: a contract publish attests both sides of a draft cycle (22e657e4)
-- publish: publish the whole graph in one multiPublish transaction (1d1c3188)
 - a publish reference into a list names the element it fills (69f3e11a)
 - publish: upload size limit, confirm step and upload estimate (68a833f1)
 

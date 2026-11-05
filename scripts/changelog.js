@@ -18,6 +18,9 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { execFileSync } from 'child_process'
 
+/** Package-relative globs for tests and their fixtures (`git log` pathspecs). */
+const TEST_PATHS = ['**/__tests__/**', '**/*.test.*', '**/*.spec.*']
+
 const HIDDEN_TYPES = new Set(['test', 'tests', 'ci', 'chore', 'build', 'style'])
 const GROUPS = [
   ['breaking', 'Breaking'],
@@ -226,13 +229,19 @@ export function extendReleaseSection(text, { version, date, commitGroups }) {
 
 /**
  * Commits in `range` (e.g. `v0.7.2..HEAD`) that touched packages/<dir>, newest first, without merges.
- * Changes to the package's CHANGELOG.md don't count, so changelog edits don't list themselves.
+ * Changes to the package's CHANGELOG.md don't count, so changelog edits don't list themselves, and
+ * neither do changes to its tests and fixtures, which ship nothing.
  * @param {string} rootDir
  * @param {string} dir
  * @param {string} range
  */
 export function packageCommits(rootDir, dir, range) {
-  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', range, '--', `packages/${dir}`, `:(exclude)packages/${dir}/CHANGELOG.md`], {
+  const pathspecs = [
+    `packages/${dir}`,
+    `:(exclude)packages/${dir}/CHANGELOG.md`,
+    ...TEST_PATHS.map((glob) => `:(exclude,glob)packages/${dir}/${glob}`),
+  ]
+  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', range, '--', ...pathspecs], {
     cwd: rootDir,
     encoding: 'utf-8',
   }).trim()

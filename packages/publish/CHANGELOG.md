@@ -64,7 +64,6 @@ All notable changes to this project will be documented in this file.
 - journal each direct EAS transaction (c458a58d)
 - pin each UserOp attempt to its own EntryPoint nonce key (5d9fbee8)
 - reconcile open attempts before any retry or restore sends (ec41d7f5)
-- archive: verifyPublishedArchive, a browser entry that checks a bag against its anchor (7e95bff1)
 - journal attestation sends, refuse one that may double-attest (7243e1a0)
 - anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
 
@@ -149,9 +148,7 @@ All notable changes to this project will be documented in this file.
 - read publish results from the account's Attested events (147bbff1)
 - send the batch's value and drop the replaced-executor uninstall (440d267e)
 - disconnect works before config; ConnectButton waits for it before stopping publishes (089754e3)
-- sdk: typed errors for getPublishModels and Node resetLocalData; export UpdateVersionUidProps (89939f2d)
 - core entry no longer imports thirdweb at load (d1e5c962)
-- sdk: use seedprotocol.io for the schema file $schema URL (ea2d96e3)
 
 #### Other
 

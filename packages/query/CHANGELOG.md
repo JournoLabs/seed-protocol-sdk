@@ -24,7 +24,6 @@ All notable changes to this package are documented in this file.
 
 - getSeedAttestations takes asOf and returns the Version history (c555dec5)
 - rdf: read a Schema's sidecar as a lens over the state graph (27c71f5e)
-- eas: bag anchor schema, left out of property reads (d5773848)
 
 #### Other
 
