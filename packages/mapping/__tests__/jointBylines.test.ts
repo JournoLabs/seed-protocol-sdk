@@ -79,6 +79,20 @@ describe('split, then lookup', () => {
     ])
   })
 
+  it('a single Relation target filled by one part reports no miss for the others', () => {
+    // An import that counts every miss as a failed property would log a filled author as skipped
+    const known = apply('Mira Chen and Lee Park', edge(people, { ...splitOn, propertyName: 'author' }), author)
+    expect(known).toEqual({ bag: { author: 'mira' }, misses: [] })
+    const later = apply('Lee Park and Mira Chen', edge(people, { ...splitOn, propertyName: 'author' }), author)
+    expect(later).toEqual({ bag: { author: 'mira' }, misses: [] })
+  })
+
+  it('a single Relation target with no part known reports each part', () => {
+    const { bag, misses } = apply('Lee Park and Ana Diaz', edge(people, { ...splitOn, propertyName: 'author' }), author)
+    expect(bag).toEqual({})
+    expect(misses.map((m) => m.value)).toEqual(['Lee Park', 'Ana Diaz'])
+  })
+
   it('a string with no separator is reported whole', () => {
     const { misses } = apply('Lee Park', edge(people, splitOn))
     expect(misses).toEqual([{ sourceId: 'rss-author', propertyName: 'authors', value: 'Lee Park' }])

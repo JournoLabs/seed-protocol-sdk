@@ -1,6 +1,6 @@
 import {
   isRelationLookupTarget,
-  resolveSourceLookup,
+  resolveTargetLookup,
   shapeLookupValue,
 } from './relationLookup'
 import { resolveMappingSource } from './resolvedSources'
@@ -90,15 +90,16 @@ function classFromSource(source: SourceNode): UrlMediaClass | undefined {
 
 /**
  * A lookup edge's value (absent when nothing matched) and the misses to report. An empty source
- * value is no lookup: no value and no misses. A split value that is partly known keeps the known
- * parts' refs and reports each unknown part, and a repeated source does the same for each value.
+ * value is no lookup: no value and no misses. For a List target, a split value that is partly known
+ * keeps the known parts' refs and reports each unknown part, and a repeated source does the same
+ * for each value. A single target takes the first match and reports misses only when nothing matched.
  */
 function applyLookupEdge(
   mapping: FieldMapping,
   source: SourceNode,
   target: TargetProperty,
 ): { value?: string | string[]; misses: UnmatchedLookup[] } {
-  const { refs, misses: found } = resolveSourceLookup(mapping, source)
+  const { refs, misses: found } = resolveTargetLookup(mapping, source, target)
   const misses = found.map((miss) => ({ sourceId: source.id, propertyName: mapping.propertyName, ...miss }))
   return refs.length > 0 ? { value: shapeLookupValue(refs, target), misses } : { misses }
 }

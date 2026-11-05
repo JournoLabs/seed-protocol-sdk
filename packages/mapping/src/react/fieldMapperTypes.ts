@@ -47,6 +47,11 @@ export type FieldMapperRow = {
   source?: SourceNode
   /** Normalized origin sample string for the current source. */
   sampleValue: string
+  /**
+   * Every value a lookup on this source reads (each of `values`, else `value`), normalized. A lookup
+   * row is `needsLookup` until each has an entry, so a picker lists these, not `sampleValue`.
+   */
+  sampleValues: string[]
   /** Sync preview, or a description of what the host resolver will produce. */
   preview: string
   /** Transform this edge needs to yield a usable value, if any. */

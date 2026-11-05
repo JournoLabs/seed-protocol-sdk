@@ -8,7 +8,7 @@ import {
 } from '../edgeMapping'
 import {
   isRelationLookupTarget,
-  resolveSourceLookup,
+  resolveTargetLookup,
   lookupValuesFromSource,
   sampleValueFromSource,
   shapeLookupValue,
@@ -140,7 +140,7 @@ export function previewForEdge(
       propertyName: options?.propertyName ?? options?.target?.name ?? '',
       resolve: 'lookup' as const,
     }
-    const { refs, misses } = resolveSourceLookup(mapping, source)
+    const { refs, misses } = resolveTargetLookup(mapping, source, options?.target)
     const missing = misses.map(({ value }) => `‹lookup ref for "${truncateSample(value, 48)}"›`)
     if (refs.length > 0) {
       const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
@@ -202,6 +202,8 @@ export function rowState(args: {
   requiredResolve: ResolveJob | null
   conflict?: boolean
   source?: SourceNode
+  /** The property the row fills; a single Relation is mapped once one value has an entry. */
+  target?: TargetProperty
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
   if (!args.mapping || !isPresentEdge(args.mapping)) return 'empty'
@@ -214,7 +216,7 @@ export function rowState(args: {
   if (actual === 'lookup') {
     if (
       lookupValuesFromSource(args.source).length === 0 ||
-      resolveSourceLookup(args.mapping, args.source).misses.length > 0
+      resolveTargetLookup(args.mapping, args.source, args.target).misses.length > 0
     ) {
       return 'needsLookup'
     }
@@ -428,13 +430,15 @@ export function buildPropertyModeRows(args: {
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
     const sampleValue = sampleValueFromSource(source)
-    const state = rowState({ mapping, requiredResolve, source })
+    const sampleValues = lookupValuesFromSource(source)
+    const state = rowState({ mapping, requiredResolve, source, target })
     return {
       id: target.name,
       target,
       mapping,
       source,
       sampleValue,
+      sampleValues,
       preview: previewForEdge(source, mapping?.resolve, {
         target,
         propertyName: target.name,
@@ -518,6 +522,7 @@ export function buildSourceModeRows(args: {
         ? r.mapping
         : r.mapping
     const sampleValue = sampleValueFromSource(r.source)
+    const sampleValues = lookupValuesFromSource(r.source)
     const complete =
       mapping && isPresentEdge(mapping) ? mapping : undefined
     const state = rowState({
@@ -525,6 +530,7 @@ export function buildSourceModeRows(args: {
       requiredResolve,
       conflict: conflicts.has(r.id),
       source: r.source,
+      target: r.target,
     })
     // Drafts with only source or only property stay empty
     const effectiveState =
@@ -540,6 +546,7 @@ export function buildSourceModeRows(args: {
       mapping: complete,
       source: r.source,
       sampleValue,
+      sampleValues,
       preview: previewForEdge(r.source, complete?.resolve, {
         target: r.target,
         propertyName: complete?.propertyName,

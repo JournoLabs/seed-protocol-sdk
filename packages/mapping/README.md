@@ -248,7 +248,7 @@ import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
   }
   renderLookup={(row) => (
     <IdentityLookup
-      sampleValue={row.sampleValue}
+      values={row.sampleValues} // every value the row needs an entry for
       entries={row.mapping?.lookup?.entries ?? []}
       onChange={row.onLookupChange}
     />
@@ -291,9 +291,13 @@ const mapper = useFieldMapper({
 ```
 
 Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`.
-Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without it the
-package's uid text editor is shown; `slots.lookups: false` hides it. Entries are stored in
-`lookup.entries` on the edge.
+Pass `renderLookup` to paint the host picker (Identity, etc.) on that row, or after the rows with
+`slots.lookups: 'section'`. Without it the package's uid text editor is shown; `slots.lookups: false`
+hides it. Entries are stored in `lookup.entries` on the edge. A row stays `needsLookup` until each of
+`row.sampleValues` has an entry, except that a single Relation is mapped once one of them has.
+
+A document saved before 0.8.0 may keep its entries in a top-level `lookups` table, which 0.8.0
+ignores. `migrateMappingLookups(document)` moves them onto the edges; save the `document` it returns.
 
 Row and JSON previews match sync `applyMapping` output. Lookup hits appear in the
 bag; extract/file/derive/assemble stay under `_pendingResolve`. JSON sits behind a disclosure.

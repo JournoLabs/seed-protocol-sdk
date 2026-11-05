@@ -513,6 +513,12 @@ export interface FeedArchiveLink {
   href: string
 }
 
+/** A Date for Atom's `<updated>` from a Date or a date string; undefined for anything else. */
+function atomDate(value: unknown): Date | undefined {
+  const date = value instanceof Date ? value : typeof value === 'string' && value.trim() ? new Date(value) : undefined
+  return date && Number.isFinite(date.getTime()) ? date : undefined
+}
+
 export const createFeed = (
   items: FeedItem[],
   schemaName: string,
@@ -593,8 +599,9 @@ export const createFeed = (
           // Atom entries require: id, title, updated, links
           const entry: Record<string, unknown> = {
             ...item, // Preserve all dynamic properties, the item's own title, updated and links included
-            // A present null keeps the default: RFC 4287 requires <updated>
-            updated: item.updated ?? (item.date || item.pubDate || now),
+            // RFC 4287 requires a valid <updated>: an empty, unparseable or numeric value falls back
+            // to the item's published time, then now
+            updated: atomDate(item.updated) ?? atomDate(item.date) ?? atomDate(item.pubDate) ?? now,
             links: item.links ?? (item.link ? [{ href: item.link }] : []),
             // The same identifier as RSS's guid (D26)
             id: item.guid || item.id || item.link,

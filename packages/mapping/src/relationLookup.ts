@@ -190,6 +190,21 @@ export function resolveSourceLookup(
   return { refs: [...new Set(refs)], misses }
 }
 
+/**
+ * {@link resolveSourceLookup} for the property it fills. A single (non-List) target holds one ref,
+ * so once any value matches, the first match fills it and the other values are not misses (D55).
+ * With no match, or for a List target, every miss is kept.
+ */
+export function resolveTargetLookup(
+  mapping: FieldMapping,
+  source: SourceNode | undefined,
+  target: TargetProperty | undefined,
+): SourceLookupResolution {
+  const resolved = resolveSourceLookup(mapping, source)
+  if (!target || target.dataType === 'List' || resolved.refs.length === 0) return resolved
+  return { refs: resolved.refs.slice(0, 1), misses: [] }
+}
+
 export function withLookupEntries(
   edge: FieldMapping,
   entries: LookupEntry[],
