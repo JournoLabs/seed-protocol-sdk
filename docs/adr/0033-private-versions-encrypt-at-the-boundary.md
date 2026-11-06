@@ -36,6 +36,11 @@ which does not depend on the SDK, so a reader can decrypt without it. Each priva
 random content key, always wrapped to the publisher, so the publisher can read their own content
 without any outside service.
 
+Key wraps are post-quantum hybrid from the start, because ciphertext on Arweave stays readable to
+anyone who later breaks the wrap. The `mlkem768x25519` stanza seals the file key with HPKE to an
+X-Wing key (ML-KEM-768 plus X25519), following age's recipient of the same name. X-Wing comes from
+`@noble/post-quantum`; the HPKE key schedule and AES-256-GCM use WebCrypto.
+
 **Boundaries.** The SDK encrypts in exactly one place on the way out and decrypts at a fixed set of
 seams on the way in:
 

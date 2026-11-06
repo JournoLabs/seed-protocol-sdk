@@ -1,6 +1,6 @@
 {
   "format": "seed-private/v1",
-  "note": "Generated with __tests__/reference.ts (node:crypto). bodyPattern bytes are (i * 31 + 7) & 255 for i in 0..length-1.",
+  "note": "Generated with __tests__/reference.ts (node:crypto). bodyPattern bytes are (i * 31 + 7) & 255 for i in 0..length-1. recipientVectors and recipientEnvelope use fileKeyHex and payloadNonceHex; their stanzas were built with @hpke/core and @hpke/hybridkem-x-wing.",
   "fileKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "payloadNonceHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
   "vectors": [
@@ -117,5 +117,48 @@
       "envelopeLength": 201217,
       "envelopeSha256": "59663878456b5e4f156f1887f1482b9df46bea3639d1fc36dc1ccd0c8aa9128c"
     }
-  ]
+  ],
+  "recipientVectors": [
+    {
+      "name": "publisher",
+      "recipientSeedHex": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f",
+      "publicKeySha256": "da668025e295976458a417fdd74ce67e4fa5faa9de3edb98b61574a7d78d59e9",
+      "randomnessHex": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+      "stanza": {
+        "type": "mlkem768x25519",
+        "args": [
+          "nsqzJtAnd6cUhN8H9o117o3C0Ps4X5Y67W1wf5sFHvj64GZ+AYKyUw3yd35Y7GoLDtX8lfJupOTZO+cVQdUceuaZFlXmd/Mnf/nVc7A6FSos07je5B1TfyUnB1pPmg3oKT0RRWjaAYeWJP8bjjs3o8ATmav+P+dY7Lb+4V8BHiH8vkohCy/lLac0nAwHw9QIiXent1iomYijWy4UT+KaLz49zrxJ13iAtUzQlAi5FjKQ6LkIOsfbyfIPgfDgiRe9FbJhIJeCG3VNDnd/upojiFkr8u29WUgaEnOrfElSms6Hu5px3s7ZoJObuhYMoThOMFRS2OJvRnohYcbIdxj+s+SXcWJr5/gfKqq1pHLTU5/oESYzMCh/gb5efK1kuO8ZBWteydqc6Fvv2zHxiQOrYZyR4ORo2VR+/tAGqiMD1HmV8247Zx75fIPUdniITbVTo5tjegxH1pGSIcgCkGSrXCm//dqom9mLGZfmKce3KsFtoyO6HgwjUnZI63D4Z9Dxx2Mjqu8/UZ7OxAlrMoQ/VUFfEb0eoD39fE+jnisO3RQqDi+J2sJCW3qt41/gESBrk08urLZHHnkcQiztEJ26FD1vkaFFbqgCI70lyWSG32b+aEXXSU5rZ9j4B5PvrW01alumDEk/5zltOFerFSM54usA4ygLT3krCHkRjXN7kEuGWDBwgnGgkS8vbcRd/bjAsxP2SBljILUwWLckxQtyws1SWdEE/RMR5HVs5S994fNnbxXVy1PZF5D0di2yK5CvZihGmYTx4GNFPD0N3WPxSb9tTmaX5awqdZoyAQ30c7VDXDiOYOKPMssFveD7pqGYs05fGD4z1Hg31+2UAWgHLWeiNLLFKIiaz/WKqwglTRKjuQ8NLeNWE64c6ttQj84LV4c/YOGylI1ROCF/HZRHYP8qjnvW1vlupAbp5Jqq8JVeEDXKoMp/ivtynQD1Ox5c1FsXoWUrRq810LRgygZ0o1ihBazO56eERcPZllOW6daR/7c9yi73R2fVLMHzjrG/V0EqLkQ1hwc+70kbu+K5+A3792fwzZDIVVe/leErgOT/N1laF/RJXuO7wktr6IITS6X78IiWYjm0MbhVor6Ow/LLlZiNcfcR8JbxQoGY8RrLv8p9a+BYSvW4XvYTzIKfNHWZfEZoKdA+PgawA1pJFOxzb35eiRqgHgA8lrctxDdB0NYHYYn2NYCgCNU29GCfM7T/4N88CHqrhR207h6k80Jt7qR2fGoSR7YhPMfdOhbSKxlIxdsvINxbZYWaQYm6GVLFVGhBojAAfwGgHjJohifXmLGhWHB4wYULYzlOIjeBUc4GTUt9NsgAkJkTUeiaPLohAT7rW6MNOcwQnEeYQ/6iYhY2icWCiOWT25YAMe5wSqlpSny6F6RJa0iTw7lY7ELooCBs5sliMtHB+THQ/CBhfbShlcxMb9Gc3z6/Zi8/Pl9thpJsnBKM+EWBV0+WhA2Y7lq1Ox7Dt24rsluUXg"
+        ],
+        "bodyHex": "0a971addf1d380a9c5f1635a714185698ad6d93b027a86801d2c458833cfe74b111d9f95391122496fe206c0eba2376d"
+      }
+    },
+    {
+      "name": "recovery",
+      "recipientSeedHex": "707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f",
+      "publicKeySha256": "1591ead4832a073870453ff5b5338f69bf7d876a89931ede080704d100604c28",
+      "randomnessHex": "d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f",
+      "stanza": {
+        "type": "mlkem768x25519",
+        "args": [
+          "xOffTSnpoQmUH1M7fOE0Tj7b/3hb25aU8B9bX0hnRjnscFOTqy8tabo3e9Go8RpQrRLMroo5TGzpSOaj9HcRsF4xc0dxu/ikBdu6qzswk35JCY1mO278iVXQrMy4dUg12SSxLnzbnr3nKiw5NX+zHyK+3nuSeeE2C4+rUzkjlgol473pxTtu/LPDl5BuoQ/kJgIILqWmUPJZWvMG0kFFkz6c6i3Cqy6d0BTl/KiOnZk8nqQ21xhFO/sGQhDzr2ErtPpRbKETHJr4n+MbjYjht24cDtME66QMpKvjveTmAM0PYggz1IYYlgLlzQwQKbtNfsBpPFuqOfFbhCNvIPbrd282CmYInMru+aLTzZrj3wqmRUW35rxg+yYOYsUpqv8diYmOuV8MnumV/xBEJkUS3lsuvH/WU1bKYlJWTzMwF1QHa/9N5GxvJByv8tpgLUJ0DI78fC40Dp5LnrDu/an1HrvgyrGYJEibAuuo0zuZcZH6SCFdK4Mi1KW8CE4AEHbdxWwBly2sYoC/NeLl3itpN2tZkw+GnK6lkMda28ZLIzzGhLOUT+OOCg+m0h8Iuo726NKDTGIj5X/VKbNnondFwyJzrqeDFywhARtqIQvX7mpci3x196oCTJ5kjDtctWZeZ977VQTcEH5Fewb6cvRB6rfVFEOqk5V5Y8GuqknUVl+6qgeF7tlSAwUVJMmR2dTi/2iDR1Tnbqvpbk7ZAg1EqMOue99SzsjV76qLDB2KYO8qia87qXhWcgShuPH2Tm6tffP/GlnY75Hb6JAa2eOQWYTOvzlOCVZ52nNnq+GSPF1DYZIz1jH99Jk1ZtHxZ5alwccmKOQGKRaJ+6cVoDKvJdCTp6PafqbUNvNlbBVUoakQ5mhUUP7bCaRsN/S45foYnSbH69W8oXQ284QnbLs+a5ZsHw5wXVJ8FRV5cjnVEwqMRbMC9O9nUUZQL15I/ZqhzhQtVeGVbYJH3Dvzvv5+/G81TDWOXOLu4Fr/LLfX/6lQj+U5pxV7WgAlPLEmDu+WmqO8nGygY//7+nU6AfTiuAc1kiQohDEq+0wZQKkJTtEAbhlBWPIYmNGdkMAjhC9yAUzMfx1Fj4HVuR+HI7OIbmkBDbtp23nvF9WVd6wwQYJMVpzGu5nwmfKoDNg1mgFkaN1Asfd5SF9CYLaqcTsIT7/aSYymdjYWx1pVEFFVUv1OBiWjwzPkm0H202YHhvwAW0AutveuaeJ866EHhHuSA7X/HZymjK6ve6u8Y2iWxI7uxv7otuF9DfOh5D88uIf0l9vka5+iU7lRKtJC0NuQnhDHWFtGRdcgV6PfeGi3Rqr1Dyzuq2IAOm24crlKAR0odF2+PllEkHn77Se3Vr3SlaXedVrES1gr0uEZ/O3x1FLv1Df0sSIloAk0XOqH8KlKLiZi5QC2+t7/u4XladvOi5uZ/IuMhmRp4M5Mnv+2pPE+c84WKCejL/kjePz082Rk2M8KgRNjhpCndfK2mavWbg"
+        ],
+        "bodyHex": "fc86293b056e2bb6766e7222c0abad25ea32f3ac2c6f06d7a17ae25d391b4c112e48a6c11bc0769d7de8375d19bb161d"
+      }
+    }
+  ],
+  "recipientEnvelope": {
+    "bind": {
+      "envelopeId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "chainId": "11155420"
+    },
+    "contentType": "text/html",
+    "bodyText": "<p>Only the publisher and the recovery key can read this.</p>",
+    "padding": "padme",
+    "stanzas": [
+      "publisher",
+      "recovery"
+    ],
+    "envelopeLength": 3511,
+    "envelopeSha256": "3c7885a10633f771aa8e7fa181c926a9a115bb6b3c3a8e582b4b445b35278735"
+  }
 }

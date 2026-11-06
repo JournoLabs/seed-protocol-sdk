@@ -6,8 +6,8 @@ follows [age](https://github.com/C2SP/C2SP/blob/main/age.md): a text header of r
 authenticated by an HMAC, then a STREAM payload of independently authenticated chunks. It differs
 from age in the key size, the cipher, the `bind` line and the content frame. ADR 0033 records why.
 
-Status: draft. Recipient stanza types are not defined yet; this version fixes the framing, the
-payload and the header MAC.
+Status: draft. One recipient stanza type is defined, `mlkem768x25519`. Stanza types for readers'
+key grants and subscription epochs come with those features.
 
 ## Notation
 
@@ -58,6 +58,38 @@ stanza types it doesn't know. The type `x-test` appears only in test vectors.
 "---")`. The MAC covers the version line, the bind line, every stanza and the three dashes, not the
 space or the MAC itself. A reader must verify it, in constant time, before decrypting the payload.
 
+## Recipient stanzas
+
+### mlkem768x25519
+
+The file key sealed with HPKE (RFC 9180) to an X-Wing public key. The publisher's own wrap and the
+recovery wrap are both this type, each to its own key. The construction follows age's
+`mlkem768x25519` recipient ([c2sp.org/age](https://c2sp.org/age)) with a different `info`
+string, a 32-byte file key and AES-256-GCM.
+
+**Keys.** The secret key is 32 random bytes. The public key is the 1216-byte X-Wing encapsulation
+key derived from it (draft-connolly-cfrg-xwing-kem, the KEM that draft-ietf-hpke-pq calls
+MLKEM768-X25519): the ML-KEM-768 encapsulation key followed by the X25519 public key.
+
+**Wrapping.** `enc, ct = SealBase(pkR = public key, info = "seed-private/v1/mlkem768x25519",
+aad = "", pt = file key)` with this suite:
+
+| | Algorithm | Id |
+|---|---|---|
+| KEM | MLKEM768-X25519 (X-Wing) | `0x647a` |
+| KDF | HKDF-SHA256 | `0x0001` |
+| AEAD | AES-256-GCM | `0x0002` |
+
+The stanza is `-> mlkem768x25519 <base64(enc)>` with `ct` as its body. `enc` is 1120 bytes (the
+ML-KEM-768 ciphertext, then the X25519 ephemeral key) and `ct` is 48 bytes. Every wrap uses fresh
+encapsulation randomness.
+
+**Unwrapping.** A reader with a secret key computes `OpenBase(enc, skR, info, "", ct)`. A stanza
+of this type with other than one argument, an argument that isn't canonical base64 of 1120 bytes,
+or a body that isn't 48 bytes is malformed, and decryption fails. A body that doesn't authenticate
+means the stanza was wrapped to another key; the reader tries the next stanza. Readers try every
+`mlkem768x25519` stanza, since the header doesn't say which key each one is for.
+
 ## Payload
 
 The payload follows the MAC line's LF: the 16-byte payload nonce, then the chunks.
@@ -106,3 +138,10 @@ nonce `a0 a1 ... af`, and each names its `padding` (`padme` or `none`). They wer
 cover a short text, an empty body with two stanzas and a stanza body that fills a whole line, an
 unpadded plaintext of exactly one chunk and of one chunk plus one byte, and a 200000-byte body
 padded to four chunks. `__tests__/envelope.test.ts` lists the failure cases above as tests.
+
+`recipientVectors` gives two `mlkem768x25519` stanzas, wrapping the same file key, each with its
+recipient seed, the SHA-256 of the public key and the 64 bytes of encapsulation randomness (the
+first 32 for ML-KEM, the last 32 for the X25519 ephemeral key). `recipientEnvelope` is an
+envelope carrying both. These stanzas were produced with hpke-js (`@hpke/core`,
+`@hpke/hybridkem-x-wing`), which shares no code with `src/`; `__tests__/recipient.test.ts` also
+checks the X-Wing KEM against the draft's first test vector.

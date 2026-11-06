@@ -33,6 +33,7 @@ export type EnvelopeErrorCode =
   | 'BIND_MISMATCH'
   | 'NO_KEY'
   | 'BAD_FILE_KEY'
+  | 'BAD_RECIPIENT_KEY'
   | 'HEADER_MAC'
   | 'TRUNCATED'
   | 'BAD_CHUNK'
