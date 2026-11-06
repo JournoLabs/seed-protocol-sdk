@@ -161,6 +161,8 @@ export const gateway = {
 `/raw/{id}` readers then try those URLs first and fall back to the resolved / public list: Html
 storage-seed bodies, the browser file-download worker, `BrowserArweaveClient.getTransactionData`,
 and the feed image service. Each gateway gets a 10 s timeout so a hung one does not block the next.
+When no gateway serves an Html body, the SDK logs one `console.warn` listing each gateway and its
+answer.
 Use `getArweaveReadBaseUrls()` for the same ordered list in your own readers. The config field is
 only applied when set, so an app's own setter call survives client init.
 

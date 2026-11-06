@@ -68,67 +68,99 @@ export async function ensureArweaveReadGatewayForFallback(): Promise<void> {
   }
 }
 
-/** GET `{baseUrl}/raw/{id}`; `undefined` on network error, timeout or non-2xx. */
+/**
+ * What one gateway answered to `/raw/{id}`: the HTTP status, `'timeout'` (our abort fired),
+ * `'network'` (fetch threw; a browser reports a CORS-blocked answer this way, without its status),
+ * `'empty'` (2xx with no bytes) or `'unreadable'` (2xx whose body or read transform failed).
+ */
+export type ArweaveRawReadOutcome = number | 'timeout' | 'network' | 'empty' | 'unreadable'
+
+export type ArweaveRawReadAttempt = { baseUrl: string; outcome: ArweaveRawReadOutcome }
+
+/** GET `{baseUrl}/raw/{id}`. `response` is set only for a 2xx answer. */
 export async function fetchArweaveRawFromBaseUrl(
   baseUrl: string,
   transactionId: string,
   options?: { timeoutMs?: number },
-): Promise<Response | undefined> {
+): Promise<ArweaveRawReadAttempt & { response?: Response }> {
+  const base = baseUrl.replace(/\/$/, '')
   const controller = new AbortController()
   const timer = setTimeout(
     () => controller.abort(),
     options?.timeoutMs ?? DEFAULT_ARWEAVE_RAW_READ_TIMEOUT_MS,
   )
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/raw/${encodeURIComponent(transactionId)}`, {
+    const res = await fetch(`${base}/raw/${encodeURIComponent(transactionId)}`, {
       method: 'GET',
       credentials: 'omit',
       signal: controller.signal,
     })
-    return res.ok ? res : undefined
+    return res.ok
+      ? { baseUrl: base, outcome: res.status, response: res }
+      : { baseUrl: base, outcome: res.status }
   } catch {
-    return undefined
+    return { baseUrl: base, outcome: controller.signal.aborted ? 'timeout' : 'network' }
   } finally {
     clearTimeout(timer)
   }
 }
 
 /**
- * GET `/raw/{id}` across read gateways and return the first non-empty body. Preferred gateways go
- * first and are tried before any read-gateway probe; a just-published item is served by the
- * gateway it was uploaded through well before it reaches L1 or the public hosts.
+ * GET `/raw/{id}` across read gateways, asking each at most once, and return the first non-empty
+ * body with what each gateway asked answered. Preferred gateways go first and are tried before any
+ * read-gateway probe; a just-published item is served by the gateway it was uploaded through well
+ * before it reaches L1 or the public hosts. The configured host (`BaseArweaveClient.getBaseUrl()`)
+ * goes last when the resolved list leaves it out.
  * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`); `decode: false`
  * returns the transaction's bytes as stored, as `getTransactionData` does.
  */
-export async function fetchArweaveRawBytesAcrossGateways(
+export async function readArweaveRawAcrossGateways(
   transactionId: string,
   options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number; decode?: boolean },
-): Promise<Uint8Array | undefined> {
+): Promise<{ bytes?: Uint8Array; attempts: ArweaveRawReadAttempt[] }> {
+  const attempts: ArweaveRawReadAttempt[] = []
   const tried = new Set<string>()
   const tryUrls = async (urls: string[]): Promise<Uint8Array | undefined> => {
-    for (const base of urls) {
-      if (tried.has(base)) continue
+    for (const url of urls) {
+      const base = url.trim().replace(/\/$/, '')
+      if (!base || tried.has(base)) continue
       tried.add(base)
-      const res = await fetchArweaveRawFromBaseUrl(base, transactionId, options)
-      if (!res) continue
+      const { response, ...attempt } = await fetchArweaveRawFromBaseUrl(base, transactionId, options)
+      if (!response) {
+        attempts.push(attempt)
+        continue
+      }
       try {
         const bytes =
           options?.decode === false
-            ? new Uint8Array(await res.arrayBuffer())
-            : (await readArweaveContentResponse(res, { transactionId })).bytes
-        if (bytes.byteLength > 0) return bytes
+            ? new Uint8Array(await response.arrayBuffer())
+            : (await readArweaveContentResponse(response, { transactionId })).bytes
+        if (bytes.byteLength > 0) {
+          attempts.push(attempt)
+          return bytes
+        }
+        attempts.push({ baseUrl: base, outcome: 'empty' })
       } catch {
-        /* body read failed — next gateway */
+        attempts.push({ baseUrl: base, outcome: 'unreadable' })
       }
     }
     return undefined
   }
 
   const preferred = await tryUrls(getPreferredArweaveReadBaseUrls())
-  if (preferred) return preferred
+  if (preferred) return { bytes: preferred, attempts }
 
   await ensureArweaveReadGatewayForFallback()
-  return tryUrls(getResolvedArweaveReadBaseUrls(options))
+  const bytes = await tryUrls([...getResolvedArweaveReadBaseUrls(options), BaseArweaveClient.getBaseUrl()])
+  return { bytes, attempts }
+}
+
+/** {@link readArweaveRawAcrossGateways}'s bytes; undefined when no gateway served any. */
+export async function fetchArweaveRawBytesAcrossGateways(
+  transactionId: string,
+  options?: ArweaveReadBaseUrlOptions & { timeoutMs?: number; decode?: boolean },
+): Promise<Uint8Array | undefined> {
+  return (await readArweaveRawAcrossGateways(transactionId, options)).bytes
 }
 
 /** {@link fetchArweaveRawBytesAcrossGateways} as text; undefined for an encrypted envelope no transform opened. */

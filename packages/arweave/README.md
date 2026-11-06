@@ -44,6 +44,11 @@ import { fetchArweaveRawTextAcrossGateways } from '@seedprotocol/arweave'
 const body = await fetchArweaveRawTextAcrossGateways(txId)
 ```
 
+`readArweaveRawAcrossGateways(txId)` asks the same gateways once each and returns `{ bytes, attempts }`,
+where each attempt is `{ baseUrl, outcome }` and `outcome` is the HTTP status, `'timeout'`, `'network'`
+(the request threw; in a browser this includes an answer blocked by CORS), `'empty'` or `'unreadable'`.
+Use it to say why a read missed.
+
 Override the fallback list with `ARWEAVE_READ_GATEWAYS` or `NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS` (comma-separated hosts).
 
 ### Gateway endpoint resolution
@@ -68,7 +73,7 @@ See [GATEWAY_HYPER.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main
 |-------|--------------|
 | `@seedprotocol/arweave` | `ArweaveClient` (alias of `BaseArweaveClient`), `IArweaveClient` |
 | | Gateway constants and env helpers: `DEFAULT_ARWEAVE_HOST`, `DEFAULT_ARWEAVE_GATEWAYS`, `ARWEAVE_HOST_ENV_KEYS`, `resolveArweaveHostFromEnv`, `getArweaveReadGatewayHostsForPrimary` |
-| | Read gateways: `ensureReadGatewaySelected`, `selectFirstHealthyReadGateway`, `probeGateway`, `getArweaveReadBaseUrls`, `fetchArweaveRawFromBaseUrl`, `fetchArweaveRawTextAcrossGateways`, `setPreferredArweaveReadBaseUrls` |
+| | Read gateways: `ensureReadGatewaySelected`, `selectFirstHealthyReadGateway`, `probeGateway`, `getArweaveReadBaseUrls`, `fetchArweaveRawFromBaseUrl`, `readArweaveRawAcrossGateways`, `fetchArweaveRawTextAcrossGateways`, `setPreferredArweaveReadBaseUrls` |
 | | Circuit breaker: `configureGatewayCircuitBreaker`, `isGatewayHostCircuitOpen`, `recordGatewayHostSuccess` / `recordGatewayHostFailure` |
 | | Gateway config: `resolveSeedGatewayEndpoints`, `resolveSidecarOrigin`, `seedGatewayConfigFromSeedConfig`, `seedGatewayConfigFromClientContext`, `SeedGatewayConfig`, `ResolvedSeedGatewayEndpoints` |
 | | Upload pipeline status: `getArweaveUploadStatus`, `isArweaveL1AnchoringComplete`, `getUploadPipelineTransactionStatus`, `queryArweaveGatewayTransactionWithFallback` |

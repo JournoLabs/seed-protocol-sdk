@@ -11,6 +11,7 @@ import {
   fetchArweaveRawBytesAcrossGateways,
   fetchArweaveRawTextAcrossGateways,
   getArweaveReadBaseUrls,
+  readArweaveRawAcrossGateways,
 } from '../../src/gateway/readBaseUrls.js'
 import { setArweaveContentReadTransform } from '../../src/content/arweaveContent.js'
 import type { ResolvedSeedGatewayEndpoints } from '../../src/types/gateway.js'
@@ -191,6 +192,63 @@ describe('fetchArweaveRawTextAcrossGateways', () => {
   it('returns undefined when every gateway fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
     await expect(fetchArweaveRawTextAcrossGateways(TX)).resolves.toBeUndefined()
+  })
+})
+
+describe('readArweaveRawAcrossGateways', () => {
+  const HUNG = 'https://hung.example'
+  const BLOCKED = 'https://blocked.example'
+  const EMPTY = 'https://empty.example'
+
+  beforeEach(() => {
+    BaseArweaveClient.setHost('https://arweave.net')
+  })
+
+  it("reports each gateway's outcome once when none serves the item", async () => {
+    setPreferredArweaveReadBaseUrls([PROXY, HUNG])
+    const fetchMock = vi.fn((url: string | URL, init?: RequestInit) => {
+      const s = String(url)
+      if (s.startsWith(HUNG)) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+      }
+      if (s.startsWith(BLOCKED)) return Promise.reject(new TypeError('Failed to fetch'))
+      if (s.startsWith(EMPTY)) return Promise.resolve(new Response('', { status: 200 }))
+      return Promise.resolve(new Response('nope', { status: 404 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { bytes, attempts } = await readArweaveRawAcrossGateways(TX, {
+      timeoutMs: 20,
+      fallbackHosts: [PROXY, 'blocked.example', 'empty.example'],
+    })
+
+    expect(bytes).toBeUndefined()
+    expect(attempts).toEqual([
+      { baseUrl: PROXY, outcome: 404 },
+      { baseUrl: HUNG, outcome: 'timeout' },
+      { baseUrl: BLOCKED, outcome: 'network' },
+      { baseUrl: EMPTY, outcome: 'empty' },
+      { baseUrl: 'https://arweave.net', outcome: 404 },
+    ])
+    const rawUrls = fetchMock.mock.calls.map(([url]) => String(url)).filter((u) => u.includes('/raw/'))
+    expect(rawUrls).toHaveLength(new Set(rawUrls).size)
+  })
+
+  it('tries the configured host when the resolved gateways leave it out', async () => {
+    BaseArweaveClient.setHost(PROXY)
+    setResolvedSeedGatewayEndpoints(
+      resolved({ activePath: 'http-proxy', arweaveHost: 'arweave.net', arweaveBaseUrl: 'https://arweave.net' }),
+    )
+    const fetchMock = vi.fn(async (url: string | URL) =>
+      String(url).startsWith(PROXY) ? new Response('from proxy', { status: 200 }) : new Response('', { status: 404 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { bytes, attempts } = await readArweaveRawAcrossGateways(TX)
+    expect(new TextDecoder().decode(bytes)).toBe('from proxy')
+    expect(attempts.at(-1)).toEqual({ baseUrl: PROXY, outcome: 200 })
   })
 })
 

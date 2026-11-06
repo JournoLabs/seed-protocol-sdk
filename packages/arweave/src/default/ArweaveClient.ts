@@ -96,7 +96,7 @@ export class DefaultArweaveClient implements IArweaveClient {
     // `/raw` is already decoded, so skip the preferred gateways when the caller asked for undecoded data.
     const preferred = options?.decode === false ? [] : getPreferredArweaveReadBaseUrls()
     for (const base of preferred) {
-      const response = await fetchArweaveRawFromBaseUrl(base, transactionId)
+      const { response } = await fetchArweaveRawFromBaseUrl(base, transactionId)
       if (!response) continue
       try {
         if (options?.string) {

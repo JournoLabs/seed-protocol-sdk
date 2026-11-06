@@ -4,6 +4,9 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- An Html body whose local file is missing is read from a file already downloaded under its transaction id, else from `/raw/{id}` on each read gateway once. When no gateway has it, one `console.warn` names the transaction and each gateway's answer (status, `timeout` or `network error`), once per transaction per page load. The read no longer falls back to arweave-js `getData`, which can't serve a bundled data item and logged four console lines per miss, or to a download that asked the same gateways again.
+- **Breaking:** `fetchArweaveRawFromBaseUrl`, re-exported from `@seedprotocol/arweave`, returns `{ baseUrl, outcome, response? }` (see the @seedprotocol/arweave changelog).
+
 - Private properties' uploads are encrypted: a private property's storage seed, an image embedded in a private Html property, and a composite whose ItemStorage properties are private go through `GetPublishUploadsOptions.encryptUpload`, which is now called only for those uploads. Without an encryptor, or when it returns nothing, building the uploads throws the new `PrivateUploadNotEncryptedError` (code `PRIVATE_UPLOAD_NOT_ENCRYPTED`) and nothing is uploaded. `summarizePublishUploads` and `summarizePublishWork` size a private upload as its envelope, at most, so cost estimates and upload limits include padding and the key wrap.
 - `updatePublishAttempt` takes `{ nonceKey: null, entryPoint: null }`, which records that an attempt's send went out under a key of the wallet's own.
 - `@seedprotocol/sdk/vite` exports `RdfSidecarOptions`, the type of the plugin's `rdfSidecar` option.
