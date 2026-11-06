@@ -20,6 +20,13 @@ A publish runs in the tab that started it, which holds `seed:publish:<seedLocalI
 restores in-progress publishes, it skips any whose lock another tab holds, and
 `PublishManager.createPublish` resolves `undefined` for a seed publishing elsewhere.
 
+Every tab sees the same `in_progress` rows in `publish_processes`. `publishLockHolder(seedLocalId)`
+from `@seedprotocol/publish` reads the lock to say which tab runs one: `'here'`, `'other-tab'` or
+`'none'`. `'none'` on an `in_progress` row means the tab running it closed. No open tab picks it up;
+the next tab to load restores it. The answer can change without the row changing, when the running
+tab closes, so re-reading only on row changes misses that. Without Web Locks every tab runs its own
+publishes, and the answer is `'here'`.
+
 That lock names one seed, and an attestation transaction can cover several. The open rows in
 `publish_attempts` cover the rest: they are in the shared database, and the check and the insert are
 one transaction, so a tab publishing a related item alone fails with `AttestationAttemptOpenError`

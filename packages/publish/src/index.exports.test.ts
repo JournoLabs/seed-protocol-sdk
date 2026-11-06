@@ -7,4 +7,9 @@ describe('@seedprotocol/publish entry', () => {
     expect(error).toBeInstanceOf(Error)
     expect(error.code).toBe('SIGNED_DATA_ITEMS_MISSING')
   })
+
+  test('exports publishLockHolder, so a tab can tell whether it runs a publish', async () => {
+    const entry = await import('./index')
+    expect(await entry.publishLockHolder('seed-not-publishing')).toBeOneOf(['here', 'none'])
+  })
 })

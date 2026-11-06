@@ -198,6 +198,10 @@ export type {
 } from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
+export {
+  publishLockHolder,
+  type PublishLockHolder,
+} from './services/publishManager/publishLocks'
 export type { PublishRestoreStatus } from './services/publishManager/actors/restoreFromDb'
 export {
   usePublishProcess,
