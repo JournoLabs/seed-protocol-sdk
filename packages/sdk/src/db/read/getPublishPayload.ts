@@ -34,6 +34,7 @@ import {
 import {
   getPublishGraph,
   htmlPropertyForHtmlSeed,
+  isPrivateProperty,
   type PublishGraph,
   type PublishGraphNode,
   type PublishGraphProperty,
@@ -272,6 +273,17 @@ async function attestProperty(
     matchesDataType(definition.dataType, ModelPropertyDataTypes.Html)
   const isRef = property.kind === 'relation' || property.kind === 'storageSeed'
   const isStorageTransaction = property.kind === 'storageTransaction'
+
+  // Only uploaded values can be private: anything else would be attested as plaintext. Schema
+  // files refuse the flag elsewhere; a model defined in code can still carry it.
+  if (isPrivateProperty(property) && property.kind !== 'storageSeed' && property.kind !== 'itemStorage' && row?.propertyValue != null && row.propertyValue !== '') {
+    addValidationError(
+      ctx,
+      `Cannot publish ${key}: it is marked private, but only Html, Json, File, Image and ItemStorage Text values are encrypted. Its value would be attested as plaintext.`,
+      key,
+    )
+    return undefined
+  }
 
   // The storage transaction slot attests this publish's upload of the node's file(s).
   const uploaded = isStorageTransaction ? uploadedTxFor(ctx, node.seedLocalId) : undefined

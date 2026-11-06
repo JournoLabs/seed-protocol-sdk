@@ -1,3 +1,4 @@
+import { getPublishConfig } from '~/config'
 import type { GetPublishUploadDataOptions } from '../helpers/getPublishUploadData'
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
@@ -17,6 +18,9 @@ export async function executeCreateArweaveDataItemsPhase2(
   const { item } = context
 
   const uploadDataOpts: GetPublishUploadDataOptions = {}
+  // From the config, not the context: a restored publish record holds no functions.
+  const encryptUpload = getPublishConfig().encryptPrivateUpload
+  if (encryptUpload) uploadDataOpts.encryptUpload = encryptUpload
   if (context.arweaveUploadTags?.length) {
     uploadDataOpts.arweaveUploadTags = context.arweaveUploadTags
   }

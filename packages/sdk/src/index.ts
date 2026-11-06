@@ -382,6 +382,7 @@ export {
   getPublishUploadData,
   readPublishUploadBytes,
   PublishUploadChangedError,
+  PrivateUploadNotEncryptedError,
   resolveItemStorageChildFile,
   type GetPublishUploadsOptions,
   type PublishUploadToEncrypt,

@@ -39,6 +39,14 @@ const schemaFile = () => ({
         cover: { id: generateId(), type: 'Text', storage: { type: 'ItemStorage', path: '/files', extension: '.bin' } },
       },
     },
+    SecretPost: {
+      id: generateId(),
+      properties: {
+        title: { id: generateId(), type: 'Text' },
+        storageTransactionId: { id: generateId(), type: 'Text' },
+        diary: { id: generateId(), type: 'Text', storage: { type: 'ItemStorage', path: '/html', extension: '.html' }, private: true },
+      },
+    },
   },
   enums: {},
   migrations: [],
@@ -49,7 +57,7 @@ testDescribe('ItemStorage children in publish uploads', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['StoragePost'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['StoragePost', 'SecretPost'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
     vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(
       async (_data: unknown, options?: { tags?: { name: string; value: string }[] }) =>
@@ -143,5 +151,26 @@ testDescribe('ItemStorage children in publish uploads', () => {
 
     const byName = await compositeChildren(post)
     expect(Object.keys(byName)).toEqual(['html'])
+  }, 90000)
+
+  it('a model with private ItemStorage properties uploads its composite encrypted', async () => {
+    const post = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'SecretPost', title: 'diary' } as any)
+    await waitForIdle(post, 'Item', 15000)
+    await waitForPropertyInstances(post)
+    await saveValue(post, 'diary', '<p>dear diary</p>')
+
+    await expect(getPublishUploadData(post as any)).rejects.toMatchObject({ code: 'PRIVATE_UPLOAD_NOT_ENCRYPTED', itemPropertyName: 'storageTransactionId' })
+
+    let plaintext: Uint8Array | undefined
+    const [upload] = await getPublishUploadData(post as any, {
+      encryptUpload: async ({ blob }) => {
+        plaintext = new Uint8Array(await blob.arrayBuffer())
+        return { blob: new Blob(['seed-private/v1\n']), tags: [] }
+      },
+    })
+    expect(upload!.itemPropertyName).toBe('storageTransactionId')
+    expect(new TextDecoder().decode(await upload!.blob.arrayBuffer())).toBe('seed-private/v1\n')
+    // The encryptor got the whole composite, framed as usual.
+    expect(decodeCompositeUpload(plaintext!)!.map((c) => [c.name, new TextDecoder().decode(c.bytes)])).toEqual([['diary', '<p>dear diary</p>']])
   }, 90000)
 })

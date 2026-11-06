@@ -16,6 +16,8 @@ private Versions ship (ADR 0033).
 - `buildKeystoreManifest`, `openKeystoreManifest`, `describeKeystoreManifest`: the public keystore
   manifest that recovers the identity, with a stanza per authenticator (`recoveryStanza`,
   `passkeyStanza`, `eoaSignatureStanza`). `enrollPasskey` and `passkeyPrf` make the WebAuthn calls.
+- `createPrivateUploadEncryptor`: the `encryptPrivateUpload` for `@seedprotocol/publish`, one envelope
+  per private upload.
 - `saveIdentityOnDevice`, `loadIdentityFromDevice`, `listIdentitiesOnDevice`,
   `forgetIdentityOnDevice`: an unlocked identity kept in IndexedDB under a non-extractable key.
   Any script on the origin can still decrypt it, so don't save one on a shared device.
@@ -75,3 +77,23 @@ const unlocked = await openKeystoreManifest(manifest, { passkey: passkeyPrf() },
 
 `registerEncryptionKey` in `@seedprotocol/publish` uploads the manifest and attests the key id and
 public keys from the user's account.
+
+Publishing private properties: pass an encryptor wrapping to the account's registered key.
+
+```ts
+import { createPrivateUploadEncryptor } from '@seedprotocol/encryption'
+import { getEncryptionKeysFromEas } from '@seedprotocol/eas'
+import { initPublish } from '@seedprotocol/publish'
+
+const [registration] = await getEncryptionKeysFromEas({ attester: account })
+initPublish({
+  // ...
+  encryptPrivateUpload: createPrivateUploadEncryptor({
+    recipients: [registration.recipientKey],
+    bind: { chainId: '11155420', publisher: account },
+  }),
+})
+```
+
+Only Html, Json, File, Image and ItemStorage Text properties can be `private: true`; their uploads
+are encrypted, and titles, relations and other scalars stay public.

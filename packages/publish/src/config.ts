@@ -210,6 +210,14 @@ export interface PublishConfig {
    */
   arweaveUploadTags?: TransactionTag[]
   /**
+   * Encrypts the uploads of private properties (ADR 0033): build it with
+   * `createPrivateUploadEncryptor` from `@seedprotocol/encryption`, wrapping to the publisher's
+   * registered key. Without it, publishing a private Html, Json, File, Image or ItemStorage value
+   * fails with `PrivateUploadNotEncryptedError` before anything is uploaded. Public uploads never
+   * reach it.
+   */
+  encryptPrivateUpload?: import('@seedprotocol/sdk').GetPublishUploadsOptions['encryptUpload']
+  /**
    * Default Html embedded data-URI policy for publishes when not overridden per {@link CreatePublishOptions}.
    * Default behavior when unset: `materialize`.
    */

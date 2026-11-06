@@ -13,6 +13,8 @@ import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
 import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
 import {
   getPublishGraph,
+  htmlPropertyForHtmlSeed,
+  isPrivateProperty,
   type PublishGraph,
   type PublishGraphNode,
   type PublishGraphProperty,
@@ -35,12 +37,32 @@ export type GetPublishUploadsOptions = {
    */
   onlyHtmlStorageSeedLocalIds?: string[]
   /**
-   * Encrypts an upload of a private Version (ADR 0033). Called once per upload with its plaintext
-   * and real MIME type; return undefined to upload it as is. An encrypted upload is hashed as the
-   * returned bytes, tagged `Content-Type: application/octet-stream` plus the returned tags, and
-   * gets no `arweaveUploadTags`, which would mark it as the app's.
+   * Encrypts the uploads of private properties (ADR 0033): a private Html, Json, File or Image
+   * property's storage seed, an image embedded in a private Html property, and a node's composite
+   * when its ItemStorage properties are private. Called once per private upload with its plaintext
+   * and real MIME type. An encrypted upload is hashed as the returned bytes, tagged
+   * `Content-Type: application/octet-stream` plus the returned tags, and gets no
+   * `arweaveUploadTags`, which would mark it as the app's. Without it, or when it returns
+   * undefined, a publish with a private upload throws {@link PrivateUploadNotEncryptedError}
+   * before anything is uploaded. Public uploads never reach it.
    */
   encryptUpload?: (upload: PublishUploadToEncrypt) => Promise<EncryptedPublishUpload | undefined>
+}
+
+/**
+ * A private property's upload had no encryptor, or the encryptor returned nothing. Nothing was
+ * uploaded: a private value is never sent as plaintext.
+ */
+export class PrivateUploadNotEncryptedError extends Error {
+  readonly code = 'PRIVATE_UPLOAD_NOT_ENCRYPTED' as const
+
+  constructor(readonly itemPropertyName: string) {
+    super(
+      `Cannot publish ${itemPropertyName}: it is private and no encryptor encrypted it. Configure encryptPrivateUpload (see @seedprotocol/encryption).`,
+    )
+    this.name = 'PrivateUploadNotEncryptedError'
+    Object.setPrototypeOf(this, PrivateUploadNotEncryptedError.prototype)
+  }
 }
 
 /** What {@link GetPublishUploadsOptions.encryptUpload} receives. */
@@ -77,6 +99,8 @@ export type PublishUploadSource = UploadTarget & {
   children?: { name: string; filePath: string }[]
   /** A saved ItemStorage edit whose file is gone: the paths tried, per property. */
   missingLocalEdits?: { name: string; tried: string[] }[]
+  /** Its content belongs to a private property, so it is uploaded only encrypted. */
+  private?: boolean
 }
 
 /** Longest a file's first bytes need to be for sniffMimeType. */
@@ -101,9 +125,11 @@ const buildPublishUploadData = async (
   contentType: string | undefined,
   target: UploadTarget,
   options: GetPublishUploadsOptions | undefined,
+  isPrivate: boolean,
 ): Promise<PublishUploadData> => {
-  const encrypted = await options?.encryptUpload?.({ ...target, blob, contentType })
-  if (encrypted) {
+  if (isPrivate) {
+    const encrypted = await options?.encryptUpload?.({ ...target, blob, contentType })
+    if (!encrypted) throw new PrivateUploadNotEncryptedError(target.itemPropertyName)
     const contentHash = await getBlobSha256(encrypted.blob)
     return {
       blob: encrypted.blob,
@@ -235,7 +261,15 @@ async function compositeSource(node: PublishGraphNode): Promise<PublishUploadSou
     else if (missingLocalEdit) missingLocalEdits.push({ name: property.key, tried: missingLocalEdit })
   }
   if (children.length === 0 && missingLocalEdits.length === 0) return undefined
-  return { ...slotTarget(node), children, ...(missingLocalEdits.length ? { missingLocalEdits } : {}) }
+  // Schema files keep a model's ItemStorage properties all private or all public; one private
+  // child is enough to encrypt the composite, so a code-defined mix never leaks the private one.
+  const isPrivate = node.properties.some((p) => p.kind === 'itemStorage' && isPrivateProperty(p))
+  return {
+    ...slotTarget(node),
+    children,
+    ...(missingLocalEdits.length ? { missingLocalEdits } : {}),
+    ...(isPrivate ? { private: true } : {}),
+  }
 }
 
 /** The file of a storage seed this publish attests, named by the referring property's row. */
@@ -255,6 +289,7 @@ async function storageSeedSource(owner: PublishGraphNode, property: PublishGraph
     itemPropertyLocalId: property.row?.localId ?? '',
     versionLocalId: property.row?.versionLocalId ?? owner.version.localId ?? '',
     filePath,
+    ...(isPrivateProperty(property) ? { private: true } : {}),
   }
 }
 
@@ -291,7 +326,9 @@ export async function getPublishUploadSources(
     for (const row of node.embeddedImages) {
       const image = graph.nodes.find((n) => n.seedLocalId === row.imageSeedLocalId && n.kind === 'embeddedImage')
       const filePath = image ? await findEmbeddedImageFilePath(image.seedLocalId) : undefined
-      if (image && filePath) add({ ...slotTarget(image), filePath })
+      // An image embedded in a private Html property is as private as the Html.
+      const isPrivate = isPrivateProperty(htmlPropertyForHtmlSeed(node, row.htmlSeedLocalId))
+      if (image && filePath) add({ ...slotTarget(image), filePath, ...(isPrivate ? { private: true } : {}) })
     }
   }
   return sources
@@ -299,7 +336,7 @@ export async function getPublishUploadSources(
 
 /** The content of one source; a missing local ItemStorage edit fails the publish. */
 async function readSource(source: PublishUploadSource, options: GetPublishUploadsOptions | undefined): Promise<PublishUploadData> {
-  const { filePath, children, missingLocalEdits, ...target } = source
+  const { filePath, children, missingLocalEdits, private: isPrivate = false, ...target } = source
   const missing = missingLocalEdits?.[0]
   if (missing) {
     // Uploading without it would publish a composite that silently lacks this edit.
@@ -317,10 +354,10 @@ async function readSource(source: PublishUploadSource, options: GetPublishUpload
       parts.push({ name: child.name, bytes: new Uint8Array(await blob.arrayBuffer()) })
     }
     const composite = new Blob([encodeCompositeUpload(parts) as BlobPart])
-    return buildPublishUploadData(composite, 'application/octet-stream', target, options)
+    return buildPublishUploadData(composite, 'application/octet-stream', target, options, isPrivate)
   }
   const blob = await BaseFileManager.openBlob(filePath!)
-  return buildPublishUploadData(blob, await uploadFileMimeType(blob, filePath!), target, options)
+  return buildPublishUploadData(blob, await uploadFileMimeType(blob, filePath!), target, options, isPrivate)
 }
 
 /** Fails like a publish would when an item's relation names a seed that isn't there. */

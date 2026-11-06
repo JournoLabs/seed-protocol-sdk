@@ -51,23 +51,29 @@ export async function prepareUploads(
   }
 }
 
-export const createArweaveDataItems = fromPromise(
-  async ({ input: { context } }: PublishInput): Promise<CreateArweaveDataItemsResult> => {
-    // Uploads are read from rows: a restored publish record's plain item data is enough
-    const { item } = context
+/** Phase 1's uploads: everything but deferred Html, encrypted where a property is private. */
+export async function executeCreateArweaveDataItems(context: PublishMachineContext): Promise<CreateArweaveDataItemsResult> {
+  // Uploads are read from rows: a restored publish record's plain item data is enough
+  const { item } = context
 
-    const uploadDataOpts: GetPublishUploadDataOptions = {}
-    if (context.arweaveUploadTags?.length) {
-      uploadDataOpts.arweaveUploadTags = context.arweaveUploadTags
-    }
-    const def = context.htmlEmbeddedDeferredHtmlSeedLocalIds
-    if (def?.length) {
-      uploadDataOpts.deferHtmlStorageSeedLocalIds = def
-    }
-    const uploadDataList = await getPublishUploadData(
-      item,
-      Object.keys(uploadDataOpts).length ? uploadDataOpts : undefined,
-    )
-    return prepareUploads(uploadDataList, context)
+  const uploadDataOpts: GetPublishUploadDataOptions = {}
+  // From the config, not the context: a restored publish record holds no functions.
+  const encryptUpload = getPublishConfig().encryptPrivateUpload
+  if (encryptUpload) uploadDataOpts.encryptUpload = encryptUpload
+  if (context.arweaveUploadTags?.length) {
+    uploadDataOpts.arweaveUploadTags = context.arweaveUploadTags
   }
+  const def = context.htmlEmbeddedDeferredHtmlSeedLocalIds
+  if (def?.length) {
+    uploadDataOpts.deferHtmlStorageSeedLocalIds = def
+  }
+  const uploadDataList = await getPublishUploadData(
+    item,
+    Object.keys(uploadDataOpts).length ? uploadDataOpts : undefined,
+  )
+  return prepareUploads(uploadDataList, context)
+}
+
+export const createArweaveDataItems = fromPromise(
+  async ({ input: { context } }: PublishInput): Promise<CreateArweaveDataItemsResult> => executeCreateArweaveDataItems(context),
 )
