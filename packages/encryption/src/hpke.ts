@@ -17,8 +17,6 @@ const NH = 32
 export const XWING_PUBLIC_KEY_LENGTH = 1216
 export const XWING_SECRET_KEY_LENGTH = 32
 export const XWING_ENC_LENGTH = 1120
-/** Randomness one encapsulation consumes: 32 bytes for ML-KEM, then 32 for the X25519 ephemeral. */
-export const XWING_ENCAPSULATION_RANDOMNESS_LENGTH = 64
 
 const encoder = new TextEncoder()
 

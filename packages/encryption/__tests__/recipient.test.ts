@@ -16,6 +16,7 @@ import {
 } from '../src/index'
 import { encryptEnvelopeWithNonce } from '../src/envelope'
 import { wrapFileKeyWithRandomness } from '../src/recipient'
+import { referenceXWingStanza } from './reference'
 import vectorFile from './vectors.json'
 
 const hex = (s: string) => new Uint8Array(Buffer.from(s, 'hex'))
@@ -61,6 +62,18 @@ describe('mlkem768x25519 stanza vectors', () => {
       expect(await unwrapFileKey(vectorStanza(v.name), hex(v.recipientSeedHex))).toEqual(fileKey)
     })
   }
+
+  it('matches hpke-js on random seeds, randomness and file keys', async () => {
+    for (let i = 0; i < 5; i++) {
+      const [seed, randomness, key] = [32, 64, 32].map((n) => crypto.getRandomValues(new Uint8Array(n))) as [Uint8Array, Uint8Array, Uint8Array]
+      const theirs = await referenceXWingStanza(Buffer.from(key), Buffer.from(seed), Buffer.from(randomness))
+      const { publicKey } = generateRecipientKeyPair(seed)
+      expect(Buffer.from(publicKey).equals(theirs.publicKey)).toBe(true)
+      const ours = await wrapFileKeyWithRandomness(key, publicKey, randomness)
+      expect(ours.args).toEqual(theirs.stanza.args)
+      expect(Buffer.from(ours.body).equals(theirs.stanza.body)).toBe(true)
+    }
+  })
 
   it('reproduces the envelope wrapped to the publisher and the recovery key', async () => {
     const e = vectorFile.recipientEnvelope
