@@ -68,6 +68,10 @@ const manifest = await buildKeystoreManifest(identity, [
 ])
 await saveIdentityOnDevice(identity)
 
-// Elsewhere, with the manifest fetched by the key id from the registration attestation:
-const unlocked = await openKeystoreManifest(manifest, { passkey: passkeyPrf() }, { expectKeyId })
+// Elsewhere: the newest registration from getEncryptionKeysFromEas (@seedprotocol/eas) names the
+// manifest's Arweave transaction and the key id.
+const unlocked = await openKeystoreManifest(manifest, { passkey: passkeyPrf() }, { expectKeyId: registration.keyId })
 ```
+
+`registerEncryptionKey` in `@seedprotocol/publish` uploads the manifest and attests the key id and
+public keys from the user's account.

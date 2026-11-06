@@ -21,6 +21,8 @@ const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUILD_ORDER = [
   // Inlined into vite and next at build time, so it builds first.
   'bundler-core',
+  // Reads no workspace package; publish's tests read its dist.
+  'encryption',
   'eas',
   'arweave',
   'query',

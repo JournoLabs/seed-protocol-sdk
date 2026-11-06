@@ -286,6 +286,7 @@
       },
       "devDependencies": {
         "@pimlico/alto": "0.0.21",
+        "@seedprotocol/encryption": "workspace:*",
         "@seedprotocol/react": "workspace:*",
         "@seedprotocol/sdk": "workspace:*",
         "@types/bun": "1.4.3",

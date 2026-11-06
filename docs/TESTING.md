@@ -96,16 +96,24 @@ v0.8, EIP-7702), sponsored and unsponsored, against the real OP Sepolia contract
 
 `startAaStack()` (`packages/publish/test-utils/aaStack/aaStack.ts`) starts anvil forked from OP
 Sepolia at a pinned block, Alto (`@pimlico/alto`) for both EntryPoints, and a test-only
-`AcceptAllPaymaster` behind a local ERC-7677 service. The fork's upstream is a local server that
+`AcceptAllPaymaster` behind a local ERC-7677 service.
+`packages/publish/src/services/encryptionKey/encryptionKey.stack.test.ts` uses the same stack to
+register the encryption key schema and attest keys from an EOA and from a sponsored ManagedAccount
+against the real SchemaRegistry and EAS predeploys. The fork's upstream is a local server that
 replays `opSepoliaFork.json`, the answers OP Sepolia gave when the tests last ran against it, so
 the tests need no network. Their keys and clock are fixed, because a new address or nonce key reads
-state the fixture doesn't hold; replay reports such reads after the run. Record the fixture again
-after changing the pinned block or adding a test that reaches new state:
+state the fixture doesn't hold; replay reports such reads after the run. A test that attests also
+fixes block timestamps (`anvil_setBlockTimestampInterval`), since an attestation's uid, and so the
+EAS storage it writes, includes its block's time. Record again after changing the pinned block or
+adding a test that reaches new state. Recording adds to the fixture, so record only the file that
+changed:
 
 ```bash
 cd packages/publish
-SEED_AA_STACK_RECORD=1 SEED_LIVE_NETWORK_TESTS=1 bun test src/helpers/adapters/aaSenders.stack.test.ts
+SEED_AA_STACK_RECORD=1 SEED_LIVE_NETWORK_TESTS=1 bun test src/services/encryptionKey/encryptionKey.stack.test.ts
 ```
+
+After changing the pinned block, delete `opSepoliaFork.json` and record each file.
 
 `AcceptAllPaymaster.sol` compiles into `acceptAllPaymaster.ts` with
 `bun test-utils/aaStack/compileAcceptAllPaymaster.ts`, which needs `solc` 0.8.25 or later.

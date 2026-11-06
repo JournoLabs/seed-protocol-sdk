@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 type RpcRequest = { jsonrpc: '2.0'; id: unknown; method: string; params?: unknown }
 type RecordedAnswer = { result: unknown } | { error: unknown }
@@ -24,7 +24,8 @@ const keyOf = (req: RpcRequest) => JSON.stringify([req.method, req.params ?? []]
 /**
  * A JSON-RPC server standing in for a public chain RPC, so a fork of it runs with no network.
  *
- * `record` forwards each request to `upstream` and saves the answer to `fixturePath` on `stop()`.
+ * `record` forwards each request it has no answer for to `upstream`, and on `stop()` writes the
+ * fixture with the new answers added.
  * `replay` answers from that file and errors on anything not in it. Anvil asks a fork's upstream
  * only for state at the pinned block, so the same test run asks the same questions each time.
  */
@@ -35,8 +36,11 @@ export function startRecordedRpc(options: {
   forkBlock: number
 }): RecordedRpc {
   const { fixturePath, mode, forkBlock } = options
+  // Recording adds to the fixture rather than replacing it, so recording one test file keeps the
+  // answers other files replay. A fixture for another block is started over.
+  const existing = existsSync(fixturePath) ? (JSON.parse(readFileSync(fixturePath, 'utf8')) as RecordedRpcFixture) : undefined
   const answers: Record<string, RecordedAnswer> =
-    mode === 'replay' ? (JSON.parse(readFileSync(fixturePath, 'utf8')) as RecordedRpcFixture).answers : {}
+    mode === 'replay' ? existing!.answers : existing?.forkBlock === forkBlock ? { ...existing.answers } : {}
   const misses: string[] = []
 
   const answer = async (req: RpcRequest): Promise<Record<string, unknown>> => {
