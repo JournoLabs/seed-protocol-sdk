@@ -18,6 +18,7 @@ export const PACKAGE_TESTS = [
   '@seedprotocol/bundler-core',
   '@seedprotocol/archive',
   '@seedprotocol/encryption',
+  '@seedprotocol/licensing',
   '@seedprotocol/vite',
   '@seedprotocol/query',
   '@seedprotocol/rdf',

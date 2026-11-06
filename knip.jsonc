@@ -32,6 +32,10 @@
       // codegen.ts names the plugin as 'introspection'.
       "ignoreDependencies": ["@graphql-codegen/introspection"]
     },
+    "packages/licensing": {
+      "entry": ["src/index.ts", "src/catalog/cc/index.ts", "__tests__/**/*.test.ts", "scripts/*.ts"],
+      "project": ["src/**/*.ts", "__tests__/**/*.ts", "scripts/*.ts"]
+    },
     "packages/encryption": {
       "entry": ["src/index.ts", "__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
