@@ -5,7 +5,9 @@ import { setConfigRef } from '../../config'
 import { restoreFromDb } from './actors/restoreFromDb'
 import {
   isHoldingPublishLock,
+  publishLockHolder,
   publishLockName,
+  releasePublishLock,
   releaseAllPublishLocks,
   setPublishLockManagerForTests,
   tryHoldPublishLock,
@@ -35,7 +37,10 @@ function fakeLockManager() {
         heldNames.delete(name)
       }
     },
-  } as unknown as Pick<LockManager, 'request'>
+    async query(): Promise<LockManagerSnapshot> {
+      return { held: [...heldNames].map((name) => ({ name, mode: 'exclusive' })), pending: [] }
+    },
+  } as unknown as Pick<LockManager, 'request' | 'query'>
   return { locks, otherTab, heldNames }
 }
 
@@ -74,6 +79,31 @@ describe('publish locks', () => {
       () => !heldNames.has(publishLockName('seed-a')),
       'the lock manager to free seed-a after releaseAllPublishLocks',
     )
+  }, TEST_TIMEOUT_MS)
+
+  test("publishLockHolder says whether this tab, another tab or no tab runs a seed's publish", async () => {
+    const { locks, otherTab } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+
+    expect(await tryHoldPublishLock('seed-here')).toBe(true)
+    otherTab.hold(publishLockName('seed-elsewhere'))
+
+    expect(await publishLockHolder('seed-here')).toBe('here')
+    expect(await publishLockHolder('seed-elsewhere')).toBe('other-tab')
+    expect(await publishLockHolder('seed-idle')).toBe('none')
+
+    // The tab running seed-elsewhere closes: the row stays in progress, but no tab runs it.
+    otherTab.release(publishLockName('seed-elsewhere'))
+    expect(await publishLockHolder('seed-elsewhere')).toBe('none')
+
+    releasePublishLock('seed-here')
+    expect(await publishLockHolder('seed-here')).toBe('none')
+  }, TEST_TIMEOUT_MS)
+
+  test('publishLockHolder answers here without Web Locks, where every tab runs its own publishes', async () => {
+    setPublishLockManagerForTests(undefined)
+    expect(await tryHoldPublishLock('seed-anywhere')).toBe(true)
+    expect(await publishLockHolder('seed-anywhere')).toBe('here')
   }, TEST_TIMEOUT_MS)
 
   test("restoreFromDb skips a publish another tab is running and resumes the rest", async () => {

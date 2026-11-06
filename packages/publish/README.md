@@ -333,6 +333,7 @@ Local publish runs are stored in SQLite (`publish_processes`). Useful exports fr
 | Clear finished runs for one seed only | `clearCompletedPublishProcessesForSeed(seedLocalId)` |
 | Remove one run by row id | `deletePublishProcessById(id)` |
 | Remove many runs by row ids | `deletePublishProcessesByIds(ids)` |
+| Which tab runs an `in_progress` run: this one, another, or none | `publishLockHolder(seedLocalId)` resolves `'here'`, `'other-tab'` or `'none'` ([Multiple tabs](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/MULTI_TAB.md)) |
 | Wipe **all** history for a seed (including in-progress) | `deletePublishProcessesForSeed(seedLocalId)` — deletes every row for that seed, not a single run |
 
 ```ts

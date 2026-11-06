@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- New `publishLockHolder(seedLocalId)` resolves `'here'`, `'other-tab'` or `'none'`: whether this tab runs the seed's publish, another tab does, or no tab holds its lock. Every tab sees the same `in_progress` rows, so an app can now tell the tab running a publish from the others. `'none'` on an `in_progress` row means the tab running it closed, and the publish waits for the next tab to load. Without Web Locks it resolves `'here'`. Its type is `PublishLockHolder`.
 - `estimateArchiveAnchorCost` prices the files and the path manifest as the two bundles `anchorArchive` sends, each charged Arweave's 256 KiB minimum, sizes the tags `tagPolicy` adds, and returns `alreadyAnchored: true` with every cost 0 for a bag the attester already anchored. It priced one bundle, ignored `tagPolicy`, and priced a bag `anchorArchive` would send nothing for. It returns the new `ArchiveAnchorCostEstimate`. `estimatePublishCost` takes `uploadTags` and `uploadBatches` for this.
 - `anchorArchive` signs uploads with the publish wallet's data item signer when neither the options nor the config give one, as a publish does. With ConnectButton and no `dataItemSigner` in the config, its uploads failed.
 - `anchorArchive`'s JSDoc says that a retry before the indexer shows a sent anchor can send a second one, and why that's accepted (ADR 0029).
