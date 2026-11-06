@@ -376,6 +376,14 @@ export class ArchiveAnchorSchemaNotRegisteredError extends Error {
   }
 }
 
+export class EncryptionKeySchemaNotRegisteredError extends Error {
+  readonly code = 'ENCRYPTION_KEY_SCHEMA_NOT_REGISTERED'
+  constructor() {
+    super('The encryption key schema is not registered on this chain. Call ensureEncryptionKeySchema with the owner wallet.')
+    this.name = 'EncryptionKeySchemaNotRegisteredError'
+  }
+}
+
 /** What an interrupted `anchorArchive` already uploaded. Plain data, so a job can store it. */
 export type ArchiveAnchorResume = {
   /** The bag these uploads belong to. A retry that builds another bag ignores them. */

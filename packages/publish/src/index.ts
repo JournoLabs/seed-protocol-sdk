@@ -62,6 +62,7 @@ export {
   type PublishNonceKeyErrorCode,
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
+  EncryptionKeySchemaNotRegisteredError,
   type ArchiveAnchorResume,
   EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
@@ -309,3 +310,4 @@ export {
   type AttestPublishedByResult,
 } from './services/publishedBy/public'
 export * from './services/archiveAnchor/public'
+export * from './services/encryptionKey/public'

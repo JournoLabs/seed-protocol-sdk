@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- New `getEncryptionKeysFromEas({ attester, includeRevoked })` returns an account's `seedprotocol.encryptionKey` registrations, newest first, with the key id, suite, public keys and keystore manifest transaction decoded (`EncryptionKeyRegistration`). New constants `ENCRYPTION_KEY_SCHEMA_DEF`, `ENCRYPTION_KEY_SCHEMA_UID` and `ENCRYPTION_KEY_SCHEMA_NAME`.
 - `getArchiveAnchorsFromEas`, `getReportedAttestationUids` and `getSeedsByUidsFromEas` ask the indexer with lower-case uids. An upper-case uid found nothing.
 
 ## 0.8.1 (2026-11-04)

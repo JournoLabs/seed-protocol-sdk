@@ -51,6 +51,24 @@ Removing an authenticator doesn't revoke it, because old manifests stay on Arwea
 identity. A device may keep the unlocked secret in IndexedDB under a non-extractable AES-GCM key.
 That stops the raw secret being copied out of the browser's files, not a script on the same origin.
 
+**Registration.** An account publishes its key with an attestation under
+`ENCRYPTION_KEY_SCHEMA_DEF` (`seedprotocol.encryptionKey`):
+
+```
+bytes32 key_id,string suite,bytes recipient_key,bytes tag_key,bytes32 keystore_tx
+```
+
+It has no `refUID`. `suite` is `seed-private/v1`, the public keys are stored in full so anyone can
+wrap to them from the attestation alone, and `keystore_tx` is the manifest's Arweave transaction.
+The schema is revocable with the zero resolver, so its UID is the same on every chain, and it is
+registered once per chain by a wallet that can call SchemaRegistry. The attester is the account:
+the wallet's transactions must come from the account itself, so a ManagedAccount attests through a
+UserOp calling EAS directly, not through `multiPublish`. Session keys never register keys, since a
+leaked one could otherwise redirect every future wrap. Registering again, with a new identity or a
+revised manifest, adds an attestation, and readers take the newest live one; revoked ones still name
+the manifests that open older Versions. A reader checks the key id against the public keys before
+wrapping to them.
+
 **Boundaries.** The SDK encrypts in exactly one place on the way out and decrypts at a fixed set of
 seams on the way in:
 
