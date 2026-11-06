@@ -2,7 +2,7 @@
  * A second implementation of SPEC.md's encryption, written against node:crypto and sharing no
  * code with src/. The vectors were produced with it, and the tests check src/ against both.
  */
-import { createCipheriv, createHmac, hkdfSync } from 'node:crypto'
+import { createCipheriv, createHash, createHmac, createPrivateKey, createPublicKey, hkdfSync } from 'node:crypto'
 
 export interface ReferenceStanza {
   type: string
@@ -89,4 +89,41 @@ export async function referenceXWingStanza(
     new Uint8Array(fileKey),
   )
   return { publicKey, stanza: { type: 'mlkem768x25519', args: [b64(Buffer.from(enc))], body: Buffer.from(ct) } }
+}
+
+const hkdf = (ikm: Buffer, salt: Buffer, info: string) => Buffer.from(hkdfSync('sha256', ikm, salt, info, 32))
+
+/** SPEC.md "Identity": the derived public keys and key id, using hpke-js for X-Wing and node:crypto for X25519. */
+export async function referenceIdentity(secret: Buffer): Promise<{ xwingPublicKey: Buffer; x25519PublicKey: Buffer; keyId: string }> {
+  const { XWing } = await import('@hpke/hybridkem-x-wing')
+  const kem = new XWing()
+  const pair = await kem.generateKeyPairDerand(new Uint8Array(hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/mlkem768x25519')))
+  const xwingPublicKey = Buffer.from(await kem.serializePublicKey(pair.publicKey))
+  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b656e04220420', 'hex'), hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/x25519')])
+  const spki = createPublicKey(createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' })
+  const x25519PublicKey = Buffer.from(spki.subarray(-32))
+  const keyId = createHash('sha256').update(Buffer.from('seed-private/v1/key-id\0')).update(xwingPublicKey).update(x25519PublicKey).digest('hex')
+  return { xwingPublicKey, x25519PublicKey, keyId: `0x${keyId}` }
+}
+
+export function referenceKeystoreFileKey(secret: Buffer): Buffer {
+  return hkdf(secret, Buffer.alloc(0), 'seed-private/v1/keystore')
+}
+
+export function referenceRecoverySeed(entropy: Buffer): Buffer {
+  return hkdf(entropy, Buffer.alloc(0), 'seed-private/v1/recovery/mlkem768x25519')
+}
+
+function sealZeroNonce(kek: Buffer, fileKey: Buffer): Buffer {
+  const cipher = createCipheriv('aes-256-gcm', kek, Buffer.alloc(12))
+  return Buffer.concat([cipher.update(fileKey), cipher.final(), cipher.getAuthTag()])
+}
+
+export function referencePasskeyStanza(fileKey: Buffer, credentialId: Buffer, salt: Buffer, prfOutput: Buffer): ReferenceStanza {
+  return { type: 'passkey-prf', args: [b64(credentialId), b64(salt)], body: sealZeroNonce(hkdf(prfOutput, salt, 'seed-private/v1/passkey-prf'), fileKey) }
+}
+
+/** `signature` is 65 bytes with a low `s`, so `r || s` is its first 64 bytes. */
+export function referenceEoaSignatureStanza(fileKey: Buffer, salt: Buffer, signature: Buffer): ReferenceStanza {
+  return { type: 'eoa-signature', args: [b64(salt)], body: sealZeroNonce(hkdf(signature.subarray(0, 64), salt, 'seed-private/v1/eoa-signature'), fileKey) }
 }

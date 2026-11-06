@@ -35,3 +35,29 @@ export {
 export type { RecipientKeyPair } from './recipient'
 export { UnknownEntitlementKindError, isEntitled, registerEntitlementAdapter } from './entitlement'
 export type { AccessPolicyRef, EntitlementAdapter, EntitlementBlockTag } from './entitlement'
+export {
+  IDENTITY_SECRET_LENGTH,
+  createEncryptionIdentity,
+  encryptionIdentityFromSecret,
+  generateRecoveryPhrase,
+  recoveryKeyFromPhrase,
+} from './identity'
+export type { EncryptionIdentity } from './identity'
+export {
+  EOA_SIGNATURE_STANZA_TYPE,
+  KEYSTORE_CONTENT_TYPE,
+  PASSKEY_PRF_STANZA_TYPE,
+  buildKeystoreManifest,
+  describeKeystoreManifest,
+  eoaSignatureMessage,
+  eoaSignatureStanza,
+  generateEoaSignatureSalt,
+  generatePasskeySalt,
+  openKeystoreManifest,
+  passkeyStanza,
+  recoveryStanza,
+} from './keystore'
+export type { KeystoreAuthenticator, KeystoreUnlock, PasskeyPrfEvaluator, PasskeyPrfRequest } from './keystore'
+export { enrollPasskey, passkeyPrf } from './passkey'
+export type { PasskeyOptions } from './passkey'
+export { forgetIdentityOnDevice, listIdentitiesOnDevice, loadIdentityFromDevice, saveIdentityOnDevice } from './deviceStore'

@@ -160,5 +160,57 @@
     ],
     "envelopeLength": 3511,
     "envelopeSha256": "3c7885a10633f771aa8e7fa181c926a9a115bb6b3c3a8e582b4b445b35278735"
+  },
+  "keystoreVector": {
+    "identitySecretHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "xwingPublicKeySha256": "4358e720acdbb91185b4765dfaf016e3905b65ad6f6f765cc7a0c8dd519f7e9a",
+    "x25519PublicKeyHex": "053410f0a7b26275af4cf62123f52391edc64c32bd143fb74be824e25247113e",
+    "keyId": "0x4e66fe1b9175264f9dcaa14c974fac3e6cf2bded190467a4b829f8ed9e5104af",
+    "keystoreFileKeyHex": "f48bfaaa3895900a59f12bbda276254662fb647014e05b6feb55d2c2b7a9076c",
+    "recovery": {
+      "entropyHex": "7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
+      "randomnessHex": "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
+      "publicKeySha256": "a5756f69d2a14c6ff52bd2772073af765e785b0158d25866508b5323b76d1020",
+      "stanza": {
+        "type": "mlkem768x25519",
+        "args": [
+          "h2U6meLN9LJJHNEI6l/sorjQnrivUcMOR1q6IDRSZst8nGtwkim+UUDVXEL/XrrKb4d9LLmqodNDhmg8d/Yehh9anG0r521P0FjmaydGw6Zd2uBPwtGTG3xCUlW0k2lByRbLoRevus7PCBZS5FfPuphPFeJzBulfyJNKFoYqGJ7Iy/U/5wV5iMu1rqqxEOq2i4lliGdwdXgsfi2sTNwJ2XBkZTqeqI3K5vCCOGzOG+pKjqHvij6t6fEZppulUYfBTq0NO/PYfkaRCECjqDw24wJ+jVUU0am9XaAi8llIEOHz0ypE92PmNJYPdV6lVpEWbRTUl7smdDemaf6wF+xcIvu2zfhHxZl5jYctIEMnSCZ04MYGy3EomaxxmYH665pXtovutnUnDdGXqktwDZAJvCBVhx/649x03U3OlIZ0Nj8dmOC7ZkGT26YHkbXfEk5UZcn3Pw2PTGqTAUdVft9Bp29+juLvejwlAA6KM7U9OT5JOMg1SobGD4e5AjnkkVDPYt3camsTQd7v4gU92dSfRpAthYoDAIaCO8uMs5NgjEAzyEPaCqOjzd9S3ggs/akx5habKblDue5u9UvhAS8tzl5DDIP3wlCPgR3HXc5guiFrNYme0fVygr+yUI6Y29JOlKMsZZeslWn20g27fgGoOHPnffwjZtFyyUtnlopVFYV28uAB43/PNeZXnUBS1X8/SoTl/BSFHwa2aZb+VP2/NVAm+3M2nixKi6ExQ7jE+zvPhIKJdf+DWqLtHAdyDCsb0gXeojiJgiShPhxPXaN+tnpbvek6nqaNcugt9PfVHP0scNuybk2Bvi22UIfiwiOY8UDsdpUH2I3VEV5DB53NuKxhuZDdVbMXF2qOh8seSeNuDRuOaZF4qgRyIVU3EUoel5scmbSXhvxDjnlu1N317mosPuy7j9E8fc5weBFuH2e4+qbHTBT7PjsoFul3GIYeAy6v+hNCEgIteXs15lMvAB9kk3qPW4967/F/rFo/G3LATAUo16sfdYNSWIIARjyVVpBEBCR/eH2fGy6HJCrsYivK8F4U8Jh9d6rKrUDeJYPQNvpOXFYwJ2IrxRGG+3kwJkwUDmw0+SV3hzL28LFDnVwC2aKtjwp2Oy+EzevQJbA7vVOMRQG/4y11AnmsVjhJzGyr0pckDuz+IUYyEKn1dJzeRpok8J1lWkz4xSRMSA319mrhUZ8cEdnP23+AAedDtgKSHWNRytlNpXoOGj+7pjEOyNye+hKRiuDTquknKbbFD1IO0ggxiSBBptVBsqYLgYj/3FIdf6J7cthLPf4GA2bl7ptsnBUCw0ZyBYvgCQsQHQ49gFwDYnWBo5iP8FvR7PWH4UgWPl2j0iiKnTtZZkE0fEJ7lZijoLJ0b522z3NwgsTvP+S06uZx3M0mSe6uCCLhemdYOq/65ksK3tUq0fdNd2U4fkLiXsBP6gAj8jT/XYeQfxOUs6ExmFuJT1E95yd4zie4wQsy+TmCqHzaRw"
+        ],
+        "bodyHex": "89018dd4466bb149cefef1716348f4e3ada9bc8eff1d886f9493b19d542605a4104ee29da9607fe4b20de1ebe3760237"
+      }
+    },
+    "passkey": {
+      "credentialIdHex": "22222222222222222222222222222222",
+      "saltHex": "3333333333333333333333333333333333333333333333333333333333333333",
+      "prfOutputHex": "5555555555555555555555555555555555555555555555555555555555555555",
+      "stanza": {
+        "type": "passkey-prf",
+        "args": [
+          "IiIiIiIiIiIiIiIiIiIiIg",
+          "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
+        ],
+        "bodyHex": "865f913ba470bdb01cdb84f8ac8287d4a99adea197d5f1b06a8e42e32def0aff2d037c6f154c10e2781a09d0d83bea97"
+      }
+    },
+    "eoaSignature": {
+      "saltHex": "6666666666666666666666666666666666666666666666666666666666666666",
+      "privateKeyHex": "7777777777777777777777777777777777777777777777777777777777777777",
+      "message": "Unlock your Seed Protocol encryption key\n\nSigning this message lets this app read your private Versions. Anyone who gets this signature can read them too, so sign it only in apps you trust.\n\nKey: 0x6666666666666666666666666666666666666666666666666666666666666666",
+      "signatureHex": "0x8bcaf7741f02695176d06fb5c62112d2406fa76ac18aecb2814ecdb68f27326414e363a696734f6f235ddf8f4f5de8b923d750f23b3a0d262e0273009e5b98091c",
+      "stanza": {
+        "type": "eoa-signature",
+        "args": [
+          "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY"
+        ],
+        "bodyHex": "f87c74c38e4e34b585ee70435fd0a1c58ef613a31abe68c0ca13251f7c7ec8bc6058b51bc7f22f05f091f6b7165e090c"
+      }
+    },
+    "bind": {
+      "envelopeId": "0x8888888888888888888888888888888888888888888888888888888888888888",
+      "keyId": "0x4e66fe1b9175264f9dcaa14c974fac3e6cf2bded190467a4b829f8ed9e5104af",
+      "purpose": "keystore"
+    },
+    "manifestLength": 2318,
+    "manifestSha256": "51b089d98a28535d386331aa5aaaebfcab01bf7bafe9fd88f899e9d3ba736411"
   }
 }
