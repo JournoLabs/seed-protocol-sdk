@@ -26,15 +26,15 @@ plaintext, and local storage is not encrypted today.
 **Terms.** A **draft** is local and unattested, and is never encrypted. A **private Version** is an
 attested Version whose private property values are encrypted before they leave the device. An
 encrypted Version shared with readers or collaborators is still a private Version. New code does
-not use "sealed" or "locked" for encryption concepts: private values travel in an
-`encrypted_content` storage seed, the envelope attestation is `seedprotocol.envelope`, and a synced
-row this device has no key for is described as "encrypted, no key on this device".
+not use "sealed" or "locked" for encryption concepts: a synced row this device has no key for is
+described as "encrypted, no key on this device". If private scalars or an envelope attestation are
+added later, they are named `encrypted_content` and `seedprotocol.envelope`.
 
 **Envelopes.** Encrypted bytes use the `seed-private/v1` envelope, specified in
 `packages/encryption/SPEC.md` with test vectors. The format code lives in `@seedprotocol/encryption`,
-which does not depend on the SDK, so a reader can decrypt without it. Each private Version gets a
-random content key, always wrapped to the publisher, so the publisher can read their own content
-without any outside service.
+which does not depend on the SDK, so a reader can decrypt without it. Each private upload gets its
+own random file key and envelope id, and the key is always wrapped to the publisher, so the
+publisher can read their own content without any outside service.
 
 Key wraps are post-quantum hybrid from the start, because ciphertext on Arweave stays readable to
 anyone who later breaks the wrap. The `mlkem768x25519` stanza seals the file key with HPKE to an
@@ -89,8 +89,26 @@ revoked row.
 to its PADMÉ length, so an envelope's size shows a size class (at most 12% extra bytes) rather than
 the exact length. A publish can turn padding off.
 
-**Privacy is declared per property** with `private: true` in the schema file. Public properties of
+**Privacy is declared per property** with `private: true` in the schema file, and only on
+properties whose values are uploaded: Html, Json, File, Image and ItemStorage Text. Their
+attestations hold a pointer to the upload, so encrypting the upload is enough. Scalars and relations
+are attested as values, so schema files refuse the flag on them and a publish refuses to attest a
+private one from a model defined in code; a value that must be private goes in a private Json
+property. A model's ItemStorage properties share one composite upload, so they are all private or
+all public. An image embedded in a private Html property is encrypted with it. Public properties of
 the same model are published as today.
+
+**Publish encrypts through an app-supplied encryptor.** `@seedprotocol/publish` can't depend on
+`@seedprotocol/encryption` at runtime while it is unpublished, so the app passes
+`createPrivateUploadEncryptor` as `encryptPrivateUpload`. It needs only recipient public keys, from
+the registration attestation, so a session key can publish a private Version. A private upload with
+no encryptor fails the publish before anything is uploaded.
+
+**No envelope attestation or per-upload recovery wrap.** The publisher's storage transaction
+attestation already names each ciphertext's Arweave transaction, whose id commits to its bytes, so
+an extra attestation would add a schema and gas without adding a guarantee. The keystore manifest's
+recovery stanza recovers the identity every upload is wrapped to, so a second wrap per upload would
+only add about 1.2 KB. Either can be added later without changing what is already published.
 
 **Revocation withholds the future only.** Once a reader has a key, it opens every ciphertext that
 key covers, forever. Revoking a key grant stops future keys from being issued and is a policy signal

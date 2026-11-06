@@ -14,6 +14,7 @@ import {
   type PublishMode,
 } from '@/db/read/publishGraph'
 import { getPublishUploadSources, type PublishUploadSource } from '@/db/read/getPublishUploads'
+import { estimateEncryptedUploadBytes } from '@/helpers/encryptedUploadSize'
 
 export type { PublishMode }
 
@@ -61,13 +62,17 @@ export function estimateDataUriByteLength(dataUri: string): number | null {
   return Math.max(0, Math.floor((b64.length * 3) / 4) - padding)
 }
 
-/** Bytes an upload carries (a composite's children summed, as before framing). */
+/**
+ * Bytes an upload carries: a composite's children summed, as before framing; a private upload's
+ * envelope size, at most.
+ */
 async function sourceBytes(source: PublishUploadSource): Promise<number> {
   let total = 0
   for (const filePath of source.children ? source.children.map((c) => c.filePath) : [source.filePath!]) {
     total += (await BaseFileManager.getFileSize(filePath)) ?? 0
   }
-  return total
+  // A private upload goes out as an envelope: padded, with a header and a key wrap.
+  return source.private && total > 0 ? estimateEncryptedUploadBytes(total) : total
 }
 
 /**

@@ -418,6 +418,7 @@
         "@rollup/plugin-commonjs": "^29.0.0",
         "@rollup/plugin-json": "^6.1.0",
         "@rollup/plugin-typescript": "^12.1.2",
+        "@seedprotocol/encryption": "workspace:*",
         "@seedprotocol/vite": "workspace:*",
         "arlocal": "1.1.66",
         "arweave": "^1.15.5",

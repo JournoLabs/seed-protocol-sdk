@@ -61,3 +61,5 @@ export type { KeystoreAuthenticator, KeystoreUnlock, PasskeyPrfEvaluator, Passke
 export { enrollPasskey, passkeyPrf } from './passkey'
 export type { PasskeyOptions } from './passkey'
 export { forgetIdentityOnDevice, listIdentitiesOnDevice, loadIdentityFromDevice, saveIdentityOnDevice } from './deviceStore'
+export { createPrivateUploadEncryptor } from './uploadEncryptor'
+export type { EncryptedUpload, PrivateUploadEncryptorOptions, UploadToEncrypt } from './uploadEncryptor'

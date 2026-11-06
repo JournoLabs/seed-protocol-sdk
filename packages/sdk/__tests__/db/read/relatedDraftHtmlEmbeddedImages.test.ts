@@ -6,7 +6,7 @@ import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { BaseArweaveClient } from '@seedprotocol/arweave'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
-import { getPublishUploads } from '@/db/read/getPublishUploads'
+import { getPublishUploadData, getPublishUploads } from '@/db/read/getPublishUploads'
 import { RelatedItemUnpublishedError } from '@/db/read/publishErrors'
 import { summarizePublishUploads, summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
@@ -55,6 +55,13 @@ const schemaFile = () => ({
       properties: {
         title: { id: generateId(), type: 'Text' },
         pageBody: { id: generateId(), type: 'Html' },
+      },
+    },
+    EmbedSecret: {
+      id: generateId(),
+      properties: {
+        label: { id: generateId(), type: 'Text' },
+        secretBody: { id: generateId(), type: 'Html', private: true },
       },
     },
     EmbedArticle: {
@@ -140,7 +147,7 @@ testDescribe('Html-embedded images of related draft items', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['EmbedNote', 'EmbedPage', 'EmbedArticle', 'Image', 'File', 'Html'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['EmbedNote', 'EmbedPage', 'EmbedSecret', 'EmbedArticle', 'Image', 'File', 'Html'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -161,6 +168,34 @@ testDescribe('Html-embedded images of related draft items', () => {
     const article = await createItem({ modelName: 'EmbedArticle', headline: `About ${label}`, note: note.seedLocalId })
     return { note, article }
   }
+
+  it('of a private Html property are encrypted like the Html', async () => {
+    const secret = await createItem({ modelName: 'EmbedSecret', label: 'secret', secretBody: `<p>hidden <img src="${DATA_URI}"></p>` })
+    const htmlSeed = htmlContext(secret, 'secretBody').propertyValue!
+    const { deferredHtmlSeedLocalIds } = await prepareHtmlEmbeddedImagesForPublish(secret as any, 'materialize')
+    const [row] = await coPublishRows(secret.seedLocalId)
+    const imageSeedLocalId = row!.imageSeedLocalId
+
+    const encrypted: { seedLocalId: string; contentType?: string }[] = []
+    const encryptUpload = async (upload: { seedLocalId: string; contentType?: string }) => {
+      encrypted.push({ seedLocalId: upload.seedLocalId, contentType: upload.contentType })
+      return { blob: new Blob(['seed-private/v1\n']), tags: [{ name: 'Seed-Encryption', value: 'seed-private/v1' }] }
+    }
+    const phase1 = await getPublishUploadData(secret as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds, encryptUpload })
+    const image = phase1.find((u) => u.seedLocalId === imageSeedLocalId)!
+    expect(image.contentType).toBe('application/octet-stream')
+    expect(encrypted).toContainEqual({ seedLocalId: imageSeedLocalId, contentType: 'image/png' })
+
+    const phase2 = await getPublishUploadData(secret as any, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds, encryptUpload })
+    expect(phase2.map((u) => [u.seedLocalId, u.contentType])).toEqual([[htmlSeed, 'application/octet-stream']])
+    expect(encrypted.map((e) => e.seedLocalId).sort()).toEqual([htmlSeed, imageSeedLocalId].sort())
+
+    // Without an encryptor the image is refused rather than uploaded as plaintext.
+    await expect(getPublishUploadData(secret as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds })).rejects.toMatchObject({
+      code: 'PRIVATE_UPLOAD_NOT_ENCRYPTED',
+    })
+    await clearHtmlEmbeddedImageCoPublishRows(secret.seedLocalId)
+  })
 
   it('are materialized, uploaded before the Html, rewritten and attested with the related item', async () => {
     const createTransaction = vi

@@ -29,7 +29,7 @@ export { StagedValueMissingError } from '../storageValue/stage'
 export { PublishValidationFailedError, type PublishValidationError } from '../db/read/getPublishPayload'
 export { RelatedItemUnpublishedError, RELATED_ITEM_UNPUBLISHED_CODE } from '../db/read/publishErrors'
 export { HtmlEmbeddedDataUriLimitError, HtmlSeedPropertyRefError } from '../helpers/htmlEmbeddedDataUriPublish'
-export { PublishUploadChangedError } from '../db/read/getPublishUploads'
+export { PrivateUploadNotEncryptedError, PublishUploadChangedError } from '../db/read/getPublishUploads'
 export { getEasSchemaUidForModel } from '../db/read/getSchemaUidForModel'
 
 // Node.js specific exports

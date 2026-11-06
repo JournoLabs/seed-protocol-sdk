@@ -58,6 +58,47 @@ testDescribe('schema file validation rules', () => {
     )
   })
 
+  it('rejects private on a property attested as plaintext', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    for (const [suffix, prop] of [
+      ['text', { type: 'Text', private: true }],
+      ['number', { type: 'Number', private: true }],
+      ['relation', { type: 'Relation', model: 'RuleNote', private: true }],
+    ] as const) {
+      const file = schemaFile(`rules-private-${suffix}`, `Rules Private ${suffix}`, {
+        secret: { id: `rules-private-${suffix}-secret`, ...prop },
+      })
+      await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).rejects.toThrow(
+        'RuleNote.secret: only Html, Json, File, Image and ItemStorage Text properties can be private',
+      )
+    }
+  })
+
+  it('accepts private on uploaded properties', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    const file = schemaFile('rules-private-uploaded', 'Rules Private Uploaded', {
+      body: { id: 'rules-private-uploaded-body', type: 'Html', private: true },
+      data: { id: 'rules-private-uploaded-data', type: 'Json', private: true },
+      cover: { id: 'rules-private-uploaded-cover', type: 'Image', private: true },
+      attachment: { id: 'rules-private-uploaded-attachment', type: 'File', private: true },
+      notes: { id: 'rules-private-uploaded-notes', dataType: 'Text', storageType: 'ItemStorage', localStorageDir: '/notes', filenameSuffix: '.md', private: true },
+      title: { id: 'rules-private-uploaded-title', type: 'Text' },
+    })
+    await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).resolves.not.toThrow()
+  })
+
+  it('rejects a model whose ItemStorage properties are part private', async () => {
+    const { importJsonSchema } = await import('@/imports/json')
+    const storage = { dataType: 'Text', storageType: 'ItemStorage', localStorageDir: '/notes', filenameSuffix: '.md' }
+    const file = schemaFile('rules-private-mixed', 'Rules Private Mixed', {
+      notes: { id: 'rules-private-mixed-notes', ...storage, private: true },
+      summary: { id: 'rules-private-mixed-summary', ...storage },
+    })
+    await expect(importJsonSchema({ contents: JSON.stringify(file) }, 1)).rejects.toThrow(
+      'RuleNote: its ItemStorage properties are uploaded together, so they must all be private or all public (private: notes; public: summary)',
+    )
+  })
+
   it('rejects a property whose EAS name is a reserved ABI word', async () => {
     const { importJsonSchema } = await import('@/imports/json')
     const file = schemaFile('rules-reserved-property', 'Rules Reserved Property', {

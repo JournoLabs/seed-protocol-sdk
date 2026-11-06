@@ -66,6 +66,7 @@ const workspaceSourceAliases = (platform) => {
     exact('@seedprotocol/archive/node', 'archive/src/node/index.ts'),
     exact('@seedprotocol/archive/seed', 'archive/src/seed/index.ts'),
     exact('@seedprotocol/archive', 'archive/src/index.ts'),
+    exact('@seedprotocol/encryption', 'encryption/src/index.ts'),
     exact('@seedprotocol/eas/node', 'eas/src/node/index.ts'),
     exact('@seedprotocol/eas', 'eas/src/index.ts'),
     exact('@seedprotocol/arweave/node', 'arweave/src/node/index.ts'),
@@ -326,6 +327,7 @@ export default defineConfig({
             'packages/archive/__tests__/seed/**/*.test.ts',
             // Other publish tests use bun:test and run via `bun run --filter @seedprotocol/publish test`.
             'packages/publish/src/services/publish/actors/createArweaveDataItemsPhase2.test.ts',
+            'packages/publish/src/services/publish/actors/createArweaveDataItems.private.test.ts',
             'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',
             'packages/publish/src/services/publish/helpers/ensureEasSchemas.savedRowSchemaUid.test.ts',
             'packages/publish/src/services/publish/helpers/ensureEasSchemas.attestedOnly.test.ts',

@@ -273,6 +273,11 @@ export function htmlPropertyForHtmlSeed(node: PublishGraphNode, htmlSeedLocalId:
   )
 }
 
+/** Whether the schema marks `property` private (ADR 0033): its upload is encrypted. */
+export function isPrivateProperty(property: Pick<PublishGraphProperty, 'definition'> | undefined): boolean {
+  return property?.definition.private === true
+}
+
 /** Rebuilds after waiting at most this many times; ops that keep arriving don't hold publish forever. */
 const MAX_GRAPH_OUTBOX_PASSES = 4
 

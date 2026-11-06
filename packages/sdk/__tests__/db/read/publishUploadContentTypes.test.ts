@@ -3,7 +3,7 @@ import { Item } from '@/Item/Item'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseArweaveClient } from '@seedprotocol/arweave'
-import { getPublishUploadData, getPublishUploads, readPublishUploadBytes } from '@/db/read/getPublishUploads'
+import { PrivateUploadNotEncryptedError, getPublishUploadData, getPublishUploads, readPublishUploadBytes } from '@/db/read/getPublishUploads'
 import { getContentSha256 } from '@/helpers/arweaveContentTags'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
@@ -37,6 +37,7 @@ const schemaFile = () => ({
         report: { id: generateId(), type: 'File' },
         audio: { id: generateId(), type: 'File' },
         untitled: { id: generateId(), type: 'File' },
+        secret: { id: generateId(), type: 'File', private: true },
       },
     },
   },
@@ -122,35 +123,33 @@ testDescribe('publish upload Content-Type', () => {
     })
   }, 90000)
 
-  it('encryptUpload replaces the bytes, hashes and tags the ciphertext, and hides the real type', async () => {
+  it("encrypts a private property's upload: ciphertext hashed and tagged, real type hidden, public uploads untouched", async () => {
     const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'UploadTypesDoc', title: 'private' } as any)
     await waitForIdle(item, 'Item', 15000)
     await waitForPropertyInstances(item)
-    await setFile(item, 'report', new File([PDF], `report-${generateId()}.pdf`))
+    await setFile(item, 'secret', new File([PDF], `secret-${generateId()}.pdf`))
     await setFile(item, 'audio', new File([WAV], `clip-${generateId()}.wav`))
 
     const seen: { name: string; contentType?: string; bytes: number[] }[] = []
     const CIPHERTEXT = new TextEncoder().encode('seed-private/v1\nnot really encrypted')
     const options = {
       arweaveUploadTags: [{ name: 'App-Name', value: 'TestApp' }],
-      // Only the report is private.
       encryptUpload: async (upload: { itemPropertyName: string; blob: Blob; contentType?: string }) => {
         seen.push({ name: upload.itemPropertyName, contentType: upload.contentType, bytes: Array.from(new Uint8Array(await upload.blob.arrayBuffer())) })
-        if (upload.itemPropertyName !== 'report') return undefined
         return { blob: new Blob([CIPHERTEXT]), tags: [{ name: 'Seed-Encryption', value: 'seed-private/v1' }] }
       },
     }
     const uploads = await getPublishUploadData(item as any, options)
     const byProperty = Object.fromEntries(uploads.map((u) => [u.itemPropertyName, u]))
 
-    // The hook saw each upload's plaintext and real type.
-    expect(seen.find((s) => s.name === 'report')).toEqual({ name: 'report', contentType: 'application/pdf', bytes: Array.from(PDF) })
+    // Only the private upload reached the encryptor, with its plaintext and real type.
+    expect(seen).toEqual([{ name: 'secret', contentType: 'application/pdf', bytes: Array.from(PDF) }])
 
-    const report = byProperty.report!
-    expect(Array.from(await readPublishUploadBytes(report))).toEqual(Array.from(CIPHERTEXT))
-    expect(report.contentHash).toBe(getContentSha256(CIPHERTEXT))
-    expect(report.contentType).toBe('application/octet-stream')
-    expect(report.tags).toEqual([
+    const secret = byProperty.secret!
+    expect(Array.from(await readPublishUploadBytes(secret))).toEqual(Array.from(CIPHERTEXT))
+    expect(secret.contentHash).toBe(getContentSha256(CIPHERTEXT))
+    expect(secret.contentType).toBe('application/octet-stream')
+    expect(secret.tags).toEqual([
       { name: 'Content-SHA-256', value: getContentSha256(CIPHERTEXT) },
       { name: 'Content-Type', value: 'application/octet-stream' },
       { name: 'Seed-Encryption', value: 'seed-private/v1' },
@@ -159,5 +158,26 @@ testDescribe('publish upload Content-Type', () => {
     // A public upload in the same publish is unchanged, app tags included.
     expect(byProperty.audio?.contentType).toBe('audio/wav')
     expect(byProperty.audio?.tags).toContainEqual({ name: 'App-Name', value: 'TestApp' })
+  }, 90000)
+
+  it('refuses to build a private upload with no encryptor, or one that returns nothing', async () => {
+    const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'UploadTypesDoc', title: 'unencrypted' } as any)
+    await waitForIdle(item, 'Item', 15000)
+    await waitForPropertyInstances(item)
+    await setFile(item, 'secret', new File([PDF], `secret-${generateId()}.pdf`))
+
+    // Sizing reads no file and needs no encryptor: the private upload is counted as its envelope.
+    const { summarizePublishUploads } = await import('@/db/read/summarizePublishWork')
+    const { estimateEncryptedUploadBytes } = await import('@/helpers/encryptedUploadSize')
+    expect((await summarizePublishUploads(item as any)).uploadSizes).toEqual([estimateEncryptedUploadBytes(PDF.length)])
+
+    for (const options of [undefined, { arweaveUploadTags: [] }, { encryptUpload: async () => undefined }]) {
+      await expect(getPublishUploadData(item as any, options)).rejects.toMatchObject({
+        name: 'PrivateUploadNotEncryptedError',
+        code: 'PRIVATE_UPLOAD_NOT_ENCRYPTED',
+        itemPropertyName: 'secret',
+      })
+    }
+    await expect(getPublishUploads(item as any)).rejects.toBeInstanceOf(PrivateUploadNotEncryptedError)
   }, 90000)
 })

@@ -181,6 +181,19 @@ type SchemaFilePropertyFields = {
   private?: unknown
 }
 
+const UPLOADED_DATA_TYPES: string[] = [
+  ModelPropertyDataTypes.Html,
+  ModelPropertyDataTypes.Json,
+  ModelPropertyDataTypes.File,
+  ModelPropertyDataTypes.Image,
+]
+
+/** Whether a property's value is uploaded to Arweave, so its attestation holds only a pointer. */
+function isUploadedProperty(def: { dataType?: string; storageType?: string }): boolean {
+  if (UPLOADED_DATA_TYPES.includes(def.dataType ?? '')) return true
+  return def.dataType === ModelPropertyDataTypes.Text && def.storageType === 'ItemStorage'
+}
+
 /**
  * A schema file's property problems, as `Model.property: message` lines: unknown type names and
  * rules that don't apply to the type are errors; ignored rules (`custom`) are warnings.
@@ -214,10 +227,25 @@ function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
       }
       if (raw.private !== undefined && typeof raw.private !== 'boolean') {
         errors.push(`${at}: private must be true or false`)
+      } else if (raw.private === true && !isUploadedProperty(def)) {
+        errors.push(
+          `${at}: only Html, Json, File, Image and ItemStorage Text properties can be private; this one would be attested as plaintext. Put the value in a private Json property instead.`,
+        )
       }
       for (const problem of validationRuleProblems(def.dataType, def.refValueType, def.validation)) {
         ;(problem.severity === 'error' ? errors : warnings).push(`${at}: ${problem.message}`)
       }
+    }
+    // A model's ItemStorage properties are uploaded together, so one upload can't be part private.
+    const itemStorage = Object.entries(model?.properties ?? {}).filter(
+      ([, prop]) => (normalizePropertyRecordSchema((prop ?? {}) as SchemaFilePropertyFields) as { storageType?: string }).storageType === 'ItemStorage',
+    )
+    const privateNames = itemStorage.filter(([, prop]) => (prop as SchemaFilePropertyFields | undefined)?.private === true).map(([name]) => name)
+    if (privateNames.length > 0 && privateNames.length < itemStorage.length) {
+      const publicNames = itemStorage.map(([name]) => name).filter((name) => !privateNames.includes(name))
+      errors.push(
+        `${modelName}: its ItemStorage properties are uploaded together, so they must all be private or all public (private: ${privateNames.join(', ')}; public: ${publicNames.join(', ')})`,
+      )
     }
   }
   return { errors, warnings }
