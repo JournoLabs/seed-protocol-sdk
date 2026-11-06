@@ -6,7 +6,7 @@ import { normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
 import { getPropertyDefinition } from '@/helpers/propertyDefinition'
 import { timingMarks } from '@/helpers/timing'
-import { resolveStorageDisplay, storedValueKind, missingFileOf } from '@/storageValue/resolve'
+import { resolveStorageDisplay, storedValueKind, missingFileOf, missingFileWithEnvelope } from '@/storageValue/resolve'
 
 const logger = debug('seedSdk:itemProperty:loadProperty')
 
@@ -131,7 +131,7 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   const kind = storedValueKind(propertyRecordSchema, metadataRecord)
   // A stored display value is a dead blob: URL after reload (or a file:// URL that breaks when
   // filesDir moves): Image, File and Html never read it.
-  let missingFile: { path?: string } | null | undefined
+  let missingFile: { path?: string; encrypted?: true; transactionId?: string } | null | undefined
   let refResolvedDisplayValue: string | undefined =
     kind === 'image' || kind === 'file'
       ? context.refResolvedDisplayValue ?? undefined
@@ -144,7 +144,7 @@ export async function loadProperty(context: PropertyMachineContext): Promise<Loa
   } else if (kind && kind !== 'itemStorage') {
     try {
       const display = await resolveStorageDisplay(kind, metadataRecord, { fetch: true })
-      missingFile = missingFileOf(kind, metadataRecord, display)
+      missingFile = await missingFileWithEnvelope(kind, metadataRecord, missingFileOf(kind, metadataRecord, display))
       metadataRecord.refResolvedValue = display.ref.refResolvedValue ?? null
       metadataRecord.localStorageDir = display.ref.localStorageDir ?? null
       if (display.renderValue !== undefined) {

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   addExcludedTransactions: vi.fn(async () => undefined),
   notifyFilesWrittenOutsideCache: vi.fn(async () => undefined),
+  hasEnvelopeDecryptor: vi.fn(() => false),
+  openEncryptedDownloads: vi.fn(async (): Promise<{ written: string[]; opened: string[]; stillEncrypted: string[] }> => ({ written: [], opened: [], stillEncrypted: [] })),
 }))
 
 vi.mock('@/db/write/addExcludedTransactions', () => ({
@@ -10,6 +12,10 @@ vi.mock('@/db/write/addExcludedTransactions', () => ({
 }))
 vi.mock('@/helpers/tabEvents', () => ({
   notifyFilesWrittenOutsideCache: mocks.notifyFilesWrittenOutsideCache,
+}))
+vi.mock('@/helpers/envelopeContent', () => ({
+  hasEnvelopeDecryptor: mocks.hasEnvelopeDecryptor,
+  openEncryptedDownloads: mocks.openEncryptedDownloads,
 }))
 vi.mock('@/helpers/FileManager/BaseFileManager', () => ({
   BaseFileManager: { getWorkingDir: () => '/files' },
@@ -81,6 +87,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       hashMismatchTransactionIds: [],
       failedTransactionIds: [],
       encryptedTransactionIds: [],
+      decryptedTransactionIds: [],
     })
 
     expect(mocks.addExcludedTransactions).toHaveBeenCalledWith(new Set(['tx-2']))
@@ -172,6 +179,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       hashMismatchTransactionIds: ['tx-2'],
       failedTransactionIds: [],
       encryptedTransactionIds: [],
+      decryptedTransactionIds: [],
     })
   })
 
@@ -187,6 +195,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       hashMismatchTransactionIds: [],
       failedTransactionIds: [],
       encryptedTransactionIds: [],
+      decryptedTransactionIds: [],
     })
   })
 
@@ -204,6 +213,25 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       hashMismatchTransactionIds: [],
       failedTransactionIds: ['tx-2'],
       encryptedTransactionIds: ['tx-1'],
+      decryptedTransactionIds: [],
     })
+  })
+  it('opens envelopes with the registered decryptor before announcing the saved files', async () => {
+    mocks.hasEnvelopeDecryptor.mockReturnValue(true)
+    mocks.openEncryptedDownloads.mockResolvedValue({ written: ['/files/html/tx-1.html'], opened: ['tx-1'], stillEncrypted: ['tx-3'] })
+    const compositeChildPaths = { 'tx-3': { diary: 'html/diary.html' } }
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const p = new FileDownloader().downloadAll({ ...params, transactionIds: ['tx-1', 'tx-2', 'tx-3'], compositeChildPaths })
+    const worker = lastWorker()
+    worker.emit({ message: 'fileSaved', filePath: '/files/encrypted/tx-1' })
+    worker.emit({ message: 'encryptedContent', transactionId: 'tx-1' })
+    worker.emit({ message: 'encryptedContent', transactionId: 'tx-3' })
+    worker.emit({ message: 'fileError', transactionId: 'tx-2', error: { name: 'Error', message: 'x' } })
+    worker.emit({ done: true })
+    await expect(p).resolves.toMatchObject({ encryptedTransactionIds: ['tx-3'], decryptedTransactionIds: ['tx-1'] })
+    // Every requested transaction that didn't fail, so envelopes kept from earlier runs open too.
+    expect(mocks.openEncryptedDownloads).toHaveBeenCalledWith(['tx-1', 'tx-3'], compositeChildPaths)
+    expect(mocks.notifyFilesWrittenOutsideCache).toHaveBeenCalledWith(['/files/encrypted/tx-1', '/files/html/tx-1.html'])
+    mocks.hasEnvelopeDecryptor.mockReturnValue(false)
   })
 })

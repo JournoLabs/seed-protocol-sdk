@@ -228,7 +228,8 @@ const SeedImageInner = ({
     originalContentUrl ||
     blobPreviewUrl ||
     (isBlobUrl(srcUrl) ? srcUrl : undefined) ||
-    (ensure && !hasContentUrl ? gatewayHref : undefined) ||
+    // A private image this device has no key for (ADR 0033): the gateway only has its ciphertext.
+    (ensure && !hasContentUrl && property?.valueStatus !== 'encrypted' ? gatewayHref : undefined) ||
     'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
   // A gateway that 404s (e.g. the image hasn't propagated there yet) moves on to the next one.

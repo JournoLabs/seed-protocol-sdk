@@ -18,6 +18,7 @@ private Versions ship (ADR 0033).
   `passkeyStanza`, `eoaSignatureStanza`). `enrollPasskey` and `passkeyPrf` make the WebAuthn calls.
 - `createPrivateUploadEncryptor`: the `encryptPrivateUpload` for `@seedprotocol/publish`, one envelope
   per private upload.
+- `createEnvelopeDecryptor`: opens downloaded envelopes for the SDK's `setEnvelopeDecryptor`.
 - `saveIdentityOnDevice`, `loadIdentityFromDevice`, `listIdentitiesOnDevice`,
   `forgetIdentityOnDevice`: an unlocked identity kept in IndexedDB under a non-extractable key.
   Any script on the origin can still decrypt it, so don't save one on a shared device.
@@ -97,3 +98,17 @@ initPublish({
 
 Only Html, Json, File, Image and ItemStorage Text properties can be `private: true`; their uploads
 are encrypted, and titles, relations and other scalars stay public.
+
+Reading private Versions on a device where the identity is unlocked: register a decryptor in every
+tab, then open what earlier downloads kept.
+
+```ts
+import { createEnvelopeDecryptor } from '@seedprotocol/encryption'
+import { openAllEncryptedDownloads, setEnvelopeDecryptor } from '@seedprotocol/sdk'
+
+setEnvelopeDecryptor(createEnvelopeDecryptor([unlocked]))
+await openAllEncryptedDownloads()
+```
+
+Until then, a private Image, File or Html value reads as `valueStatus: 'encrypted'`. Don't register a
+decrypting Arweave read transform in a process that builds public feeds.

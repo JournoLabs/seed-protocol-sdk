@@ -413,6 +413,8 @@ const isAlreadyStored = async (
   filesRoot: string,
   childPaths: Record<string, string> | undefined,
 ): Promise<boolean> => {
+  // A kept envelope is opened from disk by the page once it has a key; never fetched again.
+  if (await isNonEmptyFile(getFilesPath(filesRoot, 'encrypted', transactionId))) return true
   const routed = Object.values(childPaths ?? {})
     .map(safeRelativePath)
     .filter((path): path is string => !!path)

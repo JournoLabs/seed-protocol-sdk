@@ -105,11 +105,44 @@ export function missingFileOf(
   kind: StoredValueKind,
   row: { propertyValue?: unknown; refResolvedValue?: string | null },
   display: { ref: StorageRef; renderValue?: string },
-): { path?: string } | null {
+): { path?: string; encrypted?: true; transactionId?: string } | null {
   if (display.renderValue !== undefined) return null
   if (row.propertyValue == null && !row.refResolvedValue) return null
   const name = display.ref.refResolvedValue
   return name ? { path: BaseFileManager.getFilesPath(storageSubdir(kind, display.ref.localStorageDir), name) } : {}
+}
+
+/**
+ * {@link missingFileOf}, marked `encrypted` when this device holds the file's transaction only as an
+ * envelope it couldn't open (ADR 0033): the value is private and this device has no key for it.
+ * `transactionId` lets a property read again when that envelope's plaintext lands under any name.
+ */
+export async function missingFileWithEnvelope(
+  kind: StoredValueKind,
+  row: { propertyValue?: unknown; refResolvedValue?: string | null; localStorageDir?: string | null },
+  missing: { path?: string; encrypted?: true; transactionId?: string } | null,
+): Promise<{ path?: string; encrypted?: true; transactionId?: string } | null> {
+  if (!missing || (kind !== 'image' && kind !== 'file' && kind !== 'html')) return missing
+  const transactionId = await storageTransactionIdOf(kind, row)
+  const { hasEncryptedDownload } = await import('@/helpers/envelopeContent')
+  if (!transactionId || !(await hasEncryptedDownload(transactionId))) return missing
+  return { ...missing, encrypted: true, transactionId }
+}
+
+/** The Arweave transaction an Image, File or Html value's file comes from, when the row says. */
+async function storageTransactionIdOf(
+  kind: 'image' | 'file' | 'html',
+  row: { propertyValue?: unknown; refResolvedValue?: string | null; localStorageDir?: string | null },
+): Promise<string | undefined> {
+  const propertyValue = typeof row.propertyValue === 'string' ? row.propertyValue.trim() : undefined
+  if (kind === 'html') {
+    if (!propertyValue) return undefined
+    const { resolveHtmlStorageSeedLocalId } = await import('@/helpers/readHtmlBodyForStorageSeed')
+    const seedLocalId = await resolveHtmlStorageSeedLocalId(propertyValue)
+    return storageSeedTransactionId(seedLocalId ? { seedLocalId } : { seedUid: propertyValue })
+  }
+  const ref = await resolveStorageRef(kind, { propertyValue, refResolvedValue: row.refResolvedValue, localStorageDir: row.localStorageDir })
+  return ref.refResolvedValue?.split('.')[0] || undefined
 }
 
 export type StorageDisplayOptions = {

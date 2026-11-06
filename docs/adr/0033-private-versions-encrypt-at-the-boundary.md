@@ -81,9 +81,17 @@ seams on the way in:
   Bytes that are still an envelope after these steps (no key on the device) are never decoded as
   text or sniffed as media: downloads keep them in `encrypted/`, and text reads return nothing.
 
-Local rows and files stay plaintext. A synced row whose content is encrypted and whose key this
-device doesn't hold is stored with its envelope id and no value, distinct from a draft and from a
-revoked row.
+Local rows and files stay plaintext. The download worker keeps an envelope whole at
+`encrypted/<txId>`, and the tab that downloaded it opens it with the decryptor the app registered
+(`setEnvelopeDecryptor`), writing the plaintext where a plain download would have gone; a worker
+can't receive a function, and keys stay out of it. A value whose envelope is kept but not opened has
+`valueStatus: 'encrypted'`, distinct from a draft, from a missing file and from a revoked row. That
+state comes from the kept file, so no metadata column holds the envelope id yet; one can be added if
+something needs the state without the download.
+
+The SDK registers no decrypting Arweave read transform. Feed generation hydrates bodies through that
+transform, so a process that registered one and built public feeds would publish private bodies.
+Html values fall back to the downloaded file, which the decryptor opens.
 
 **Envelopes are padded by default.** The content frame records the body length and is zero-padded
 to its PADMÉ length, so an envelope's size shows a size class (at most 12% extra bytes) rather than
@@ -141,7 +149,6 @@ adapter; no license terms appear in encryption schemas or APIs.
   reading them.
 - Places that hand a gateway URL straight to the browser (`SeedImage`, `useEnsureLocalImage`,
   `mediaRef` hrefs, feed image URLs) can't show private content and must use local blob URLs for it.
-- A new property metadata column is needed for the envelope id, so a migration.
 - `@seedprotocol/encryption` stays `private` in its package.json until private Versions ship, so it
   is not part of releases before then.
 

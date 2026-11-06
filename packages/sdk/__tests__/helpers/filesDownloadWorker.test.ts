@@ -369,6 +369,18 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
       const second = await runWorker(data, respond, { shared })
       expect(second.fetched).toEqual([])
     })
+
+    it('counts a kept envelope as stored for a composite with child paths too', async () => {
+      // A private ItemStorage composite never writes its children until the page opens it.
+      const shared = newOpfsFiles()
+      const data = { transactionIds: [TX], arweaveHost: HOST, skipExisting: true, compositeChildPaths: { [TX]: { diary: 'html/diary.html' } } }
+      const respond = async () => new Response(ENVELOPE as BodyInit, { status: 200 })
+      await runWorker(data, respond, { shared })
+      vi.unstubAllGlobals()
+      delete (globalThis as any).onmessage
+      const second = await runWorker(data, respond, { shared })
+      expect(second.fetched).toEqual([])
+    })
   })
 
   describe('composite uploads', () => {
