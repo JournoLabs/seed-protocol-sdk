@@ -13,8 +13,8 @@ import {
   type EnvelopeErrorCode,
   type Stanza,
 } from '../src/index'
-import { encryptEnvelopeWithNonce } from '../src/envelope'
-import { referenceEncrypt } from './reference'
+import { encryptEnvelopeWithNonce, padmeLength } from '../src/envelope'
+import { referenceEncrypt, referencePadme } from './reference'
 import vectorFile from './vectors.json'
 
 const hex = (s: string) => new Uint8Array(Buffer.from(s, 'hex'))
@@ -32,6 +32,7 @@ function vectorInput(v: (typeof vectorFile.vectors)[number]) {
     stanzas: v.stanzas.map((s) => ({ type: s.type, args: s.args, body: hex(s.bodyHex) })),
     contentType: v.contentType,
     body: 'bodyText' in v && v.bodyText !== undefined ? text.encode(v.bodyText) : pattern(v.bodyPattern!.length),
+    padding: v.padding as 'padme' | 'none',
   }
 }
 
@@ -72,15 +73,18 @@ describe('seed-private/v1 vectors', () => {
         contentType: 'application/octet-stream',
         body: full,
       }
-      const ours = await encryptEnvelopeWithNonce(input, nonce)
-      const theirs = referenceEncrypt({
-        ...input,
-        fileKey: Buffer.from(key),
-        body: Buffer.from(full),
-        payloadNonce: Buffer.from(nonce),
-        stanzas: input.stanzas.map((s) => ({ ...s, body: Buffer.from(s.body) })),
-      })
-      expect(Buffer.from(ours).equals(theirs)).toBe(true)
+      for (const padding of ['padme', 'none'] as const) {
+        const ours = await encryptEnvelopeWithNonce({ ...input, padding }, nonce)
+        const theirs = referenceEncrypt({
+          ...input,
+          padding,
+          fileKey: Buffer.from(key),
+          body: Buffer.from(full),
+          payloadNonce: Buffer.from(nonce),
+          stanzas: input.stanzas.map((s) => ({ ...s, body: Buffer.from(s.body) })),
+        })
+        expect(Buffer.from(ours).equals(theirs)).toBe(true)
+      }
     }
   })
 })
@@ -123,9 +127,61 @@ describe('encryptEnvelope', () => {
   })
 })
 
+describe('padding', () => {
+  const base = { fileKey, bind: { envelopeId: '0x' + '11'.repeat(32) }, stanzas: [{ type: 'x-test', args: [], body: new Uint8Array(32) }], contentType: 'text/plain' }
+
+  it('computes PADMÉ lengths that match the paper and stay within 12%', () => {
+    for (let n = 0; n < 5000; n++) expect(padmeLength(n)).toBe(referencePadme(n))
+    for (const n of [65536, 65537, 200045, 1_000_003, 10 * 2 ** 30 + 1]) {
+      expect(padmeLength(n)).toBe(referencePadme(n))
+      expect(padmeLength(n)).toBeGreaterThanOrEqual(n)
+      expect(padmeLength(n) / n).toBeLessThanOrEqual(1.12)
+    }
+  })
+
+  it('gives bodies of nearby lengths the same envelope size by default', async () => {
+    const a = await encryptEnvelope({ ...base, body: pattern(100_000) })
+    // Both plaintexts round up to 100352 bytes (49 steps of 2048).
+    const b = await encryptEnvelope({ ...base, body: pattern(100_200) })
+    expect(a.length).toBe(b.length)
+    expect((await decryptEnvelope(b, { fileKey })).body.length).toBe(100_200)
+  })
+
+  it("leaves the exact length visible with padding: 'none'", async () => {
+    const a = await encryptEnvelope({ ...base, body: pattern(100_000), padding: 'none' })
+    const b = await encryptEnvelope({ ...base, body: pattern(100_900), padding: 'none' })
+    expect(b.length - a.length).toBe(900)
+  })
+
+  const withPlaintext = (meta: object, after: Buffer) => {
+    const metaBytes = Buffer.from(JSON.stringify(meta))
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(metaBytes.length)
+    return new Uint8Array(referenceEncrypt({
+      ...base,
+      fileKey: Buffer.from(fileKey),
+      body: Buffer.alloc(0),
+      payloadNonce: Buffer.from(payloadNonce),
+      stanzas: base.stanzas.map((st) => ({ ...st, body: Buffer.from(st.body) })),
+      plaintext: Buffer.concat([len, metaBytes, after]),
+    }))
+  }
+
+  it('rejects padding that is not all zero', async () => {
+    const env = withPlaintext({ bodyLength: 2, contentType: 'text/plain' }, Buffer.from([104, 105, 0, 0, 1, 0]))
+    await expectCode(decryptEnvelope(env, { fileKey }), 'BAD_CONTENT_FRAME')
+  })
+
+  it('rejects a missing or out-of-range bodyLength', async () => {
+    await expectCode(decryptEnvelope(withPlaintext({ contentType: 'text/plain' }, Buffer.from('hi')), { fileKey }), 'BAD_CONTENT_FRAME')
+    await expectCode(decryptEnvelope(withPlaintext({ bodyLength: 3, contentType: 'text/plain' }, Buffer.from('hi')), { fileKey }), 'BAD_CONTENT_FRAME')
+    await expectCode(decryptEnvelope(withPlaintext({ bodyLength: 1.5, contentType: 'text/plain' }, Buffer.from('hi')), { fileKey }), 'BAD_CONTENT_FRAME')
+  })
+})
+
 describe('decryptEnvelope failures', () => {
-  // Three chunks: 200000 bytes of body.
-  const v = vectorFile.vectors.find((x) => x.name === 'three chunks')!
+  // Four chunks, the last one short.
+  const v = vectorFile.vectors.find((x) => x.name === '200000-byte body, padded to four chunks')!
   const make = () => encryptEnvelopeWithNonce(vectorInput(v), payloadNonce)
   const headerEnd = (env: Uint8Array) => Buffer.from(env).indexOf('\n', Buffer.from(env).indexOf('--- ')) + 1
 

@@ -20,6 +20,7 @@ export type {
   EnvelopeBind,
   EnvelopeErrorCode,
   EnvelopeHeader,
+  EnvelopePadding,
   Stanza,
 } from './envelope'
 export { UnknownEntitlementKindError, isEntitled, registerEntitlementAdapter } from './entitlement'

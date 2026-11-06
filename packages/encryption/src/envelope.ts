@@ -75,7 +75,14 @@ export interface EncryptEnvelopeInput {
   /** The plaintext's real MIME type; stored inside the encrypted payload. */
   contentType: string
   body: Uint8Array
+  /**
+   * `'padme'` (default) zero-pads the plaintext to its PADMÉ length, so the ciphertext size
+   * reveals only a size class (at most 12% extra bytes). `'none'` leaves the exact length visible.
+   */
+  padding?: EnvelopePadding
 }
+
+export type EnvelopePadding = 'padme' | 'none'
 
 export interface DecryptEnvelopeOptions {
   /** The file key, when the caller already unwrapped it. */
@@ -180,11 +187,28 @@ function chunkNonce(index: number, last: boolean): Uint8Array<ArrayBuffer> {
   return iv
 }
 
-function encodeContentFrame(contentType: string, body: Uint8Array): Uint8Array<ArrayBuffer> {
-  const meta = encoder.encode(JSON.stringify({ contentType }))
+/**
+ * PADMÉ (Nikitin et al., "Reducing Metadata Leakage from Encrypted Files and Communication with
+ * PURBs", 2019): round `length` up so only the top `floor(log2(E)) + 1` bits of its exponent `E`
+ * vary. Overhead is at most 12%.
+ */
+export function padmeLength(length: number): number {
+  if (length < 2) return length
+  let e = 0
+  while (2 ** (e + 1) <= length) e++
+  let s = 0
+  while (2 ** (s + 1) <= e) s++
+  const step = 2 ** (e - (s + 1))
+  return Math.ceil(length / step) * step
+}
+
+function encodeContentFrame(contentType: string, body: Uint8Array, padding: EnvelopePadding): Uint8Array<ArrayBuffer> {
+  const meta = encoder.encode(JSON.stringify({ bodyLength: body.length, contentType }))
   const len = new Uint8Array(4)
   new DataView(len.buffer).setUint32(0, meta.length)
-  return concat([len, meta, body])
+  const unpadded = 4 + meta.length + body.length
+  const padded = padding === 'padme' ? padmeLength(unpadded) : unpadded
+  return concat([len, meta, body, new Uint8Array(padded - unpadded)])
 }
 
 function decodeContentFrame(plain: Uint8Array): { contentType: string; body: Uint8Array } {
@@ -199,9 +223,17 @@ function decodeContentFrame(plain: Uint8Array): { contentType: string; body: Uin
   } catch {
     throw new EnvelopeError('BAD_CONTENT_FRAME', 'Content metadata is not UTF-8 JSON')
   }
-  const contentType = (meta as { contentType?: unknown } | null)?.contentType
+  const { contentType, bodyLength } = (meta ?? {}) as { contentType?: unknown; bodyLength?: unknown }
   if (typeof contentType !== 'string') throw new EnvelopeError('BAD_CONTENT_FRAME', 'Content metadata has no contentType')
-  return { contentType, body: plain.subarray(4 + metaLength) }
+  const bodyStart = 4 + metaLength
+  if (typeof bodyLength !== 'number' || !Number.isSafeInteger(bodyLength) || bodyLength < 0 || bodyStart + bodyLength > plain.length) {
+    throw new EnvelopeError('BAD_CONTENT_FRAME', 'Content metadata bodyLength is missing or out of range')
+  }
+  const bodyEnd = bodyStart + bodyLength
+  for (let i = bodyEnd; i < plain.length; i++) {
+    if (plain[i] !== 0) throw new EnvelopeError('BAD_CONTENT_FRAME', 'Padding after the body is not all zero')
+  }
+  return { contentType, body: plain.subarray(bodyStart, bodyEnd) }
 }
 
 function encodeStanza(stanza: Stanza): string {
@@ -232,7 +264,7 @@ export async function encryptEnvelopeWithNonce(input: EncryptEnvelopeInput, payl
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', await headerMacKey(input.fileKey, 'sign'), prefix))
 
   const key = await payloadKey(input.fileKey, payloadNonce, bindText, 'encrypt')
-  const plain = encodeContentFrame(input.contentType, input.body)
+  const plain = encodeContentFrame(input.contentType, input.body, input.padding ?? 'padme')
   const chunks: Uint8Array[] = []
   const count = Math.max(1, Math.ceil(plain.length / CHUNK_SIZE))
   for (let i = 0; i < count; i++) {
