@@ -68,3 +68,25 @@ export function referenceEncrypt(input: ReferenceInput): Buffer {
   }
   return Buffer.concat([prefix, Buffer.from(` ${b64(mac)}\n`), input.payloadNonce, ...chunks])
 }
+
+/**
+ * The mlkem768x25519 stanza, built with hpke-js (`@hpke/core`, `@hpke/hybridkem-x-wing`), whose
+ * ML-KEM, X25519 and HPKE code is independent of src/'s `@noble/post-quantum` and WebCrypto code.
+ */
+export async function referenceXWingStanza(
+  fileKey: Buffer,
+  recipientSeed: Buffer,
+  randomness: Buffer,
+): Promise<{ publicKey: Buffer; stanza: ReferenceStanza }> {
+  const { CipherSuite, HkdfSha256, Aes256Gcm } = await import('@hpke/core')
+  const { XWing } = await import('@hpke/hybridkem-x-wing')
+  const kem = new XWing()
+  const pair = await kem.generateKeyPairDerand(new Uint8Array(recipientSeed))
+  const publicKey = Buffer.from(await kem.serializePublicKey(pair.publicKey))
+  const suite = new CipherSuite({ kem, kdf: new HkdfSha256(), aead: new Aes256Gcm() })
+  const { enc, ct } = await suite.seal(
+    { recipientPublicKey: pair.publicKey, ekm: new Uint8Array(randomness), info: Buffer.from('seed-private/v1/mlkem768x25519') },
+    new Uint8Array(fileKey),
+  )
+  return { publicKey, stanza: { type: 'mlkem768x25519', args: [b64(Buffer.from(enc))], body: Buffer.from(ct) } }
+}
