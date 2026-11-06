@@ -87,6 +87,29 @@ Use `startLocalArweave()` from that file in other tests that need an Arweave nod
 posts and mines a transaction so it is readable at once (`{ mine: false }` leaves it unmined), and
 `failRawRead(id, status)` makes `/raw/<id>` answer with a gateway error.
 
+### Account-abstraction stack tests
+
+`packages/publish/src/helpers/adapters/aaSenders.stack.test.ts` sends UserOps through
+`createManagedAccountTxSender` (EntryPoint v0.6) and `createPermissionlessTxSender` (EntryPoint
+v0.8, EIP-7702), sponsored and unsponsored, against the real OP Sepolia contracts. They need
+`anvil` from [Foundry](https://getfoundry.sh); CI installs v1.8.4.
+
+`startAaStack()` (`packages/publish/test-utils/aaStack/aaStack.ts`) starts anvil forked from OP
+Sepolia at a pinned block, Alto (`@pimlico/alto`) for both EntryPoints, and a test-only
+`AcceptAllPaymaster` behind a local ERC-7677 service. The fork's upstream is a local server that
+replays `opSepoliaFork.json`, the answers OP Sepolia gave when the tests last ran against it, so
+the tests need no network. Their keys and clock are fixed, because a new address or nonce key reads
+state the fixture doesn't hold; replay reports such reads after the run. Record the fixture again
+after changing the pinned block or adding a test that reaches new state:
+
+```bash
+cd packages/publish
+SEED_AA_STACK_RECORD=1 SEED_LIVE_NETWORK_TESTS=1 bun test src/helpers/adapters/aaSenders.stack.test.ts
+```
+
+`AcceptAllPaymaster.sol` compiles into `acceptAllPaymaster.ts` with
+`bun test-utils/aaStack/compileAcceptAllPaymaster.ts`, which needs `solc` 0.8.25 or later.
+
 ### Live network tests
 
 Files named `*.live.test.ts` call real services and are skipped unless `SEED_LIVE_NETWORK_TESTS=1`,

@@ -11,8 +11,10 @@
     // and each table's row types sit beside it.
     "packages/sdk/src/seedSchema/*.ts": ["exports", "types"]
   },
-  // System binaries, called by archive's metadata and verifyArchive tests when installed.
-  "ignoreBinaries": ["shasum", "xmllint"],
+  // System binaries: shasum and xmllint, called by archive's metadata and verifyArchive tests when
+  // installed; anvil (Foundry), started by publish's account-abstraction stack tests; solc, run by
+  // publish's compileAcceptAllPaymaster.ts.
+  "ignoreBinaries": ["shasum", "xmllint", "anvil", "solc"],
   "workspaces": {
     ".": {
       "entry": ["scripts/**/*.{js,ts,mjs}", "vite.config.js"],
@@ -87,9 +89,18 @@
       "ignore": ["__tests__/fixtures/next-app/.next*/**"]
     },
     "packages/publish": {
-      // test-utils/parse5Loaded.bun.ts is a preload in bunfig.toml.
-      "entry": ["src/index.ts", "src/thirdweb.ts", "src/**/*.test.{ts,tsx}", "test-utils/*.bun.ts"],
-      "project": ["src/**/*.{ts,tsx}", "test-utils/**/*.ts"]
+      // test-utils/parse5Loaded.bun.ts is a preload in bunfig.toml. compileAcceptAllPaymaster.ts is
+      // run by hand to regenerate acceptAllPaymaster.ts.
+      "entry": [
+        "src/index.ts",
+        "src/thirdweb.ts",
+        "src/**/*.test.{ts,tsx}",
+        "test-utils/*.bun.ts",
+        "test-utils/aaStack/compileAcceptAllPaymaster.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "test-utils/**/*.ts"],
+      // The aaStack tests run Alto's CLI by path, not by import.
+      "ignoreDependencies": ["@pimlico/alto"]
     },
     "packages/query": {
       "entry": ["src/index.ts", "src/index.node.ts", "src/node/index.ts", "src/ens/index.ts", "__tests__/**/*.test.ts"],

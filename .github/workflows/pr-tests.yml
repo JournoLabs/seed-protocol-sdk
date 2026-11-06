@@ -30,6 +30,13 @@ jobs:
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
 
+      # anvil, which the publish package's account-abstraction stack tests start
+      # (packages/publish/test-utils/aaStack). Pinned to the version their fork fixture was recorded with.
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.4
+
       # Same as release.yml: the tests import workspace packages from their dist, and the
       # declaration check reads every package's dist
       - name: Build workspace packages

@@ -79,6 +79,12 @@ jobs:
 
       - run: bunx playwright install --with-deps chromium
 
+      # anvil, which the publish package's account-abstraction stack tests start
+      # (packages/publish/test-utils/aaStack). Pinned to the version their fork fixture was recorded with.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.4
+
       - run: bun run lint
 
       # Workspace packages resolve to their dist: the root vite.config.js imports @seedprotocol/vite,
