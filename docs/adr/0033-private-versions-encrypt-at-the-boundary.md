@@ -26,7 +26,9 @@ plaintext, and local storage is not encrypted today.
 **Terms.** A **draft** is local and unattested, and is never encrypted. A **private Version** is an
 attested Version whose private property values are encrypted before they leave the device. An
 encrypted Version shared with readers or collaborators is still a private Version. New code does
-not use "sealed" or "locked" for encryption concepts.
+not use "sealed" or "locked" for encryption concepts: private values travel in an
+`encrypted_content` storage seed, the envelope attestation is `seedprotocol.envelope`, and a synced
+row this device has no key for is described as "encrypted, no key on this device".
 
 **Envelopes.** Encrypted bytes use the `seed-private/v1` envelope, specified in
 `packages/encryption/SPEC.md` with test vectors. The format code lives in `@seedprotocol/encryption`,
@@ -50,6 +52,10 @@ Local rows and files stay plaintext. A synced row whose content is encrypted and
 device doesn't hold is stored with its envelope id and no value, distinct from a draft and from a
 revoked row.
 
+**Envelopes are padded by default.** The content frame records the body length and is zero-padded
+to its PADMÉ length, so an envelope's size shows a size class (at most 12% extra bytes) rather than
+the exact length. A publish can turn padding off.
+
 **Privacy is declared per property** with `private: true` in the schema file. Public properties of
 the same model are published as today.
 
@@ -58,6 +64,16 @@ key covers, forever. Revoking a key grant stops future keys from being issued an
 honest clients respect; publishing a new Version under a new content key is the only way to cut a
 reader off from changed content. Product wording describes access to Versions published while the
 reader's access was active, never "unpublish" or "revoke access" to past content.
+
+**Encryption keys are registered by the user.** The `seedprotocol.encryptionKey` attestation comes
+from the user's account (directly, by EOA delegation, or as a sponsored UserOp), never from an
+automation session key. A leaked session key could otherwise point every future wrap at an
+attacker's key. A session key that publishes a private Version wraps to the key already registered.
+
+**Collaborators re-wrap per editor.** An editor publishing a new Version wraps its file key to every
+recipient, reading the recipient list from the Seed's access policy or key grants rather than its
+own local state, and always includes the publisher. A shared policy key is left to subscriptions,
+where per-epoch keys already play that role.
 
 **Entitlement is pluggable.** Who may receive keys is answered by adapters registered against
 `isEntitled(policy, address, blockTag)`. Licensing is a separate package that registers its own
@@ -69,6 +85,7 @@ adapter; no license terms appear in encryption schemas or APIs.
   Version shows as encrypted with no value, not as missing.
 - Encryption hides content, not structure. The uploader address, byte sizes, model type, attester,
   timing, Version count and relation uids stay public.
+- Padding adds up to 12% to a private upload's size, which Arweave cost estimates must include.
 - Ciphertext needs no server change: the upload API and bundlers forward data items without
   reading them.
 - Places that hand a gateway URL straight to the browser (`SeedImage`, `useEnsureLocalImage`,

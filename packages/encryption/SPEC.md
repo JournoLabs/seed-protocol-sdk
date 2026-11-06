@@ -63,8 +63,16 @@ space or the MAC itself. A reader must verify it, in constant time, before decry
 The payload follows the MAC line's LF: the 16-byte payload nonce, then the chunks.
 
 The plaintext is the content frame: a 4-byte big-endian length `n`, then `n` bytes of UTF-8 JSON
-`{"contentType":"<MIME type>"}`, then the content. The real content type is only here, never in the
-header or in upload tags. `n` must not exceed 65536.
+`{"bodyLength":<integer>,"contentType":"<MIME type>"}`, then `bodyLength` bytes of content, then
+zero bytes of padding. The real content type is only here, never in the header or in upload tags.
+`n` must not exceed 65536. A reader must reject a frame whose `bodyLength` is not a non-negative
+integer, runs past the end of the plaintext, or is followed by a non-zero byte.
+
+**Padding.** Writers should pad by default, so the ciphertext size shows a size class rather than
+the exact length. Seed writers pad the frame's total length `L` (the 4 length bytes, the JSON and
+the content) to PADMÉ(`L`): with `E = floor(log2 L)` and `S = floor(log2 E) + 1`, round `L` up to a
+multiple of `2^(E - S)`. That adds at most 12%. `L` below 2 is left as is. A writer may skip
+padding; readers handle both the same way.
 
 The plaintext is split into 64 KiB (65536-byte) chunks. Every chunk but the last is full-size. The
 last chunk is non-empty, unless it is the only chunk. Chunk `i` (from 0) is encrypted with
@@ -93,7 +101,8 @@ An envelope is uploaded with `Content-Type: application/octet-stream` and the ta
 
 `__tests__/vectors.json` lists inputs and the resulting envelopes: the hex for envelopes up to
 4096 bytes, and the length and SHA-256 for all. All vectors use file key `00 01 ... 1f` and payload
-nonce `a0 a1 ... af`. They were produced by `__tests__/reference.ts`, a node:crypto implementation
-that shares no code with `src/`. The cases cover a short text, an empty body with two stanzas and a
-stanza body that fills a whole line, a plaintext of exactly one chunk, one chunk plus one byte, and
-three chunks. `__tests__/envelope.test.ts` lists the failure cases above as tests.
+nonce `a0 a1 ... af`, and each names its `padding` (`padme` or `none`). They were produced by
+`__tests__/reference.ts`, a node:crypto implementation that shares no code with `src/`. The cases
+cover a short text, an empty body with two stanzas and a stanza body that fills a whole line, an
+unpadded plaintext of exactly one chunk and of one chunk plus one byte, and a 200000-byte body
+padded to four chunks. `__tests__/envelope.test.ts` lists the failure cases above as tests.

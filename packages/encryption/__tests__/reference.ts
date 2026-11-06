@@ -17,6 +17,18 @@ export interface ReferenceInput {
   contentType: string
   body: Buffer
   payloadNonce: Buffer
+  padding?: 'padme' | 'none'
+  /** Replaces the content frame, to build envelopes whose plaintext src/ would never produce. */
+  plaintext?: Buffer
+}
+
+/** PADMÉ, written from the paper's definition with logarithms rather than src/'s loops. */
+export function referencePadme(length: number): number {
+  if (length < 2) return length
+  const e = Math.floor(Math.log2(length))
+  const s = Math.floor(Math.log2(e)) + 1
+  const mask = 2 ** (e - s) - 1
+  return Number((BigInt(length) + BigInt(mask)) & ~BigInt(mask))
 }
 
 const b64 = (bytes: Buffer) => bytes.toString('base64').replace(/=+$/, '')
@@ -38,10 +50,12 @@ export function referenceEncrypt(input: ReferenceInput): Buffer {
 
   const info = Buffer.concat([Buffer.from('seed-private/v1/payload'), Buffer.from([0]), Buffer.from(bindText)])
   const key = Buffer.from(hkdfSync('sha256', input.fileKey, input.payloadNonce, info, 32))
-  const meta = Buffer.from(JSON.stringify({ contentType: input.contentType }))
+  const meta = Buffer.from(JSON.stringify({ bodyLength: input.body.length, contentType: input.contentType }))
   const len = Buffer.alloc(4)
   len.writeUInt32BE(meta.length)
-  const plain = Buffer.concat([len, meta, input.body])
+  const unpadded = 4 + meta.length + input.body.length
+  const padded = (input.padding ?? 'padme') === 'padme' ? referencePadme(unpadded) : unpadded
+  const plain = input.plaintext ?? Buffer.concat([len, meta, input.body, Buffer.alloc(padded - unpadded)])
 
   const chunks: Buffer[] = []
   const count = Math.max(1, Math.ceil(plain.length / 65536))
