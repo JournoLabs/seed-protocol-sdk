@@ -124,4 +124,4 @@ Core publish uses standard RPC, so a provider needs no adapter. Two EntryPoint v
 
 Check that a provider still accepts v0.6 UserOps on your chain before choosing it for a ManagedAccount. Fees come from `pimlico_getUserOperationGasPrice` when the bundler answers it, and otherwise from the chain's estimate; `estimateFeesPerGas` on `createManagedAccountTxSender` replaces both.
 
-The ManagedAccount sender has been run against a local Alto bundler and a test paymaster behind an ERC-7677 service. It has not been run against a hosted provider.
+Both senders are tested in CI against Alto and a test paymaster behind an ERC-7677 service, on a fork of OP Sepolia with the real factory, EntryPoints and Simple7702Account ([TESTING.md](./TESTING.md#account-abstraction-stack-tests)). They have not been run against a hosted provider.
