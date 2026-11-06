@@ -41,6 +41,16 @@ anyone who later breaks the wrap. The `mlkem768x25519` stanza seals the file key
 X-Wing key (ML-KEM-768 plus X25519), following age's recipient of the same name. X-Wing comes from
 `@noble/post-quantum`; the HPKE key schedule and AES-256-GCM use WebCrypto.
 
+**Identity and keystore.** A user's encryption identity is one random 32-byte secret; the recipient
+key, an X25519 tag key and the key id are derived from it. The secret is recovered from a public
+keystore manifest, itself a `seed-private/v1` envelope, with one stanza per authenticator: a
+recovery key derived from a 24-word phrase, a passkey's WebAuthn PRF output, or an EOA's
+deterministic signature. The manifest's file key derives from the identity, so any device holding
+the identity can publish a revised manifest that adds an authenticator without the others present.
+Removing an authenticator doesn't revoke it, because old manifests stay on Arweave; that takes a new
+identity. A device may keep the unlocked secret in IndexedDB under a non-extractable AES-GCM key.
+That stops the raw secret being copied out of the browser's files, not a script on the same origin.
+
 **Boundaries.** The SDK encrypts in exactly one place on the way out and decrypts at a fixed set of
 seams on the way in:
 

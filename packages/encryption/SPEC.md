@@ -6,7 +6,8 @@ follows [age](https://github.com/C2SP/C2SP/blob/main/age.md): a text header of r
 authenticated by an HMAC, then a STREAM payload of independently authenticated chunks. It differs
 from age in the key size, the cipher, the `bind` line and the content frame. ADR 0033 records why.
 
-Status: draft. One recipient stanza type is defined, `mlkem768x25519`. Stanza types for readers'
+Status: draft. Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity, and
+the keystore manifest with its `passkey-prf` and `eoa-signature` stanzas. Stanza types for readers'
 key grants and subscription epochs come with those features.
 
 ## Notation
@@ -90,6 +91,74 @@ or a body that isn't 48 bytes is malformed, and decryption fails. A body that do
 means the stanza was wrapped to another key; the reader tries the next stanza. Readers try every
 `mlkem768x25519` stanza, since the header doesn't say which key each one is for.
 
+## Identity
+
+A user's encryption identity is one **identity secret** of 32 random bytes. Everything else is
+derived from it:
+
+- **Recipient key:** the `mlkem768x25519` key pair whose secret key is
+  `HKDF(identity secret, empty, "seed-private/v1/identity/mlkem768x25519", 32)`. Version file keys
+  are wrapped to its public key.
+- **Tag key:** the X25519 key pair whose private key is
+  `HKDF(identity secret, empty, "seed-private/v1/identity/x25519", 32)` (RFC 7748 clamping applies
+  when it is used). It is reserved for blinded tags.
+- **Key id:** `0x` and the lowercase hex of `SHA-256("seed-private/v1/key-id" || 0x00 || recipient
+  public key || tag public key)`.
+
+**Recovery key.** A recovery phrase is 24 words from the BIP39 English list encoding 32 bytes of
+entropy with BIP39's checksum. Readers compare words after NFKD normalization, lowercasing and
+collapsing whitespace, and reject unknown words, a bad checksum and any other length. The recovery
+key is the `mlkem768x25519` key pair whose secret key is
+`HKDF(entropy, empty, "seed-private/v1/recovery/mlkem768x25519", 32)`. BIP39's PBKDF2 seed is not
+used, so a wallet's phrase entered by mistake gives an unrelated key.
+
+## Keystore manifest
+
+The keystore manifest lets any authenticator the user enrolled recover the identity secret. It is a
+`seed-private/v1` envelope with:
+
+- **file key** `HKDF(identity secret, empty, "seed-private/v1/keystore", 32)`. It depends only on
+  the identity, so a device that holds the identity can write a revised manifest that copies the
+  existing stanzas unchanged and adds one;
+- **bind** `{"envelopeId": <random per revision>, "keyId": <the key id>, "purpose": "keystore"}`;
+- **content type** `application/vnd.seedprotocol.identity-secret` and the 32-byte identity secret
+  as the body;
+- **one or more stanzas**, each of a type below.
+
+The manifest is public, so a stanza may hold nothing that identifies the user beyond their account.
+A reader that opens a manifest must check that the identity derived from the body has the bind's
+key id, and that its keystore file key equals the one the stanza unwrapped; when it knows the key id
+from the registration attestation it must also check the bind against it.
+
+**Recovery stanza.** An `mlkem768x25519` stanza wrapping the keystore file key to the recovery
+public key. Writing it needs only the public key, not the phrase.
+
+**`passkey-prf`.** `-> passkey-prf <base64(credential id)> <base64(salt)>`, where the salt is 32
+random bytes, with a 48-byte body `AES-256-GCM(KEK, nonce = 12 zero bytes, aad = "", file key)` and
+`KEK = HKDF(PRF output, salt, "seed-private/v1/passkey-prf", 32)`. The PRF output is the WebAuthn
+`prf` extension's `results.first` for the credential with `eval.first = salt`. A reader with
+several `passkey-prf` stanzas asks for any of their credentials in one request, using
+`evalByCredential`.
+
+**`eoa-signature`.** `-> eoa-signature <base64(salt)>`, with a 32-byte random salt and the same
+body construction, with `KEK = HKDF(r || s, salt, "seed-private/v1/eoa-signature", 32)`. `r || s`
+are the 64 bytes of the account's EIP-191 `personal_sign` signature over the message below, with
+`s` replaced by `n - s` when it is above `n / 2` (`n` the secp256k1 order), and with the parity bit
+cleared when the signature is in EIP-2098 compact form. `v` is not used. Only EOAs whose wallets
+sign deterministically (RFC 6979) can use this stanza. The message, with LF line endings and the
+salt as `0x` and lowercase hex:
+
+```
+Unlock your Seed Protocol encryption key
+
+Signing this message lets this app read your private Versions. Anyone who gets this signature can read them too, so sign it only in apps you trust.
+
+Key: 0x<salt>
+```
+
+A zero nonce is safe in both stanzas because each KEK is used for one encryption: it depends on a
+fresh random salt.
+
 ## Payload
 
 The payload follows the MAC line's LF: the 16-byte payload nonce, then the chunks.
@@ -145,3 +214,8 @@ first 32 for ML-KEM, the last 32 for the X25519 ephemeral key). `recipientEnvelo
 envelope carrying both. These stanzas were produced with hpke-js (`@hpke/core`,
 `@hpke/hybridkem-x-wing`), which shares no code with `src/`; `__tests__/recipient.test.ts` also
 checks the X-Wing KEM against the draft's first test vector.
+
+`keystoreVector` is a keystore manifest built by the reference with its derived file key and the
+same payload nonce. It lists the identity secret, its derived public keys and key id, the keystore
+file key, and one stanza of each type with its inputs. The recovery entropy is BIP39's test vector `7f7f...7f` ("legal winner thank year ..."), and the
+signature is from secp256k1 private key `77 77 ... 77`.

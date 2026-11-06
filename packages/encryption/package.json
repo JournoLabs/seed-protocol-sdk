@@ -41,6 +41,7 @@
     "@hpke/core": "^1.10.0",
     "@hpke/hybridkem-x-wing": "^0.7.0",
     "@types/node": "^24.10.1",
+    "fake-indexeddb": "^6.2.7",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
@@ -58,6 +59,8 @@
     "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "dependencies": {
-    "@noble/post-quantum": "^0.7.1"
+    "@noble/curves": "^2.4.0",
+    "@noble/post-quantum": "^0.7.1",
+    "@scure/bip39": "^2.4.0"
   }
 }

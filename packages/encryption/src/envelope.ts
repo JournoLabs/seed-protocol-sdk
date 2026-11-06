@@ -39,6 +39,9 @@ export type EnvelopeErrorCode =
   | 'BAD_CHUNK'
   | 'TRAILING_DATA'
   | 'BAD_CONTENT_FRAME'
+  | 'BAD_RECOVERY_PHRASE'
+  | 'BAD_KEYSTORE'
+  | 'PASSKEY_PRF_UNSUPPORTED'
 
 export class EnvelopeError extends Error {
   readonly code: EnvelopeErrorCode
@@ -155,7 +158,7 @@ function copy(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   return new Uint8Array(bytes)
 }
 
-async function hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array<ArrayBuffer>> {
+export async function hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array<ArrayBuffer>> {
   const key = await crypto.subtle.importKey('raw', copy(ikm), 'HKDF', false, ['deriveBits'])
   const bits = await crypto.subtle.deriveBits(
     { name: 'HKDF', hash: 'SHA-256', salt: copy(salt), info: copy(info) },
