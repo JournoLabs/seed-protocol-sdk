@@ -46,7 +46,7 @@ if (missing.length > 0) {
 }
 
 /** Entries whose declarations only make sense with a runtime hook or are not code. */
-const SKIP_ENTRIES = new Set(['./package.json', './node-eas-lodash'])
+const SKIP_ENTRIES = new Set(['./package.json', './node-eas-lodash', './terms.schema.json'])
 
 const specifiers = packages.flatMap((p) =>
   Object.keys(p.exports)
