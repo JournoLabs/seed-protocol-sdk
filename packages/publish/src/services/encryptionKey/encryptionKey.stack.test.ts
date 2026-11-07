@@ -8,15 +8,16 @@ import {
   recoveryStanza,
   type EncryptionIdentity,
 } from '@seedprotocol/encryption'
-import { ENCRYPTION_KEY_SCHEMA_DEF, ENCRYPTION_KEY_SCHEMA_UID, bytes32ToArweaveTxId } from '@seedprotocol/eas'
+import { BaseEasClient, ENCRYPTION_KEY_SCHEMA_DEF, ENCRYPTION_KEY_SCHEMA_UID, bytes32ToArweaveTxId } from '@seedprotocol/eas'
 import { JsonRpcProvider, Wallet } from 'ethers'
 import { bytesToHex, createPublicClient, http, keccak256, parseAbi, parseEther, toHex, type Address } from 'viem'
 import { optimismSepolia } from 'viem/chains'
 import { startAaStack, type AaStack } from '../../../test-utils/aaStack/aaStack'
 
 // Registration against the real OP Sepolia SchemaRegistry and EAS predeploys on the replayed fork,
-// from an EOA and from a sponsored ManagedAccount. Only Arweave is stood in for: the app's
-// signDataItems records the manifest and returns an id, and the existence check is stubbed.
+// from an EOA and from a sponsored ManagedAccount. Only Arweave and the EAS indexer are stood in
+// for: the app's signDataItems records the manifest and returns an id, the existence check is
+// stubbed, and the indexer answers with the rows a test sets in `indexer`.
 // Keys, identities, the clock and block timestamps are fixed so the fork reads only recorded state:
 // an attestation's uid, and so the EAS storage slot it is written to, includes its block's time.
 
@@ -28,7 +29,7 @@ const { initPublish } = await import('../../config')
 const { fromEthersWallet } = await import('../../helpers/seedSigner')
 const { createManagedAccountTxSender } = await import('../../helpers/adapters/managedAccountTxSender')
 const { EncryptionKeySchemaNotRegisteredError } = await import('../../errors')
-const { ensureEncryptionKeySchema, registerEncryptionKey } = await import('./index')
+const { ensureEncryptionKeySchema, getVerifiedEncryptionKey, registerEncryptionKey } = await import('./index')
 
 const EAS = '0x4200000000000000000000000000000000000021' as Address
 const keyFor = (label: string) => keccak256(toHex(`seed encryption key ${label}`))
@@ -79,7 +80,24 @@ async function attestationOnChain(uid: string) {
   return { attestation, fields }
 }
 
+/** What the stand-in indexer lists, as EAS GraphQL returns attestations. */
+let indexer: unknown[] = []
+
+/** The indexer row for `uid` as it is on chain, with `fields` replaced as a misbehaving indexer would. */
+async function indexerRow(uid: string, { attester, fields: replaced = {} }: { attester?: string; fields?: Record<string, unknown> } = {}) {
+  const { attestation, fields } = await attestationOnChain(uid)
+  const all = { ...fields, ...replaced }
+  return {
+    id: uid,
+    attester: attester ?? attestation.attester,
+    timeCreated: Number(attestation.time),
+    revocationTime: Number(attestation.revocationTime),
+    decodedDataJson: JSON.stringify(Object.entries(all).map(([name, value]) => ({ name, value: { name, value } }))),
+  }
+}
+
 beforeAll(async () => {
+  BaseEasClient.configure({ getEasClient: () => ({ request: async () => ({ itemProperties: indexer }) }) as never })
   setSystemTime(new Date('2026-11-06T00:00:00Z'))
   stack = await startAaStack()
   initPublish({ chain: optimismSepolia, rpcUrl: stack.rpcUrl, uploadApiBaseUrl: 'http://127.0.0.1:9' })
@@ -178,4 +196,80 @@ describe('encryption key registration on OP Sepolia', () => {
     await expect(registerEncryptionKey({ ...inputFor(keys), tagKey: other.identity.tagKey.publicKey }, opts)).rejects.toThrow(/not the id of these public keys/)
     await expect(registerEncryptionKey({ ...inputFor(keys), keystoreManifest: other.manifest }, opts)).rejects.toThrow(/not a keystore manifest for/)
   })
+})
+
+describe('rotating and choosing an encryption key on OP Sepolia', () => {
+  let first: Awaited<ReturnType<typeof registerEncryptionKey>>
+  let second: Awaited<ReturnType<typeof registerEncryptionKey>>
+
+  test('registering again revokes the earlier live registration', async () => {
+    const user = eoaWallet('eoa user')
+    const opts = { account: user.txSender.address, wallet: user, signDataItems }
+    indexer = []
+    first = await registerEncryptionKey(inputFor(await identityFor('rotate one')), opts)
+    expect(first.revokedRegistrationUids).toEqual([])
+
+    indexer = [await indexerRow(first.uid)]
+    second = await registerEncryptionKey(inputFor(await identityFor('rotate two')), opts)
+
+    expect(second.revokedRegistrationUids).toEqual([first.uid.toLowerCase()])
+    expect((await chain.attestation(first.uid)).revocationTime).toBeGreaterThan(0n)
+    expect((await chain.attestation(second.uid)).revocationTime).toBe(0n)
+  }, 60_000)
+
+  test("doesn't try to revoke a registration the indexer still lists as live after it was revoked", async () => {
+    const user = eoaWallet('eoa user')
+    // Stale: first is revoked on chain but listed as live. EAS would revert a multiRevoke that
+    // included it, and with it the revoke of anything else listed.
+    indexer = [{ ...(await indexerRow(first.uid)), revocationTime: 0 }]
+    const third = await registerEncryptionKey(inputFor(await identityFor('rotate three')), {
+      account: user.txSender.address,
+      wallet: user,
+      signDataItems,
+    })
+    expect(third.revokedRegistrationUids).toEqual([])
+    expect((await chain.attestation(third.uid)).revocationTime).toBe(0n)
+  }, 60_000)
+
+  test('takes the newest registration EAS confirms, not what the indexer says', async () => {
+    const account = eoaWallet('eoa user').txSender.address
+    const staleFirst = { ...(await indexerRow(first.uid)), revocationTime: 0 }
+
+    indexer = [await indexerRow(second.uid), staleFirst]
+    expect((await getVerifiedEncryptionKey({ account }))?.uid).toBe(second.uid)
+
+    // A stale listing that has only the replaced key finds nothing rather than wrapping to it.
+    indexer = [staleFirst]
+    expect(await getVerifiedEncryptionKey({ account })).toBeUndefined()
+
+    // Keys the attestation doesn't hold, with a key id that matches them.
+    const other = (await identityFor('rotate one')).identity
+    indexer = [
+      await indexerRow(second.uid, {
+        fields: { key_id: other.keyId, recipient_key: bytesToHex(other.recipient.publicKey), tag_key: bytesToHex(other.tagKey.publicKey) },
+      }),
+    ]
+    expect(await getVerifiedEncryptionKey({ account })).toBeUndefined()
+
+    // Another account's attestation listed under this one.
+    const someoneElse = eoaWallet('someone else').txSender.address
+    indexer = [await indexerRow(second.uid, { attester: someoneElse })]
+    expect(await getVerifiedEncryptionKey({ account: someoneElse })).toBeUndefined()
+  }, 60_000)
+
+  test('a ManagedAccount revokes its earlier registration through a sponsored UserOp', async () => {
+    const signer = fromEthersWallet(new Wallet(keyFor('managed admin'))).signer
+    const sender = await createManagedAccountTxSender({ signer, bundlerUrl: stack.bundlerUrl, paymasterUrl: stack.paymasterUrl })
+    const wallet = { kind: 'modular' as const, signer, txSender: sender }
+    const opts = { account: sender.address, wallet, signDataItems }
+    indexer = []
+    const before = await registerEncryptionKey(inputFor(await identityFor('managed rotate one')), opts)
+    indexer = [await indexerRow(before.uid)]
+    const after = await registerEncryptionKey(inputFor(await identityFor('managed rotate two')), opts)
+
+    expect(after.revokedRegistrationUids).toEqual([before.uid.toLowerCase()])
+    expect((await chain.attestation(before.uid)).revocationTime).toBeGreaterThan(0n)
+    indexer = [await indexerRow(after.uid), await indexerRow(before.uid)]
+    expect((await getVerifiedEncryptionKey({ account: sender.address }))?.uid).toBe(after.uid)
+  }, 90_000)
 })

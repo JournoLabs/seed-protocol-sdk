@@ -4,13 +4,16 @@ import {
   ENCRYPTION_KEY_SCHEMA_NAME,
   ENCRYPTION_KEY_SCHEMA_UID,
   arweaveTxIdToBytes32,
+  getEncryptionKeysFromEas,
+  type EncryptionKeyRegistration,
 } from '@seedprotocol/eas'
 import { buildArweaveContentTags, getContentSha256, type PublishUploadData } from '@seedprotocol/sdk'
 import { bytesToHex, sha256 } from 'viem'
 import { getPublishConfig } from '~/config'
 import { EncryptionKeySchemaNotRegisteredError } from '~/errors'
-import { waitForPublishReceipt } from '~/helpers/chainClient'
-import { getAttestedUidsFromReceipt, prepareEasAttest, ZERO_ADDRESS } from '~/helpers/easDirect'
+import { easAbi } from '~/helpers/abi/eas'
+import { getPublishPublicClient, waitForPublishReceipt } from '~/helpers/chainClient'
+import { getAttestedUidsFromReceipt, prepareEasAttest, prepareEasMultiRevoke, ZERO_ADDRESS } from '~/helpers/easDirect'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { dataItemSignerForPublish } from '~/helpers/publishWalletRegistry'
@@ -58,6 +61,12 @@ export type RegisterEncryptionKeyResult = {
   attester: string
   /** Arweave transaction id of the uploaded manifest. */
   keystoreTx: string
+  /**
+   * The account's earlier live registrations, revoked in one transaction once the new one landed.
+   * Empty when there were none, or when listing or revoking them failed (logged); those stay live,
+   * and readers still take the newest.
+   */
+  revokedRegistrationUids: string[]
 }
 
 const encoder = new TextEncoder()
@@ -135,10 +144,80 @@ async function uploadManifest(manifest: Uint8Array, wallet: PublishWallet, optio
 }
 
 /**
+ * Whether EAS on the publish chain holds `registration` as a live encryption key attestation from
+ * `account`, with the data the indexer decoded. Throws when the chain can't be read.
+ */
+async function isLiveOnChain(registration: EncryptionKeyRegistration, account: string): Promise<boolean> {
+  if (registration.suite !== SUITE) return false
+  if (keyIdOf(registration.recipientKey, registration.tagKey) !== registration.keyId) return false
+  const uid = registration.uid.toLowerCase() as `0x${string}`
+  if (!/^0x[0-9a-f]{64}$/.test(uid)) return false
+  const onChain = await getPublishPublicClient().readContract({
+    address: getPublishConfig().easContractAddress as `0x${string}`,
+    abi: easAbi,
+    functionName: 'getAttestation',
+    args: [uid],
+  })
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  return (
+    onChain.uid.toLowerCase() === uid &&
+    onChain.schema.toLowerCase() === ENCRYPTION_KEY_SCHEMA_UID &&
+    onChain.attester.toLowerCase() === account.toLowerCase() &&
+    onChain.revocationTime === 0n &&
+    (onChain.expirationTime === 0n || onChain.expirationTime > now) &&
+    onChain.data.toLowerCase() === encodeEncryptionKeyData(registration).toLowerCase()
+  )
+}
+
+/**
+ * The encryption key to wrap `account`'s private Versions to: the newest registration the indexer
+ * lists that EAS on the publish chain confirms is live, from `account`, with the same data. An
+ * indexer that lags or misbehaves can still list a registration that was revoked or name keys the
+ * attestation doesn't hold; those are skipped. Undefined when no listed registration passes.
+ *
+ * The indexer can also leave out a newer registration, which this can't detect.
+ * {@link registerEncryptionKey} revokes the earlier registrations when it adds one, so a stale
+ * listing finds nothing rather than a replaced key. Throws when the chain can't be read, rather
+ * than falling back to an unchecked key.
+ */
+export async function getVerifiedEncryptionKey({ account }: { account: string }): Promise<EncryptionKeyRegistration | undefined> {
+  for (const registration of await getEncryptionKeysFromEas({ attester: account })) {
+    if (await isLiveOnChain(registration, account)) return registration
+  }
+  return undefined
+}
+
+/** Revokes `account`'s `earlier` registrations that are still live on chain, other than `keep`. */
+async function revokeEarlierRegistrations(
+  earlier: EncryptionKeyRegistration[],
+  keep: string,
+  account: string,
+  wallet: PublishWallet,
+): Promise<string[]> {
+  const live: string[] = []
+  for (const registration of earlier) {
+    if (registration.uid.toLowerCase() === keep.toLowerCase()) continue
+    // EAS reverts the whole multiRevoke on one already revoked, which a stale indexer still lists.
+    if (await isLiveOnChain(registration, account)) live.push(registration.uid.toLowerCase())
+  }
+  if (live.length === 0) return []
+  await waitForPublishReceipt(
+    (
+      await wallet.txSender.sendTransaction(
+        prepareEasMultiRevoke([{ schema: ENCRYPTION_KEY_SCHEMA_UID as `0x${string}`, data: live.map((uid) => ({ uid: uid as `0x${string}` })) }]),
+      )
+    ).transactionHash,
+  )
+  return live
+}
+
+/**
  * Registers an encryption key for the wallet's account (ADR 0033): uploads the keystore manifest
  * to Arweave, then the account attests `seedprotocol.encryptionKey` with the key id, both public
  * keys and the manifest's transaction. Registering again (a new identity, or a revised manifest
- * with another authenticator) makes a new attestation; readers take the newest live one.
+ * with another authenticator) makes a new attestation, then revokes the account's earlier live
+ * ones in a second transaction, so a reader with a stale indexer listing doesn't wrap to a
+ * replaced key. Revoked registrations still name the manifests that open older Versions.
  *
  * Throws {@link EncryptionKeySchemaNotRegisteredError} before uploading when the schema is
  * missing, and refuses inputs whose key id doesn't match the keys or the manifest.
@@ -156,6 +235,13 @@ export async function registerEncryptionKey(
     )
   }
   if (!(await getSchemaRecord(ENCRYPTION_KEY_SCHEMA_UID))) throw new EncryptionKeySchemaNotRegisteredError()
+
+  // Listed before attesting: the indexer may not show the new registration yet, and the earlier
+  // ones are what this one replaces.
+  const earlier = await getEncryptionKeysFromEas({ attester }).catch((err: unknown) => {
+    console.warn('[@seedprotocol/publish] registerEncryptionKey: could not list earlier registrations; none revoked', err)
+    return [] as EncryptionKeyRegistration[]
+  })
 
   const keystoreTx = await uploadManifest(input.keystoreManifest, wallet, options)
   const { transactionHash } = await wallet.txSender.sendTransaction(
@@ -175,7 +261,12 @@ export async function registerEncryptionKey(
   const attested = receipt ? getAttestedUidsFromReceipt(receipt, getPublishConfig().easContractAddress, attester) : []
   const created = attested.find((a) => a.schemaUid.toLowerCase() === ENCRYPTION_KEY_SCHEMA_UID)
   if (!created) throw new Error(`Transaction ${transactionHash} made no encryption key attestation from ${attester}`)
-  return { uid: created.uid, attester, keystoreTx }
+
+  const revokedRegistrationUids = await revokeEarlierRegistrations(earlier, created.uid, attester, wallet).catch((err: unknown) => {
+    console.warn('[@seedprotocol/publish] registerEncryptionKey: revoking the earlier registrations failed; they stay live', err)
+    return [] as string[]
+  })
+  return { uid: created.uid, attester, keystoreTx, revokedRegistrationUids }
 }
 
 /**

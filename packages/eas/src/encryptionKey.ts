@@ -62,10 +62,13 @@ function decodeRegistration(attestation: Attestation): EncryptionKeyRegistration
 }
 
 /**
- * `attester`'s encryption key registrations, newest first. The first is the key to wrap to.
- * `includeRevoked` adds revoked ones, whose keystore manifests still open older Versions. Readers
- * should still check each key against its id (`encryptionIdentityFromSecret` once unlocked, or
- * the key id hash before wrapping). Not cached, so a retry sees what the indexer has now.
+ * `attester`'s encryption key registrations as the indexer reports them, newest first, with
+ * registrations from the same second ordered by uid so every reader gets the same order.
+ * `includeRevoked` adds revoked ones, whose keystore manifests still open older Versions.
+ *
+ * To pick the key to wrap to, use `getVerifiedEncryptionKey` from `@seedprotocol/publish`, which
+ * checks this list against EAS on chain: an indexer that lags or misbehaves can leave out a newer
+ * registration or a revocation. Not cached, so a retry sees what the indexer has now.
  */
 export async function getEncryptionKeysFromEas({
   attester,
@@ -83,5 +86,5 @@ export async function getEncryptionKeysFromEas({
     .filter((a) => a.attester.toLowerCase() === attester.toLowerCase())
     .map(decodeRegistration)
     .filter((r): r is EncryptionKeyRegistration => !!r)
-    .sort((a, b) => b.timeCreated - a.timeCreated)
+    .sort((a, b) => b.timeCreated - a.timeCreated || (a.uid < b.uid ? 1 : a.uid > b.uid ? -1 : 0))
 }

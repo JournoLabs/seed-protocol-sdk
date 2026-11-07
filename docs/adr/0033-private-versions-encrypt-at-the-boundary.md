@@ -65,9 +65,12 @@ registered once per chain by a wallet that can call SchemaRegistry. The attester
 the wallet's transactions must come from the account itself, so a ManagedAccount attests through a
 UserOp calling EAS directly, not through `multiPublish`. Session keys never register keys, since a
 leaked one could otherwise redirect every future wrap. Registering again, with a new identity or a
-revised manifest, adds an attestation, and readers take the newest live one; revoked ones still name
-the manifests that open older Versions. A reader checks the key id against the public keys before
-wrapping to them.
+revised manifest, adds an attestation and then revokes the account's earlier live ones; revoked
+ones still name the manifests that open older Versions. A publisher wraps to the newest
+registration the indexer lists that EAS confirms on chain: live, from the account, under this
+schema, with the data the indexer decoded and a key id that matches the public keys. An indexer
+can still leave out a newer registration; because rotation revokes the old one, a stale listing
+then finds no key rather than a replaced one.
 
 **Boundaries.** The SDK encrypts in exactly one place on the way out and decrypts at a fixed set of
 seams on the way in:

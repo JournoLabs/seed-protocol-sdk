@@ -62,6 +62,17 @@ describe('encryption key registrations', () => {
     })
   })
 
+  it('orders registrations from the same second by uid, whatever order the indexer returns', async () => {
+    const a = registration('0x' + 'aa'.repeat(32), ATTESTER, 7)
+    const b = registration('0x' + 'bb'.repeat(32), ATTESTER, 7)
+    answer([a, b])
+    const first = await getEncryptionKeysFromEas({ attester: ATTESTER })
+    answer([b, a])
+    const second = await getEncryptionKeysFromEas({ attester: ATTESTER })
+    expect(first.map((k) => k.uid)).toEqual([b.id, a.id])
+    expect(second.map((k) => k.uid)).toEqual([b.id, a.id])
+  })
+
   it('asks for revoked registrations too when told to', async () => {
     const calls = answer([registration('revoked', ATTESTER, 1, 9)])
     const keys = await getEncryptionKeysFromEas({ attester: ATTESTER, includeRevoked: true })
