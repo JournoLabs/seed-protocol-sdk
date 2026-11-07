@@ -29,6 +29,7 @@ const SYNC_PACKAGES = [
   'archive',
   'rdf',
   'ipfs',
+  'licensing',
   // Private, but published manifests list it in devDependencies (workspace refs become this version).
   'bundler-core',
 ]
@@ -104,7 +105,7 @@ function syncVersions(newVersion = null) {
   }
 }
 
-export { syncVersions }
+export { syncVersions, SYNC_PACKAGES }
 
 // Only run when invoked as a CLI script (not when imported by new-version.js)
 const isDirectRun =
