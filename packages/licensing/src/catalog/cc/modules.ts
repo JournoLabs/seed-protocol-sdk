@@ -117,6 +117,7 @@ const allRightsReserved: LicenseModule = Object.freeze({
   spdx: RESERVED_SPDX,
   name: 'All rights reserved',
   shortName: 'All rights reserved',
+  iri: RESERVED_URLS.canonicalUrl,
   domains: ALL_DOMAINS,
   steward: Object.freeze({ name: 'Seed Protocol', url: 'https://seedprotocol.io' }),
   legal: legal(RESERVED_SPDX, RESERVED_URLS.canonicalUrl),

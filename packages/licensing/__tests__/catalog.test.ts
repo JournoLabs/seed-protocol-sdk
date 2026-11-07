@@ -17,6 +17,13 @@ describe('the cc catalog', () => {
       'LicenseRef-seed-all-rights-reserved-1',
     ]))
 
+  it('names an IRI for every module, the reserved-rights notice for reserved rights', () => {
+    expect(creativeCommons.filter((m) => !m.iri).map((m) => m.spdx)).toEqual([])
+    expect(catalog.bySpdx('LicenseRef-seed-all-rights-reserved-1')?.iri).toBe(
+      'https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt',
+    )
+  })
+
   it('every module validates and parses', () => {
     for (const m of creativeCommons) {
       expect(validateTerms(m.toTerms()).ok, m.id).toBe(true)

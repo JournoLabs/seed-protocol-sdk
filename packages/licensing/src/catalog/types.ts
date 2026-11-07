@@ -11,7 +11,7 @@ export interface LicenseModule<P = void> {
   spdx: string
   name: string
   shortName: string
-  /** The license's IRI, for `dcterms:license`. Absent for reserved rights. */
+  /** The license's IRI, for `dcterms:license` and `rel="license"`. Reserved rights uses its notice's URL. */
   iri?: string
   domains: readonly Domain[]
   steward: { name: string; url: string }
