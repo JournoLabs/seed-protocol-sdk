@@ -208,13 +208,13 @@ describe('ensureEasSchemasForItem', () => {
     await expect(
       ensureEasSchemasForItem(postItem() as never, wallet(), { managedAddress: MANAGED }),
     ).rejects.toThrow(
-      'schema "string title" is not registered; automation keys can\'t register schemas. Call ensureEasSchemasForModels with the owner wallet first.',
+      'schema "string title" is not registered; automation keys can\'t register schemas. Call ensureEasSchemasForModels with any wallet that isn\'t a session key first.',
     )
     expect(sendTransaction).not.toHaveBeenCalled()
     expect(registerSchema).not.toHaveBeenCalled()
   })
 
-  test('an owner wallet still registers a missing schema', async () => {
+  test('a wallet that isn\'t a session key registers a missing schema', async () => {
     harness.automationActive = false
     harness.imageProperties = []
     harness.basicProperties = [{ propertyName: 'title', propertyDef: { dataType: 'text' } }]
