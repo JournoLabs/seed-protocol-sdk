@@ -44,6 +44,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0032](0032-ens-reads-live-in-query.md) | ENS reads live in query, behind its `ens` subpath | Accepted |
 | [0033](0033-private-versions-encrypt-at-the-boundary.md) | Private Versions encrypt at the publish and read boundaries; access can only be withheld going forward | Proposed |
 | [0034](0034-license-terms-and-terms-hash.md) | License terms are a closed ODRL profile identified by termsHash | Accepted |
+| [0035](0035-any-wallet-registers-schemas.md) | Any wallet registers schemas; readers identify them by UID | Accepted |
 
 ## Writing one
 

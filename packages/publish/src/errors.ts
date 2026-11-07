@@ -82,8 +82,9 @@ export class ManagedAccountPublishError extends Error {
 
 /**
  * EAS schemas a publish needs are missing and the account can't register them: an automation
- * session key may call only the executor module. The owner wallet registers them with
- * `ensureEasSchemasForModels` (or `ensureEasSchemasForItem`). Thrown before any transaction.
+ * session key may call only the executor module. Any other wallet registers them with
+ * `ensureEasSchemasForModels` (or `ensureEasSchemasForItem`); which wallet doesn't matter
+ * (ADR 0035). Thrown before any transaction.
  */
 export class EasSchemasNotRegisteredError extends Error {
   readonly code = 'EAS_SCHEMAS_NOT_REGISTERED' as const
@@ -95,7 +96,7 @@ export class EasSchemasNotRegisteredError extends Error {
     const list = missing.map((def) => `"${def}"`).join(', ')
     super(
       `${missing.length === 1 ? `schema ${list} is` : `schemas ${list} are`} not registered; automation keys can't register schemas. ` +
-        'Call ensureEasSchemasForModels with the owner wallet first.',
+        'Call ensureEasSchemasForModels with any wallet that isn\'t a session key first.',
     )
     this.name = 'EasSchemasNotRegisteredError'
   }
@@ -366,12 +367,12 @@ export class PublishWalletMissingError extends Error {
 
 /**
  * The anchor schema isn't registered on this chain. A session key can't register it: call
- * `ensureArchiveAnchorSchema` once with the owner wallet.
+ * `ensureArchiveAnchorSchema` once with any other wallet (ADR 0035).
  */
 export class ArchiveAnchorSchemaNotRegisteredError extends Error {
   readonly code = 'ARCHIVE_ANCHOR_SCHEMA_NOT_REGISTERED'
   constructor() {
-    super('The archive anchor schema is not registered on this chain. Call ensureArchiveAnchorSchema with the owner wallet.')
+    super('The archive anchor schema is not registered on this chain. Call ensureArchiveAnchorSchema once with any wallet that isn\'t a session key.')
     this.name = 'ArchiveAnchorSchemaNotRegisteredError'
   }
 }
@@ -379,7 +380,7 @@ export class ArchiveAnchorSchemaNotRegisteredError extends Error {
 export class EncryptionKeySchemaNotRegisteredError extends Error {
   readonly code = 'ENCRYPTION_KEY_SCHEMA_NOT_REGISTERED'
   constructor() {
-    super('The encryption key schema is not registered on this chain. Call ensureEncryptionKeySchema with the owner wallet.')
+    super('The encryption key schema is not registered on this chain. Call ensureEncryptionKeySchema once with any wallet that isn\'t a session key.')
     this.name = 'EncryptionKeySchemaNotRegisteredError'
   }
 }

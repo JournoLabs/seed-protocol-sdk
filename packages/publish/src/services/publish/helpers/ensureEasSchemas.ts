@@ -373,7 +373,8 @@ export async function ensureEasSchemasForItem(
  * (default) also the models relation and list properties name, each once (see the SDK's
  * getPublishModels).
  *
- * The owner wallet calls it so automation, which can't register schemas, finds them. A call with
+ * Any wallet but a session key can call it, so automation, which can't register schemas, finds
+ * them; which wallet doesn't matter (ADR 0035). A call with
  * everything registered only reads. An automation session key throws EasSchemasNotRegisteredError
  * when something is missing; `dryRun` returns the missing definitions without sending.
  */
