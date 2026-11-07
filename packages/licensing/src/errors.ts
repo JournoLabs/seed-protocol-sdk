@@ -8,6 +8,16 @@ export class InvalidLicenseTermsError extends Error {
   }
 }
 
+/** Deeds and summary sentences exist in English only. */
+export class UnsupportedLocaleError extends Error {
+  readonly locale: string
+  constructor(locale: string) {
+    super(`No deed template for locale "${locale}"; only "en" is available`)
+    this.name = 'UnsupportedLocaleError'
+    this.locale = locale
+  }
+}
+
 /** A value that RFC 8785 canonical JSON, as this package restricts it, can't represent. */
 export class CanonicalJsonError extends Error {
   readonly path: string
