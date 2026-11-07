@@ -16,6 +16,8 @@ const deprecatedIds = new Set(DEPRECATED_IDS)
 
 const IDSTRING = /^[A-Za-z0-9.-]+$/
 const OPERATORS = new Set(['AND', 'OR', 'WITH'])
+/** Deeper parentheses are refused rather than recursed into, so hostile input can't overflow the stack. */
+const MAX_DEPTH = 64
 
 /** The id as the SPDX list spells it, matched case-insensitively, or undefined. Licenses only, not exceptions. */
 export function isKnownSpdxId(id: string): string | undefined {
@@ -33,6 +35,7 @@ class SpdxSyntaxError extends Error {}
 export function parseSpdx(expression: string): SpdxParseResult {
   const tokens = expression.match(/\(|\)|[^\s()]+/g) ?? []
   let position = 0
+  let depth = 0
   const ids: string[] = []
   const deprecated: string[] = []
 
@@ -77,8 +80,10 @@ export function parseSpdx(expression: string): SpdxParseResult {
     const token = next()
     if (token === undefined) fail('expected a license id')
     if (token === '(') {
+      if (++depth > MAX_DEPTH) fail(`parentheses nested too deeply (more than ${MAX_DEPTH})`)
       const inner = parseOr()
       if (next() !== ')') fail('missing closing parenthesis')
+      depth--
       return inner
     }
     if (token === ')') fail('unexpected closing parenthesis')

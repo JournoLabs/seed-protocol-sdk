@@ -28,7 +28,9 @@ The hash covers `legal.sha256`, `legal.lang` and `legal.canonicalUrl`, not where
 stored: an Arweave transaction id lives in the offer or `licenseTerms` record, so uploading or
 mirroring a text never changes a hash. For catalog licenses on the SPDX list, `legal.sha256` is the
 SHA-256 of `text/<id>.txt` from `spdx/license-list-data` at tag `v3.29.0`, vendored in
-`packages/licensing/legal/`.
+`packages/licensing/legal/`. `canonicalUrl` is hashed, so it must be a URL that never moves: the
+steward's own URL, or for Seed-authored texts a path on the repository's `main` branch, never one
+tied to a release tag.
 
 The hash doesn't cover the deed template. Deeds and one-sentence summaries are derived from terms
 through a closed rule vocabulary (template `seed-deed/1.0.0`), carry `reviewed: false` until counsel

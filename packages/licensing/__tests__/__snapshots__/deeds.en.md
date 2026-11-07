@@ -27,7 +27,6 @@ This summary is not the license; the legal text at https://creativecommons.org/p
 **Not covered**
 
 - Exceptions and limitations to copyright, such as fair use, still apply.
-- Moral rights, privacy and publicity rights are not covered.
 
 Steward's deed: https://creativecommons.org/publicdomain/zero/1.0/deed.en
 
@@ -256,7 +255,7 @@ Steward's deed: https://creativecommons.org/licenses/by-nc-nd/4.0/deed.en
 
 > Others need permission to republish this.
 
-This summary is not the license; the legal text at https://github.com/JournoLabs/seed-protocol-sdk/blob/v0.8.2/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt (sha256 e11f4786261aa29fffcbf5c8d51264b2463c285000ca284d9ec6ac627607dd8a) governs.
+This summary is not the license; the legal text at https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt (sha256 e11f4786261aa29fffcbf5c8d51264b2463c285000ca284d9ec6ac627607dd8a) governs.
 
 **You cannot**
 

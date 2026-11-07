@@ -18,7 +18,7 @@ export const CC0_URLS = {
 export const RESERVED_SPDX = 'LicenseRef-seed-all-rights-reserved-1'
 export const RESERVED_URLS = {
   canonicalUrl:
-    'https://github.com/JournoLabs/seed-protocol-sdk/blob/v0.8.2/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt',
+    'https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt',
 }
 
 /** Every module URL (IRI and legal text) to the module's SPDX id. */

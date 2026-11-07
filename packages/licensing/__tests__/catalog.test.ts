@@ -52,6 +52,11 @@ describe('the cc catalog', () => {
     expect(termsHash(m.toTerms())).toBe(before)
   })
 
+  it('points reserved rights at a URL that no release tag moves', () =>
+    expect(catalog.get('all-rights-reserved@1.0.0')!.legal.canonicalUrl).toBe(
+      'https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/licensing/legal/LicenseRef-seed-all-rights-reserved-1.txt',
+    ))
+
   it('freezes modules', () => expect(Object.isFrozen(creativeCommons[0])).toBe(true))
 
   it('filters by domain', () => {
@@ -71,6 +76,8 @@ describe('the cc catalog', () => {
     expect(terms('cc-by-sa@4.0.0').duties).toContainEqual({ duty: 'shareAlike' })
     expect(terms('cc0@1.0.0').duties).toEqual([])
     expect(terms('cc0@1.0.0').grant.revocableFor).toBe('never')
+    // CC0 1.0 §3: the fallback license is non transferable and non sublicensable.
+    expect(terms('cc0@1.0.0').grant).toMatchObject({ transferable: false, sublicensable: false })
     expect(terms('cc-by@4.0.0').grant.revocableFor).toBe('breach-only')
     const reserved = terms('all-rights-reserved@1.0.0')
     expect([reserved.permissions, reserved.prohibitions, reserved.duties]).toEqual([[], [], []])

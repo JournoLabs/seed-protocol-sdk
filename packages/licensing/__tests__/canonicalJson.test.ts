@@ -20,6 +20,11 @@ describe('canonicalJson', () => {
     expect(canonicalJson({ a: 1, b: undefined })).toBe('{"a":1}')
   })
 
+  it('throws on a sparse array rather than writing a hole', () => {
+    // eslint-disable-next-line no-sparse-arrays
+    expect(() => canonicalJson({ a: [, 1] })).toThrow(CanonicalJsonError)
+  })
+
   it.each([[1.5], [NaN], [Infinity], [2 ** 53], [[undefined]], [new Date(0)], [new Map()], [() => 1], [10n]])(
     'throws on %s',
     (v) => {

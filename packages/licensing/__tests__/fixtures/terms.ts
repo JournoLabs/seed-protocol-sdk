@@ -57,6 +57,10 @@ export const invalidTerms = {
     const { legal: _legal, ...rest } = ccBy
     return rest
   })(),
+  inheritedDuty: with_({ duties: [{ duty: 'toString' }] }),
+  inheritedDutyWithKey: with_({ duties: [{ duty: 'toString', x: 1 }] }),
+  inheritedConstraint: with_({ permissions: [{ action: 'reproduce', constraints: [{ name: 'constructor', operator: 'eq', value: 1 }] }] }),
+  sparsePermissions: with_({ permissions: new Array(3) }),
   null: null,
   array: [],
   string: 'x',

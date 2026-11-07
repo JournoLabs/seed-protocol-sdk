@@ -50,6 +50,11 @@ describe('renderDeed', () => {
     expect(renderDeed(creativeCommons[1]!.toTerms(), { locale: 'en' }).notCovered).toHaveLength(2)
   })
 
+  it("doesn't tell CC0 readers that moral rights aren't covered, since CC0 waives them", () =>
+    expect(renderDeed(creativeCommons[0]!.toTerms(), { locale: 'en' }).notCovered).toEqual([
+      'Exceptions and limitations to copyright, such as fair use, still apply.',
+    ]))
+
   it('marks the deed unreviewed and versioned, and passes the steward deed through', () => {
     const m = creativeCommons[1]!
     expect(renderDeed(m.toTerms(), { locale: 'en', stewardDeedUrl: m.stewardDeedUrl })).toMatchObject({

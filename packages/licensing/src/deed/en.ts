@@ -24,9 +24,9 @@ export const EN_SEE_LEGAL_TEXT = 'Further conditions apply; see the legal text.'
 export const enDisclaimer = (location: string, sha256: string) =>
   `This summary is not the license; the legal text at ${location} (sha256 ${sha256}) governs.`
 
-export const EN_NOT_COVERED = [
-  'Exceptions and limitations to copyright, such as fair use, still apply.',
-  'Moral rights, privacy and publicity rights are not covered.',
-] as const
+export const EN_EXCEPTIONS_NOTE = 'Exceptions and limitations to copyright, such as fair use, still apply.'
+
+/** Left out for a waiver such as CC0, which waives these rights too. */
+export const EN_MORAL_RIGHTS_NOTE = 'Moral rights, privacy and publicity rights are not covered.'
 
 export const EN_NONCOMMERCIAL_NOTE = 'What counts as non-commercial is defined by the legal text, not this summary.'

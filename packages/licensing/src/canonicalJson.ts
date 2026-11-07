@@ -29,12 +29,13 @@ function write(value: unknown, path: string): string {
       throw new CanonicalJsonError(path, `${typeof value} is not JSON`)
   }
   if (Array.isArray(value)) {
-    return `[${value
-      .map((item, i) => {
-        if (item === undefined) throw new CanonicalJsonError(`${path}[${i}]`, 'undefined in an array')
-        return write(item, `${path}[${i}]`)
-      })
-      .join(',')}]`
+    const items: string[] = []
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) throw new CanonicalJsonError(`${path}[${i}]`, 'hole in a sparse array')
+      if (value[i] === undefined) throw new CanonicalJsonError(`${path}[${i}]`, 'undefined in an array')
+      items.push(write(value[i], `${path}[${i}]`))
+    }
+    return `[${items.join(',')}]`
   }
   const proto = Object.getPrototypeOf(value)
   if (proto !== Object.prototype && proto !== null) throw new CanonicalJsonError(path, 'not a plain object')

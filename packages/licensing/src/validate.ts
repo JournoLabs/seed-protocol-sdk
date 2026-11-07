@@ -65,13 +65,16 @@ export function validateTerms(terms: unknown): TermsValidationResult {
   }
   function array(value: unknown, path: string, each: (item: unknown, path: string) => void) {
     if (!Array.isArray(value)) return err(path, 'must be an array')
-    value.forEach((item, i) => each(item, `${path}[${i}]`))
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) err(`${path}[${i}]`, 'is a hole in a sparse array')
+      else each(value[i], `${path}[${i}]`)
+    }
   }
 
   function constraint(value: unknown, path: string) {
     if (!object(value, path, ['name', 'operator', 'value'])) return
     const name = value.name
-    if (typeof name !== 'string' || !(name in CONSTRAINT_OPERATORS)) {
+    if (typeof name !== 'string' || !Object.hasOwn(CONSTRAINT_OPERATORS, name)) {
       return err(join(path, 'name'), `must be one of ${Object.keys(CONSTRAINT_OPERATORS).join(', ')}`)
     }
     oneOf(value.operator, join(path, 'operator'), CONSTRAINT_OPERATORS[name]!)
@@ -99,7 +102,7 @@ export function validateTerms(terms: unknown): TermsValidationResult {
       discloseSource: ['network'],
       stateChanges: [],
     }
-    if (typeof value.duty !== 'string' || !(value.duty in optional)) {
+    if (typeof value.duty !== 'string' || !Object.hasOwn(optional, value.duty)) {
       return err(join(path, 'duty'), `must be one of ${Object.keys(optional).join(', ')}`)
     }
     object(value, path, ['duty'], optional[value.duty])

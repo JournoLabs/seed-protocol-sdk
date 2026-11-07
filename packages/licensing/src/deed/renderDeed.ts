@@ -1,6 +1,6 @@
 import { UnsupportedLocaleError } from '../errors'
 import type { SeedLicenseTerms } from '../terms'
-import { EN_NONCOMMERCIAL_NOTE, EN_NOT_COVERED, EN_RULE_TEXT, EN_SEE_LEGAL_TEXT, enDisclaimer } from './en'
+import { EN_EXCEPTIONS_NOTE, EN_MORAL_RIGHTS_NOTE, EN_NONCOMMERCIAL_NOTE, EN_RULE_TEXT, EN_SEE_LEGAL_TEXT, enDisclaimer } from './en'
 import { deriveRules, SECTION_OF, type DeedSection, type RuleId } from './rules'
 
 export type DeedLine = { rule: RuleId | 'see-legal-text'; text: string }
@@ -48,7 +48,9 @@ export function renderDeed(terms: SeedLicenseTerms, options: RenderDeedOptions):
   for (const rule of rules) sections[SECTION_OF[rule]].push({ rule, text: EN_RULE_TEXT[rule] })
   for (const section of uncovered) sections[section].push({ rule: 'see-legal-text', text: EN_SEE_LEGAL_TEXT })
 
-  const notCovered: string[] = [...EN_NOT_COVERED]
+  // A waiver: everything permitted, nothing owed, never withdrawn (CC0 1.0 §2 waives moral rights too).
+  const waiver = terms.permissions.length > 0 && terms.duties.length === 0 && terms.grant.revocableFor === 'never'
+  const notCovered: string[] = waiver ? [EN_EXCEPTIONS_NOTE] : [EN_EXCEPTIONS_NOTE, EN_MORAL_RIGHTS_NOTE]
   if (rules.includes('noncommercial')) notCovered.push(EN_NONCOMMERCIAL_NOTE)
 
   const deed: Deed = {

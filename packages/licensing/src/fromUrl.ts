@@ -1,7 +1,7 @@
 import { catalogUrlTable } from './catalog/cc/urls'
 import { isKnownSpdxId } from './spdx/parse'
 
-const CC_LICENSE = /^\/licenses\/(by|by-sa|by-nc|by-nc-sa|by-nd|by-nc-nd)\/(\d+\.\d+)(?:\/([a-z]{2}))?(?:\/(?:deed\.[a-z-]+|legalcode(?:\.[a-z-]+)?))?$/
+const CC_LICENSE = /^\/licenses\/(by|by-sa|by-nc|by-nc-sa|by-nd|by-nc-nd)\/(\d+\.\d+)(?:\/([a-z]{2,3}))?(?:\/(?:deed\.[a-z-]+|legalcode(?:\.[a-z-]+)?))?$/
 const CC_ZERO = /^\/publicdomain\/zero\/1\.0(?:\/(?:deed\.[a-z-]+|legalcode(?:\.[a-z-]+)?))?$/
 const SPDX_PAGE = /^\/licenses\/([A-Za-z0-9.+-]+?)(?:\.html|\.json)?$/
 

@@ -107,7 +107,8 @@ const cc0: LicenseModule = Object.freeze({
     ],
     prohibitions: [],
     duties: [],
-    grant: { transferable: true, sublicensable: true, exclusive: false, revocableFor: 'never', warranty: 'as-is', duration: 'copyright-term' },
+    // CC0 1.0 §3: the fallback license is non transferable and non sublicensable.
+    grant: { transferable: false, sublicensable: false, exclusive: false, revocableFor: 'never', warranty: 'as-is', duration: 'copyright-term' },
   }),
 })
 

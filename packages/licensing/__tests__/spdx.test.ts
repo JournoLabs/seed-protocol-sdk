@@ -43,6 +43,13 @@ describe('parseSpdx', () => {
 
   it('dedupes ids in order of appearance', () => expect(ok('MIT AND (MIT OR CC0-1.0)').ids).toEqual(['MIT', 'CC0-1.0']))
 
+  it('returns an error for very deep nesting instead of overflowing the stack', () => {
+    const deep = '('.repeat(20000) + 'MIT' + ')'.repeat(20000)
+    const result = parseSpdx(deep)
+    expect(!result.ok && result.error).toMatch(/nested too deeply/)
+    expect(parseSpdx('('.repeat(64) + 'MIT' + ')'.repeat(64)).ok).toBe(true)
+  })
+
   it('flags deprecated ids', () => expect(ok('GPL-2.0').deprecated).toEqual(['GPL-2.0']))
 
   it('says why a lowercase operator fails', () => {
