@@ -3,6 +3,7 @@ import { getEasEndpoint } from '../easEndpoint.js'
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 import { GET_SCHEMA_BY_NAME } from '../queries.js'
 import { easName } from '../easNames.js'
+import { seedSchemaUid } from '../seedSchemaUid.js'
 
 const schemaUidForModel = new Map<string, string>()
 
@@ -166,8 +167,10 @@ export const getEasSchemaUidForSchemaDefinition = async ({
 }
 
 /**
- * UID of the EAS schema whose definition is exactly `schemaDefinition` (e.g. `string title`), or
- * undefined when EAS has none or the EAS clients aren't configured. A UID already recorded
+ * UID of the schema Seed attests under for `schemaDefinition` (e.g. `string title`):
+ * {@link seedSchemaUid} of it, when EAS has that schema; undefined when it doesn't or the EAS
+ * clients aren't configured. A registration of the same definition with another resolver or
+ * revocable flag doesn't count (ADR 0035). A UID already recorded
  * ({@link setSchemaUidForSchemaDefinition}, e.g. by publish after registering the schema) answers
  * without a request. Found UIDs and misses are cached (see SCHEMA_LOOKUP_MISS_TTL_MS). Throws when
  * the request fails.
@@ -183,19 +186,22 @@ export const getEasSchemaUidForExactDefinition = async (
   const easClient = BaseEasClient.getEasClient()
   if (!queryClient || !easClient) return undefined
 
+  const expectedUid = seedSchemaUid(schemaDefinition)
   const schemaUid = await cachedSchemaLookup(`definition:${schemaDefinition}`, async () => {
     const queryResult = await queryClient.fetchQuery({
       queryKey: ['getSchemaByDefinition', schemaDefinition],
       queryFn: async () =>
         easClient.request(GET_SCHEMA_BY_NAME, {
-          where: { schema: { equals: schemaDefinition } },
+          where: { id: { equals: expectedUid } },
         }),
     })
     // Handle both { schemas: [...] } and { data: { schemas: [...] } } formats
     const schemas =
       (queryResult as { schemas?: Array<{ id: string }> })?.schemas ??
       (queryResult as { data?: { schemas?: Array<{ id: string }> } })?.data?.schemas
-    return Array.isArray(schemas) && schemas.length > 0 ? schemas[0]!.id : undefined
+    return Array.isArray(schemas) && schemas.some((schema) => schema.id?.toLowerCase() === expectedUid)
+      ? expectedUid
+      : undefined
   })
   // Found on EAS, not newly registered: no cached misses to forget.
   if (schemaUid) schemaUidForDefinition.set(key, schemaUid)

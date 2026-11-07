@@ -4,15 +4,17 @@ import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { GET_PUBLISH_AUTHORIZATIONS } from './queries.js'
 import {
+  PUBLISH_AUTHORIZATION_SCHEMA_DEF,
   PUBLISH_AUTHORIZATION_SCHEMA_NAME,
   decodePublishAuthorizationData,
 } from './publishAuthorizationHelpers.js'
 import type { Attestation } from './graphql/gql/graphql.js'
+import { seedSchemaUid } from './seedSchemaUid.js'
 
 export type GetPublishAuthorizationFromEasParams = {
   /**
    * ManagedAccount identity address(es) that attested the grant (EAS `attester`).
-   * When omitted, filter by named schema only (then apply identity filters client-side).
+   * When omitted, every attestation under the schema (then apply identity filters client-side).
    */
   identities?: string[]
   /** Optional session key addresses (EAS `recipient` filter). */
@@ -20,8 +22,8 @@ export type GetPublishAuthorizationFromEasParams = {
   /** Optional app addresses (decoded `app`, case-insensitive). */
   apps?: string[]
   /**
-   * PublishAuthorization schema UID. When omitted, filters by named schema
-   * {@link PUBLISH_AUTHORIZATION_SCHEMA_NAME}.
+   * PublishAuthorization schema UID. When omitted, {@link seedSchemaUid} of
+   * {@link PUBLISH_AUTHORIZATION_SCHEMA_DEF}.
    */
   schemaUid?: string
   excludeRevoked?: boolean
@@ -43,19 +45,8 @@ export async function getPublishAuthorizationFromEas(
 
   let where: Record<string, unknown> = {}
 
-  if (schemaUid) {
-    where.schemaId = { equals: schemaUid }
-  } else {
-    where.schema = {
-      is: {
-        schemaNames: {
-          some: {
-            name: { equals: PUBLISH_AUTHORIZATION_SCHEMA_NAME },
-          },
-        },
-      },
-    }
-  }
+  // Its UID, not its name: anyone can attach a name to another schema (ADR 0035).
+  where.schemaId = { equals: schemaUid ?? seedSchemaUid(PUBLISH_AUTHORIZATION_SCHEMA_DEF) }
 
   if (identities?.length) {
     where.attester = {

@@ -40,6 +40,8 @@ const BASE_SCHEMA_UIDS = [schemaUid(NAME_SCHEMA_DEF), schemaUid(VERSION_SCHEMA_D
 const harness = {
   automationActive: false,
   knownUids: new Set<string>(),
+  /** Registrations of a definition by someone else, with a resolver: definition -> their UID. */
+  otherRegistrations: new Map<string, string>(),
   imageProperties: [] as Array<{
     propertyName: string
     propertyDef: { dataType: string }
@@ -60,6 +62,11 @@ const sendTransaction = mock(async () => ({
   transactionHash: `0x${'ab'.repeat(32)}` as `0x${string}`,
 }))
 const getSchemaRecord = mock(async (uid: string) => {
+  for (const [schema, other] of harness.otherRegistrations) {
+    if (other === String(uid).toLowerCase()) {
+      return { uid, resolver: '0x3333333333333333333333333333333333333333', revocable: true, schema }
+    }
+  }
   if (!harness.knownUids.has(String(uid).toLowerCase())) return null
   return {
     uid,
@@ -106,7 +113,7 @@ mock.module('@seedprotocol/sdk', () => ({
   getPublishGraph: async () => publishGraph(),
   getPublishModels: async () => [],
   publishRemovesValue: async () => false,
-  getEasSchemaUidForExactDefinition: async () => undefined,
+  getEasSchemaUidForExactDefinition: async (definition: string) => harness.otherRegistrations.get(definition),
   setSchemaUidForSchemaDefinition: () => {},
   setSchemaUidForModel: () => {},
   // Mirrors the SDK helper for the names used here (staff, authors).
@@ -226,6 +233,26 @@ describe('ensureEasSchemasForItem', () => {
 
     expect(registerSchema).toHaveBeenCalled()
     expect(sendTransaction).toHaveBeenCalled()
+  })
+
+  // ADR 0035: the same definition registered by someone else with a resolver has another UID; a
+  // publish attesting under it would run their resolver.
+  test("registers its own schema when only someone else's registration of the definition exists", async () => {
+    harness.automationActive = false
+    harness.imageProperties = []
+    harness.basicProperties = [{ propertyName: 'title', propertyDef: { dataType: 'text' } }]
+    harness.listProperties = []
+    harness.knownUids = new Set([...BASE_SCHEMA_UIDS, schemaUid('bytes32 post')])
+    harness.otherRegistrations = new Map([['string title', `0x${'cd'.repeat(32)}`]])
+    sendTransaction.mockClear()
+    registerSchema.mockClear()
+    try {
+      await ensureEasSchemasForItem(postItem() as never, wallet(), { managedAddress: MANAGED })
+    } finally {
+      harness.otherRegistrations = new Map()
+    }
+
+    expect(registerSchema.mock.calls.map((call) => (call as unknown as [{ schema: string }])[0].schema)).toContain('string title')
   })
 
   test('fails without sending when a base schema is missing, and does not register it', async () => {

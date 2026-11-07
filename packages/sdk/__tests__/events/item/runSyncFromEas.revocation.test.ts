@@ -63,6 +63,16 @@ const fakeEasClient = {
       return {
         itemProperties: filterFake(variables.where, fakeEas.properties),
       }
+    // Related seeds' model names come from their schema's definition (ADR 0035).
+    if (operation === 'GetSchemas') {
+      const ids: string[] = variables.where?.id?.in ?? []
+      const schema = fakeEas.modelSchema?.schema
+      return {
+        schemas: ids
+          .filter((id) => schema && id === OTHER_MODEL_SCHEMA_UID)
+          .map((id) => ({ id, schema })),
+      }
+    }
     throw new Error(`Unexpected EAS request ${operation}`)
   },
 }
@@ -122,8 +132,12 @@ const uid = (byte: string) => '0x' + byte.repeat(32)
 const TITLE_SCHEMA_UID = uid('5c')
 const AUTHOR_SCHEMA_UID = uid('5d')
 const EDITOR_SCHEMA_UID = uid('5e')
-/** Related seeds use a schema the main sync doesn't query, so only the related fetch finds them. */
-const OTHER_MODEL_SCHEMA_UID = uid('6a')
+/**
+ * Related seeds use a schema the main sync doesn't query, so only the related fetch finds them: the
+ * UID Seed registers the model's definition under (set in beforeAll), which the fake main sync's
+ * `modelSchema` id isn't.
+ */
+let OTHER_MODEL_SCHEMA_UID = ''
 
 describe.sequential('runSyncFromEas: revocations', () => {
   let modelName = ''
@@ -161,6 +175,8 @@ describe.sequential('runSyncFromEas: revocations', () => {
     if (!schemaString) throw new Error('No local model schema to sync against')
     modelName = schemaString.replace(/^bytes32 /, '')
     fakeEas.modelSchema = { id: uid('5a'), schema: schemaString }
+    const { seedSchemaUid } = await import('@seedprotocol/eas')
+    OTHER_MODEL_SCHEMA_UID = seedSchemaUid(schemaString)
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {

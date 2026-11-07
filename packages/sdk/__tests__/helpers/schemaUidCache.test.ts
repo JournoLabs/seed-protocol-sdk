@@ -6,6 +6,7 @@ import {
   getEasSchemaUidForExactDefinition,
   getEasSchemaUidForSchemaDefinition,
   resetSchemaUidCaches,
+  seedSchemaUid,
   setSchemaUidForModel,
   setSchemaUidForSchemaDefinition,
 } from '@seedprotocol/eas'
@@ -15,6 +16,7 @@ import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
 const UID_A = '0x' + 'a'.repeat(64)
 const UID_B = '0x' + 'b'.repeat(64)
+const TITLE_UID = seedSchemaUid('string title')
 
 /** Stub EAS indexer: answers every schema query with `schemas`, counting requests. */
 let schemas: Array<{ id: string; schema?: string }> = []
@@ -46,9 +48,9 @@ afterEach(() => {
 
 describe('getEasSchemaUidForExactDefinition', () => {
   it('caches a found UID', async () => {
-    schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
-    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
+    schemas = [{ id: TITLE_UID }]
+    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(TITLE_UID)
+    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(TITLE_UID)
     expect(request).toHaveBeenCalledTimes(1)
   })
 
@@ -80,14 +82,14 @@ describe('getEasSchemaUidForExactDefinition', () => {
   it('looks up again after the miss TTL (schema registered by another client)', async () => {
     vi.useFakeTimers({ now: 0 })
     await getEasSchemaUidForExactDefinition('string title')
-    schemas = [{ id: UID_A }]
+    schemas = [{ id: TITLE_UID }]
 
     vi.setSystemTime(SCHEMA_LOOKUP_MISS_TTL_MS - 1)
     expect(await getEasSchemaUidForExactDefinition('string title')).toBeUndefined()
     expect(request).toHaveBeenCalledTimes(1)
 
     vi.setSystemTime(SCHEMA_LOOKUP_MISS_TTL_MS)
-    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
+    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(TITLE_UID)
     expect(request).toHaveBeenCalledTimes(2)
   })
 
@@ -95,8 +97,8 @@ describe('getEasSchemaUidForExactDefinition', () => {
     failNext = true
     await expect(getEasSchemaUidForExactDefinition('string title')).rejects.toThrow('indexer unavailable')
 
-    schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(UID_A)
+    schemas = [{ id: TITLE_UID }]
+    expect(await getEasSchemaUidForExactDefinition('string title')).toBe(TITLE_UID)
     expect(request).toHaveBeenCalledTimes(2)
   })
 
@@ -146,19 +148,23 @@ describe('getEasSchemaUidForSchemaDefinition', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('looks the exact definition up, not a name it ends with', async () => {
+  it("looks up the UID Seed registers the exact definition under", async () => {
+    const uid = seedSchemaUid('bytes32 storage_transaction_id')
+    schemas = [{ id: uid }]
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32 storage_transaction_id' })).toBe(uid)
+    expect(request).toHaveBeenCalledWith(expect.anything(), { where: { id: { equals: uid } } })
+  })
+
+  it('ignores a registration of the definition under another UID (another resolver)', async () => {
     schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'bytes32 storage_transaction_id' })).toBe(UID_A)
-    expect(request).toHaveBeenCalledWith(expect.anything(), {
-      where: { schema: { equals: 'bytes32 storage_transaction_id' } },
-    })
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string body' })).toBeUndefined()
   })
 
   it('returns undefined without caching when the request fails', async () => {
     failNext = true
     expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBeUndefined()
-    schemas = [{ id: UID_A }]
-    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBe(UID_A)
+    schemas = [{ id: seedSchemaUid('string title') }]
+    expect(await getEasSchemaUidForSchemaDefinition({ schemaText: 'string title' })).toBe(seedSchemaUid('string title'))
   })
 })
 
@@ -186,10 +192,11 @@ describe('getEasSchemaUidForModel', () => {
 
 
   it("asks EAS for the model's exact schema, as publish registers it", async () => {
-    schemas = [{ id: UID_A, schema: 'bytes32 blog_post' }]
-    expect(await getEasSchemaUidForModel('BlogPost')).toBe(UID_A)
-    const variables = request.mock.calls[0]?.[1] as { where: { schema: { in: string[] } } }
-    expect(variables.where.schema.in).toEqual(['bytes32 blog_post'])
+    const uid = seedSchemaUid('bytes32 blog_post')
+    schemas = [{ id: uid, schema: 'bytes32 blog_post' }]
+    expect(await getEasSchemaUidForModel('BlogPost')).toBe(uid)
+    const variables = request.mock.calls[0]?.[1] as { where: { id: { in: string[] } } }
+    expect(variables.where.id.in).toEqual([uid])
   })
 
   it("ignores a schema under an older SDK's name", async () => {
@@ -201,8 +208,8 @@ describe('getEasSchemaUidForModel', () => {
     failNext = true
     expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
     // Not cached as a miss: found once EAS answers again.
-    schemas = [{ id: UID_A, schema: 'bytes32 article' }]
-    expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
+    schemas = [{ id: seedSchemaUid('bytes32 article'), schema: 'bytes32 article' }]
+    expect(await getEasSchemaUidForModel('Article')).toBe(seedSchemaUid('bytes32 article'))
   })
 })
 

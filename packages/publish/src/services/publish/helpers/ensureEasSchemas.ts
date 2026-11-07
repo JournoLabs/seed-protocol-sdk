@@ -3,7 +3,6 @@ import {
   getPublishModels,
   INTERNAL_DATA_TYPES,
   normalizeDataType,
-  getEasSchemaUidForExactDefinition,
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
   listRelationEasPropertyName,
@@ -126,8 +125,6 @@ type RequiredSchema = {
   modelNames: string[]
   /** Property and storage-transaction schemas are cached by definition for the payload. */
   byDefinition: boolean
-  /** A property's schema may be registered with another resolver; the indexer finds it by definition. */
-  lookupByDefinition: boolean
 }
 
 /** Required schemas by definition, so a definition two models or properties share is checked and registered once. */
@@ -147,15 +144,11 @@ function requireSchema(
       label: fields.label,
       modelNames: [],
       byDefinition: false,
-      lookupByDefinition: false,
     }
     required.set(definition, entry)
   }
   if (fields.modelName && !entry.modelNames.includes(fields.modelName)) entry.modelNames.push(fields.modelName)
-  if (fields.byDefinition) {
-    entry.byDefinition = true
-    entry.lookupByDefinition = true
-  }
+  if (fields.byDefinition) entry.byDefinition = true
 }
 
 function requireModel(required: RequiredSchemas, modelName: string): void {
@@ -220,16 +213,11 @@ function requiredForModels(models: PublishModel[]): RequiredSchemas {
   return required
 }
 
-/** The UID `entry` is registered under on this chain, if any. */
+/**
+ * The UID `entry` is registered under on this chain, if any: its own, with the zero resolver and
+ * revocable. A registration of the same definition with a resolver isn't used (ADR 0035).
+ */
 async function findRegisteredUid(entry: RequiredSchema): Promise<string | undefined> {
-  if (entry.lookupByDefinition) {
-    // Already on EAS under this exact definition (a name alone matches schemas of any type)
-    const existingUid = await getEasSchemaUidForExactDefinition(entry.definition).catch(() => undefined)
-    if (existingUid) {
-      const record = await getSchemaRecord(existingUid)
-      if (record && record.schema === entry.definition) return existingUid
-    }
-  }
   return (await getSchemaRecord(entry.uid)) ? entry.uid : undefined
 }
 

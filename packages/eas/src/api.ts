@@ -17,6 +17,8 @@ import {
   GET_VERSIONS,
 } from './queries.js'
 import type { Attestation } from './graphql/gql/graphql.js'
+import { modelSchemaDefinition } from './modelSchemas.js'
+import { seedSchemaModelName, seedSchemaUid } from './seedSchemaUid.js'
 
 export type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 
@@ -167,11 +169,13 @@ export const getSeedsFromSchemaUids = async ({
       }),
   })) as { itemSeeds: Attestation[] }
 
-  return itemSeeds
+  return withSeedSchemaNames(itemSeeds)
 }
 
 /**
- * Seeds of the schema named `schemaName`, newest first, revoked ones left out. With `uidPrefix`,
+ * Seeds of the model `schemaName`, newest first, revoked ones left out: attestations under
+ * `bytes32 <easName(schemaName)>` with the zero resolver, revocable (ADR 0008, ADR 0035). Names
+ * attested onto schemas aren't consulted. With `uidPrefix`,
  * only seeds whose UID starts with it; easscan matches it case-sensitively, so pass it lowercase
  * with `0x`. With `attesters`, only seeds attested by one of them, in any case; values that
  * aren't addresses are ignored, and if none is left there are no seeds. Both apply before
@@ -191,17 +195,7 @@ export const getSeedsBySchemaName = async (
     where: withExcludeRevokedFilter({
       ...(uidPrefix !== undefined ? { id: { startsWith: uidPrefix } } : {}),
       ...(attesters ? { attester: { in: attesters } } : {}),
-      schema: {
-        is: {
-          schemaNames: {
-            some: {
-              name: {
-                equals: schemaName,
-              },
-            },
-          },
-        },
-      },
+      schemaId: { equals: seedSchemaUid(modelSchemaDefinition(schemaName)) },
     }),
     take: limit,
     skip: skipVal,
@@ -222,14 +216,14 @@ export const getSeedsBySchemaName = async (
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, variables),
   })) as { itemSeeds: Attestation[] }
 
-  // Every seed matched `schemaName`, so it is attached here instead of selected (see GET_SEEDS_LEAN).
+  // Every seed is of `schemaName`, so it is attached here instead of selected (see GET_SEEDS_LEAN).
   return itemSeeds.map((seed) => withSchemaNames(seed, [schemaName]))
 }
 
 const withSchemaNames = (seed: Attestation, names: string[]): Attestation =>
   ({ ...seed, schema: { schemaNames: names.map((name) => ({ name })) } }) as Attestation
 
-/** Found schema names by endpoint and schema UID. A schema's names don't change once found. */
+/** Model names found by endpoint and schema UID. A schema's definition doesn't change. */
 const schemaNamesBySchemaUid = new Map<string, string[]>()
 
 const schemaNamesCacheKey = (schemaUid: string): string => {
@@ -242,15 +236,17 @@ const schemaNamesCacheKey = (schemaUid: string): string => {
   return `${endpoint}\n${schemaUid.toLowerCase()}`
 }
 
-/** Clears the schema-name cache of getSchemaNamesBySchemaUids. For tests. */
+/** Clears the cache of getSchemaNamesBySchemaUids. For tests. */
 export const resetSchemaNamesCache = (): void => {
   schemaNamesBySchemaUid.clear()
 }
 
 /**
- * Names of each EAS schema in `schemaUids`, in EAS order, keyed by the UID as given. Schemas with
- * no name are left out. Found names are cached for the process; schemas without one are asked
- * again next time.
+ * The model name of each seed schema in `schemaUids`, keyed by the UID as given: `<name>` of a
+ * `bytes32 <name>` schema registered the way Seed registers it ({@link seedSchemaModelName}),
+ * as a one-element list. Read from the schema's definition, not from names attested onto it,
+ * which anyone can add (ADR 0035). Other schemas are left out. Found names are cached for the
+ * process; schemas EAS didn't return are asked again next time.
  */
 export const getSchemaNamesBySchemaUids = async (
   schemaUids: string[],
@@ -272,13 +268,14 @@ export const getSchemaNamesBySchemaUids = async (
       easClient.request(GET_SCHEMAS, {
         where: { id: { in: missing } },
       }),
-  })) as { schemas: Array<{ id: string; schemaNames?: Array<{ name: string }> }> }
+  })) as { schemas: Array<{ id: string; schema?: string | null }> }
 
   const byLowerUid = new Map(missing.map((uid) => [uid.toLowerCase(), uid]))
   for (const schema of schemas ?? []) {
-    const names = (schema.schemaNames ?? []).map((n) => n.name)
     const uid = byLowerUid.get(schema.id.toLowerCase())
-    if (!uid || names.length === 0) continue
+    const name = uid ? seedSchemaModelName(uid, schema.schema) : undefined
+    if (!uid || !name) continue
+    const names = [name]
     schemaNamesBySchemaUid.set(schemaNamesCacheKey(uid), names)
     result.set(uid, names)
   }
@@ -307,7 +304,16 @@ export const getSeedsByUidsFromEas = async ({
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, { where, take: uids.length, skip: 0 }),
   })) as { itemSeeds: Attestation[] }
 
-  const seeds = itemSeeds ?? []
+  return withSeedSchemaNames(itemSeeds ?? [])
+}
+
+/**
+ * `seeds` with `schema.schemaNames` set to the model name their schema's definition gives
+ * ({@link getSchemaNamesBySchemaUids}), replacing any names the indexer joined in. A seed whose
+ * schema isn't a Seed model schema gets none.
+ */
+export const withSeedSchemaNames = async (seeds: Attestation[]): Promise<Attestation[]> => {
+  if (seeds.length === 0) return seeds
   const namesBySchemaUid = await getSchemaNamesBySchemaUids(seeds.map((seed) => seed.schemaId))
   return seeds.map((seed) => withSchemaNames(seed, namesBySchemaUid.get(seed.schemaId) ?? []))
 }

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { waitFor } from 'xstate'
-import { BaseEasClient, resetSchemaUidCaches } from '@seedprotocol/eas'
+import { BaseEasClient, resetSchemaUidCaches, seedSchemaUid } from '@seedprotocol/eas'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
@@ -18,7 +18,8 @@ import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
-const TITLE_SCHEMA_UID = '0x' + 'c'.repeat(64)
+/** The UID Seed registers `string title` under (ADR 0035). */
+const TITLE_SCHEMA_UID = seedSchemaUid('string title')
 
 testDescribe('EAS schema lookups when saving', () => {
   const schemaName = 'Test Schema Save Lookups'
@@ -58,7 +59,7 @@ testDescribe('EAS schema lookups when saving', () => {
         ({
           request: async (_document: unknown, variables: unknown) => {
             requests.push(variables)
-            return JSON.stringify(variables).includes('"string title"')
+            return JSON.stringify(variables).includes(TITLE_SCHEMA_UID)
               ? { schemas: [{ id: TITLE_SCHEMA_UID }] }
               : { schemas: [] }
           },

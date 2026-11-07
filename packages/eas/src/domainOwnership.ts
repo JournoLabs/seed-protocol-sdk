@@ -4,10 +4,12 @@ import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { GET_DOMAIN_OWNERSHIPS } from './queries.js'
 import {
+  DOMAIN_OWNERSHIP_SCHEMA_DEF,
   DOMAIN_OWNERSHIP_SCHEMA_NAME,
   decodeDomainOwnershipData,
 } from './domainOwnershipHelpers.js'
 import type { Attestation } from './graphql/gql/graphql.js'
+import { seedSchemaUid } from './seedSchemaUid.js'
 
 export type GetDomainOwnershipFromEasParams = {
   /** Tool canonical wallet(s) that may have attested. */
@@ -17,8 +19,8 @@ export type GetDomainOwnershipFromEasParams = {
   /** Optional claimer addresses (EAS `recipient` filter). */
   claimers?: string[]
   /**
-   * DomainOwnership schema UID. When omitted, filters by named schema
-   * {@link DOMAIN_OWNERSHIP_SCHEMA_NAME}.
+   * DomainOwnership schema UID. When omitted, {@link seedSchemaUid} of
+   * {@link DOMAIN_OWNERSHIP_SCHEMA_DEF}.
    */
   schemaUid?: string
   excludeRevoked?: boolean
@@ -50,19 +52,8 @@ export async function getDomainOwnershipFromEas(
     attester: { in: attesterAddresses },
   }
 
-  if (schemaUid) {
-    where.schemaId = { equals: schemaUid }
-  } else {
-    where.schema = {
-      is: {
-        schemaNames: {
-          some: {
-            name: { equals: DOMAIN_OWNERSHIP_SCHEMA_NAME },
-          },
-        },
-      },
-    }
-  }
+  // Its UID, not its name: anyone can attach a name to another schema (ADR 0035).
+  where.schemaId = { equals: schemaUid ?? seedSchemaUid(DOMAIN_OWNERSHIP_SCHEMA_DEF) }
 
   if (claimers?.length) {
     where.recipient = {
