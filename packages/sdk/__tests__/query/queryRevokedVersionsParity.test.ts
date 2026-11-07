@@ -10,6 +10,7 @@ import {
   BaseQueryClient,
   GET_PROPERTIES,
   GET_SCHEMAS,
+  seedSchemaUid,
   GET_SEEDS,
   GET_SEEDS_LEAN,
   GET_VERSIONS,
@@ -30,7 +31,7 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 const uid = (byte: string) => '0x' + byte.repeat(32)
 const ZERO = uid('00')
 const SCHEMA = 'rvparity_post'
-const SEED_SCHEMA_UID = '0x' + 'f0'.repeat(31) + '01'
+const SEED_SCHEMA_UID = seedSchemaUid(`bytes32 ${SCHEMA}`)
 const TITLE_SCHEMA_UID = '0x' + 'f0'.repeat(31) + '03'
 const ATTESTER = '0x1234567890123456789012345678901234567890'
 const REVOKED_AT = 1_700_009_999
@@ -128,17 +129,17 @@ const matches = (att: Record<string, any>, where: Record<string, any>): boolean 
     throw new Error(`fake EAS: unsupported where ${key}: ${JSON.stringify(cond)}`)
   })
 
-const SCHEMA_NAMES: Record<string, string> = {
-  [SEED_SCHEMA_UID]: SCHEMA,
-  [VERSION_SCHEMA_UID]: 'version',
-  [TITLE_SCHEMA_UID]: 'title',
+const SCHEMA_DEFINITIONS: Record<string, string> = {
+  [SEED_SCHEMA_UID]: `bytes32 ${SCHEMA}`,
+  [VERSION_SCHEMA_UID]: 'bytes32 version',
+  [TITLE_SCHEMA_UID]: 'string title',
 }
 
 const fakeEasClient = {
   request: async (doc: unknown, vars: { where: Record<string, any>; take?: number; skip?: number }) => {
     if (doc === GET_SCHEMAS) {
       const ids: string[] = vars.where.id.in
-      return { schemas: ids.map((id) => ({ id, schemaNames: [{ name: SCHEMA_NAMES[id] }] })) }
+      return { schemas: ids.map((id) => ({ id, schema: SCHEMA_DEFINITIONS[id] })) }
     }
     const key =
       doc === GET_SEEDS || doc === GET_SEEDS_LEAN

@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `queryBySchema` and `queryBySchemaForMonth` list Seeds under the model's schema UID (`bytes32 <easName>`, zero resolver, revocable) instead of any schema carrying the name (ADR 0035). A schema someone else named the same no longer adds its attestations, and `BlogPost` lists the same Seeds as `blog_post`.
 - `QueryModels` accepts a `SchemaFileFormat['models']` from `@seedprotocol/sdk` with no cast, as its JSDoc said. It failed to compile (TS2559): every field of its property type was optional and shared none with a schema file's.
 - An unfilled reference slot (a relation value below 2^32 that the publisher's `multiPublish` never filled) is left out of changelog entries and `getSeedAttestations`, as records leave it out: a relation holding one is absent and a list drops it. A changelog showed the placeholder as a value change, and `getSeedAttestations` returned it as a related seed uid.
 - `readSeedAtTime` reads by the rule `getSeedAttestations({ asOf })` uses: it reads a uid in any case, throws a `RangeError` for an `asOf` that isn't finite, returns undefined for a seed created after `asOf`, and lists only the Versions made by then. It starts the query platform as the other reads do, with the one-copy check. It was case-sensitive, returned a seed before it existed and Versions after `asOf`, and threw `QueryClient not configured` in a fresh process.

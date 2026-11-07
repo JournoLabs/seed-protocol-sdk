@@ -3,8 +3,9 @@ import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { GET_SEEDS } from './queries.js'
-import { PUBLISHED_BY_SCHEMA_NAME } from './publishedByHelpers.js'
+import { PUBLISHED_BY_SCHEMA_DEF, PUBLISHED_BY_SCHEMA_NAME } from './publishedByHelpers.js'
 import type { Attestation } from './graphql/gql/graphql.js'
+import { seedSchemaUid } from './seedSchemaUid.js'
 
 export type GetPublishedByFromEasParams = {
   /** Tool canonical wallet(s) that may have attested. */
@@ -12,8 +13,8 @@ export type GetPublishedByFromEasParams = {
   /** Optional seed UIDs used as refUID on the sidecar. */
   refUIDs?: string[]
   /**
-   * PublishedBy schema UID. When omitted, filters by named schema
-   * {@link PUBLISHED_BY_SCHEMA_NAME}.
+   * PublishedBy schema UID. When omitted, {@link seedSchemaUid} of
+   * {@link PUBLISHED_BY_SCHEMA_DEF}.
    */
   schemaUid?: string
   excludeRevoked?: boolean
@@ -34,19 +35,8 @@ export async function getPublishedByFromEas(
     attester: { in: attesterAddresses },
   }
 
-  if (schemaUid) {
-    where.schemaId = { equals: schemaUid }
-  } else {
-    where.schema = {
-      is: {
-        schemaNames: {
-          some: {
-            name: { equals: PUBLISHED_BY_SCHEMA_NAME },
-          },
-        },
-      },
-    }
-  }
+  // Its UID, not its name: anyone can attach a name to another schema (ADR 0035).
+  where.schemaId = { equals: schemaUid ?? seedSchemaUid(PUBLISHED_BY_SCHEMA_DEF) }
 
   if (refUIDs?.length) {
     where.refUID = { in: refUIDs }

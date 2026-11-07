@@ -7,6 +7,8 @@ import {
   EasClient,
   withExcludeRevokedFilter,
   GET_SEEDS_LEAN,
+  modelSchemaDefinition,
+  seedSchemaUid,
 } from '@seedprotocol/eas'
 import type { AttestationLike } from '../types.js'
 import type { QueryDataSource, SeedListFilter } from './types.js'
@@ -49,17 +51,8 @@ export function createRemoteQueryDataSource(): QueryDataSource {
       const { startTs, endTs } = monthBoundsUnix(year, month)
       const where = withExcludeRevokedFilter({
         AND: [
-          {
-            schema: {
-              is: {
-                schemaNames: {
-                  some: {
-                    name: { equals: schemaName },
-                  },
-                },
-              },
-            },
-          },
+          // The model's schema by UID, not by name (ADR 0035).
+          { schemaId: { equals: seedSchemaUid(modelSchemaDefinition(schemaName)) } },
           {
             timeCreated: { gte: startTs, lt: endTs },
           },
@@ -72,7 +65,7 @@ export function createRemoteQueryDataSource(): QueryDataSource {
         take: 1000,
         skip: 0,
       })
-      // Every seed matched `schemaName`; the lean query doesn't select it.
+      // Every seed is of `schemaName`; the lean query doesn't select it.
       return (itemSeeds ?? []).map((seed) => ({
         ...seed,
         schema: { schemaNames: [{ name: schemaName }] },

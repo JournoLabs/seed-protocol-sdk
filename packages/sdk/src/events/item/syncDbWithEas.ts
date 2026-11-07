@@ -37,7 +37,7 @@ import {
   generateId,
 } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { GET_SEEDS } from '@seedprotocol/eas'
+import { GET_SEEDS, withSeedSchemaNames } from '@seedprotocol/eas'
 import {
   getAllAddressesFromDb,
   getItemStoragePropertiesForModel,
@@ -1151,7 +1151,7 @@ const getRelatedSeedsAndVersions = async (state: SyncRunState, signal?: AbortSig
   const easClient = BaseEasClient.getEasClient()
 
   // No `revoked` filter, like `getSeedsFromSchemaUids({ excludeRevoked: false })` in the main sync.
-  const { itemSeeds } = await abortable(
+  const { itemSeeds: fetched } = await abortable(
     easClient.request(GET_SEEDS, {
       where: {
         id: {
@@ -1160,6 +1160,11 @@ const getRelatedSeedsAndVersions = async (state: SyncRunState, signal?: AbortSig
       },
     }),
     signal,
+  )
+  // Model names from each schema's definition, not from names attested onto it (ADR 0035). An
+  // attestation that isn't under a Seed model schema gets none, and isn't a seed to store.
+  const itemSeeds = (await abortable(withSeedSchemaNames(fetched), signal)).filter(
+    (seed) => (seed.schema?.schemaNames?.length ?? 0) > 0,
   )
 
   const { seedUids } = await saveEasSeedsToDb({ itemSeeds, state })

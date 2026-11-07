@@ -4,6 +4,7 @@ import { fetchEasModelSchemas, getEasModelSchemasForNames, matchEasModelSchemas 
 import { BaseEasClient } from '../src/EasClient/BaseEasClient.js'
 import { BaseQueryClient } from '../src/QueryClient/BaseQueryClient.js'
 import type { IQueryClient } from '../src/QueryClient/IQueryClient.js'
+import { seedSchemaUid } from '../src/seedSchemaUid.js'
 
 const uid = (c: string) => `0x${c.repeat(32)}`
 
@@ -29,10 +30,23 @@ describe('fetchEasModelSchemas', () => {
       { name: 'HTMLPage', level: 'normalized' },
     ])
     expect(request).toHaveBeenCalledTimes(1)
-    const variables = request.mock.calls[0]?.[1] as unknown as { where: { schema: { in: string[] } } }
-    expect(variables.where.schema.in).toContain('bytes32 blog_post')
-    expect(variables.where.schema.in).not.toContain('bytes32 blogpost')
-    expect(variables.where.schema.in).toEqual(expect.arrayContaining(['bytes32 html_page', 'bytes32 htmlpage']))
+    // By the UID Seed registers each definition under, not by definition: anyone can register the
+    // same definition with a resolver (ADR 0035).
+    const variables = request.mock.calls[0]?.[1] as unknown as { where: { id: { in: string[] } } }
+    expect(variables.where.id.in).toContain(seedSchemaUid('bytes32 blog_post'))
+    expect(variables.where.id.in).not.toContain(seedSchemaUid('bytes32 blogpost'))
+    expect(variables.where.id.in).toEqual(
+      expect.arrayContaining([seedSchemaUid('bytes32 html_page'), seedSchemaUid('bytes32 htmlpage')]),
+    )
+  })
+
+  it('leaves out a registration of the same definition under another UID', async () => {
+    schemas = [
+      { id: uid('d'), schema: 'bytes32 blog_post' },
+      { id: seedSchemaUid('bytes32 blog_post'), schema: 'bytes32 blog_post' },
+    ]
+    const found = await getEasModelSchemasForNames([{ name: 'BlogPost', level: 'exact' }])
+    expect(found.map((m) => m.schema.id)).toEqual([seedSchemaUid('bytes32 blog_post')])
   })
 
   it('sends no request without names', async () => {

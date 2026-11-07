@@ -4,6 +4,13 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Reads pick schemas by UID, never by an attested name (ADR 0035). Anyone can attach any name to any schema, and anyone can register a Seed definition again with a resolver; OP Sepolia already has two schemas named `image`.
+  - New `seedSchemaUid(definition)`: the UID Seed registers a definition under (zero resolver, revocable), the same on every chain. New `seedSchemaModelName(schemaUid, definition)` and `withSeedSchemaNames(seeds)`.
+  - `getSeedsBySchemaName(name)` lists attestations under `seedSchemaUid('bytes32 ' + easName(name))`. It matched schemas carrying that name, so a schema someone else named `post` was listed with Seed's. `BlogPost` and `blog_post` now list the same Seeds.
+  - `getPublishedByFromEas`, `getPublishAuthorizationFromEas` and `getDomainOwnershipFromEas` without `schemaUid` filter by the UID of their definition instead of the schema name.
+  - `getEasSchemaUidForExactDefinition` and `fetchEasModelSchemas` (and `getEasModelSchemasForNames`) find only the UID Seed registers a definition under. They took whichever schema the indexer returned first with that definition, which could be one registered with a resolver.
+  - `getSeedsFromSchemaUids` and `getSeedsByUidsFromEas` set `schema.schemaNames` to the model name the schema's definition gives (`post` for `bytes32 post`), replacing the names the indexer joins in.
+- **Breaking:** `getSchemaNamesBySchemaUids` returns, for each Seed model schema, the one name its definition gives, and leaves out other schemas. It returned every name attested onto each schema.
 - New `getEncryptionKeysFromEas({ attester, includeRevoked })` returns an account's `seedprotocol.encryptionKey` registrations, newest first, with the key id, suite, public keys and keystore manifest transaction decoded (`EncryptionKeyRegistration`). New constants `ENCRYPTION_KEY_SCHEMA_DEF`, `ENCRYPTION_KEY_SCHEMA_UID` and `ENCRYPTION_KEY_SCHEMA_NAME`.
 - `getArchiveAnchorsFromEas`, `getReportedAttestationUids` and `getSeedsByUidsFromEas` ask the indexer with lower-case uids. An upper-case uid found nothing.
 

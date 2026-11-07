@@ -3,6 +3,7 @@ import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { GET_SCHEMAS } from './queries.js'
 import { timedFetchQuery } from './easTiming.js'
 import type { Schema as EASSchema } from './graphql/gql/graphql.js'
+import { seedSchemaUid } from './seedSchemaUid.js'
 import {
   compareNameMatchTiers,
   DEFAULT_NAME_MATCH_LEVEL,
@@ -46,7 +47,9 @@ const levelsByName = (models: readonly ModelSchemaLookup[]): Map<string, NameMat
 /**
  * The EAS model schemas (`bytes32 <name>`) the given local model names can match, in one request:
  * every name each model can match at its level (`easNamesToFetch`; at `exact` only
- * `bytes32 <easName>`). A superset; {@link matchEasModelSchemas} says which model each is for.
+ * `bytes32 <easName>`), each as Seed registers it (zero resolver, revocable; {@link seedSchemaUid}),
+ * so a stranger's registration of the same definition isn't returned. A superset;
+ * {@link matchEasModelSchemas} says which model each is for.
  * Empty when the EAS clients aren't configured. Throws when the request fails.
  */
 export const fetchEasModelSchemas = async (models: readonly ModelSchemaLookup[]): Promise<EASSchema[]> => {
@@ -62,11 +65,14 @@ export const fetchEasModelSchemas = async (models: readonly ModelSchemaLookup[])
     for (const easSchemaName of easNamesToFetch(name, level)) definitions.add(`${BYTES32_PREFIX}${easSchemaName}`)
   }
   const sorted = [...definitions].sort()
+  const uids = sorted.map(seedSchemaUid)
   const result = (await timedFetchQuery(queryClient, {
     queryKey: ['fetchEasModelSchemas', sorted],
-    queryFn: async () => easClient.request(GET_SCHEMAS, { where: { schema: { in: sorted } } }),
+    queryFn: async () => easClient.request(GET_SCHEMAS, { where: { id: { in: uids } } }),
   })) as { schemas?: EASSchema[] } | undefined
-  return result?.schemas ?? []
+  // Only the UIDs asked for, in case the indexer answers loosely.
+  const wanted = new Set(uids)
+  return (result?.schemas ?? []).filter((schema) => wanted.has(schema.id?.toLowerCase() as `0x${string}`))
 }
 
 /**

@@ -16,14 +16,23 @@ import {
   GET_SEEDS_LEAN,
   GET_VERSIONS,
 } from '../src/queries.js'
+import { seedSchemaUid } from '../src/seedSchemaUid.js'
 
-const POST_SCHEMA = '0x' + 'a'.repeat(64)
-const IMAGE_SCHEMA = '0x' + 'b'.repeat(64)
+const POST_SCHEMA = seedSchemaUid('bytes32 post')
+const IMAGE_SCHEMA = seedSchemaUid('bytes32 image')
+/** Not on EAS. */
 const UNNAMED_SCHEMA = '0x' + 'c'.repeat(64)
+/** `bytes32 post` registered by someone else with a resolver: another UID. */
+const OTHER_POST_SCHEMA = '0x' + 'd'.repeat(64)
+/** Not a model schema. */
+const TITLE_SCHEMA = seedSchemaUid('string title')
 
-const NAMES: Record<string, string[]> = {
-  [POST_SCHEMA]: ['post'],
-  [IMAGE_SCHEMA]: ['image'],
+/** Each schema's definition, and the names attested onto it (anyone can add one). */
+const SCHEMAS: Record<string, { schema: string; names: string[] }> = {
+  [POST_SCHEMA]: { schema: 'bytes32 post', names: ['image', 'post'] },
+  [IMAGE_SCHEMA]: { schema: 'bytes32 image', names: [] },
+  [OTHER_POST_SCHEMA]: { schema: 'bytes32 post', names: ['post'] },
+  [TITLE_SCHEMA]: { schema: 'string title', names: ['post'] },
 }
 
 const seed = (id: string, schemaId: string) => ({
@@ -47,8 +56,8 @@ const fakeEasClient = {
       const ids: string[] = variables.where.id.in
       return {
         schemas: ids
-          .filter((id) => id in NAMES)
-          .map((id) => ({ id, schemaNames: NAMES[id]!.map((name) => ({ name })) })),
+          .filter((id) => id in SCHEMAS)
+          .map((id) => ({ id, schema: SCHEMAS[id]!.schema, schemaNames: SCHEMAS[id]!.names.map((name) => ({ name })) })),
       }
     }
     return { itemSeeds: seedsResponse }
@@ -76,11 +85,19 @@ describe('lean seed queries', () => {
     }
   })
 
-  it('getSeedsByUidsFromEas attaches schema names from schemaId', async () => {
-    seedsResponse = [seed('0x1', POST_SCHEMA), seed('0x2', IMAGE_SCHEMA), seed('0x3', UNNAMED_SCHEMA)]
-    const seeds = await getSeedsByUidsFromEas({ uids: ['0x1', '0x2', '0x3'] })
+  it('getSeedsByUidsFromEas attaches the model name from each schema definition', async () => {
+    seedsResponse = [
+      seed('0x1', POST_SCHEMA),
+      seed('0x2', IMAGE_SCHEMA),
+      seed('0x3', UNNAMED_SCHEMA),
+      seed('0x4', OTHER_POST_SCHEMA),
+      seed('0x5', TITLE_SCHEMA),
+    ]
+    const seeds = await getSeedsByUidsFromEas({ uids: ['0x1', '0x2', '0x3', '0x4', '0x5'] })
 
-    expect(seeds.map((s) => s.schema.schemaNames.map((n) => n.name))).toEqual([['post'], ['image'], []])
+    // Not the names attested onto the schemas: POST_SCHEMA is also named "image", and the others
+    // are named "post" without being Seed's post schema.
+    expect(seeds.map((s) => s.schema.schemaNames.map((n) => n.name))).toEqual([['post'], ['image'], [], [], []])
     expect(requests.map((r) => r.operation)).toEqual(['GetSeedsLean', 'GetSchemas'])
   })
 
@@ -111,6 +128,13 @@ describe('lean seed queries', () => {
 
     expect(seeds[0]!.schema.schemaNames).toEqual([{ name: 'post' }])
     expect(requests.map((r) => r.operation)).toEqual(['GetSeedsLean'])
+  })
+
+  it("getSeedsBySchemaName filters by the model schema's UID, not by attested names", async () => {
+    await getSeedsBySchemaName('BlogPost', 10)
+    const { where } = requests[0]!.variables
+    expect(where.schemaId).toEqual({ equals: seedSchemaUid('bytes32 blog_post') })
+    expect(JSON.stringify(where)).not.toMatch(/schemaNames/)
   })
 
   it('getSeedsBySchemaName sends attesters checksummed, before take and skip', async () => {
