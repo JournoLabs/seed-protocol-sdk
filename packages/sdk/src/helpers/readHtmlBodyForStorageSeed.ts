@@ -1,5 +1,9 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { fetchArweaveRawTextAcrossGateways } from '@seedprotocol/arweave'
+import {
+  isEncryptedArweaveContent,
+  readArweaveRawAcrossGateways,
+  type ArweaveRawReadAttempt,
+} from '@seedprotocol/arweave'
 
 /** Published storage seeds use `0x` + 64 hex; `saveHtml` still writes `html/{localId}.html`. */
 const SEED_UID_HEX_RE = /^0x[a-fA-F0-9]{64}$/
@@ -16,15 +20,21 @@ function extractArweaveTransactionId(raw: string): string {
   return t
 }
 
-/**
- * GET /raw/{txId} on each read gateway, preferred ones ({@link setPreferredArweaveReadBaseUrls})
- * first. Avoids arweave.js /tx/.../offset which often 404s on arweave.net while another gateway
- * (e.g. ar.seedprotocol.io, or the one the item was just uploaded through) still serves the data.
- */
-async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | undefined> {
-  const id = extractArweaveTransactionId(txId)
-  if (!id || SEED_UID_HEX_RE.test(id)) return undefined
-  return fetchArweaveRawTextAcrossGateways(id)
+/** Transaction ids already warned about, so re-renders of the same post don't repeat the line. */
+const warnedMissingBodies = new Set<string>()
+
+function describeAttempt({ baseUrl, outcome }: ArweaveRawReadAttempt): string {
+  if (outcome === 'network') return `${baseUrl} network error`
+  if (outcome === 'empty') return `${baseUrl} empty body`
+  if (outcome === 'unreadable') return `${baseUrl} unreadable body`
+  return `${baseUrl} ${outcome}`
+}
+
+function warnBodyNotFound(txId: string, attempts: ArweaveRawReadAttempt[]): void {
+  if (warnedMissingBodies.has(txId)) return
+  warnedMissingBodies.add(txId)
+  const tried = attempts.length > 0 ? attempts.map(describeAttempt).join(', ') : 'no gateway configured'
+  console.warn(`[seed] Html body for ${txId} not found on any gateway: ${tried}`)
 }
 
 /**
@@ -45,8 +55,9 @@ export async function resolveHtmlStorageSeedLocalId(
 
 /**
  * When the local draft file is gone (new device, OPFS cleared, etc.), load HTML from the
- * Html storage seed's published Arweave transaction id: a read gateway's `/raw`, then the Arweave
- * client, then a download into `html/` (named after the seed or the transaction).
+ * Html storage seed's published Arweave transaction id: a file already downloaded into `html/`
+ * under that id, else `/raw` on each read gateway once ({@link readArweaveRawAcrossGateways}).
+ * When no gateway serves it, one `console.warn` names each gateway and what it answered.
  */
 async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise<string | undefined> {
   const { storageSeedTransactionId } = await import('@/storageValue/resolve')
@@ -59,34 +70,36 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
   if (sourced) {
     const fetched = await fetchBlobBytes(sourced)
     if (!fetched) return undefined
-    const { transformArweaveContent, isEncryptedArweaveContent } = await import('@seedprotocol/arweave')
+    const { transformArweaveContent } = await import('@seedprotocol/arweave')
     const { bytes } = await transformArweaveContent({ bytes: fetched }, { transactionId: txId })
     return isEncryptedArweaveContent(bytes) ? undefined : new TextDecoder('utf-8').decode(bytes)
   }
 
-  const rawHtml = await fetchHtmlViaRawAcrossGateways(txId)
-  if (rawHtml) return rawHtml
+  const id = extractArweaveTransactionId(txId)
+  if (!id) return undefined
 
+  // A bulk or earlier download names the file after the transaction, not the seed.
   try {
-    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
-    const data = await BaseArweaveClient.getTransactionData(extractArweaveTransactionId(txId), {
-      string: true,
-    })
-    if (typeof data === 'string' && data.length > 0 && !data.startsWith('seed-private/v1\n')) return data
-  } catch {
-    /* offline / bad tx id */
-  }
-
-  try {
-    const { downloadTransactionIdWithDedupe } = await import('../events/files/download')
-    await downloadTransactionIdWithDedupe(txId)
     const { findFileInDir } = await import('@/storageValue/findFile')
-    const filePath = await findFileInDir('html', [`${seedLocalId}.html`, extractArweaveTransactionId(txId)])
-    if (filePath) return BaseFileManager.readFileAsString(filePath)
+    const filePath = await findFileInDir('html', [id])
+    if (filePath) {
+      const saved = await BaseFileManager.readFileAsString(filePath)
+      if (saved) return saved
+    }
   } catch {
-    /* OPFS unsupported or download failed */
+    /* no file storage */
   }
-  return undefined
+
+  // Every gateway's `/raw` is the whole search: arweave-js `getData` can't read a bundled data item
+  // (the node API doesn't index them) and the download worker would ask the same gateways again.
+  const { bytes, attempts } = await readArweaveRawAcrossGateways(id)
+  if (!bytes) {
+    warnBodyNotFound(id, attempts)
+    return undefined
+  }
+  // An envelope no read transform opened was found, so it isn't a miss: no warning.
+  if (isEncryptedArweaveContent(bytes)) return undefined
+  return new TextDecoder().decode(bytes) || undefined
 }
 
 /** Read saved HTML body for a parent Html property whose `propertyValue` points at the Html storage seed. */

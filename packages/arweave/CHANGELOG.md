@@ -4,6 +4,10 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking:** `fetchArweaveRawFromBaseUrl` returns `{ baseUrl, outcome, response? }` instead of `Response | undefined`. `outcome` is the HTTP status, `'timeout'` or `'network'`; `response` is set only for a 2xx answer.
+- New `readArweaveRawAcrossGateways(transactionId, options)`: `/raw/{id}` on each read gateway at most once, returning `{ bytes, attempts }` with what each gateway answered. `fetchArweaveRawBytesAcrossGateways` and `fetchArweaveRawTextAcrossGateways` wrap it.
+- The across-gateways reads try the configured host (`ArweaveClient.getBaseUrl()`) last when the resolved gateways leave it out, as the browser download worker already did.
+
 - `fetchArweaveRawBytesAcrossGateways(id, { decode: false })` returns the transaction's bytes as a gateway serves them, without the registered content read transform, as `getTransactionData` does. The default still applies the transform.
 - `isEncryptedArweaveContent(bytes)`: true for a `seed-private/v1` envelope (ADR 0033). `fetchArweaveRawTextAcrossGateways` returns undefined for an envelope that no read transform decrypted, rather than decoding ciphertext as text.
 
