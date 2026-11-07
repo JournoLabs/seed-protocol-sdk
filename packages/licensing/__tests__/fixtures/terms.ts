@@ -25,7 +25,7 @@ const ccBy: SeedLicenseTerms = {
 
 const with_ = (patch: Record<string, unknown>) => ({ ...ccBy, ...patch })
 
-export const validTerms: Record<string, SeedLicenseTerms> = {
+export const validTerms = {
   ccBy,
   withTransition: { ...ccBy, transition: { changeAt: { afterSeconds: 63072000 }, changeLicense: 'Apache-2.0' } },
   withConstraints: {
@@ -36,9 +36,9 @@ export const validTerms: Record<string, SeedLicenseTerms> = {
     ],
   },
   undefinedOptional: { ...ccBy, transition: undefined, governingLaw: undefined },
-}
+} satisfies Record<string, SeedLicenseTerms>
 
-export const invalidTerms: Record<string, unknown> = {
+export const invalidTerms = {
   extraKey: with_({ colour: 'blue' }),
   unknownAction: with_({ permissions: [{ action: 'print' }] }),
   badSpdx: with_({ spdx: 'NOT-A-LICENSE' }),
@@ -61,4 +61,5 @@ export const invalidTerms: Record<string, unknown> = {
   array: [],
   string: 'x',
   number: 1,
-}
+} satisfies Record<string, unknown>
+

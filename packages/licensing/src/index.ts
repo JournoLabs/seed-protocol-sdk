@@ -1,5 +1,6 @@
 export { canonicalJson } from './canonicalJson'
-export { CanonicalJsonError } from './errors'
+export { CanonicalJsonError, InvalidLicenseTermsError } from './errors'
+export { termsHash } from './hash'
 export { parseSpdx, isKnownSpdxId } from './spdx/parse'
 export type { SpdxNode, SpdxParseResult } from './spdx/parse'
 export { SPDX_LIST_VERSION } from './spdx/list.generated'
