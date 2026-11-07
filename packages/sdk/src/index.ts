@@ -377,6 +377,12 @@ export {
   type GetPublishGraphOptions,
 } from './db/read/publishGraph'
 export { getPublishModels, type PublishModel, type GetPublishModelsOptions } from './db/read/publishModels'
+// Private Versions on a reading device (ADR 0033): the app's decryptor opens downloaded envelopes.
+export {
+  setEnvelopeDecryptor,
+  openAllEncryptedDownloads,
+  type EnvelopeDecryptor,
+} from './helpers/envelopeContent'
 export {
   itemHasPublishUploadCandidates,
   getPublishUploadData,

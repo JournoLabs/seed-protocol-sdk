@@ -23,7 +23,7 @@ import {
   BaseFileManager,
   getCorrectId,
 } from '@/helpers'
-import { resolveStorageDisplay, storageSubdir, storedValueKind } from '@/storageValue/resolve'
+import { missingFileWithEnvelope, resolveStorageDisplay, storageSubdir, storedValueKind } from '@/storageValue/resolve'
 import {
   getMetadataPropertyNamesForQuery,
   listRelationEasPropertyName,
@@ -450,7 +450,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // the same file is kept), Html and ItemStorage their text
         const fileKind = isImage ? 'image' : isFile ? 'file' : isItemStorage ? 'itemStorage' : isHtml ? 'html' : undefined
         // Image, File and Html: whether this pass found the file (undefined leaves missingFile as it is)
-        let missingFile: { path?: string } | null | undefined
+        let missingFile: { path?: string; encrypted?: true; transactionId?: string } | null | undefined
         if (fileKind && context.refResolvedValue) {
           try {
             let found: boolean
@@ -494,12 +494,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                   ? null
                   : showsResolved
                     ? (context.missingFile ?? null)
-                    : {
-                        path: BaseFileManager.getFilesPath(
-                          storageSubdir(fileKind, context.localStorageDir),
-                          context.refResolvedValue,
-                        ),
-                      }
+                    : await missingFileWithEnvelope(
+                        fileKind,
+                        { propertyValue: pv, refResolvedValue: context.refResolvedValue, localStorageDir: context.localStorageDir },
+                        {
+                          path: BaseFileManager.getFilesPath(
+                            storageSubdir(fileKind, context.localStorageDir),
+                            context.refResolvedValue,
+                          ),
+                        },
+                      )
             }
             if (!found) {
               // Keep filename for display when File object is present but not yet saved to disk
@@ -598,7 +602,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const missing = this._service.getSnapshot().context.missingFile
       if (!missing || !Array.isArray(paths)) return
       const name = missing.path?.split('/').pop()
-      if (name && !paths.some((path) => typeof path === 'string' && path.split('/').pop() === name)) return
+      // An opened envelope's plaintext is named after its transaction, not always `name`
+      const matches = (path: unknown) => {
+        if (typeof path !== 'string') return false
+        const base = path.split('/').pop()
+        return base === name || (!!missing.transactionId && base?.split('.')[0] === missing.transactionId)
+      }
+      if (name && !paths.some(matches)) return
       this._service.send({ type: 'rehydrateFromDb' })
     }
     eventEmitter.on(FILES_CHANGED_EVENT, onFilesChanged)
@@ -1554,21 +1564,27 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   /**
    * Whether `value` holds an Image, File or Html property's content: `'fetching'` while the property
-   * loads (a load downloads a file that isn't on disk), `'missing'` when the file wasn't found, else
-   * `'resolved'`. While `'missing'`, `value` is undefined and `missingFile` says where the file was
-   * looked for; the property reads it again when that file is saved (a download, another tab).
+   * loads (a load downloads a file that isn't on disk), `'missing'` when the file wasn't found,
+   * `'encrypted'` when it was downloaded as an envelope this device has no key for (a private
+   * Version, ADR 0033), else `'resolved'`. While `'missing'` or `'encrypted'`, `value` is undefined
+   * and `missingFile` says where the file was looked for; the property reads it again when that file
+   * is saved (a download, another tab, an envelope opened after `setEnvelopeDecryptor`).
    * Other properties are always `'resolved'`.
    */
-  get valueStatus(): 'resolved' | 'fetching' | 'missing' {
+  get valueStatus(): 'resolved' | 'fetching' | 'missing' | 'encrypted' {
     const context = this._getSnapshotContext()
     const kind = storedValueKind(context.propertyRecordSchema, context)
     if (kind !== 'image' && kind !== 'file' && kind !== 'html') return 'resolved'
     if (this.status === 'loading') return 'fetching'
-    return context.missingFile ? 'missing' : 'resolved'
+    if (!context.missingFile) return 'resolved'
+    return context.missingFile.encrypted ? 'encrypted' : 'missing'
   }
 
-  /** While `valueStatus` is `'missing'`: the file looked for (`path`, when the value names one). Else null. */
-  get missingFile(): { path?: string } | null {
+  /**
+   * While `valueStatus` is `'missing'` or `'encrypted'`: the file looked for (`path`, when the value
+   * names one) and, when encrypted, its `transactionId`. Else null.
+   */
+  get missingFile(): { path?: string; encrypted?: true; transactionId?: string } | null {
     return this._getSnapshotContext().missingFile ?? null
   }
 

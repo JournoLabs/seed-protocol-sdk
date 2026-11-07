@@ -139,6 +139,22 @@ describe('SeedImage ensure / progressive gateway', () => {
     }
   })
 
+  it('never loads the gateway for a private image this device has no key for', async () => {
+    mocks.ensureImageLocal.mockImplementation(() => new Promise(() => {})) // stays ensuring
+    render(
+      <SeedImage
+        imageProperty={makeImageProperty({ valueStatus: 'encrypted', value: undefined })}
+        filename={VALID_TX}
+        width={480}
+        ensure
+        data-testid="seed-img"
+      />,
+    )
+    const img = await screen.findByTestId('seed-img')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(img.getAttribute('src')).toMatch(/^data:image\/gif/)
+  })
+
   it('does not call ensureImageLocal when ensure={false}', async () => {
     render(
       <SeedImage

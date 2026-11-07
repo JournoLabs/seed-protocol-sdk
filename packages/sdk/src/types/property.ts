@@ -96,6 +96,6 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
    * Image, File and Html: the file the stored value names wasn't found (on disk, or for Html through
    * its transaction), with the path looked up when the value names one. Null once found.
    */
-  missingFile?: { path?: string } | null
+  missingFile?: { path?: string; encrypted?: true; transactionId?: string } | null
 }
 

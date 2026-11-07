@@ -2,6 +2,7 @@ import { addExcludedTransactions } from '@/db/write/addExcludedTransactions';
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
 import filesDownload from './filesDownload'
 import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
+import { hasEnvelopeDecryptor, openEncryptedDownloads } from '@/helpers/envelopeContent'
 import { contentSha256TagMatches } from '@/helpers/arweaveContentTags'
 import debug from 'debug'
 import type { DownloadAllFilesParams, DownloadAllFilesResult } from '@/helpers/FileManager/IFileManager'
@@ -75,6 +76,7 @@ export class FileDownloader {
     const verified = new Set<string>()
     const hashMismatch = new Set<string>()
     const encrypted = new Set<string>()
+    const decrypted = new Set<string>()
     const failed = new Set<string>()
     const inactivityTimeoutMs = this.options.inactivityTimeoutMs ?? FILE_DOWNLOAD_INACTIVITY_TIMEOUT_MS
 
@@ -110,6 +112,16 @@ export class FileDownloader {
         settled = true
         cleanup()
         addExcludedTransactions(localExcludedTransactions)
+          // Envelopes this tab can open, fetched now or kept from an earlier run (ADR 0033)
+          .then(async (): Promise<{ written: string[]; opened: string[] }> =>
+            hasEnvelopeDecryptor()
+              ? openEncryptedDownloads(transactionIds.filter((id) => !failed.has(id)), compositeChildPaths)
+              : { written: [], opened: [] },
+          )
+          .then(({ written, opened }) => {
+            savedPaths.push(...written)
+            for (const id of opened) decrypted.add(id)
+          })
           // The worker wrote to OPFS directly; refresh caches here and in other tabs.
           .then(() => notifyFilesWrittenOutsideCache(savedPaths))
           .then(() =>
@@ -117,7 +129,8 @@ export class FileDownloader {
               verifiedTransactionIds: [...verified].filter((id) => !failed.has(id)),
               hashMismatchTransactionIds: [...hashMismatch],
               failedTransactionIds: [...failed],
-              encryptedTransactionIds: [...encrypted].filter((id) => !failed.has(id)),
+              encryptedTransactionIds: [...encrypted].filter((id) => !failed.has(id) && !decrypted.has(id)),
+              decryptedTransactionIds: [...decrypted],
             }),
           )
           .catch(reject)
