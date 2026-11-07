@@ -1,0 +1,14 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the cc catalog > pins every termsHash 1`] = `
+{
+  "all-rights-reserved@1.0.0": "0xa16c74c511b6503f01c8859ef8ef182cf2fe4ef93bd45c8db0c6cbad81bd0b91",
+  "cc-by-nc-nd@4.0.0": "0xb6f5301e8e40de05f0427fe7a0b5081ef57b3a42c7bca04b9e954cdfe4dc8202",
+  "cc-by-nc-sa@4.0.0": "0x4e2492f01e920e6efab648e1a8519c653136d55d7febf28fad737328940e17f8",
+  "cc-by-nc@4.0.0": "0x65593a000165303222b7cbc29549916de4536d48f07ca93a394645e17e250561",
+  "cc-by-nd@4.0.0": "0xabe7d6c91bc5d9cd544487c741b9c0e95e97a32140f5d52e25688f36fb60d17f",
+  "cc-by-sa@4.0.0": "0x9b6af4d566ccca5ef7c6e4d07f74f77681f907a91982750de46b3d853da037a2",
+  "cc-by@4.0.0": "0x126ed72da53bb563258c379debc4c0b42a2944726f8d8db82a8062d8c2520cec",
+  "cc0@1.0.0": "0xfb696e067d1df17045ccc64e43585d12035fbb1c732b9b8cdf7863f994155496",
+}
+`;

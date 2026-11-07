@@ -23,7 +23,7 @@ const FORBIDDEN = [
   '@tanstack/react-query',
 ]
 
-const PACKAGES = ['archive', 'encryption', 'eas', 'arweave', 'vite', 'next', 'rdf', 'ipfs']
+const PACKAGES = ['archive', 'encryption', 'licensing', 'eas', 'arweave', 'vite', 'next', 'rdf', 'ipfs']
 
 function checkPackage(shortName) {
   const pkgPath = join(rootDir, 'packages', shortName, 'package.json')

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seedprotocol.io/odrl/seed-license/1/terms.schema.json",
+  "title": "SeedLicenseTerms",
+  "description": "License terms under the profile https://seedprotocol.io/odrl/seed-license/1 (ADR 0034). validateTerms in @seedprotocol/licensing also rejects what this schema can't express: an spdx, shareAlike license or changeLicense that isn't a valid SPDX 3.29.0 expression; the same action and target both permitted and prohibited; a shareAlike duty with no derive permission.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile", "spdx", "legal", "permissions", "prohibitions", "duties", "grant"],
+  "properties": {
+    "profile": { "const": "https://seedprotocol.io/odrl/seed-license/1" },
+    "spdx": { "type": "string" },
+    "legal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "lang", "canonicalUrl"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "lang": { "type": "string" },
+        "canonicalUrl": { "type": "string" }
+      }
+    },
+    "permissions": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "prohibitions": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "duties": { "type": "array", "items": { "$ref": "#/$defs/duty" } },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeAt", "changeLicense"],
+      "properties": {
+        "changeAt": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["afterSeconds"],
+              "properties": { "afterSeconds": { "type": "integer", "minimum": 1 } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["at"],
+              "properties": { "at": { "type": "integer", "minimum": 0 } }
+            }
+          ]
+        },
+        "changeLicense": { "type": "string" }
+      }
+    },
+    "postTerm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["derivatives", "trainedModels"],
+      "properties": {
+        "derivatives": { "enum": ["retain", "cease-distribution", "remove"] },
+        "trainedModels": { "enum": ["may-continue", "no-new-training"] }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferable", "sublicensable", "exclusive", "revocableFor", "warranty", "duration"],
+      "properties": {
+        "transferable": { "type": "boolean" },
+        "sublicensable": { "type": "boolean" },
+        "exclusive": { "const": false },
+        "revocableFor": { "enum": ["breach-only", "never"] },
+        "warranty": { "enum": ["as-is", "ownership"] },
+        "duration": {
+          "oneOf": [{ "const": "copyright-term" }, { "type": "integer", "minimum": 1 }]
+        }
+      }
+    },
+    "governingLaw": { "type": "string" }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": [
+            "use",
+            "reproduce",
+            "distribute",
+            "derive",
+            "commercialize",
+            "seed:aiTrain",
+            "seed:aiInput",
+            "seed:aiIndex",
+            "seed:search"
+          ]
+        },
+        "target": { "enum": ["work", "adaptation"] },
+        "constraints": { "type": "array", "items": { "$ref": "#/$defs/constraint" } }
+      }
+    },
+    "constraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/stringConstraint" },
+        { "$ref": "#/$defs/spatialConstraint" },
+        { "$ref": "#/$defs/userClassConstraint" },
+        { "$ref": "#/$defs/integerConstraint" }
+      ]
+    },
+    "stringConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operator", "value"],
+      "properties": {
+        "name": { "const": "purpose" },
+        "operator": { "enum": ["eq", "neq"] },
+        "value": { "type": "string" }
+      }
+    },
+    "spatialConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operator", "value"],
+      "properties": {
+        "name": { "const": "spatial" },
+        "operator": { "enum": ["eq", "neq"] },
+        "value": { "type": "string", "pattern": "^[A-Z]{2}$" }
+      }
+    },
+    "userClassConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operator", "value"],
+      "properties": {
+        "name": { "const": "userClass" },
+        "operator": { "enum": ["eq", "neq"] },
+        "value": { "enum": ["commercial", "noncommercial", "education", "government", "personal"] }
+      }
+    },
+    "integerConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operator", "value"],
+      "properties": {
+        "name": { "enum": ["dateTime", "elapsedTime", "count"] },
+        "operator": { "enum": ["gte", "lt", "lte"] },
+        "value": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        { "if": { "properties": { "name": { "const": "dateTime" } } }, "then": { "properties": { "operator": { "enum": ["gte", "lt"] } } } },
+        { "if": { "properties": { "name": { "enum": ["elapsedTime", "count"] } } }, "then": { "properties": { "operator": { "const": "lte" } } } }
+      ]
+    },
+    "duty": {
+      "oneOf": [
+        { "$ref": "#/$defs/plainDuty" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["duty"],
+          "properties": { "duty": { "const": "shareAlike" }, "license": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["duty"],
+          "properties": { "duty": { "const": "discloseSource" }, "network": { "type": "boolean" } }
+        }
+      ]
+    },
+    "plainDuty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duty"],
+      "properties": { "duty": { "enum": ["attribute", "includeNotice", "stateChanges"] } }
+    }
+  }
+}

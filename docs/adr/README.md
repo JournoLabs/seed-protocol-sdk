@@ -43,6 +43,7 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0031](0031-archive-is-an-add-on-over-the-sdk.md) | Archive is an add-on over the SDK | Accepted |
 | [0032](0032-ens-reads-live-in-query.md) | ENS reads live in query, behind its `ens` subpath | Accepted |
 | [0033](0033-private-versions-encrypt-at-the-boundary.md) | Private Versions encrypt at the publish and read boundaries; access can only be withheld going forward | Proposed |
+| [0034](0034-license-terms-and-terms-hash.md) | License terms are a closed ODRL profile identified by termsHash | Accepted |
 
 ## Writing one
 

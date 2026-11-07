@@ -23,6 +23,8 @@ const BUILD_ORDER = [
   'bundler-core',
   // Reads no workspace package; publish's tests read its dist.
   'encryption',
+  // Reads no workspace package.
+  'licensing',
   'eas',
   'arweave',
   'query',
