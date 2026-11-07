@@ -27,6 +27,8 @@ Each concept has one home. Use it; don't add a parallel one.
   `@seedprotocol/encryption` (`packages/encryption/SPEC.md`, ADR 0033), which never imports the SDK.
   The SDK encrypts only through `GetPublishUploadsOptions.encryptUpload` and decrypts only through
   the Arweave content read transform and the download worker. "Draft" means local and unattested.
+- **License terms, catalog and deeds:** `@seedprotocol/licensing` (`packages/licensing`, ADR 0034),
+  which never imports the SDK. Licensing adds no `license` property to models.
 - **Archive bags:** `exportArchive` (`packages/archive/src/seed/exportArchive.ts`, ADR 0031). Archive
   builds on the SDK, never the reverse; `@seedprotocol/archive/verify` stays free of the SDK.
 
