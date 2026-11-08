@@ -22,6 +22,13 @@ export type RecordedRpc = {
 const keyOf = (req: RpcRequest) => JSON.stringify([req.method, req.params ?? []])
 
 /**
+ * Lookups by transaction hash. Anvil forwards them to the upstream for a transaction it hasn't
+ * mined yet, and the upstream never has one the test sent, so the answer is always null. Hashes
+ * can differ between runs (fees, timing), so replay answers these without a recorded entry.
+ */
+const TX_HASH_LOOKUPS = new Set(['eth_getTransactionReceipt', 'eth_getTransactionByHash'])
+
+/**
  * A JSON-RPC server standing in for a public chain RPC, so a fork of it runs with no network.
  *
  * `record` forwards each request it has no answer for to `upstream`, and on `stop()` writes the
@@ -54,7 +61,7 @@ export function startRecordedRpc(options: {
       const body = (await res.json()) as { result?: unknown; error?: unknown }
       answers[key] = 'error' in body && body.error !== undefined ? { error: body.error } : { result: body.result }
     }
-    const recorded = answers[key]
+    const recorded = answers[key] ?? (TX_HASH_LOOKUPS.has(req.method) ? { result: null } : undefined)
     if (!recorded) {
       misses.push(`${req.method} ${JSON.stringify(req.params ?? [])}`)
       return {

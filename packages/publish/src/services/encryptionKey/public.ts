@@ -4,6 +4,7 @@ export {
   ENCRYPTION_KEY_SCHEMA_UID,
   encodeEncryptionKeyData,
   ensureEncryptionKeySchema,
+  getVerifiedEncryptionKey,
   registerEncryptionKey,
   type RegisterEncryptionKeyInput,
   type RegisterEncryptionKeyOptions,

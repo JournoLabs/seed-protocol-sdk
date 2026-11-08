@@ -71,22 +71,22 @@ const manifest = await buildKeystoreManifest(identity, [
 ])
 await saveIdentityOnDevice(identity)
 
-// Elsewhere: the newest registration from getEncryptionKeysFromEas (@seedprotocol/eas) names the
+// Elsewhere: the registration from getVerifiedEncryptionKey (@seedprotocol/publish) names the
 // manifest's Arweave transaction and the key id.
 const unlocked = await openKeystoreManifest(manifest, { passkey: passkeyPrf() }, { expectKeyId: registration.keyId })
 ```
 
 `registerEncryptionKey` in `@seedprotocol/publish` uploads the manifest and attests the key id and
-public keys from the user's account.
+public keys from the user's account, then revokes the account's earlier registrations.
 
 Publishing private properties: pass an encryptor wrapping to the account's registered key.
 
 ```ts
 import { createPrivateUploadEncryptor } from '@seedprotocol/encryption'
-import { getEncryptionKeysFromEas } from '@seedprotocol/eas'
-import { initPublish } from '@seedprotocol/publish'
+import { getVerifiedEncryptionKey, initPublish } from '@seedprotocol/publish'
 
-const [registration] = await getEncryptionKeysFromEas({ attester: account })
+// The newest registration the indexer lists that EAS on chain confirms. Undefined when none is.
+const registration = await getVerifiedEncryptionKey({ account })
 initPublish({
   // ...
   encryptPrivateUpload: createPrivateUploadEncryptor({

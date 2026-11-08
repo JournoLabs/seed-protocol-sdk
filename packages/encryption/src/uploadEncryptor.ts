@@ -11,7 +11,7 @@ import { XWING_PUBLIC_KEY_LENGTH, wrapFileKey } from './recipient'
 export interface PrivateUploadEncryptorOptions {
   /**
    * X-Wing public keys to wrap each upload's file key to. Always include the publisher's
-   * registered key (`recipientKey` from `getEncryptionKeysFromEas` in `@seedprotocol/eas`), or the
+   * registered key (`recipientKey` from `getVerifiedEncryptionKey` in `@seedprotocol/publish`), or the
    * publisher can't read the Version on another device.
    */
   recipients: Uint8Array[]
