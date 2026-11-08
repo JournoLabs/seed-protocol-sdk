@@ -129,6 +129,8 @@ export interface PublishMachineContext {
   nonceKey?: string
   /** An attempt reconcile found not landed: the next send repeats it under its nonce key. */
   resumeAttemptId?: string
+  /** The waiting state a `giveUp` left, to go back to while an attempt is open. */
+  giveUpFrom?: 'attestationFailureRecoverable' | 'attestationFailureRecoverableDirectToEas' | 'attestationOutcomeUnknown'
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown

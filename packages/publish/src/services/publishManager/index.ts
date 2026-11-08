@@ -5,6 +5,7 @@ import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
+import { giveUpPublish } from './actions/giveUpPublish'
 import { stopAll } from './actions/stopAll'
 import { addSubscription } from './actions/addSubscription'
 import { requestSavePublish } from './actions/requestSavePublish'
@@ -41,6 +42,7 @@ type PublishManagerEvent =
   | { type: 'REMOVE_SUBSCRIPTION'; seedLocalId: string }
   | { type: 'RETRY_ATTESTATIONS'; seedLocalId: string; account?: unknown }
   | { type: 'STOP_PUBLISH'; seedLocalId: string }
+  | { type: 'GIVE_UP'; seedLocalId: string }
   | { type: 'STOP_ALL' }
 
 export const publishManagerMachine = setup({
@@ -64,6 +66,7 @@ export const publishManagerMachine = setup({
     removeSubscription,
     retryAttestations,
     stopPublish,
+    giveUpPublish,
     stopAll,
   } as unknown as Record<string, (args: unknown) => void>,
 }).createMachine({
@@ -128,6 +131,9 @@ export const publishManagerMachine = setup({
         },
         STOP_PUBLISH: {
           actions: ['stopPublish'],
+        },
+        GIVE_UP: {
+          actions: ['giveUpPublish'],
         },
         STOP_ALL: {
           actions: ['stopAll'],
@@ -307,6 +313,15 @@ export const PublishManager = {
   settleAttestationAttempt: (seedLocalId: string, publisher: string): Promise<AttestationSettleResult> =>
     settleAttestationAttempt(seedLocalId, publisher, hasRun),
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
+  /**
+   * Ends a publish waiting after a failed attestation (`attestationFailureRecoverable`, its direct
+   * EAS twin, or `attestationOutcomeUnknown`) as `failed`, keeping its error, unlike `stopPublish`,
+   * which records it `interrupted` and clears the error. It ends the run only once no attestation
+   * attempt for the seed is open; otherwise the run keeps waiting, and `retryAttestations` settles
+   * the attempt. Read `query(seedLocalId)` to see which happened. Does nothing in any other state, or
+   * when this tab has no publish for the seed.
+   */
+  giveUpPublish: (seedLocalId: string) => publishManager.send({ type: 'GIVE_UP', seedLocalId }),
   /**
    * The current snapshot of a seed's publish (running, or settled this session), or undefined.
    * A read only: it used to stop the publish it named, as stopPublish does without marking the row

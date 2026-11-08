@@ -69,6 +69,7 @@ describe('describePublishRun', () => {
     expect(describePublishRun('rewritingHtmlEmbedded').phase).toBe('uploading')
     expect(describePublishRun('uploadingViaBundlerPhase2').phase).toBe('uploading')
     expect(describePublishRun('creatingAttestationsDirectToEas').phase).toBe('attesting')
+    expect(describePublishRun('checkingGiveUp')).toEqual({ phase: 'attesting', awaitingRetry: false, terminal: false })
     expect(describePublishRun('revokingRetractedProperties')).toEqual({
       phase: 'retracting',
       awaitingRetry: false,

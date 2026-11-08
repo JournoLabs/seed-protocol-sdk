@@ -10,6 +10,7 @@ import {
   createAttestations,
   createAttestationsDirectToEas,
   reconcileAttestations,
+  checkGiveUp,
   uploadViaBundler,
   type ReconcileResult,
   checking,
@@ -63,6 +64,7 @@ export const publishMachine = setup({
     createAttestations,
     createAttestationsDirectToEas,
     reconcileAttestations,
+    checkGiveUp,
     checking,
     authorizing,
     preparingHtmlEmbedded,
@@ -438,6 +440,10 @@ export const publishMachine = setup({
           target  : 'reconcilingAttestations',
           actions : [ 'assignAccountFromRetry', ],
         },
+        giveUp : {
+          target  : 'checkingGiveUp',
+          actions : assign({ giveUpFrom : () => 'attestationFailureRecoverable' as const }),
+        },
       },
     },
     // Every retry and restore passes through here: nothing sends until earlier attempts are settled.
@@ -484,6 +490,10 @@ export const publishMachine = setup({
           target  : 'reconcilingAttestations',
           actions : [ 'assignAccountFromRetry', ],
         },
+        giveUp : {
+          target  : 'checkingGiveUp',
+          actions : assign({ giveUpFrom : () => 'attestationOutcomeUnknown' as const }),
+        },
       },
     },
     creatingAttestationsDirectToEas : {
@@ -511,6 +521,59 @@ export const publishMachine = setup({
           target  : 'reconcilingAttestations',
           actions : [ 'assignAccountFromRetry', ],
         },
+        giveUp : {
+          target  : 'checkingGiveUp',
+          actions : assign({ giveUpFrom : () => 'attestationFailureRecoverableDirectToEas' as const }),
+        },
+      },
+    },
+    // giveUp ends the run only once no attempt is open: one that may still land must not be hidden.
+    checkingGiveUp : {
+      invoke : {
+        src     : 'checkGiveUp',
+        input   : ( { context } ) => ({ seedLocalId : context.item?.seedLocalId as string }),
+        onDone  : [
+          {
+            guard  : ( { event } ) => !(event.output as { open: boolean }).open,
+            target : FAILURE,
+          },
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverable',
+            target  : 'attestationFailureRecoverable',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverableDirectToEas',
+            target  : 'attestationFailureRecoverableDirectToEas',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationOutcomeUnknown',
+            target  : 'attestationOutcomeUnknown',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          // A snapshot saved without giveUpFrom still lands in a state that takes retry.
+          { target : 'attestationFailureRecoverable' },
+        ],
+        onError : [
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverable',
+            target  : 'attestationFailureRecoverable',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverableDirectToEas',
+            target  : 'attestationFailureRecoverableDirectToEas',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          {
+            guard   : ( { context } ) => context.giveUpFrom === 'attestationOutcomeUnknown',
+            target  : 'attestationOutcomeUnknown',
+            actions : assign({ giveUpFrom : () => undefined }),
+          },
+          // A snapshot saved without giveUpFrom still lands in a state that takes retry.
+          { target : 'attestationFailureRecoverable' },
+        ],
       },
     },
     // ADR 0021: retracted properties revoke their attestations once the rest is attested
