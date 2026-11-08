@@ -20,6 +20,8 @@ const registration = (id: string, attester: string, timeCreated: number, revocat
     field('suite', 'seed-private/v1'),
     field('recipient_key', '0x' + '11'.repeat(1216)),
     field('tag_key', '0x' + '22'.repeat(32)),
+    field('binding_key', '0x' + '33'.repeat(32)),
+    field('binding_signature', '0x' + '44'.repeat(64)),
     field('keystore_tx', arweaveTxIdToBytes32(TX)),
   ]),
 })
@@ -55,6 +57,8 @@ describe('encryption key registrations', () => {
     expect(keys[0]).toMatchObject({ keyId: KEY_ID, suite: 'seed-private/v1', keystoreTx: TX, revocationTime: 0 })
     expect(keys[0]!.recipientKey).toEqual(new Uint8Array(1216).fill(0x11))
     expect(keys[0]!.tagKey).toEqual(new Uint8Array(32).fill(0x22))
+    expect(keys[0]!.bindingKey).toEqual(new Uint8Array(32).fill(0x33))
+    expect(keys[0]!.bindingSignature).toEqual(new Uint8Array(64).fill(0x44))
     expect(calls[0]).toMatchObject({
       attester: { equals: checksumAddresses([ATTESTER])[0] },
       schemaId: { equals: ENCRYPTION_KEY_SCHEMA_UID },

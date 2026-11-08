@@ -6,6 +6,7 @@ import {
   openKeystoreManifest,
   recoveryKeyFromPhrase,
   recoveryStanza,
+  signKeyBinding,
   type EncryptionIdentity,
 } from '@seedprotocol/encryption'
 import { BaseEasClient, ENCRYPTION_KEY_SCHEMA_DEF, ENCRYPTION_KEY_SCHEMA_UID, bytes32ToArweaveTxId } from '@seedprotocol/eas'
@@ -29,7 +30,9 @@ const { initPublish } = await import('../../config')
 const { fromEthersWallet } = await import('../../helpers/seedSigner')
 const { createManagedAccountTxSender } = await import('../../helpers/adapters/managedAccountTxSender')
 const { EncryptionKeySchemaNotRegisteredError } = await import('../../errors')
-const { ensureEncryptionKeySchema, getVerifiedEncryptionKey, registerEncryptionKey } = await import('./index')
+const { encodeEncryptionKeyData, ensureEncryptionKeySchema, getVerifiedEncryptionKey, registerEncryptionKey } = await import('./index')
+const { getAttestedUidsFromReceipt, prepareEasAttest, ZERO_ADDRESS, ZERO_BYTES32 } = await import('../../helpers/easDirect')
+const { waitForPublishReceipt } = await import('../../helpers/chainClient')
 
 const EAS = '0x4200000000000000000000000000000000000021' as Address
 const keyFor = (label: string) => keccak256(toHex(`seed encryption key ${label}`))
@@ -53,10 +56,13 @@ async function identityFor(label: string): Promise<{ identity: EncryptionIdentit
   return { identity, manifest }
 }
 
-const inputFor = ({ identity, manifest }: { identity: EncryptionIdentity; manifest: Uint8Array }) => ({
+/** Registration input for `identity`, its binding signed for `account` on OP Sepolia. */
+const inputFor = ({ identity, manifest }: { identity: EncryptionIdentity; manifest: Uint8Array }, account: string) => ({
   keyId: identity.keyId,
   recipientKey: identity.recipient.publicKey,
   tagKey: identity.tagKey.publicKey,
+  bindingKey: identity.bindingKey.publicKey,
+  bindingSignature: signKeyBinding(identity, { account, chainId: optimismSepolia.id }),
   keystoreManifest: manifest,
 })
 
@@ -107,7 +113,7 @@ beforeAll(async () => {
   // Later than any block the stack mined at wall-clock time, then one second per block.
   await rpc('evm_setNextBlockTimestamp', [Date.parse('2030-01-01T00:00:00Z') / 1000])
   await rpc('anvil_setBlockTimestampInterval', [1])
-  for (const label of ['owner', 'eoa user']) await stack.setBalance(eoaWallet(label).txSender.address as Address, parseEther('1'))
+  for (const label of ['owner', 'eoa user', 'mallory']) await stack.setBalance(eoaWallet(label).txSender.address as Address, parseEther('1'))
 }, 120_000)
 
 afterAll(async () => {
@@ -125,7 +131,7 @@ describe('encryption key registration on OP Sepolia', () => {
     const user = eoaWallet('eoa user')
     const keys = await identityFor('eoa identity')
     await expect(
-      registerEncryptionKey(inputFor(keys), { account: user.txSender.address, wallet: user, signDataItems }),
+      registerEncryptionKey(inputFor(keys, user.txSender.address), { account: user.txSender.address, wallet: user, signDataItems }),
     ).rejects.toBeInstanceOf(EncryptionKeySchemaNotRegisteredError)
     expect(uploads).toHaveLength(0)
 
@@ -139,7 +145,7 @@ describe('encryption key registration on OP Sepolia', () => {
   test('an EOA attests its key and manifest directly', async () => {
     const user = eoaWallet('eoa user')
     const keys = await identityFor('eoa identity')
-    const result = await registerEncryptionKey(inputFor(keys), { account: user.txSender.address, wallet: user, signDataItems })
+    const result = await registerEncryptionKey(inputFor(keys, user.txSender.address), { account: user.txSender.address, wallet: user, signDataItems })
 
     expect(result.attester).toBe(user.txSender.address)
     const upload = uploads.at(-1)!
@@ -171,7 +177,7 @@ describe('encryption key registration on OP Sepolia', () => {
     const wallet = { kind: 'modular' as const, signer: fromEthersWallet(new Wallet(keyFor('managed admin'))).signer, txSender: sender }
     const keys = await identityFor('managed identity')
 
-    const result = await registerEncryptionKey(inputFor(keys), { account: sender.address, wallet, signDataItems })
+    const result = await registerEncryptionKey(inputFor(keys, sender.address), { account: sender.address, wallet, signDataItems })
 
     const { attestation, fields } = await attestationOnChain(result.uid)
     expect(attestation.attester).toBe(sender.address as Address)
@@ -183,8 +189,22 @@ describe('encryption key registration on OP Sepolia', () => {
     const sessionKey = eoaWallet('session key')
     const before = uploads.length
     await expect(
-      registerEncryptionKey(inputFor(await identityFor('eoa identity')), { account: eoaWallet('eoa user').txSender.address, wallet: sessionKey, signDataItems }),
+      registerEncryptionKey(inputFor(await identityFor('eoa identity'), eoaWallet('eoa user').txSender.address), { account: eoaWallet('eoa user').txSender.address, wallet: sessionKey, signDataItems }),
     ).rejects.toThrow(/never by a session key/)
+    expect(uploads).toHaveLength(before)
+  })
+
+  test('refuses a binding signed for another account or chain, before uploading', async () => {
+    const user = eoaWallet('eoa user')
+    const keys = await identityFor('eoa identity')
+    const opts = { account: user.txSender.address, wallet: user, signDataItems }
+    const before = uploads.length
+    const forOther = signKeyBinding(keys.identity, { account: eoaWallet('someone else').txSender.address, chainId: optimismSepolia.id })
+    const forOtherChain = signKeyBinding(keys.identity, { account: user.txSender.address, chainId: 10 })
+    await expect(registerEncryptionKey({ ...inputFor(keys, user.txSender.address), bindingSignature: forOther }, opts)).rejects.toThrow(/bindingSignature/)
+    await expect(registerEncryptionKey({ ...inputFor(keys, user.txSender.address), bindingSignature: forOtherChain }, opts)).rejects.toThrow(/bindingSignature/)
+    const otherBindingKey = (await identityFor('managed identity')).identity.bindingKey.publicKey
+    await expect(registerEncryptionKey({ ...inputFor(keys, user.txSender.address), bindingKey: otherBindingKey }, opts)).rejects.toThrow(/not the id of these public keys/)
     expect(uploads).toHaveLength(before)
   })
 
@@ -193,8 +213,8 @@ describe('encryption key registration on OP Sepolia', () => {
     const keys = await identityFor('eoa identity')
     const other = await identityFor('managed identity')
     const opts = { account: user.txSender.address, wallet: user, signDataItems }
-    await expect(registerEncryptionKey({ ...inputFor(keys), tagKey: other.identity.tagKey.publicKey }, opts)).rejects.toThrow(/not the id of these public keys/)
-    await expect(registerEncryptionKey({ ...inputFor(keys), keystoreManifest: other.manifest }, opts)).rejects.toThrow(/not a keystore manifest for/)
+    await expect(registerEncryptionKey({ ...inputFor(keys, user.txSender.address), tagKey: other.identity.tagKey.publicKey }, opts)).rejects.toThrow(/not the id of these public keys/)
+    await expect(registerEncryptionKey({ ...inputFor(keys, user.txSender.address), keystoreManifest: other.manifest }, opts)).rejects.toThrow(/not a keystore manifest for/)
   })
 })
 
@@ -206,11 +226,11 @@ describe('rotating and choosing an encryption key on OP Sepolia', () => {
     const user = eoaWallet('eoa user')
     const opts = { account: user.txSender.address, wallet: user, signDataItems }
     indexer = []
-    first = await registerEncryptionKey(inputFor(await identityFor('rotate one')), opts)
+    first = await registerEncryptionKey(inputFor(await identityFor('rotate one'), opts.account), opts)
     expect(first.revokedRegistrationUids).toEqual([])
 
     indexer = [await indexerRow(first.uid)]
-    second = await registerEncryptionKey(inputFor(await identityFor('rotate two')), opts)
+    second = await registerEncryptionKey(inputFor(await identityFor('rotate two'), opts.account), opts)
 
     expect(second.revokedRegistrationUids).toEqual([first.uid.toLowerCase()])
     expect((await chain.attestation(first.uid)).revocationTime).toBeGreaterThan(0n)
@@ -222,7 +242,7 @@ describe('rotating and choosing an encryption key on OP Sepolia', () => {
     // Stale: first is revoked on chain but listed as live. EAS would revert a multiRevoke that
     // included it, and with it the revoke of anything else listed.
     indexer = [{ ...(await indexerRow(first.uid)), revocationTime: 0 }]
-    const third = await registerEncryptionKey(inputFor(await identityFor('rotate three')), {
+    const third = await registerEncryptionKey(inputFor(await identityFor('rotate three'), user.txSender.address), {
       account: user.txSender.address,
       wallet: user,
       signDataItems,
@@ -242,11 +262,17 @@ describe('rotating and choosing an encryption key on OP Sepolia', () => {
     indexer = [staleFirst]
     expect(await getVerifiedEncryptionKey({ account })).toBeUndefined()
 
-    // Keys the attestation doesn't hold, with a key id that matches them.
+    // Keys the attestation doesn't hold, with a key id and binding that match them.
     const other = (await identityFor('rotate one')).identity
     indexer = [
       await indexerRow(second.uid, {
-        fields: { key_id: other.keyId, recipient_key: bytesToHex(other.recipient.publicKey), tag_key: bytesToHex(other.tagKey.publicKey) },
+        fields: {
+          key_id: other.keyId,
+          recipient_key: bytesToHex(other.recipient.publicKey),
+          tag_key: bytesToHex(other.tagKey.publicKey),
+          binding_key: bytesToHex(other.bindingKey.publicKey),
+          binding_signature: bytesToHex(signKeyBinding(other, { account, chainId: optimismSepolia.id })),
+        },
       }),
     ]
     expect(await getVerifiedEncryptionKey({ account })).toBeUndefined()
@@ -263,13 +289,35 @@ describe('rotating and choosing an encryption key on OP Sepolia', () => {
     const wallet = { kind: 'modular' as const, signer, txSender: sender }
     const opts = { account: sender.address, wallet, signDataItems }
     indexer = []
-    const before = await registerEncryptionKey(inputFor(await identityFor('managed rotate one')), opts)
+    const before = await registerEncryptionKey(inputFor(await identityFor('managed rotate one'), opts.account), opts)
     indexer = [await indexerRow(before.uid)]
-    const after = await registerEncryptionKey(inputFor(await identityFor('managed rotate two')), opts)
+    const after = await registerEncryptionKey(inputFor(await identityFor('managed rotate two'), opts.account), opts)
 
     expect(after.revokedRegistrationUids).toEqual([before.uid.toLowerCase()])
     expect((await chain.attestation(before.uid)).revocationTime).toBeGreaterThan(0n)
     indexer = [await indexerRow(after.uid), await indexerRow(before.uid)]
     expect((await getVerifiedEncryptionKey({ account: sender.address }))?.uid).toBe(after.uid)
   }, 90_000)
+})
+
+describe('copied keys on OP Sepolia', () => {
+  test("skips another account's registration copied into this account's attestation", async () => {
+    // Mallory attests the victim's keys and binding as her own registration, around registerEncryptionKey.
+    const victim = eoaWallet('eoa user').txSender.address
+    const mallory = eoaWallet('mallory')
+    const keys = await identityFor('copied identity')
+    const data = encodeEncryptionKeyData({ ...inputFor(keys, victim), keystoreTx: 'p1zjJ0gVyVyJtnHqO8pKcqQ4Ew3cZtYwYgC2QbE5xdA' })
+    const { transactionHash } = await mallory.txSender.sendTransaction(
+      prepareEasAttest({
+        schema: ENCRYPTION_KEY_SCHEMA_UID,
+        data: { recipient: ZERO_ADDRESS, expirationTime: 0n, revocable: true, refUID: ZERO_BYTES32, data, value: 0n },
+      }),
+    )
+    const receipt = await waitForPublishReceipt(transactionHash)
+    const [copied] = getAttestedUidsFromReceipt(receipt!, EAS, mallory.txSender.address)
+    expect((await chain.attestation(copied!.uid)).attester).toBe(mallory.txSender.address as Address)
+
+    indexer = [await indexerRow(copied!.uid)]
+    expect(await getVerifiedEncryptionKey({ account: mallory.txSender.address })).toBeUndefined()
+  }, 60_000)
 })

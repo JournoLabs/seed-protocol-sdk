@@ -37,15 +37,16 @@ export const ARCHIVE_ANCHOR_SCHEMA_NAME = 'seedprotocol.archiveAnchor'
 
 /**
  * Schema of a user's encryption key registration (ADR 0033): the account attests its key id, the
- * key format, both public keys and the Arweave transaction of its keystore manifest. No refUID.
+ * key format, its three public keys, the binding key's signature that the key belongs to this
+ * account on this chain, and the Arweave transaction of its keystore manifest. No refUID.
  * Revocable, zero resolver, like {@link VERSION_SCHEMA_DEF}.
  */
 export const ENCRYPTION_KEY_SCHEMA_DEF =
-  'bytes32 key_id,string suite,bytes recipient_key,bytes tag_key,bytes32 keystore_tx'
+  'bytes32 key_id,string suite,bytes recipient_key,bytes tag_key,bytes binding_key,bytes binding_signature,bytes32 keystore_tx'
 
 /** UID of {@link ENCRYPTION_KEY_SCHEMA_DEF}, the same on every chain. */
 export const ENCRYPTION_KEY_SCHEMA_UID =
-  '0xcbc9fd063a62f9af68cd3959c703b4e84ba1eff410dae6adfd204848c82062e3'
+  '0x45d5d330ae470f98abdd75dce77f388017d6765d49a0b6cbaf3de113433670e6'
 
 /** Schema #1 display name for {@link ENCRYPTION_KEY_SCHEMA_DEF}. */
 export const ENCRYPTION_KEY_SCHEMA_NAME = 'seedprotocol.encryptionKey'

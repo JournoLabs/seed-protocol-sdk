@@ -165,7 +165,8 @@
     "identitySecretHex": "1111111111111111111111111111111111111111111111111111111111111111",
     "xwingPublicKeySha256": "4358e720acdbb91185b4765dfaf016e3905b65ad6f6f765cc7a0c8dd519f7e9a",
     "x25519PublicKeyHex": "053410f0a7b26275af4cf62123f52391edc64c32bd143fb74be824e25247113e",
-    "keyId": "0x4e66fe1b9175264f9dcaa14c974fac3e6cf2bded190467a4b829f8ed9e5104af",
+    "ed25519PublicKeyHex": "18bcb72a1f2582a1839f1d93ea771f135ce95a8943385280e0272ca14d8dc994",
+    "keyId": "0x4fa96435959e875ccc499824a805029f4ec635c5a8a9c761f6705c59a7d8fe11",
     "keystoreFileKeyHex": "f48bfaaa3895900a59f12bbda276254662fb647014e05b6feb55d2c2b7a9076c",
     "recovery": {
       "entropyHex": "7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
@@ -207,10 +208,15 @@
     },
     "bind": {
       "envelopeId": "0x8888888888888888888888888888888888888888888888888888888888888888",
-      "keyId": "0x4e66fe1b9175264f9dcaa14c974fac3e6cf2bded190467a4b829f8ed9e5104af",
+      "keyId": "0x4fa96435959e875ccc499824a805029f4ec635c5a8a9c761f6705c59a7d8fe11",
       "purpose": "keystore"
     },
     "manifestLength": 2318,
-    "manifestSha256": "51b089d98a28535d386331aa5aaaebfcab01bf7bafe9fd88f899e9d3ba736411"
+    "manifestSha256": "cc196c7fa047fa3229a3ce11d84cdce7902953d2d82534abdcc52c42fbd3914f",
+    "keyBinding": {
+      "account": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "chainId": 11155420,
+      "signatureHex": "6477d462a7cef2955abd4bc18980d7dc0836bab8ea81b7cf27cff80db9cdccfdaa5a4a876c908059d27d6f7c122c6e49061c5b8f6203025adf75c63b7031d90b"
+    }
   }
 }

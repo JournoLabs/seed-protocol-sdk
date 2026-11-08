@@ -42,10 +42,17 @@ X-Wing key (ML-KEM-768 plus X25519), following age's recipient of the same name.
 `@noble/post-quantum`; the HPKE key schedule and AES-256-GCM use WebCrypto.
 
 **Identity and keystore.** A user's encryption identity is one random 32-byte secret; the recipient
-key, an X25519 tag key and the key id are derived from it. The secret is recovered from a public
-keystore manifest, itself a `seed-private/v1` envelope, with one stanza per authenticator: a
-recovery key derived from a 24-word phrase, a passkey's WebAuthn PRF output, or an EOA's
-deterministic signature. The manifest's file key derives from the identity, so any device holding
+key, an X25519 tag key, an Ed25519 binding key and the key id are derived from it. The secret is
+recovered from a public keystore manifest, itself a `seed-private/v1` envelope, with one stanza per
+authenticator: a recovery key derived from a 24-word phrase, a passkey's WebAuthn PRF output, or an
+EOA's deterministic signature.
+
+A passkey and the recovery phrase are the default. The EOA stanza is an opt-in for users who prefer
+signing with their wallet: it makes the identity, and every private Version wrapped to it, no
+stronger than the EOA's secp256k1 key. A leaked or phished key, or a future quantum attacker who
+recovers it from a transaction's public key, can produce the signature and open the public
+manifest. That cancels the post-quantum wraps for that user, so `eoaSignatureStanza` takes
+`acceptWalletKeyRisk: true` and apps offer it as a choice, not a default. The manifest's file key derives from the identity, so any device holding
 the identity can publish a revised manifest that adds an authenticator without the others present.
 Removing an authenticator doesn't revoke it, because old manifests stay on Arweave; that takes a new
 identity. A device may keep the unlocked secret in IndexedDB under a non-extractable AES-GCM key.
@@ -55,11 +62,15 @@ That stops the raw secret being copied out of the browser's files, not a script 
 `ENCRYPTION_KEY_SCHEMA_DEF` (`seedprotocol.encryptionKey`):
 
 ```
-bytes32 key_id,string suite,bytes recipient_key,bytes tag_key,bytes32 keystore_tx
+bytes32 key_id,string suite,bytes recipient_key,bytes tag_key,bytes binding_key,bytes binding_signature,bytes32 keystore_tx
 ```
 
 It has no `refUID`. `suite` is `seed-private/v1`, the public keys are stored in full so anyone can
 wrap to them from the attestation alone, and `keystore_tx` is the manifest's Arweave transaction.
+`binding_signature` is the binding key's signature over the key id, the chain id and the account
+(SPEC.md "Key binding"). The attester proves the account chose to publish the registration, and the
+signature proves the identity's holder made it for that account, so one account can't register
+another identity's public keys as its own and have content shared with it opened by someone else.
 The schema is revocable with the zero resolver, so its UID is the same on every chain, and it is
 registered once per chain by a wallet that can call SchemaRegistry. The attester is the account:
 the wallet's transactions must come from the account itself, so a ManagedAccount attests through a
@@ -68,7 +79,8 @@ leaked one could otherwise redirect every future wrap. Registering again, with a
 revised manifest, adds an attestation and then revokes the account's earlier live ones; revoked
 ones still name the manifests that open older Versions. A publisher wraps to the newest
 registration the indexer lists that EAS confirms on chain: live, from the account, under this
-schema, with the data the indexer decoded and a key id that matches the public keys. An indexer
+schema, with the data the indexer decoded, a key id that matches the public keys and a binding
+signature for that account and chain. An indexer
 can still leave out a newer registration; because rotation revokes the old one, a stale listing
 then finds no key rather than a replaced one.
 

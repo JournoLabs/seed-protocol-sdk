@@ -39,8 +39,13 @@ export {
   IDENTITY_SECRET_LENGTH,
   createEncryptionIdentity,
   encryptionIdentityFromSecret,
+  encryptionKeyId,
   generateRecoveryPhrase,
+  keyBindingMessage,
   recoveryKeyFromPhrase,
+  signKeyBinding,
+  verifyKeyBinding,
+  type KeyBindingTarget,
 } from './identity'
 export type { EncryptionIdentity } from './identity'
 export {

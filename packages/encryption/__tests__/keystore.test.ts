@@ -22,6 +22,8 @@ import {
   passkeyStanza,
   recoveryKeyFromPhrase,
   recoveryStanza,
+  signKeyBinding,
+  verifyKeyBinding,
   unwrapWithSecretKeys,
   wrapFileKey,
   type EnvelopeErrorCode,
@@ -33,6 +35,7 @@ import { wrapFileKeyWithRandomness } from '../src/recipient'
 import {
   referenceEoaSignatureStanza,
   referenceIdentity,
+  referenceKeyBindingSignature,
   referenceKeystoreFileKey,
   referencePasskeyStanza,
   referenceRecoverySeed,
@@ -81,6 +84,7 @@ describe('encryption identity', () => {
     expect(identity.keyId).toBe(v.keyId)
     expect(sha256(identity.recipient.publicKey)).toBe(v.xwingPublicKeySha256)
     expect(toHex(identity.tagKey.publicKey)).toBe(v.x25519PublicKeyHex)
+    expect(toHex(identity.bindingKey.publicKey)).toBe(v.ed25519PublicKeyHex)
   })
 
   it('matches the reference implementation on random secrets', async () => {
@@ -91,6 +95,7 @@ describe('encryption identity', () => {
       expect(ours.keyId).toBe(theirs.keyId)
       expect(Buffer.from(ours.recipient.publicKey).equals(theirs.xwingPublicKey)).toBe(true)
       expect(Buffer.from(ours.tagKey.publicKey).equals(theirs.x25519PublicKey)).toBe(true)
+      expect(Buffer.from(ours.bindingKey.publicKey).equals(theirs.ed25519PublicKey)).toBe(true)
     }
   })
 
@@ -98,6 +103,38 @@ describe('encryption identity', () => {
     const [a, b] = await Promise.all([createEncryptionIdentity(), createEncryptionIdentity()])
     expect(a.keyId).not.toBe(b.keyId)
     await expectCode(encryptionIdentityFromSecret(new Uint8Array(31)), 'BAD_KEYSTORE')
+  })
+})
+
+describe('key binding', () => {
+  const target = { account: v.keyBinding.account, chainId: v.keyBinding.chainId }
+
+  it('signs the vector binding, matching the reference implementation', async () => {
+    const identity = await encryptionIdentityFromSecret(hex(v.identitySecretHex))
+    expect(toHex(signKeyBinding(identity, target))).toBe(v.keyBinding.signatureHex)
+    const secret = crypto.getRandomValues(new Uint8Array(32))
+    const random = await encryptionIdentityFromSecret(secret)
+    const other = { account: `0x${toHex(crypto.getRandomValues(new Uint8Array(20)))}`, chainId: 10n }
+    expect(toHex(signKeyBinding(random, other))).toBe(
+      referenceKeyBindingSignature(Buffer.from(secret), random.keyId, other.chainId, other.account).toString('hex'),
+    )
+  })
+
+  it("verifies only the identity's binding of its own key id to that account and chain", async () => {
+    const identity = await encryptionIdentityFromSecret(hex(v.identitySecretHex))
+    const other = await createEncryptionIdentity()
+    const signature = signKeyBinding(identity, target)
+    const binding = { keyId: identity.keyId, bindingPublicKey: identity.bindingKey.publicKey, signature }
+    expect(verifyKeyBinding(binding, target)).toBe(true)
+    expect(verifyKeyBinding(binding, { account: target.account.toUpperCase().replace('0X', '0x'), chainId: BigInt(target.chainId) })).toBe(true)
+    // Copied into another account's registration, or replayed on another chain.
+    expect(verifyKeyBinding(binding, { ...target, account: `0x${'11'.repeat(20)}` })).toBe(false)
+    expect(verifyKeyBinding(binding, { ...target, chainId: 10 })).toBe(false)
+    // Another identity's key id, or another identity's binding key.
+    expect(verifyKeyBinding({ ...binding, keyId: other.keyId }, target)).toBe(false)
+    expect(verifyKeyBinding({ ...binding, bindingPublicKey: other.bindingKey.publicKey }, target)).toBe(false)
+    expect(verifyKeyBinding({ ...binding, signature: new Uint8Array(64) }, target)).toBe(false)
+    expect(verifyKeyBinding({ ...binding, signature: new Uint8Array(3) }, target)).toBe(false)
   })
 })
 
@@ -135,7 +172,7 @@ describe('keystore manifest vector', () => {
       await passkeyStanza(identity, { credentialId: hex(v.passkey.credentialIdHex), salt: hex(v.passkey.saltHex), prfOutput: hex(v.passkey.prfOutputHex) }),
     ).toEqual(vectorStanzas[1])
     expect(eoaSignatureMessage(hex(v.eoaSignature.saltHex))).toBe(v.eoaSignature.message)
-    expect(await eoaSignatureStanza(identity, { salt: hex(v.eoaSignature.saltHex), signature: v.eoaSignature.signatureHex })).toEqual(vectorStanzas[2])
+    expect(await eoaSignatureStanza(identity, { salt: hex(v.eoaSignature.saltHex), signature: v.eoaSignature.signatureHex, acceptWalletKeyRisk: true })).toEqual(vectorStanzas[2])
   })
 
   it('matches the reference stanzas on random inputs', async () => {
@@ -152,7 +189,7 @@ describe('keystore manifest vector', () => {
       // A low-s signature; the reference takes its first 64 bytes as r || s.
       const signature = Buffer.concat([Buffer.from(rand(32)), Buffer.from([0x3f]), Buffer.from(rand(31)), Buffer.from([27])])
       const refSig = referenceEoaSignatureStanza(fileKey, Buffer.from(salt), signature)
-      const oursSig = await eoaSignatureStanza(identity, { salt, signature: `0x${signature.toString('hex')}` })
+      const oursSig = await eoaSignatureStanza(identity, { salt, signature: `0x${signature.toString('hex')}`, acceptWalletKeyRisk: true })
       expect(Buffer.from(oursSig.body).equals(refSig.body)).toBe(true)
 
       // The recovery stanza: our recovery key and wrap against hpke-js with the reference seed.
@@ -244,7 +281,7 @@ describe('openKeystoreManifest', () => {
     const manifest = await buildKeystoreManifest(identity, [
       await recoveryStanza(identity, (await recoveryKeyFromPhrase(generateRecoveryPhrase())).publicKey),
       await passkeyStanza(identity, { credentialId: passkey.credentialId, salt: passkeySalt, prfOutput: passkey.prf(passkeySalt) }),
-      await eoaSignatureStanza(identity, { salt, signature: `0x${'ab'.repeat(64)}1b` }),
+      await eoaSignatureStanza(identity, { salt, signature: `0x${'ab'.repeat(64)}1b`, acceptWalletKeyRisk: true }),
     ])
     await expectCode(openKeystoreManifest(manifest, { recoveryPhrase: generateRecoveryPhrase() }), 'NO_KEY')
     await expectCode(openKeystoreManifest(manifest, { passkey: fakePasskey(passkey.credentialId).evaluator }), 'NO_KEY')
@@ -285,5 +322,15 @@ describe('openKeystoreManifest', () => {
     const recovered = await openKeystoreManifest(manifest, { recoveryPhrase: phrase })
     const opened = await decryptEnvelope(version, { unwrap: unwrapWithSecretKeys([recovered.recipient.secretKey]) })
     expect(new TextDecoder().decode(opened.body)).toBe('mine')
+  })
+})
+
+describe('eoa-signature stanza', () => {
+  it('is built only when the caller accepts that the wallet key opens the identity', async () => {
+    const identity = await createEncryptionIdentity()
+    const input = { salt: generateEoaSignatureSalt(), signature: `0x${'ab'.repeat(64)}1b` }
+    await expectCode(eoaSignatureStanza(identity, input as never), 'BAD_KEYSTORE')
+    await expectCode(eoaSignatureStanza(identity, { ...input, acceptWalletKeyRisk: false } as never), 'BAD_KEYSTORE')
+    expect((await eoaSignatureStanza(identity, { ...input, acceptWalletKeyRisk: true })).type).toBe('eoa-signature')
   })
 })

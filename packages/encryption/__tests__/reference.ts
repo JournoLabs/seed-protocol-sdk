@@ -2,7 +2,7 @@
  * A second implementation of SPEC.md's encryption, written against node:crypto and sharing no
  * code with src/. The vectors were produced with it, and the tests check src/ against both.
  */
-import { createCipheriv, createHash, createHmac, createPrivateKey, createPublicKey, hkdfSync } from 'node:crypto'
+import { createCipheriv, createHash, createHmac, createPrivateKey, createPublicKey, hkdfSync, sign } from 'node:crypto'
 
 export interface ReferenceStanza {
   type: string
@@ -93,17 +93,47 @@ export async function referenceXWingStanza(
 
 const hkdf = (ikm: Buffer, salt: Buffer, info: string) => Buffer.from(hkdfSync('sha256', ikm, salt, info, 32))
 
-/** SPEC.md "Identity": the derived public keys and key id, using hpke-js for X-Wing and node:crypto for X25519. */
-export async function referenceIdentity(secret: Buffer): Promise<{ xwingPublicKey: Buffer; x25519PublicKey: Buffer; keyId: string }> {
+/** SPEC.md "Identity": the derived public keys and key id, using hpke-js for X-Wing and node:crypto for X25519 and Ed25519. */
+export async function referenceIdentity(
+  secret: Buffer,
+): Promise<{ xwingPublicKey: Buffer; x25519PublicKey: Buffer; ed25519PublicKey: Buffer; keyId: string }> {
   const { XWing } = await import('@hpke/hybridkem-x-wing')
   const kem = new XWing()
   const pair = await kem.generateKeyPairDerand(new Uint8Array(hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/mlkem768x25519')))
   const xwingPublicKey = Buffer.from(await kem.serializePublicKey(pair.publicKey))
-  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b656e04220420', 'hex'), hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/x25519')])
-  const spki = createPublicKey(createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' })
-  const x25519PublicKey = Buffer.from(spki.subarray(-32))
-  const keyId = createHash('sha256').update(Buffer.from('seed-private/v1/key-id\0')).update(xwingPublicKey).update(x25519PublicKey).digest('hex')
-  return { xwingPublicKey, x25519PublicKey, keyId: `0x${keyId}` }
+  const x25519PublicKey = rawPublicKey(X25519_PKCS8_PREFIX, hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/x25519'))
+  const ed25519PublicKey = rawPublicKey(ED25519_PKCS8_PREFIX, hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/ed25519'))
+  const keyId = createHash('sha256')
+    .update(Buffer.from('seed-private/v1/key-id\0'))
+    .update(xwingPublicKey)
+    .update(x25519PublicKey)
+    .update(ed25519PublicKey)
+    .digest('hex')
+  return { xwingPublicKey, x25519PublicKey, ed25519PublicKey, keyId: `0x${keyId}` }
+}
+
+const X25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b656e04220420', 'hex')
+const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
+
+function rawPublicKey(pkcs8Prefix: Buffer, secretKey: Buffer): Buffer {
+  const key = createPrivateKey({ key: Buffer.concat([pkcs8Prefix, secretKey]), format: 'der', type: 'pkcs8' })
+  return Buffer.from(createPublicKey(key).export({ format: 'der', type: 'spki' }).subarray(-32))
+}
+
+/** SPEC.md "Key binding": the identity's Ed25519 signature over the label, key id, chain id and account. */
+export function referenceKeyBindingSignature(secret: Buffer, keyId: string, chainId: bigint, account: string): Buffer {
+  const message = Buffer.concat([
+    Buffer.from('seed-private/v1/key-binding\0'),
+    Buffer.from(keyId.slice(2), 'hex'),
+    Buffer.from(chainId.toString(16).padStart(64, '0'), 'hex'),
+    Buffer.from(account.slice(2), 'hex'),
+  ])
+  const key = createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, hkdf(secret, Buffer.alloc(0), 'seed-private/v1/identity/ed25519')]),
+    format: 'der',
+    type: 'pkcs8',
+  })
+  return sign(null, message, key)
 }
 
 export function referenceKeystoreFileKey(secret: Buffer): Buffer {
