@@ -19,7 +19,10 @@ import type {
 } from './types.js'
 
 export type AssembleSeedChangelogResult = {
+  /** The newest live Version, or `''` when the seed has none. */
   latestVersionUid: string
+  /** Every live Version the changelog was built from, oldest first, before `since` and `limit`. */
+  versionUids: string[]
   changelog: ChangelogEntry[]
 }
 
@@ -32,63 +35,85 @@ export async function assembleSeedChangelog(
   options?: Pick<GetSeedOptions, 'changelog'>,
   dataSource: QueryDataSource = getRemoteQueryDataSource(),
 ): Promise<AssembleSeedChangelogResult> {
+  const [seed, versions] = await Promise.all([
+    dataSource.getSeedByUid(seedUid),
+    dataSource.getVersionsForSeed(seedUid),
+  ])
+  const seedLike = seed ?? { id: seedUid, refUID: '', schemaId: '', timeCreated: 0, decodedDataJson: '' }
+  const changelogs = await assembleSeedChangelogs([seedLike], versions, options, dataSource)
+  return changelogs.get(seedLike.id.toLowerCase())!
+}
+
+/**
+ * Changelogs for many seeds from their Versions (as read, revoked ones included or not) and one
+ * request for the properties of every live Version. Keyed by lowercase seed UID, one entry per
+ * seed in `seeds`.
+ */
+export async function assembleSeedChangelogs(
+  seeds: readonly AttestationLike[],
+  versions: readonly AttestationLike[],
+  options: Pick<GetSeedOptions, 'changelog'> | undefined,
+  dataSource: QueryDataSource,
+): Promise<Map<string, AssembleSeedChangelogResult>> {
   const changelogOpts: ChangelogOptions = options?.changelog ?? {}
   const granularity = changelogOpts.granularity ?? 'version'
 
   // Anyone can attest with any refUID: only the seed's attester's versions, and each version's
   // attester's properties, count.
-  const [seed, fetchedVersions] = await Promise.all([
-    dataSource.getSeedByUid(seedUid),
-    dataSource.getVersionsForSeed(seedUid),
-  ])
-  const itemVersions = keepAttestationsFromRefAttester(fetchedVersions, seed ? [seed] : [])
-
-  const sortedVersions = [...itemVersions].sort(
-    (a, b) => a.timeCreated - b.timeCreated,
+  const seedUids = new Set(seeds.map((seed) => seed.id.toLowerCase()))
+  const liveVersions = keepAttestationsFromRefAttester(
+    versions.filter((v) => !v.revoked && seedUids.has(v.refUID.toLowerCase())),
+    seeds,
   )
-
-  if (sortedVersions.length === 0) {
-    return { latestVersionUid: '', changelog: [] }
+  const versionsBySeed = new Map<string, AttestationLike[]>()
+  for (const version of [...liveVersions].sort((a, b) => a.timeCreated - b.timeCreated)) {
+    const key = version.refUID.toLowerCase()
+    versionsBySeed.set(key, [...(versionsBySeed.get(key) ?? []), version])
   }
 
-  const latestVersionUid = sortedVersions[sortedVersions.length - 1]!.id
-  const modelName = seed?.schema?.schemaNames?.[0]?.name
-  const versionUids = sortedVersions.map((v) => v.id)
+  const properties =
+    liveVersions.length === 0
+      ? []
+      : keepAttestationsFromRefAttester(
+          await dataSource.getPropertiesForVersionUids(liveVersions.map((v) => v.id)),
+          liveVersions,
+        )
+  const propertiesByVersion = new Map<string, AttestationLike[]>()
+  for (const prop of properties) {
+    propertiesByVersion.set(prop.refUID, [...(propertiesByVersion.get(prop.refUID) ?? []), prop])
+  }
 
-  const rawProperties = keepAttestationsFromRefAttester(
-    await dataSource.getPropertiesForVersionUids(versionUids),
-    sortedVersions,
-  )
-
-  let changelog: ChangelogEntry[]
-
-  if (granularity === 'property') {
-    changelog = diffPropertyAttestations(rawProperties, modelName)
-  } else {
-    const byVersion = new Map<string, AttestationLike[]>()
-    for (const prop of rawProperties) {
-      const list = byVersion.get(prop.refUID) ?? []
-      list.push(prop)
-      byVersion.set(prop.refUID, list)
+  const result = new Map<string, AssembleSeedChangelogResult>()
+  for (const seed of seeds) {
+    const key = seed.id.toLowerCase()
+    const sortedVersions = versionsBySeed.get(key) ?? []
+    if (sortedVersions.length === 0) {
+      result.set(key, { latestVersionUid: '', versionUids: [], changelog: [] })
+      continue
     }
+    const modelName = seed.schema?.schemaNames?.[0]?.name
+    const rawProperties = sortedVersions.flatMap((v) => propertiesByVersion.get(v.id) ?? [])
 
-    const snapshots: VersionSnapshot[] = []
-    for (const version of sortedVersions) {
-      const propsForVersion = byVersion.get(version.id) ?? []
-      const canonical = pickLatestPropertyAttestationsByRefAndSchema(
-        propsForVersion,
-      ) as AttestationLike[]
-      snapshots.push({
+    let changelog: ChangelogEntry[]
+    if (granularity === 'property') {
+      changelog = diffPropertyAttestations(rawProperties, modelName)
+    } else {
+      const snapshots: VersionSnapshot[] = sortedVersions.map((version) => ({
         versionUid: version.id,
         at: version.timeCreated,
-        data: buildFlatSnapshotFromProperties(canonical, modelName),
-      })
+        data: buildFlatSnapshotFromProperties(
+          pickLatestPropertyAttestationsByRefAndSchema(propertiesByVersion.get(version.id) ?? []) as AttestationLike[],
+          modelName,
+        ),
+      }))
+      changelog = diffVersionSnapshots(snapshots)
     }
-    changelog = diffVersionSnapshots(snapshots)
-  }
 
-  return {
-    latestVersionUid,
-    changelog: applyChangelogFilters(changelog, changelogOpts),
+    result.set(key, {
+      latestVersionUid: sortedVersions[sortedVersions.length - 1]!.id,
+      versionUids: sortedVersions.map((v) => v.id),
+      changelog: applyChangelogFilters(changelog, changelogOpts),
+    })
   }
+  return result
 }

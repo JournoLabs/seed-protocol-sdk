@@ -6,7 +6,7 @@ import {
   rehydrateUnreadStorage,
   type SeedDependencies,
 } from './assembleSeeds.js'
-import { assembleSeedChangelog } from './assembleChangelog.js'
+import { assembleSeedChangelog, assembleSeedChangelogs } from './assembleChangelog.js'
 import {
   buildAssembleOptionsKey,
   getQueryCacheManager,
@@ -505,7 +505,7 @@ export async function getSeed(
   if (!wantsChangelog(include)) {
     result = await assembleData()
   } else {
-    const { latestVersionUid, changelog } = await assembleSeedChangelog(
+    const { latestVersionUid, versionUids, changelog } = await assembleSeedChangelog(
       trimmed,
       options,
       dataSource,
@@ -526,8 +526,8 @@ export async function getSeed(
       }
       if (latestVersionUid) dependencies.refUIDs.push(latestVersionUid)
     }
-    // Property changes on any version in the changelog change it.
-    for (const entry of changelog) dependencies.refUIDs.push(entry.versionUid)
+    // Property changes on any version of the seed change it, including versions `since` filtered out.
+    dependencies.refUIDs.push(...versionUids)
     dependencies = {
       refUIDs: [...new Set(dependencies.refUIDs)],
       ids: dependencies.ids,
@@ -564,7 +564,7 @@ export async function getSeed(
 export async function getSeeds(
   seedUids: readonly string[],
   options?: GetSeedsOptions,
-): Promise<Map<string, SeedRecord>> {
+): Promise<Map<string, GetSeedResult>> {
   await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
 
   // Read lowercase (EAS indexes UIDs lowercase and matches them case-sensitively); keyed as given.
@@ -587,7 +587,8 @@ export async function getSeeds(
 
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)
-  const found = new Map<string, SeedRecord>()
+  const found = new Map<string, GetSeedResult>()
+  const include = options?.include ?? 'data'
 
   /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
   const readFrom = async (
@@ -623,20 +624,30 @@ export async function getSeeds(
       .map((uid) => seedByUid.get(uid))
       .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
 
-    const assembled = await assembleSeedRecords(toAssemble, options, dataSource, {
-      versions,
-      pins,
-    })
-    for (const record of assembled.records) {
-      let result: SeedRecord = record
+    const changelogs = wantsChangelog(include)
+      ? await assembleSeedChangelogs(toAssemble, versions, options, dataSource)
+      : undefined
+    const assembled = wantsData(include)
+      ? await assembleSeedRecords(toAssemble, options, dataSource, { versions, pins })
+      : changelogOnlyRecords(toAssemble, changelogs!)
+    for (const assembledRecord of assembled.records) {
+      const key = assembledRecord.seedUid.toLowerCase()
+      const changes = changelogs?.get(key)
+      const record: GetSeedResult = changes ? { ...assembledRecord, changelog: changes.changelog } : assembledRecord
+      let dependencies = assembled.dependencies.get(assembledRecord.seedUid) ?? {
+        refUIDs: [assembledRecord.seedUid],
+        ids: [assembledRecord.seedUid],
+      }
+      if (changes) {
+        // Property changes on any version of the seed change its changelog.
+        dependencies = { refUIDs: [...new Set([...dependencies.refUIDs, ...changes.versionUids])], ids: dependencies.ids }
+      }
+      let result: GetSeedResult = record
       if (useCache) {
         const stored = await getQueryCacheManager().setItem({
           record,
-          optionsKey: optionsKeyFor(record.seedUid.toLowerCase()),
-          dependencies: assembled.dependencies.get(record.seedUid) ?? {
-            refUIDs: [record.seedUid],
-            ids: [record.seedUid],
-          },
+          optionsKey: optionsKeyFor(key),
+          dependencies,
           checkedAt: checkedAtFor(startedAt),
           seenChangeKeys: [],
           lastUpdated: startedAt,
@@ -644,7 +655,7 @@ export async function getSeeds(
         // The cached record (frozen outside production), so a fresh result behaves like a cache hit.
         if (stored) result = stored.record
       }
-      found.set(record.seedUid.toLowerCase(), result)
+      found.set(key, result)
     }
     return missing
   }
@@ -661,6 +672,32 @@ export async function getSeeds(
     if (record) result.set(given, record)
   }
   return result
+}
+
+/**
+ * `getSeed`'s `include: 'changelog'` record for each seed with a live Version: no `data`, and the
+ * newest live Version as `versionUid`. A seed whose Versions are all revoked is left out.
+ */
+function changelogOnlyRecords(
+  seeds: readonly AttestationLike[],
+  changelogs: ReadonlyMap<string, { latestVersionUid: string }>,
+): { records: SeedRecord[]; dependencies: Map<string, SeedDependencies> } {
+  const records: SeedRecord[] = []
+  const dependencies = new Map<string, SeedDependencies>()
+  for (const seed of seeds) {
+    const latestVersionUid = changelogs.get(seed.id.toLowerCase())?.latestVersionUid
+    if (!latestVersionUid) continue
+    records.push({
+      seedUid: seed.id,
+      schemaName: seed.schema!.schemaNames![0]!.name,
+      attester: seed.attester,
+      timeCreated: seed.timeCreated,
+      versionUid: latestVersionUid,
+      data: {},
+    } as SeedRecord)
+    dependencies.set(seed.id, { refUIDs: [seed.id, latestVersionUid], ids: [seed.id] })
+  }
+  return { records, dependencies }
 }
 
 /** Options for getSeedAttestations. */

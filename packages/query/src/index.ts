@@ -55,6 +55,7 @@ export type {
   VersionPin,
   ChangelogInclude,
   ChangelogOptions,
+  ChangelogReadOptions,
   ChangelogEntry,
   VersionChangelogEntry,
   PropertyChangelogEntry,
