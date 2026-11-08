@@ -6,8 +6,8 @@ follows [age](https://github.com/C2SP/C2SP/blob/main/age.md): a text header of r
 authenticated by an HMAC, then a STREAM payload of independently authenticated chunks. It differs
 from age in the key size, the cipher, the `bind` line and the content frame. ADR 0033 records why.
 
-Status: draft. Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity, and
-the keystore manifest with its `passkey-prf` and `eoa-signature` stanzas. Stanza types for readers'
+Status: draft. Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity and
+its key binding, and the keystore manifest with its `passkey-prf` and `eoa-signature` stanzas. Stanza types for readers'
 key grants and subscription epochs come with those features.
 
 ## Notation
@@ -102,8 +102,25 @@ derived from it:
 - **Tag key:** the X25519 key pair whose private key is
   `HKDF(identity secret, empty, "seed-private/v1/identity/x25519", 32)` (RFC 7748 clamping applies
   when it is used). It is reserved for blinded tags.
+- **Binding key:** the Ed25519 key pair (RFC 8032) whose 32-byte private key is
+  `HKDF(identity secret, empty, "seed-private/v1/identity/ed25519", 32)`. It signs key bindings
+  and nothing else.
 - **Key id:** `0x` and the lowercase hex of `SHA-256("seed-private/v1/key-id" || 0x00 || recipient
-  public key || tag public key)`.
+  public key || tag public key || binding public key)`.
+
+**Key binding.** An account that registers an identity also publishes the binding key's Ed25519
+signature over
+
+```
+"seed-private/v1/key-binding" || 0x00 || key id (32 bytes) || chain id (32 bytes, big-endian) || account (20 bytes)
+```
+
+where the account is the registering account's address and the chain id is the chain the
+registration is on. A reader accepts a registration only when the key id matches the three public
+keys and the signature verifies for the registration's attester and chain. Without it, an account
+could register another identity's public keys as its own, and content shared with that account
+would be readable by the other identity instead. The X-Wing and X25519 keys can't sign, so the
+binding key signs for them; the key id commits to all three.
 
 **Recovery key.** A recovery phrase is 24 words from the BIP39 English list encoding 32 bytes of
 entropy with BIP39's checksum. Readers compare words after NFKD normalization, lowercasing and
@@ -140,7 +157,11 @@ random bytes, with a 48-byte body `AES-256-GCM(KEK, nonce = 12 zero bytes, aad =
 several `passkey-prf` stanzas asks for any of their credentials in one request, using
 `evalByCredential`.
 
-**`eoa-signature`.** `-> eoa-signature <base64(salt)>`, with a 32-byte random salt and the same
+**`eoa-signature`.** Writers should offer this stanza only when the user chooses it over a passkey,
+because it makes the identity no stronger than the EOA's secp256k1 key: anyone who has that key can
+produce the signature below and open the public manifest, which reveals every private Version
+wrapped to the identity. That includes a future attacker who recovers the key from the public key
+any of the account's transactions expose. `-> eoa-signature <base64(salt)>`, with a 32-byte random salt and the same
 body construction, with `KEK = HKDF(r || s, salt, "seed-private/v1/eoa-signature", 32)`. `r || s`
 are the 64 bytes of the account's EIP-191 `personal_sign` signature over the message below, with
 `s` replaced by `n - s` when it is above `n / 2` (`n` the secp256k1 order), and with the parity bit
@@ -217,5 +238,6 @@ checks the X-Wing KEM against the draft's first test vector.
 
 `keystoreVector` is a keystore manifest built by the reference with its derived file key and the
 same payload nonce. It lists the identity secret, its derived public keys and key id, the keystore
-file key, and one stanza of each type with its inputs. The recovery entropy is BIP39's test vector `7f7f...7f` ("legal winner thank year ..."), and the
+file key, one stanza of each type with its inputs, and `keyBinding`: the binding signature for an
+account and chain id. The recovery entropy is BIP39's test vector `7f7f...7f` ("legal winner thank year ..."), and the
 signature is from secp256k1 private key `77 77 ... 77`.

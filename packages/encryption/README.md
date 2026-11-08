@@ -10,12 +10,18 @@ private Versions ship (ADR 0033).
   `mlkem768x25519` recipient stanza, which seals the file key to an X-Wing (post-quantum hybrid)
   public key with HPKE. X-Wing comes from `@noble/post-quantum`.
 - `createEncryptionIdentity`, `encryptionIdentityFromSecret`: a user's identity, one 32-byte secret
-  from which the recipient key, an X25519 tag key and the key id are derived.
+  from which the recipient key, an X25519 tag key, an Ed25519 binding key and the key id are
+  derived.
+- `signKeyBinding`, `verifyKeyBinding`: the binding key's signature that the identity belongs to an
+  account on a chain, which the account's registration carries.
 - `generateRecoveryPhrase`, `recoveryKeyFromPhrase`: a 24-word BIP39 phrase and the recovery key
   derived from it.
 - `buildKeystoreManifest`, `openKeystoreManifest`, `describeKeystoreManifest`: the public keystore
   manifest that recovers the identity, with a stanza per authenticator (`recoveryStanza`,
   `passkeyStanza`, `eoaSignatureStanza`). `enrollPasskey` and `passkeyPrf` make the WebAuthn calls.
+  Use a passkey and the recovery phrase. `eoaSignatureStanza` lets a wallet signature unlock the
+  identity instead, which means anyone with the wallet's key can read every private Version; it
+  needs `acceptWalletKeyRisk: true`, so offer it only as an option the user picks.
 - `createPrivateUploadEncryptor`: the `encryptPrivateUpload` for `@seedprotocol/publish`, one envelope
   per private upload.
 - `createEnvelopeDecryptor`: opens downloaded envelopes for the SDK's `setEnvelopeDecryptor`.
@@ -76,8 +82,26 @@ await saveIdentityOnDevice(identity)
 const unlocked = await openKeystoreManifest(manifest, { passkey: passkeyPrf() }, { expectKeyId: registration.keyId })
 ```
 
-`registerEncryptionKey` in `@seedprotocol/publish` uploads the manifest and attests the key id and
-public keys from the user's account, then revokes the account's earlier registrations.
+`registerEncryptionKey` in `@seedprotocol/publish` uploads the manifest and attests the key id,
+public keys and binding signature from the user's account, then revokes the account's earlier
+registrations.
+
+```ts
+import { signKeyBinding } from '@seedprotocol/encryption'
+import { registerEncryptionKey } from '@seedprotocol/publish'
+
+await registerEncryptionKey(
+  {
+    keyId: identity.keyId,
+    recipientKey: identity.recipient.publicKey,
+    tagKey: identity.tagKey.publicKey,
+    bindingKey: identity.bindingKey.publicKey,
+    bindingSignature: signKeyBinding(identity, { account, chainId: 11155420 }),
+    keystoreManifest: manifest,
+  },
+  { account },
+)
+```
 
 Publishing private properties: pass an encryptor wrapping to the account's registered key.
 

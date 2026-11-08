@@ -23,6 +23,13 @@ export type EncryptionKeyRegistration = {
   recipientKey: Uint8Array
   /** The X25519 tag public key. */
   tagKey: Uint8Array
+  /** The Ed25519 public key that signed {@link bindingSignature}. */
+  bindingKey: Uint8Array
+  /**
+   * The binding key's signature over the key id, the chain id and the attester (SPEC.md "Key
+   * binding" in `@seedprotocol/encryption`). Not checked here.
+   */
+  bindingSignature: Uint8Array
   /** Arweave transaction id of the keystore manifest. */
   keystoreTx: string
 }
@@ -44,7 +51,11 @@ function decodeRegistration(attestation: Attestation): EncryptionKeyRegistration
     const suite = field('suite')
     const recipientKey = hexBytes(field('recipient_key'))
     const tagKey = hexBytes(field('tag_key'))
-    if (!keyId || typeof suite !== 'string' || !recipientKey?.length || !tagKey?.length) return undefined
+    const bindingKey = hexBytes(field('binding_key'))
+    const bindingSignature = hexBytes(field('binding_signature'))
+    if (!keyId || typeof suite !== 'string' || !recipientKey?.length || !tagKey?.length || !bindingKey?.length || !bindingSignature?.length) {
+      return undefined
+    }
     return {
       uid: attestation.id,
       attester: attestation.attester,
@@ -54,6 +65,8 @@ function decodeRegistration(attestation: Attestation): EncryptionKeyRegistration
       suite,
       recipientKey,
       tagKey,
+      bindingKey,
+      bindingSignature,
       keystoreTx: bytes32ToArweaveTxId(String(field('keystore_tx'))),
     }
   } catch {

@@ -28,11 +28,37 @@ const keyOf = (req: RpcRequest) => JSON.stringify([req.method, req.params ?? []]
  */
 const TX_HASH_LOOKUPS = new Set(['eth_getTransactionReceipt', 'eth_getTransactionByHash'])
 
+type UpstreamBody = { result?: unknown; error?: unknown; rateLimited?: true }
+
+/** Public RPCs answer bursts with HTTP 429 or JSON-RPC -32016 / -32005 ("requests per second"). */
+function isRateLimited(body: UpstreamBody): boolean {
+  if (body.rateLimited) return true
+  const code = (body.error as { code?: number } | undefined)?.code
+  return code === -32016 || code === -32005
+}
+
+/** Asks the upstream, waiting and asking again while it rate-limits, up to about a minute. */
+async function askUpstream(upstream: string, req: RpcRequest): Promise<UpstreamBody> {
+  let body: UpstreamBody = {}
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)))
+    const res = await fetch(upstream, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: req.method, params: req.params ?? [] }),
+    })
+    body = res.status === 429 ? { error: { code: 429, message: 'HTTP 429' }, rateLimited: true } : ((await res.json()) as UpstreamBody)
+    if (!isRateLimited(body)) return body
+  }
+  return body
+}
+
 /**
  * A JSON-RPC server standing in for a public chain RPC, so a fork of it runs with no network.
  *
  * `record` forwards each request it has no answer for to `upstream`, and on `stop()` writes the
- * fixture with the new answers added.
+ * fixture with the new answers added. It asks again while the upstream rate-limits, and never
+ * records a rate-limit answer.
  * `replay` answers from that file and errors on anything not in it. Anvil asks a fork's upstream
  * only for state at the pinned block, so the same test run asks the same questions each time.
  */
@@ -53,13 +79,12 @@ export function startRecordedRpc(options: {
   const answer = async (req: RpcRequest): Promise<Record<string, unknown>> => {
     const key = keyOf(req)
     if (mode === 'record' && !(key in answers)) {
-      const res = await fetch(options.upstream!, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: req.method, params: req.params ?? [] }),
-      })
-      const body = (await res.json()) as { result?: unknown; error?: unknown }
-      answers[key] = 'error' in body && body.error !== undefined ? { error: body.error } : { result: body.result }
+      const body = await askUpstream(options.upstream!, req)
+      // A rate-limit answer isn't the chain's: recorded, replay would return it forever and anvil
+      // would retry the read without end.
+      if (!isRateLimited(body)) {
+        answers[key] = 'error' in body && body.error !== undefined ? { error: body.error } : { result: body.result }
+      }
     }
     const recorded = answers[key] ?? (TX_HASH_LOOKUPS.has(req.method) ? { result: null } : undefined)
     if (!recorded) {

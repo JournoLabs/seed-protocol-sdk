@@ -1,4 +1,5 @@
 import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
+import { ed25519 } from '@noble/curves/ed25519.js'
 import {
   ENCRYPTION_KEY_SCHEMA_DEF,
   ENCRYPTION_KEY_SCHEMA_NAME,
@@ -8,11 +9,12 @@ import {
   type EncryptionKeyRegistration,
 } from '@seedprotocol/eas'
 import { buildArweaveContentTags, getContentSha256, type PublishUploadData } from '@seedprotocol/sdk'
-import { bytesToHex, sha256 } from 'viem'
+import { bytesToHex, concatBytes, hexToBytes, numberToHex, sha256 } from 'viem'
 import { getPublishConfig } from '~/config'
 import { EncryptionKeySchemaNotRegisteredError } from '~/errors'
 import { easAbi } from '~/helpers/abi/eas'
 import { getPublishPublicClient, waitForPublishReceipt } from '~/helpers/chainClient'
+import { getPublishViemChain } from '~/helpers/chainConfig'
 import { getAttestedUidsFromReceipt, prepareEasAttest, prepareEasMultiRevoke, ZERO_ADDRESS } from '~/helpers/easDirect'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
@@ -35,6 +37,13 @@ export type RegisterEncryptionKeyInput = {
   recipientKey: Uint8Array
   /** `EncryptionIdentity.tagKey.publicKey`, 32 bytes. */
   tagKey: Uint8Array
+  /** `EncryptionIdentity.bindingKey.publicKey`, 32 bytes. */
+  bindingKey: Uint8Array
+  /**
+   * `signKeyBinding(identity, { account, chainId })` from `@seedprotocol/encryption`, for the
+   * registering account and the publish chain. 64 bytes.
+   */
+  bindingSignature: Uint8Array
   /** The keystore manifest from `buildKeystoreManifest`. It is uploaded as it is. */
   keystoreManifest: Uint8Array
 }
@@ -71,14 +80,39 @@ export type RegisterEncryptionKeyResult = {
 
 const encoder = new TextEncoder()
 
-/** The key id SPEC.md "Identity" defines: SHA-256 over the label, the recipient key and the tag key. */
-function keyIdOf(recipientKey: Uint8Array, tagKey: Uint8Array): string {
+/** The key id SPEC.md "Identity" defines: SHA-256 over the label and the three public keys. */
+function keyIdOf(recipientKey: Uint8Array, tagKey: Uint8Array, bindingKey: Uint8Array): string {
   const label = encoder.encode('seed-private/v1/key-id')
-  const input = new Uint8Array(label.length + 1 + recipientKey.length + tagKey.length)
+  const input = new Uint8Array(label.length + 1 + recipientKey.length + tagKey.length + bindingKey.length)
   input.set(label, 0)
   input.set(recipientKey, label.length + 1)
   input.set(tagKey, label.length + 1 + recipientKey.length)
+  input.set(bindingKey, label.length + 1 + recipientKey.length + tagKey.length)
   return sha256(input)
+}
+
+/**
+ * Whether `bindingSignature` is `bindingKey`'s Ed25519 signature that `keyId` belongs to `account`
+ * on `chainId`, over the message SPEC.md "Key binding" defines.
+ */
+function isKeyBindingValid(
+  { keyId, bindingKey, bindingSignature }: { keyId: string; bindingKey: Uint8Array; bindingSignature: Uint8Array },
+  account: string,
+  chainId: number,
+): boolean {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(keyId) || !/^0x[0-9a-fA-F]{40}$/.test(account)) return false
+  const message = concatBytes([
+    encoder.encode('seed-private/v1/key-binding'),
+    new Uint8Array([0]),
+    hexToBytes(keyId as `0x${string}`),
+    hexToBytes(numberToHex(chainId, { size: 32 })),
+    hexToBytes(account as `0x${string}`),
+  ])
+  try {
+    return ed25519.verify(bindingSignature, message, bindingKey)
+  } catch {
+    return false
+  }
 }
 
 /** The manifest's bind, read from its second line, or undefined when it isn't an envelope. */
@@ -94,10 +128,16 @@ function manifestBind(manifest: Uint8Array): Record<string, unknown> | undefined
   }
 }
 
-function checkInput({ keyId, recipientKey, tagKey, keystoreManifest }: RegisterEncryptionKeyInput) {
+function checkInput(input: RegisterEncryptionKeyInput, account: string) {
+  const { keyId, recipientKey, tagKey, bindingKey, keystoreManifest } = input
   if (recipientKey.length !== 1216) throw new Error('recipientKey must be the 1216-byte X-Wing public key')
   if (tagKey.length !== 32) throw new Error('tagKey must be the 32-byte X25519 public key')
-  if (keyIdOf(recipientKey, tagKey) !== keyId) throw new Error(`keyId ${keyId} is not the id of these public keys`)
+  if (bindingKey.length !== 32) throw new Error('bindingKey must be the 32-byte Ed25519 public key')
+  if (keyIdOf(recipientKey, tagKey, bindingKey) !== keyId) throw new Error(`keyId ${keyId} is not the id of these public keys`)
+  const chainId = getPublishViemChain().id
+  if (!isKeyBindingValid(input, account, chainId)) {
+    throw new Error(`bindingSignature is not this key's binding to ${account} on chain ${chainId}; sign it with signKeyBinding`)
+  }
   const bind = manifestBind(keystoreManifest)
   if (bind?.purpose !== 'keystore' || bind.keyId !== keyId) {
     throw new Error(`keystoreManifest is not a keystore manifest for ${keyId}`)
@@ -105,13 +145,17 @@ function checkInput({ keyId, recipientKey, tagKey, keystoreManifest }: RegisterE
 }
 
 export function encodeEncryptionKeyData(
-  input: Pick<RegisterEncryptionKeyInput, 'keyId' | 'recipientKey' | 'tagKey'> & { keystoreTx: string },
+  input: Pick<RegisterEncryptionKeyInput, 'keyId' | 'recipientKey' | 'tagKey' | 'bindingKey' | 'bindingSignature'> & {
+    keystoreTx: string
+  },
 ): `0x${string}` {
   return new SchemaEncoder(ENCRYPTION_KEY_SCHEMA_DEF).encodeData([
     { name: 'key_id', value: input.keyId, type: 'bytes32' },
     { name: 'suite', value: SUITE, type: 'string' },
     { name: 'recipient_key', value: bytesToHex(input.recipientKey), type: 'bytes' },
     { name: 'tag_key', value: bytesToHex(input.tagKey), type: 'bytes' },
+    { name: 'binding_key', value: bytesToHex(input.bindingKey), type: 'bytes' },
+    { name: 'binding_signature', value: bytesToHex(input.bindingSignature), type: 'bytes' },
     { name: 'keystore_tx', value: arweaveTxIdToBytes32(input.keystoreTx), type: 'bytes32' },
   ]) as `0x${string}`
 }
@@ -148,8 +192,6 @@ async function uploadManifest(manifest: Uint8Array, wallet: PublishWallet, optio
  * `account`, with the data the indexer decoded. Throws when the chain can't be read.
  */
 async function isLiveOnChain(registration: EncryptionKeyRegistration, account: string): Promise<boolean> {
-  if (registration.suite !== SUITE) return false
-  if (keyIdOf(registration.recipientKey, registration.tagKey) !== registration.keyId) return false
   const uid = registration.uid.toLowerCase() as `0x${string}`
   if (!/^0x[0-9a-f]{64}$/.test(uid)) return false
   const onChain = await getPublishPublicClient().readContract({
@@ -171,7 +213,9 @@ async function isLiveOnChain(registration: EncryptionKeyRegistration, account: s
 
 /**
  * The encryption key to wrap `account`'s private Versions to: the newest registration the indexer
- * lists that EAS on the publish chain confirms is live, from `account`, with the same data. An
+ * lists that EAS on the publish chain confirms is live, from `account`, with the same data, and
+ * whose binding signature names `account` and the publish chain. The signature tells the account's
+ * own key from another account's public keys copied into its registration. An
  * indexer that lags or misbehaves can still list a registration that was revoked or name keys the
  * attestation doesn't hold; those are skipped. Undefined when no listed registration passes.
  *
@@ -181,10 +225,21 @@ async function isLiveOnChain(registration: EncryptionKeyRegistration, account: s
  * than falling back to an unchecked key.
  */
 export async function getVerifiedEncryptionKey({ account }: { account: string }): Promise<EncryptionKeyRegistration | undefined> {
+  const chainId = getPublishViemChain().id
   for (const registration of await getEncryptionKeysFromEas({ attester: account })) {
+    if (!isUsableKey(registration, account, chainId)) continue
     if (await isLiveOnChain(registration, account)) return registration
   }
   return undefined
+}
+
+/** A `seed-private/v1` key whose id matches its public keys and whose binding names `account`. */
+function isUsableKey(registration: EncryptionKeyRegistration, account: string, chainId: number): boolean {
+  return (
+    registration.suite === SUITE &&
+    keyIdOf(registration.recipientKey, registration.tagKey, registration.bindingKey) === registration.keyId &&
+    isKeyBindingValid(registration, account, chainId)
+  )
 }
 
 /** Revokes `account`'s `earlier` registrations that are still live on chain, other than `keep`. */
@@ -220,13 +275,14 @@ async function revokeEarlierRegistrations(
  * replaced key. Revoked registrations still name the manifests that open older Versions.
  *
  * Throws {@link EncryptionKeySchemaNotRegisteredError} before uploading when the schema is
- * missing, and refuses inputs whose key id doesn't match the keys or the manifest.
+ * missing, and refuses inputs whose key id doesn't match the keys or the manifest, or whose binding
+ * signature doesn't name `account` and the publish chain.
  */
 export async function registerEncryptionKey(
   input: RegisterEncryptionKeyInput,
   options: RegisterEncryptionKeyOptions,
 ): Promise<RegisterEncryptionKeyResult> {
-  checkInput(input)
+  checkInput(input, options.account)
   const wallet = resolvePublishWallet({ wallet: options.wallet })
   const attester = wallet.txSender.address as `0x${string}`
   if (attester.toLowerCase() !== options.account.toLowerCase()) {

@@ -164,11 +164,20 @@ async function signatureKek(signature: string, salt: Uint8Array): Promise<Uint8A
  * A stanza that lets an EOA unlock this identity by signing `eoaSignatureMessage(salt)` again.
  * Only for EOAs whose wallet signs deterministically (RFC 6979); smart-account signatures change
  * every time and would never unlock it.
+ *
+ * Prefer a passkey and the recovery phrase. This stanza trades security for convenience: the
+ * manifest is public, so anyone who gets the EOA's private key can sign the message, open the
+ * manifest and read every private Version wrapped to this identity, past and future. That
+ * includes a leaked or phished key, and a future quantum computer, which can recover the key from
+ * any transaction the EOA has sent. `acceptWalletKeyRisk: true` says the user chose that.
  */
 export async function eoaSignatureStanza(
   identity: EncryptionIdentity,
-  { salt, signature }: { salt: Uint8Array; signature: string },
+  { salt, signature, acceptWalletKeyRisk }: { salt: Uint8Array; signature: string; acceptWalletKeyRisk: true },
 ): Promise<Stanza> {
+  if (acceptWalletKeyRisk !== true) {
+    throw new EnvelopeError('BAD_KEYSTORE', 'eoaSignatureStanza needs acceptWalletKeyRisk: true; prefer a passkey and the recovery phrase')
+  }
   if (salt.length !== SALT_LENGTH) throw new EnvelopeError('BAD_KEYSTORE', `Signature salt must be ${SALT_LENGTH} bytes`)
   const body = await sealWithKek(await signatureKek(signature, salt), await keystoreFileKey(identity))
   return { type: EOA_SIGNATURE_STANZA_TYPE, args: [encodeBase64NoPad(salt)], body }
