@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 
 const realSdk = await import('@seedprotocol/sdk')
 
@@ -42,5 +42,19 @@ describe('PublishManager.resolveAttestationAttempt', () => {
     open = []
     await PublishManager.resolveAttestationAttempt('seed1', { resend: true })
     expect(updatePublishAttempt).not.toHaveBeenCalled()
+  })
+
+  test('with no run, closes the attempt and warns nothing', async () => {
+    // A started manager runs its actions; restore moves on at once with no database.
+    process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '0'
+    await PublishManager.ready()
+    const warn = spyOn(console, 'warn')
+    try {
+      await PublishManager.resolveAttestationAttempt('seed1', { resend: true })
+      expect(updatePublishAttempt.mock.calls).toEqual([['attempt1', { status: 'abandoned' }]])
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
