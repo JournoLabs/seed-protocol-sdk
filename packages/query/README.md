@@ -117,7 +117,7 @@ const clips = await getSeeds(clipUids, { hydrateStorage: false })
 
 Seeds may be of different schemas; each record's `schemaName` is its own. Seeds that aren't found, are revoked, or lack their pinned version are left out of the map. UIDs are read lowercase and deduplicated in any case; the map keeps the first spelling of each.
 
-The seeds not in the cache are assembled together, so the number of indexer requests doesn't grow with the number of seeds: seeds, versions and properties, then the same for related seeds, plus storage bodies when `hydrateStorage` is on. Cached seeds are checked for changes in one request. Records share the item cache with `getSeed` under the same options. With `source: 'auto'`, seeds the local source doesn't have are read from remote. There's no changelog option.
+The seeds not in the cache are assembled together, so the number of indexer requests doesn't grow with the number of seeds: seeds, versions and properties, then the same for related seeds, plus storage bodies when `hydrateStorage` is on. Cached seeds are checked for changes in one request. Records share the item cache with `getSeed` under the same options. With `source: 'auto'`, seeds the local source doesn't have are read from remote. `include` and `changelog` work as for `getSeed` (see [Changelog](#changelog)).
 
 ## One version (`versionUid`, `asOf`)
 
@@ -168,7 +168,7 @@ const published = await getPublishedSeedRecord('0x...', { source: 'local' })
 
 Authoring UIs keep using `Item` / liveQuery for drafts; published JSON snapshots use query + `source`.
 
-## Changelog (`getSeed` only)
+## Changelog
 
 ```ts
 const withHistory = await getSeed('0x...', {
@@ -189,6 +189,8 @@ const withHistory = await getSeed('0x...', {
 - **Property granularity** — one entry per property attestation change (`previousValue` / `nextValue`).
 - Historical snapshots are **flat** (no relation expand / Arweave hydrate). Collections stay latest-only.
 - Works for `source: 'local'` when versions + attested metadata exist in the DB.
+- **`getSeeds`** takes the same `include` and `changelog`. Every seed's changelog is built from one request for the properties of all their live Versions, so a read of 40 seeds with `include: 'changelog'` is three requests: seeds, versions, properties. `since` and `limit` filter each seed's entries after that read; they don't shorten it, because a property entry's `previousValue` comes from an older attestation. A pin applies to `data`, and the changelog covers every Version. With `include: 'changelog'`, a seed whose Versions are all revoked is left out.
+- A cached changelog is read again when any of the seed's live Versions changes, including ones `since` left out.
 
 ## Caching
 

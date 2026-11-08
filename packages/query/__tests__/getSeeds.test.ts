@@ -206,6 +206,64 @@ describe('getSeeds', () => {
   })
 })
 
+/** A post with two versions: its title set in each, and a patch to the first. */
+function addPostWithHistory(n: number): { post: string; v1: string; v2: string } {
+  const { post, postVersion } = addClip(n)
+  const v2 = uid(n, 'b')
+  chain.versions.push(versionAt(v2, post, 30))
+  chain.properties.push(
+    propAt(postVersion, 'title', `post ${n}, patched`, 20),
+    propAt(v2, 'title', `post ${n}, v2`, 31),
+  )
+  return { post, v1: postVersion, v2 }
+}
+
+describe('getSeeds with a changelog', () => {
+  const withChangelog = { ...opts, include: 'changelog', changelog: { granularity: 'property' } } as const
+
+  it("reads every seed's changelog from one property request, as getSeed reads each", async () => {
+    const posts = [addPostWithHistory(1), addPostWithHistory(2), addPostWithHistory(3)].map((p) => p.post)
+    const one = new Map<string, unknown>()
+    for (const post of posts) one.set(post, (await getSeed(post, withChangelog))!.changelog)
+
+    vi.clearAllMocks()
+    const result = await getSeeds(posts, withChangelog)
+    expect(calls.properties).toHaveBeenCalledTimes(1)
+    expect(totalCalls()).toBe(3)
+    for (const post of posts) {
+      const record = result.get(post)!
+      expect(record.changelog).toEqual(one.get(post))
+      expect(record.changelog!.length).toBe(3)
+      expect(record.data).toEqual({})
+    }
+  })
+
+  it('returns data and changelog together for data+changelog', async () => {
+    const { post } = addPostWithHistory(1)
+    const record = (await getSeeds([post], { ...withChangelog, include: 'data+changelog' })).get(post)!
+    expect(record.data.title).toBe('post 1, v2')
+    expect(record.changelog!.map((e) => (e as { nextValue: unknown }).nextValue)).toEqual([
+      'post 1',
+      'post 1, patched',
+      'post 1, v2',
+    ])
+  })
+
+  it('leaves a revoked version out of the changelog', async () => {
+    const { post, v2 } = addPostWithHistory(1)
+    chain.versions.find((v) => v.id === v2)!.revoked = true
+    const record = (await getSeeds([post], withChangelog)).get(post)!
+    expect(record.changelog!.some((e) => e.versionUid === v2)).toBe(false)
+    expect(record.versionUid).not.toBe(v2)
+  })
+
+  it('applies since and limit to each seed', async () => {
+    const posts = [addPostWithHistory(1), addPostWithHistory(2)].map((p) => p.post)
+    const result = await getSeeds(posts, { ...opts, include: 'changelog', changelog: { granularity: 'property', since: 20 } })
+    for (const post of posts) expect(result.get(post)!.changelog!.map((e) => e.at)).toEqual([20, 31])
+  })
+})
+
 describe('getSeed with a version', () => {
   it('reads the version, with patches made to it until asOf', async () => {
     const a = addClip(1)
@@ -293,6 +351,52 @@ describe('getSeeds with the item cache', () => {
       'post 2, patched',
     )
     expect(changed.get(clips[0]!.clip)).toBe(first.get(clips[0]!.clip))
+  })
+
+  it('keeps a changelog read and a data read of the same seeds apart', async () => {
+    const { post } = addPostWithHistory(1)
+    const withChangelog = { ...opts, include: 'changelog', changelog: { granularity: 'property' } } as const
+    const changelogFirst = (await getSeeds([post], withChangelog)).get(post)!
+    const data = (await getSeeds([post], opts)).get(post)!
+    expect(data.data.title).toBe('post 1, v2')
+    expect((data as { changelog?: unknown }).changelog).toBeUndefined()
+    const changelogAgain = (await getSeeds([post], withChangelog)).get(post)!
+    expect(changelogAgain).toBe(changelogFirst)
+    expect(changelogAgain.data).toEqual({})
+  })
+
+  it('reads a cached changelog again when one of its versions gets a property', async () => {
+    const { post, v1 } = addPostWithHistory(1)
+    const withChangelog = { ...opts, include: 'changelog', changelog: { granularity: 'property' } } as const
+    expect((await getSeeds([post], withChangelog)).get(post)!.changelog).toHaveLength(3)
+
+    // A patch to the older version: the seed's uid and its latest version are unchanged.
+    const patched = propAt(v1, 'title', 'post 1, patched again', 25)
+    chain.properties.push(patched)
+    chain.changes.push({
+      id: patched.id,
+      refUID: patched.refUID,
+      timeCreated: Math.floor(Date.now() / 1000) + 5,
+      revocationTime: 0,
+    })
+    const again = (await getSeeds([post], withChangelog)).get(post)!
+    expect(again.changelog).toHaveLength(4)
+  })
+
+  it("reads getSeed's cached changelog again when a version since left out gets a property", async () => {
+    const { post, v1 } = addPostWithHistory(1)
+    const recent = { ...opts, include: 'changelog', changelog: { granularity: 'property', since: 30 } } as const
+    expect((await getSeed(post, recent))!.changelog!.map((e) => e.at)).toEqual([31])
+
+    const patched = propAt(v1, 'title', 'post 1, patched late', 40)
+    chain.properties.push(patched)
+    chain.changes.push({
+      id: patched.id,
+      refUID: patched.refUID,
+      timeCreated: Math.floor(Date.now() / 1000) + 5,
+      revocationTime: 0,
+    })
+    expect((await getSeed(post, recent))!.changelog!.map((e) => e.at)).toEqual([31, 40])
   })
 
   it('reads a body again on a cache hit when no gateway had it', async () => {

@@ -104,16 +104,26 @@ export type VersionPin = {
   asOf?: number
 }
 
-/** Options for `getSeed` (changelog is single-seed only). */
-export type GetSeedOptions = AssembleOptions & VersionPin & {
+/** What a read returns, and how its changelog is built. */
+export type ChangelogReadOptions = {
   /** Default `'data'`. */
   include?: ChangelogInclude
   changelog?: ChangelogOptions
 }
 
-/** Options for `getSeeds`: the assemble options, plus versions to read for some of the seeds. */
-export type GetSeedsOptions = AssembleOptions & {
-  /** By seed UID (any case). A seed without its pinned version is left out of the result. */
+/** Options for `getSeed`. */
+export type GetSeedOptions = AssembleOptions & VersionPin & ChangelogReadOptions
+
+/**
+ * Options for `getSeeds`: the assemble options, versions to read for some of the seeds, and
+ * `getSeed`'s `include` and `changelog`. Every seed's changelog is built from one request for the
+ * properties of all their Versions; `since` and `limit` filter each seed's entries after that read.
+ */
+export type GetSeedsOptions = AssembleOptions & ChangelogReadOptions & {
+  /**
+   * By seed UID (any case). A seed without its pinned version is left out of the result. A pin
+   * applies to `data`; the changelog covers every Version, as with `getSeed`.
+   */
   pins?: ReadonlyMap<string, VersionPin>
 }
 
