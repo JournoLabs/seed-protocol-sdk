@@ -140,6 +140,14 @@ export class AttestationAttemptOpenError extends Error {
 }
 
 /**
+ * Why an open attempt couldn't be settled. `pinnedNotLanded`: its pinned nonce key was never used,
+ * and only the run that made it may send under that key. `noEvidence`: it has no hash and no pin, so
+ * nothing on chain identifies it. `chainUnreadable`: the receipt, the key's sequence or the UserOp
+ * logs couldn't be read, or the key was used and its UserOp isn't in the logs yet.
+ */
+export type AttestationUnknownReason = 'pinnedNotLanded' | 'noEvidence' | 'chainUnreadable'
+
+/**
  * Why a publish is in `attestationOutcomeUnknown`: an earlier attempt may have landed and nothing
  * here can tell. Retry looks again. `PublishManager.resolveAttestationAttempt` settles it.
  */
@@ -151,6 +159,7 @@ export class AttestationOutcomeUnknownError extends Error {
   constructor(
     public readonly seedLocalId: string,
     attempt: { id: string; txHash: string | null },
+    public readonly reason: AttestationUnknownReason,
     cause?: unknown,
   ) {
     super(

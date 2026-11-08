@@ -111,7 +111,7 @@ describe('errorFieldsFromContext', () => {
     const attempt = { id: 'attempt1', status: 'sending', txHash: null }
     const cases: Array<[Error, string]> = [
       [new AttestationAttemptOpenError('post', attempt), 'ATTESTATION_ATTEMPT_OPEN'],
-      [new AttestationOutcomeUnknownError('post', attempt), 'ATTESTATION_OUTCOME_UNKNOWN'],
+      [new AttestationOutcomeUnknownError('post', attempt, 'noEvidence'), 'ATTESTATION_OUTCOME_UNKNOWN'],
       [
         new AttestationRecordError(
           { attemptId: 'attempt1', transactionHash: '0x01', requests: [], attester: '0x02' },

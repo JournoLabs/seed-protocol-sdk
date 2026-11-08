@@ -63,6 +63,8 @@ const row = (over: Partial<Row> = {}): Row => ({
   ...over,
 })
 
+const reasonOf = (result: unknown) => (result as { error?: { reason?: string } }).error?.reason
+
 const reconcile = (context: Record<string, unknown> = {}) => {
   const actor = createActor(reconcileAttestations, {
     input: {
@@ -120,6 +122,7 @@ describe('reconcileAttestations', () => {
     }
     const result = await reconcile()
     expect(result.outcome).toBe('unknown')
+    expect(reasonOf(result)).toBe('chainUnreadable')
     expect(rows[0]!.status).toBe('sent')
   })
 
@@ -128,6 +131,7 @@ describe('reconcileAttestations', () => {
     const result = await reconcile()
     expect(result.outcome).toBe('unknown')
     expect((result as { error: unknown }).error).toBeInstanceOf(AttestationOutcomeUnknownError)
+    expect(reasonOf(result)).toBe('noEvidence')
   })
 })
 
@@ -159,7 +163,9 @@ describe('reconcileAttestations: a direct EAS attempt', () => {
 
   test('no hash and no pin: unknown', async () => {
     rows = [row({ step: 'properties', txHash: null, status: 'sending' })]
-    expect((await reconcile()).outcome).toBe('unknown')
+    const result = await reconcile()
+    expect(result.outcome).toBe('unknown')
+    expect(reasonOf(result)).toBe('noEvidence')
     expect(recordDirectAttestation).not.toHaveBeenCalled()
   })
 })
@@ -173,7 +179,9 @@ describe('reconcileAttestations: an attempt with a pinned nonce and no hash', ()
 
   test("not landed, another run: unknown, since this run's requests differ", async () => {
     rows = [pinnedRow({ publishRunId: 'run0' })]
-    expect((await reconcile()).outcome).toBe('unknown')
+    const result = await reconcile()
+    expect(result.outcome).toBe('unknown')
+    expect(reasonOf(result)).toBe('pinnedNotLanded')
   })
 
   test('landed: found from the logs and recorded from its receipt', async () => {
@@ -194,7 +202,9 @@ describe('reconcileAttestations: an attempt with a pinned nonce and no hash', ()
   test('landed but not in the logs yet: unknown, never a resend', async () => {
     rows = [pinnedRow()]
     sequence = async () => 1n
-    expect((await reconcile()).outcome).toBe('unknown')
+    const result = await reconcile()
+    expect(result.outcome).toBe('unknown')
+    expect(reasonOf(result)).toBe('chainUnreadable')
   })
 
   test('the chain cannot be read: unknown', async () => {
@@ -202,7 +212,9 @@ describe('reconcileAttestations: an attempt with a pinned nonce and no hash', ()
     sequence = async () => {
       throw new Error('fetch failed')
     }
-    expect((await reconcile()).outcome).toBe('unknown')
+    const result = await reconcile()
+    expect(result.outcome).toBe('unknown')
+    expect(reasonOf(result)).toBe('chainUnreadable')
   })
 
   test('a named hash wins over the nonce', async () => {

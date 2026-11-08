@@ -52,6 +52,7 @@ export type {
 export {
   AttestationAttemptOpenError,
   AttestationOutcomeUnknownError,
+  type AttestationUnknownReason,
   AttestationRecordError,
   AttestationVerificationError,
   isManagedAccountPublishError,
