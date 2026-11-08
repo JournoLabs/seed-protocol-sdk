@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { BaseArweaveClient, resetGatewayCircuitBreakerForTests } from '@seedprotocol/arweave'
 import type { AttestationChange, AttestationLike } from '../src/types'
+import { resetArweaveBodyCache } from '../src/hydrateArweaveRichText'
 
 /** What the mocked indexer holds: seeds, versions and properties, each with its attester. */
 const chain = {
@@ -291,6 +293,51 @@ describe('getSeeds with the item cache', () => {
       'post 2, patched',
     )
     expect(changed.get(clips[0]!.clip)).toBe(first.get(clips[0]!.clip))
+  })
+
+  it('reads a body again on a cache hit when no gateway had it', async () => {
+    BaseArweaveClient.setHost('arweave.net')
+    resetArweaveBodyCache()
+    resetGatewayCircuitBreakerForTests()
+    const bodyUrl = `https://arweave.net/raw/${'t'.repeat(43)}`
+    const post = uid(1, 'e')
+    const postVersion = uid(1, 'f')
+    chain.seeds.push(seedAt(post, 'post'))
+    chain.versions.push(versionAt(postVersion, post, 11))
+    chain.properties.push(propAt(postVersion, 'html', bodyUrl, 12))
+
+    let gatewaysHaveIt = false
+    const fetchMock = vi.fn(async () =>
+      gatewaysHaveIt
+        ? {
+            ok: true,
+            status: 200,
+            headers: { get: () => 'text/html; charset=utf-8' },
+            arrayBuffer: async () => new TextEncoder().encode('<p>body</p>').buffer,
+          }
+        : { ok: false, status: 404, headers: { get: () => '' } },
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const unread = await getSeed(post)
+      expect(unread!.data.html).toBe(bodyUrl)
+      expect(unread!.unreadStorage).toEqual(['html'])
+
+      gatewaysHaveIt = true
+      vi.clearAllMocks()
+      const read = await getSeed(post)
+      expect(totalCalls()).toBe(0)
+      expect(read!.data.html).toBe('<p>body</p>')
+      expect(read!.unreadStorage).toBeUndefined()
+      expect((await getSeeds([post])).get(post)!.data.html).toBe('<p>body</p>')
+
+      // The cache now holds the body: no further gateway reads.
+      fetchMock.mockClear()
+      expect((await getSeed(post))!.data.html).toBe('<p>body</p>')
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('keeps pinned and latest reads apart', async () => {

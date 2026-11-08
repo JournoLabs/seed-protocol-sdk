@@ -526,6 +526,42 @@ function toSeedRecords(ctx: AssembleContext, schemaName?: string): AssembledReco
 }
 
 /**
+ * Fetches the records' storage bodies into their `data` in place, and returns each record with
+ * `unreadStorage` set to the fields no read gateway returned, or without it when there are none.
+ */
+async function hydrateRecordStorage<R extends Omit<SeedRecord, 'data'> & { data: Record<string, unknown> }>(
+  records: R[],
+  dataSource: QueryDataSource,
+): Promise<R[]> {
+  const unread = await hydrateArweaveRichTextInItems(
+    records.map((r) => r.data),
+    dataSource.readStorageBody
+      ? { readStorageBody: dataSource.readStorageBody.bind(dataSource) }
+      : undefined,
+  )
+  return records.map((record, i) => {
+    const { unreadStorage: _, ...rest } = record
+    const names = unread[i]!
+    return (names.length > 0 ? { ...rest, unreadStorage: names } : rest) as R
+  })
+}
+
+/**
+ * `record` with the bodies in its `unreadStorage` read again: a copy when it had any, the record
+ * itself otherwise. A body still unread stays a transaction URL and stays listed. For records read
+ * back from the query cache, whose dependencies say nothing about whether a gateway has a body yet.
+ */
+export async function rehydrateUnreadStorage<R extends SeedRecord>(
+  record: R,
+  dataSource: QueryDataSource,
+): Promise<R> {
+  if (!record.unreadStorage?.length) return record
+  const copy = { ...record, data: structuredClone(record.data) as Record<string, unknown> }
+  const [hydrated] = await hydrateRecordStorage([copy], dataSource)
+  return hydrated as unknown as R
+}
+
+/**
  * What an assembled record was built from, so a cache can tell when it changed: an attestation
  * created or revoked later that references one of `refUIDs` (a new or revoked Version of the seed
  * or of a seed it relates to, a property of one of their head Versions) or is one of `ids` (the
@@ -626,16 +662,8 @@ export async function assembleSeedRecords(
     expandRelationProperties(ctx)
   }
 
-  const records = toSeedRecords(ctx, request.schemaName)
-
-  if (hydrateStorage) {
-    await hydrateArweaveRichTextInItems(
-      records.map((r) => r.data),
-      dataSource.readStorageBody
-        ? { readStorageBody: dataSource.readStorageBody.bind(dataSource) }
-        : undefined,
-    )
-  }
+  const assembled = toSeedRecords(ctx, request.schemaName)
+  const records = hydrateStorage ? await hydrateRecordStorage(assembled, dataSource) : assembled
 
   const withRelated = relations !== 'uids'
   const dependencies = new Map(

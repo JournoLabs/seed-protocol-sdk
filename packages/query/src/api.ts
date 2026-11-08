@@ -3,6 +3,7 @@ import { initializeQueryPlatform } from './bootstrap.js'
 import {
   assembleSeedRecords,
   assembleSeedsWithDependencies,
+  rehydrateUnreadStorage,
   type SeedDependencies,
 } from './assembleSeeds.js'
 import { assembleSeedChangelog } from './assembleChangelog.js'
@@ -185,6 +186,16 @@ async function refreshCollection(
       : { records: [], dependencies: new Map<string, SeedDependencies>() } satisfies Assembled
   const freshBySeedUid = new Map(fresh.records.map((record) => [record.seedUid, record]))
 
+  // Cached seeds kept as they are, but a body no gateway had when cached is read again.
+  await Promise.all(
+    listed.map(async (seed) => {
+      const kept = cachedBySeedUid.get(seed.id)
+      if (!kept || changed.has(seed.id) || freshBySeedUid.has(seed.id)) return
+      const reread = await rehydrateUnreadStorage(kept, dataSource)
+      if (!sameUnreadStorage(reread, kept)) cachedBySeedUid.set(seed.id, reread)
+    }),
+  )
+
   // In list order. A changed seed that no longer assembles (every version revoked) drops out,
   // as do cached seeds no longer listed (revoked, or pushed past `limit`).
   const items: SeedRecord[] = []
@@ -366,16 +377,31 @@ async function getUnchangedCachedItems(
       await cache.clearItem(seedUid, cached.optionsKey)
       continue
     }
-    if (checkWindowAged(cached, startedAt)) {
-      await cache.setItem({
+    // A body no gateway had when the record was cached is read again; EAS can't say it arrived.
+    const record = await rehydrateUnreadStorage(cached.record, dataSource)
+    const bodiesRead = !sameUnreadStorage(record, cached.record)
+    if (bodiesRead || checkWindowAged(cached, startedAt)) {
+      const stored = await cache.setItem({
         ...cached,
-        checkedAt: checkedAtFor(startedAt),
-        seenChangeKeys: found.seenChangeKeys.get(seedUid) ?? [],
+        record,
+        ...(checkWindowAged(cached, startedAt) && {
+          checkedAt: checkedAtFor(startedAt),
+          seenChangeKeys: found.seenChangeKeys.get(seedUid) ?? [],
+        }),
       })
+      hits.set(seedUid, stored?.record ?? record)
+      continue
     }
     hits.set(seedUid, cached.record)
   }
   return hits
+}
+
+/** Whether a re-read left the same bodies unread (so there's nothing new to cache). */
+function sameUnreadStorage(a: SeedRecord, b: SeedRecord): boolean {
+  const x = a.unreadStorage ?? []
+  const y = b.unreadStorage ?? []
+  return x.length === y.length && x.every((name, i) => name === y[i])
 }
 
 async function getUnchangedCachedItem(
