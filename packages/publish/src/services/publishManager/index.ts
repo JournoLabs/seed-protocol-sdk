@@ -308,10 +308,14 @@ export const PublishManager = {
    * reverted one closes. It never sends. `running`: a publish of the seed runs or waits in this tab,
    * or another tab holds its lock; nothing was read, and `retryAttestations` settles it there.
    * `unknown`: the attempt may have landed and the chain can't say (`reason`), and it stays open;
-   * `resolveAttestationAttempt` settles it by hash or gives it up.
+   * `resolveAttestationAttempt` settles it by hash or gives it up. Waits for `ready()` first, so a
+   * publish restore brings back counts as running.
    */
-  settleAttestationAttempt: (seedLocalId: string, publisher: string): Promise<AttestationSettleResult> =>
-    settleAttestationAttempt(seedLocalId, publisher, hasRun),
+  settleAttestationAttempt: async (seedLocalId: string, publisher: string): Promise<AttestationSettleResult> => {
+    // A publish restore is about to spawn isn't in publishProcesses yet; wait for it.
+    await PublishManager.ready()
+    return settleAttestationAttempt(seedLocalId, publisher, hasRun)
+  },
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
   /**
    * Ends a publish waiting after a failed attestation (`attestationFailureRecoverable`, its direct

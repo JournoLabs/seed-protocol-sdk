@@ -209,7 +209,8 @@ does, records a landed transaction with `publisherAddress` on its rows, closes a
 sends. It resolves `{ status: 'settled' }` once no attempt is open, `{ status: 'unknown', attempt, reason }`
 for one it can't settle (with the same `reason` values as above), or `{ status: 'running' }` without
 reading anything while a publish of the seed runs or waits in this tab, or another tab holds its lock;
-`retryAttestations` settles it there.
+`retryAttestations` settles it there. It waits for `PublishManager.ready()` first, so a publish that
+restore brings back counts as running.
 
 A publish waiting in `attestationFailureRecoverable`, `attestationFailureRecoverableDirectToEas` or
 `attestationOutcomeUnknown` ends with `PublishManager.giveUpPublish(seedLocalId)`. It goes to `failure`

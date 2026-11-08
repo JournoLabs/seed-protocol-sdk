@@ -11,7 +11,7 @@ import { getPublishBlockNumber, waitForPublishReceipt } from '~/helpers/chainCli
 import { getPublishViemChain } from '~/helpers/chainConfig'
 import { usableHostNonceKey } from '~/helpers/hostNonceKey'
 import { nonceKeyForAttempt } from '~/helpers/pinnedNonce'
-import { errorChain } from '~/helpers/repeatingAttestationError'
+import { errorChain } from '~/helpers/errorChain'
 import { isNonceTooLowError } from '~/helpers/retryNonceTooLow'
 import type { SeedTxSender } from '~/helpers/seedSigner'
 import type { DirectAttestationStep } from './recordDirectAttestation'

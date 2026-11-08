@@ -134,6 +134,24 @@ describe('settleAttestationAttempt', () => {
     expect(findOpenPublishAttempts).not.toHaveBeenCalled()
   })
 
+  test('PublishManager settles only after restore, so a restored run is seen as running', async () => {
+    const { PublishManager } = await import('./index')
+    process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '20'
+    const statusAtRead: string[] = []
+    findOpenPublishAttempts.mockImplementation(async () => {
+      statusAtRead.push(PublishManager.getRestoreStatus().outcome)
+      return rows.filter(open)
+    })
+    try {
+      rows = [row()]
+      expect(await PublishManager.settleAttestationAttempt('post', PUBLISHER)).toEqual({ status: 'settled' })
+      expect(statusAtRead.length).toBeGreaterThan(0)
+      expect(statusAtRead).not.toContain('pending')
+    } finally {
+      findOpenPublishAttempts.mockImplementation(async () => rows.filter(open))
+    }
+  })
+
   test('settles where Web Locks are missing, as in Node', async () => {
     setPublishLockManagerForTests(undefined)
     rows = [row()]

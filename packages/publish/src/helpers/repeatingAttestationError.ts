@@ -1,12 +1,6 @@
 import { isManagedAccountPublishError, PublishNonceKeyError, type ManagedAccountPublishErrorCode } from '~/errors'
+import { errorChain } from './errorChain'
 import { PublishChainConfigError } from './verifyPublishChain'
-
-/** An error and its causes, outermost first, at most 8. */
-export const errorChain = (err: unknown): unknown[] => {
-  const chain: unknown[] = []
-  for (let cur = err; cur && chain.length < 8; cur = (cur as { cause?: unknown }).cause) chain.push(cur)
-  return chain
-}
 
 const REPEATING_CODES = new Set<ManagedAccountPublishErrorCode>([
   'PUBLISH_PREFLIGHT_FAILED',

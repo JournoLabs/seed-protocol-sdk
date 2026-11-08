@@ -90,9 +90,10 @@ stops at `attestationOutcomeUnknown`. Restoring a snapshot saved mid-attestation
 **An attempt can be settled with no run.** `PublishManager.settleAttestationAttempt` runs the same
 chain reads as `reconcilingAttestations`, with no run id, so it records every landed transaction it
 finds and never sends: a pinned attempt that hasn't landed stays open as `pinnedNotLanded`, because
-only its own run has the requests to send under that key. It refuses while a publish of the seed runs
-or waits in this tab, or another tab holds the seed's lock, since that run settles on its own retry and
-two settles could record one receipt twice. Without the run-less settle, a host whose run was gone
+only its own run has the requests to send under that key. It waits for restore, then refuses while a
+publish of the seed runs or waits in this tab, or another tab holds the seed's lock: that run settles
+its attempts on its own retry, and recording from both would put the caller's publisher address on rows
+the run records with its own. Without the run-less settle, a host whose run was gone
 after a reload could only give the attempt up blind.
 
 **`giveUp` ends a waiting run only once no attempt is open.** The run reads the seed's open attempts
