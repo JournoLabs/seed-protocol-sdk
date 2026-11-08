@@ -155,6 +155,30 @@ describe('hydrateArweaveRichTextInItems', () => {
     expect(second[0]!.html).toBe('<p>later</p>')
   })
 
+  it('reports the fields no gateway returned a body for, and only those', async () => {
+    const missing = `https://arweave.net/${txId(20)}`
+    const image = `https://arweave.net/${txId(21)}`
+    const read = `https://arweave.net/${txId(22)}`
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (requested: string) => {
+        if (requested.endsWith(txId(21))) return { ok: true, status: 200, headers: { get: () => 'image/png' } }
+        if (requested.endsWith(txId(22))) return htmlResponse('<p>read</p>')
+        return { ok: false, status: 404, headers: { get: () => '' } }
+      }),
+    )
+
+    const items = [
+      { html: missing, body: read },
+      { html: image },
+      { html: '<p>inline</p>' },
+    ] as Record<string, unknown>[]
+    const unread = await hydrateArweaveRichTextInItems(items)
+    expect(unread).toEqual([['html'], [], []])
+    expect(items[0]!.body).toBe('<p>read</p>')
+    expect(items[1]!.html).toBe(image)
+  })
+
   it('fetches the body from the next read gateway when the first fails', async () => {
     const url = `https://arweave.net/${txId(5)}`
     const fetchMock = vi.fn(async (requested: string) =>

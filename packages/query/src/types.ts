@@ -13,6 +13,12 @@ export type SeedRecord = {
   readonly timeCreated: number
   readonly versionUid: string
   readonly data: SeedData
+  /**
+   * Fields of `data` (a List's name for one of its elements) that still hold an Arweave transaction
+   * URL because no read gateway returned the body. A later read tries them again, cached or not.
+   * Absent when every body was read or `hydrateStorage` is false.
+   */
+  readonly unreadStorage?: readonly string[]
 }
 
 /** Where to load Seed/Version/property attestations from. Default `'remote'`. */

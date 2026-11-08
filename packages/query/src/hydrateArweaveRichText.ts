@@ -79,10 +79,19 @@ async function fetchGatewayPayloadAsUtf8(baseUrl: string, link: ArweaveTransacti
 }
 
 /**
+ * A field's body: its text, `skip` when it holds no body to show (media, ciphertext, not a
+ * transaction URL), or `unread` when no read gateway returned it. Only `unread` is worth trying again.
+ */
+type BodyRead = { kind: 'text'; text: string } | { kind: 'skip' } | { kind: 'unread' }
+
+const SKIP: BodyRead = { kind: 'skip' }
+const UNREAD: BodyRead = { kind: 'unread' }
+
+/**
  * The body from the first read gateway that has it, skipping gateways whose circuit is open. Only a
  * failure counts against a gateway's circuit; a gateway that doesn't have the body is passed over.
  */
-async function fetchBodyAcrossGateways(link: ArweaveTransactionLink): Promise<string | null> {
+async function fetchBodyAcrossGateways(link: ArweaveTransactionLink): Promise<BodyRead> {
   const baseUrls = getArweaveReadBaseUrls()
   const open = baseUrls.filter((url) => !isGatewayHostCircuitOpen(url))
   for (const baseUrl of open.length > 0 ? open : baseUrls) {
@@ -93,9 +102,9 @@ async function fetchBodyAcrossGateways(link: ArweaveTransactionLink): Promise<st
     }
     if (result.kind === 'miss') continue
     recordGatewayHostSuccess(baseUrl)
-    return result.kind === 'text' ? result.text : null
+    return result.kind === 'text' ? result : SKIP
   }
-  return null
+  return UNREAD
 }
 
 /** Upper bound on cached body text, in UTF-16 code units (~2 bytes each). */
@@ -109,7 +118,7 @@ const BODY_CACHE_MAX_CHARS = 32_000_000
  */
 const bodyCache = new Map<string, string>()
 let bodyCacheChars = 0
-const bodiesInFlight = new Map<string, Promise<string | null>>()
+const bodiesInFlight = new Map<string, Promise<BodyRead>>()
 
 /** Clears the Arweave body cache. For tests. */
 export function resetArweaveBodyCache(): void {
@@ -133,7 +142,7 @@ function cacheBody(key: string, text: string): void {
  * Gateway body for a transaction URL (`isArweaveTransactionGatewayUrl`), from whichever read gateway
  * has it: cached by transaction id and link form, concurrent requests shared.
  */
-async function fetchTransactionBody(url: string): Promise<string | null> {
+async function fetchTransactionBody(url: string): Promise<BodyRead> {
   const link = parseArweaveTransactionLink(url)!
   const key = `${link.form}:${link.transactionId}`
   const cached = bodyCache.get(key)
@@ -141,15 +150,15 @@ async function fetchTransactionBody(url: string): Promise<string | null> {
     // Most recently used goes last.
     bodyCache.delete(key)
     bodyCache.set(key, cached)
-    return cached
+    return { kind: 'text', text: cached }
   }
   const inFlight = bodiesInFlight.get(key)
   if (inFlight) return inFlight
 
   const request = fetchBodyAcrossGateways(link)
-    .then((text) => {
-      if (text !== null && bodiesInFlight.get(key) === request) cacheBody(key, text)
-      return text
+    .then((read) => {
+      if (read.kind === 'text' && bodiesInFlight.get(key) === request) cacheBody(key, read.text)
+      return read
     })
     .finally(() => {
       if (bodiesInFlight.get(key) === request) bodiesInFlight.delete(key)
@@ -162,16 +171,16 @@ async function resolveHydratedBody(
   propertyName: string,
   value: string,
   readStorageBody?: HydrateStorageOptions['readStorageBody'],
-): Promise<string | null> {
+): Promise<BodyRead> {
   if (readStorageBody) {
     try {
       const local = await readStorageBody({ propertyName, value })
-      if (local != null && local.length > 0) return local
+      if (local != null && local.length > 0) return { kind: 'text', text: local }
     } catch {
       // fall through to gateway
     }
   }
-  if (!isArweaveTransactionGatewayUrl(value)) return null
+  if (!isArweaveTransactionGatewayUrl(value)) return SKIP
   return fetchTransactionBody(value)
 }
 
@@ -196,15 +205,20 @@ async function runWithConcurrency(
  * Replace those with the UTF-8 body when `hydrateStorage` is enabled, its Arweave links moved onto
  * this reader's gateways (ADR 0025).
  * Up to HYDRATE_CONCURRENCY bodies are resolved at a time, across all items.
+ *
+ * Returns, for each item, the names of the fields (a List's name for one of its elements) that still
+ * hold a transaction URL because no read gateway returned the body, sorted. Empty when every body
+ * was read or had none to read.
  */
 export async function hydrateArweaveRichTextInItems(
   items: Record<string, unknown>[],
   options?: HydrateStorageOptions,
-): Promise<void> {
+): Promise<string[][]> {
   const readStorageBody = options?.readStorageBody
   const tasks: Array<() => Promise<void>> = []
+  const unread = items.map(() => new Set<string>())
 
-  for (const item of items) {
+  items.forEach((item, itemIndex) => {
     const keysToHydrate = new Set<string>([...RICH_TEXT_KEYS])
     const fieldModels = getFieldStorageModels(item)
     if (fieldModels) {
@@ -216,8 +230,9 @@ export async function hydrateArweaveRichTextInItems(
       const v = item[key]
       if (typeof v !== 'string' || v.trim() === '') continue
       tasks.push(async () => {
-        const text = await resolveHydratedBody(key, v, readStorageBody)
-        if (text !== null) item[key] = rehostArweaveLinksInHtml(text)
+        const read = await resolveHydratedBody(key, v, readStorageBody)
+        if (read.kind === 'text') item[key] = rehostArweaveLinksInHtml(read.text)
+        else if (read.kind === 'unread') unread[itemIndex]!.add(key)
       })
     }
 
@@ -232,13 +247,15 @@ export async function hydrateArweaveRichTextInItems(
           const el = arr[i]
           if (typeof el !== 'string') continue
           tasks.push(async () => {
-            const text = await resolveHydratedBody(listKey, el, readStorageBody)
-            if (text !== null) arr[i] = rehostArweaveLinksInHtml(text)
+            const read = await resolveHydratedBody(listKey, el, readStorageBody)
+            if (read.kind === 'text') arr[i] = rehostArweaveLinksInHtml(read.text)
+            else if (read.kind === 'unread') unread[itemIndex]!.add(listKey)
           })
         }
       }
     }
-  }
+  })
 
   await runWithConcurrency(tasks, HYDRATE_CONCURRENCY)
+  return unread.map((names) => [...names].sort())
 }

@@ -39,6 +39,8 @@ import {
   buildAssembleOptionsKey,
 } from '../src/cache/index'
 import type { AttestationLike } from '../src/types'
+import { BaseArweaveClient, resetGatewayCircuitBreakerForTests } from '@seedprotocol/arweave'
+import { resetArweaveBodyCache } from '../src/hydrateArweaveRichText'
 
 function propDecoded(name: string, value: string, type = 'string') {
   return JSON.stringify([{ value: { name, value, type } }])
@@ -347,6 +349,55 @@ describe('queryBySchema / getSeed caching', () => {
       ids: [],
     })
     expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a listed body again from the collection cache when no gateway had it', async () => {
+    BaseArweaveClient.setHost('arweave.net')
+    resetArweaveBodyCache()
+    resetGatewayCircuitBreakerForTests()
+    const bodyUrl = `https://arweave.net/raw/${'t'.repeat(43)}`
+    mockAssembledPost('0xseed1', '0xver1', 'Listed', 100)
+    mockGetItemPropertiesFromEas.mockResolvedValue([
+      {
+        id: '0xprop1',
+        decodedDataJson: propDecoded('html', bodyUrl),
+        refUID: '0xver1',
+        schemaId: '0xhtmlSchema',
+        timeCreated: 120,
+      },
+    ])
+    let gatewaysHaveIt = false
+    const fetchMock = vi.fn(async () =>
+      gatewaysHaveIt
+        ? {
+            ok: true,
+            status: 200,
+            headers: { get: () => 'text/html; charset=utf-8' },
+            arrayBuffer: async () => new TextEncoder().encode('<p>body</p>').buffer,
+          }
+        : { ok: false, status: 404, headers: { get: () => '' } },
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const opts = { limit: 10 }
+      const unread = await queryBySchema('post', opts)
+      expect(unread.items[0]!.data.html).toBe(bodyUrl)
+      expect(unread.items[0]!.unreadStorage).toEqual(['html'])
+
+      gatewaysHaveIt = true
+      const read = await queryBySchema('post', opts)
+      expect(mockGetItemPropertiesFromEas).toHaveBeenCalledTimes(1)
+      expect(read.items[0]!.data.html).toBe('<p>body</p>')
+      expect(read.items[0]!.unreadStorage).toBeUndefined()
+      expect(read.etag).not.toBe(unread.etag)
+
+      fetchMock.mockClear()
+      const again = await queryBySchema('post', opts)
+      expect(again.items[0]!.data.html).toBe('<p>body</p>')
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('a warm read sends the change check alongside the seed list', async () => {
