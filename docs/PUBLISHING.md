@@ -187,7 +187,9 @@ whose tries don't, such as a server job that creates a new item per try, passes 
 Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
 `describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
 `snapshot.context.error` is an `AttestationOutcomeUnknownError` (code `ATTESTATION_OUTCOME_UNKNOWN`)
-with `attemptId` and `transactionHash`.
+with `attemptId`, `transactionHash` and `reason`: `pinnedNotLanded` (another run's pinned UserOp
+hasn't landed), `noEvidence` (no hash and no pin) or `chainUnreadable` (the receipt, the nonce or the
+UserOp logs couldn't be read).
 `retryAttestations` looks again and never sends blind. To settle it:
 
 ```typescript
@@ -197,6 +199,34 @@ await PublishManager.resolveAttestationAttempt(seedLocalId, { txHash })
 // Give the attempt up and send again. If it did land, this attests a second time.
 await PublishManager.resolveAttestationAttempt(seedLocalId, { resend: true })
 ```
+
+`resolveAttestationAttempt` retries only a publish that runs in this tab. With no run it updates the
+attempt, and the next publish reconciles from it.
+
+To settle a seed's open attempts with no run, after a reload for example, call
+`PublishManager.settleAttestationAttempt(seedLocalId, publisherAddress)`. It reads the chain as a retry
+does, records a landed transaction with `publisherAddress` on its rows, closes a reverted one, and never
+sends. It resolves `{ status: 'settled' }` once no attempt is open, `{ status: 'unknown', attempt, reason }`
+for one it can't settle (with the same `reason` values as above), or `{ status: 'running' }` without
+reading anything while a publish of the seed runs or waits in this tab, or another tab holds its lock;
+`retryAttestations` settles it there. It waits for `PublishManager.ready()` first, so a publish that
+restore brings back counts as running.
+
+A publish waiting in `attestationFailureRecoverable`, `attestationFailureRecoverableDirectToEas` or
+`attestationOutcomeUnknown` ends with `PublishManager.giveUpPublish(seedLocalId)`. It goes to `failure`
+with its error kept, so the row reads `failed` with `errorCode`, where `stopPublish` records
+`interrupted` and clears the error. While an attempt is open it doesn't end: it passes through
+`checkingGiveUp` and goes back to the state it came from, since a send that may still land must not be
+hidden. Read `PublishManager.query(seedLocalId)` to see which happened. A publish saved during that
+check is restored in the state it came from.
+
+Nothing goes to `failure` on its own. `isRepeatingAttestationError(error)` is true for errors that come
+back on every retry until something outside the publish changes: `PublishNonceKeyError`,
+`PublishChainConfigError`, and `ManagedAccountPublishError` with `PUBLISH_PREFLIGHT_FAILED`,
+`PUBLISH_TOO_LARGE`, `MULTI_PUBLISH_NOT_ROUTED`, `USEROP_REVERTED`, `USEROP_FAILED_NO_REASON`,
+`MANAGED_ACCOUNT_NOT_DEPLOYED` or `EXECUTOR_MODULE_NOT_INSTALLED`. A host can offer giving up first for
+these. A retry can still succeed after the author deploys the account, installs the module or adds
+funds, and a new publish uploads to Arweave again.
 
 Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
 retry. `PublishManager.getRestoreStatus()` returns `outcome`, one of `pending`, `restored`, `dbNotReady`

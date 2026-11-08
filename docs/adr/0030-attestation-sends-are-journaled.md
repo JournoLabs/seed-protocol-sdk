@@ -84,3 +84,26 @@ stops at `attestationOutcomeUnknown`. Restoring a snapshot saved mid-attestation
   their own nonce.
 - **Build UserOps per call for thirdweb** with `createAndSignUserOp` and `bundleUserOp`. Kept in reserve;
   the nonce slot passed against a real bundler and leaves thirdweb's send path in place.
+
+## Addendum, 2026-11-08: settling with no run, and giving up
+
+**An attempt can be settled with no run.** `PublishManager.settleAttestationAttempt` runs the same
+chain reads as `reconcilingAttestations`, with no run id, so it records every landed transaction it
+finds and never sends: a pinned attempt that hasn't landed stays open as `pinnedNotLanded`, because
+only its own run has the requests to send under that key. It waits for restore, then refuses while a
+publish of the seed runs or waits in this tab, or another tab holds the seed's lock: that run settles
+its attempts on its own retry, and recording from both would put the caller's publisher address on rows
+the run records with its own. Without the run-less settle, a host whose run was gone
+after a reload could only give the attempt up blind.
+
+**`giveUp` ends a waiting run only once no attempt is open.** The run reads the seed's open attempts
+first and goes back to the state it came from if one is open. A run ended while one of its sends may
+still land would leave that attestation unrecorded, and the next publish of the seed would still be
+refused by the open attempt.
+
+**No error ends a run on its own.** Several errors repeat on every retry until something outside the
+publish changes, and `isRepeatingAttestationError` names them, but most of them clear once the author
+acts: deploying the account (`MANAGED_ACCOUNT_NOT_DEPLOYED`), installing the module
+(`EXECUTOR_MODULE_NOT_INSTALLED`), or funding a paymaster or account (`USEROP_REVERTED`). Moving those to
+`failure` would make the author start a new publish, which uploads to Arweave again, so the host
+decides when to give up.

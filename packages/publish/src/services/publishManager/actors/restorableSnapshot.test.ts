@@ -10,6 +10,20 @@ describe('parkInterruptedAttestation', () => {
     }
   })
 
+  test('a publish saved while checking a giveUp comes back in the state it gave up from, with no retry', () => {
+    const parsed = {
+      value: 'checkingGiveUp',
+      children: { check: {} },
+      context: { giveUpFrom: 'attestationOutcomeUnknown' } as Record<string, unknown>,
+    }
+    expect(parkInterruptedAttestation(parsed)).toBe(false)
+    expect(parsed).toEqual({ value: 'attestationOutcomeUnknown', children: {}, context: {} })
+
+    const noOrigin = { value: 'checkingGiveUp', children: {}, context: {} }
+    parkInterruptedAttestation(noOrigin)
+    expect(noOrigin.value).toBe('attestationFailureRecoverable')
+  })
+
   test('other states are left alone', () => {
     const parsed = { value: 'attestationOutcomeUnknown', children: {}, context: {} }
     expect(parkInterruptedAttestation(parsed)).toBe(false)

@@ -11,17 +11,12 @@ import { getPublishBlockNumber, waitForPublishReceipt } from '~/helpers/chainCli
 import { getPublishViemChain } from '~/helpers/chainConfig'
 import { usableHostNonceKey } from '~/helpers/hostNonceKey'
 import { nonceKeyForAttempt } from '~/helpers/pinnedNonce'
+import { errorChain } from '~/helpers/errorChain'
 import { isNonceTooLowError } from '~/helpers/retryNonceTooLow'
 import type { SeedTxSender } from '~/helpers/seedSigner'
 import type { DirectAttestationStep } from './recordDirectAttestation'
 
 const logger = debug('seedProtocol:services:publish:actors:sendAttested')
-
-const errorChain = (err: unknown): unknown[] => {
-  const chain: unknown[] = []
-  for (let cur = err; cur && chain.length < 8; cur = (cur as { cause?: unknown }).cause) chain.push(cur)
-  return chain
-}
 
 /**
  * What a failed send says about the transaction. `undefined` means it can't tell, which includes

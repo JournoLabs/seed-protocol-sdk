@@ -53,6 +53,8 @@ export const PUBLISH_RUN_STATE_PHASES: Readonly<Record<string, PublishRunDescrip
   attestationOutcomeUnknown: { phase: 'attesting', awaitingRetry: true, terminal: false },
   creatingAttestationsDirectToEas: { phase: 'attesting', awaitingRetry: false, terminal: false },
   attestationFailureRecoverableDirectToEas: { phase: 'attesting', awaitingRetry: true, terminal: false },
+  // Reads the open attempts after a giveUp: on to failure, or back to the waiting state.
+  checkingGiveUp: { phase: 'attesting', awaitingRetry: false, terminal: false },
   revokingRetractedProperties: { phase: 'retracting', awaitingRetry: false, terminal: false },
   retractionFailureRecoverable: { phase: 'retracting', awaitingRetry: true, terminal: false },
   // Reached only on `redundantPublishProcess`: another run already covers the item.

@@ -5,6 +5,7 @@ export {
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 export { getPublishChainName } from './helpers/chainConfig'
 export { verifyPublishChain, PublishChainConfigError } from './helpers/verifyPublishChain'
+export { isRepeatingAttestationError } from './helpers/repeatingAttestationError'
 export { seedTwinConfig, type SeedTwinInfo, type SeedTwinPublishConfig } from './helpers/seedTwin'
 export {
   EAS_CHAIN_DEPLOYMENTS,
@@ -52,6 +53,7 @@ export type {
 export {
   AttestationAttemptOpenError,
   AttestationOutcomeUnknownError,
+  type AttestationUnknownReason,
   AttestationRecordError,
   AttestationVerificationError,
   isManagedAccountPublishError,
@@ -199,6 +201,7 @@ export type {
 } from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
+export type { AttestationSettleResult } from './services/publishManager/settleAttestationAttempt'
 export {
   publishLockHolder,
   type PublishLockHolder,

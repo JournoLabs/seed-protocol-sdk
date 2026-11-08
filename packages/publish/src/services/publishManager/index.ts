@@ -5,6 +5,7 @@ import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
+import { giveUpPublish } from './actions/giveUpPublish'
 import { stopAll } from './actions/stopAll'
 import { addSubscription } from './actions/addSubscription'
 import { requestSavePublish } from './actions/requestSavePublish'
@@ -16,6 +17,7 @@ import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
 import { isHoldingPublishLock, releasePublishLock, tryHoldPublishLock } from './publishLocks'
+import { settleAttestationAttempt, type AttestationSettleResult } from './settleAttestationAttempt'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:PublishManager:index')
@@ -40,6 +42,7 @@ type PublishManagerEvent =
   | { type: 'REMOVE_SUBSCRIPTION'; seedLocalId: string }
   | { type: 'RETRY_ATTESTATIONS'; seedLocalId: string; account?: unknown }
   | { type: 'STOP_PUBLISH'; seedLocalId: string }
+  | { type: 'GIVE_UP'; seedLocalId: string }
   | { type: 'STOP_ALL' }
 
 export const publishManagerMachine = setup({
@@ -63,6 +66,7 @@ export const publishManagerMachine = setup({
     removeSubscription,
     retryAttestations,
     stopPublish,
+    giveUpPublish,
     stopAll,
   } as unknown as Record<string, (args: unknown) => void>,
 }).createMachine({
@@ -128,6 +132,9 @@ export const publishManagerMachine = setup({
         STOP_PUBLISH: {
           actions: ['stopPublish'],
         },
+        GIVE_UP: {
+          actions: ['giveUpPublish'],
+        },
         STOP_ALL: {
           actions: ['stopAll'],
         },
@@ -147,6 +154,9 @@ const initialManagerContext = {
 const publishManager = createActor(publishManagerMachine, {
   input: initialManagerContext,
 })
+
+/** Whether a publish of the seed runs or waits in this tab. A finished one doesn't count. */
+const hasRun = (seedLocalId: string) => publishManager.getSnapshot().context.publishProcesses.has(seedLocalId)
 
 /**
  * `snapshot.status === 'active'` is true before `start()` and while restore is running.
@@ -265,7 +275,8 @@ export const PublishManager = {
   retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').PublishWallet) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
   /**
-   * Settles a seed's open attempt, for a publish in `attestationOutcomeUnknown`, then retries.
+   * Settles a seed's open attempt, for a publish in `attestationOutcomeUnknown`, then retries that
+   * publish if it runs in this tab. With no run it only updates the attempt.
    * `txHash` names the transaction, found on a block explorer or from the wallet: it is read and
    * recorded; anything but `0x` and 64 hex digits throws a `TypeError` and records nothing. It isn't
    * checked against the attempt's sender. `resend: true` gives the attempt up and sends again, which attests a second time if
@@ -288,9 +299,33 @@ export const PublishManager = {
         'txHash' in resolution ? { status: 'sent', txHash: resolution.txHash } : { status: 'abandoned' },
       )
     }
-    publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account })
+    // With no run the next publish reconciles from the updated attempt.
+    if (hasRun(seedLocalId)) publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account })
+  },
+  /**
+   * Settles a seed's open attestation attempts from the chain when no run is waiting on them, as a
+   * retry's reconcile would: a landed transaction is recorded with `publisher` on its rows, and a
+   * reverted one closes. It never sends. `running`: a publish of the seed runs or waits in this tab,
+   * or another tab holds its lock; nothing was read, and `retryAttestations` settles it there.
+   * `unknown`: the attempt may have landed and the chain can't say (`reason`), and it stays open;
+   * `resolveAttestationAttempt` settles it by hash or gives it up. Waits for `ready()` first, so a
+   * publish restore brings back counts as running.
+   */
+  settleAttestationAttempt: async (seedLocalId: string, publisher: string): Promise<AttestationSettleResult> => {
+    // A publish restore is about to spawn isn't in publishProcesses yet; wait for it.
+    await PublishManager.ready()
+    return settleAttestationAttempt(seedLocalId, publisher, hasRun)
   },
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
+  /**
+   * Ends a publish waiting after a failed attestation (`attestationFailureRecoverable`, its direct
+   * EAS twin, or `attestationOutcomeUnknown`) as `failed`, keeping its error, unlike `stopPublish`,
+   * which records it `interrupted` and clears the error. It ends the run only once no attestation
+   * attempt for the seed is open; otherwise the run keeps waiting, and `retryAttestations` settles
+   * the attempt. Read `query(seedLocalId)` to see which happened. Does nothing in any other state, or
+   * when this tab has no publish for the seed.
+   */
+  giveUpPublish: (seedLocalId: string) => publishManager.send({ type: 'GIVE_UP', seedLocalId }),
   /**
    * The current snapshot of a seed's publish (running, or settled this session), or undefined.
    * A read only: it used to stop the publish it named, as stopPublish does without marking the row

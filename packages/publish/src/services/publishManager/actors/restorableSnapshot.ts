@@ -11,6 +11,7 @@ export interface PersistedSnapshot {
     modelName?: string
     schemaId?: string
     bundlerUploadNotNeeded?: boolean
+    giveUpFrom?: string
   }
 }
 
@@ -51,10 +52,18 @@ const ATTESTING_STATES = new Set([
 
 /**
  * A publish interrupted while attesting comes back waiting for a retry, with no running actor. The
- * retry reconciles, from the restored context, before anything can send.
+ * retry reconciles, from the restored context, before anything can send. One interrupted while
+ * checking a `giveUp` comes back in the state it gave up from, with no retry: the host can give up
+ * again.
  * @returns true when the caller should send that `retry`
  */
 export function parkInterruptedAttestation(parsed: PersistedSnapshot): boolean {
+  if (getStateValue(parsed) === 'checkingGiveUp') {
+    parsed.value = parsed.context?.giveUpFrom ?? 'attestationFailureRecoverable'
+    parsed.children = {}
+    if (parsed.context) delete parsed.context.giveUpFrom
+    return false
+  }
   if (!ATTESTING_STATES.has(getStateValue(parsed))) return false
   parsed.value = 'attestationFailureRecoverable'
   parsed.children = {}
