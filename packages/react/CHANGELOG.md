@@ -2,10 +2,21 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - `SeedImage` doesn't fall back to a gateway URL for an image whose property has `valueStatus: 'encrypted'` (a private image this device has no key for): the gateway only holds its ciphertext. It shows the transparent placeholder; check `valueStatus` to render your own.
 - A `SeedProvider` or `SeedClientGate` remounted with addresses that differ from the stored ones applies them with `client.setAddresses`. It kept the stored addresses, so an app that unmounts its provider or gate across a user switch kept the previous user's, and ownership and sync followed that account. 0.7.13 applied them. A remount with `[]` still keeps the stored addresses.
+
+### Commits
+
+#### Features
+
+- sdk: open private Versions on a reading device (170f1789)
+
+#### Fixes
+
+- a remount with other addresses applies them (788fcd85)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

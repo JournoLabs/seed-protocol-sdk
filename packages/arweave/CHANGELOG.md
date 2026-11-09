@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - **Breaking:** `fetchArweaveRawFromBaseUrl` returns `{ baseUrl, outcome, response? }` instead of `Response | undefined`. `outcome` is the HTTP status, `'timeout'` or `'network'`; `response` is set only for a 2xx answer.
 - New `readArweaveRawAcrossGateways(transactionId, options)`: `/raw/{id}` on each read gateway at most once, returning `{ bytes, attempts }` with what each gateway answered. `fetchArweaveRawBytesAcrossGateways` and `fetchArweaveRawTextAcrossGateways` wrap it.
@@ -10,6 +10,18 @@ All notable changes to this package are documented in this file.
 
 - `fetchArweaveRawBytesAcrossGateways(id, { decode: false })` returns the transaction's bytes as a gateway serves them, without the registered content read transform, as `getTransactionData` does. The default still applies the transform.
 - `isEncryptedArweaveContent(bytes)`: true for a `seed-private/v1` envelope (ADR 0033). `fetchArweaveRawTextAcrossGateways` returns undefined for an envelope that no read transform decrypted, rather than decoding ciphertext as text.
+
+### Commits
+
+#### Features
+
+- sdk: keep unopened encrypted envelopes out of text and media reads (ee9a618e)
+
+#### Fixes
+
+- sdk: one gateway pass and one warning per missed Html body (99aa5031)
+- archive, rdf, vite: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

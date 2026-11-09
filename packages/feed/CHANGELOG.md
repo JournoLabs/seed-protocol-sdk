@@ -2,10 +2,17 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - **Breaking:** `parseRssString`'s `authorList` and `creatorList` hold names as strings, each once. An Atom `<author>` was the parser's element object (`{ name: ['Mira Chen'] }`), and a name repeated in another case or spacing was listed twice. Names match as @seedprotocol/mapping's lookups do (whitespace collapsed, case-folded), and the first spelling is kept.
 - An Atom entry always gets a valid `<updated>`, which RFC 4287 requires. An item's `updated` that is empty, isn't a date, or is a number falls back to its published time, then to the time the feed is built. `''` left the element out, `'garbage'` was written as is, and `0` threw from feedsmith.
+
+### Commits
+
+#### Fixes
+
+- mapping: single-relation lookups, renderLookup in every layout, Atom updated (1f31bff2)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - Sync takes a seed's model from its schema's definition (`post` for `bytes32 post`) instead of the first name attested onto the schema, which anyone can add (ADR 0035). A relation that points at an attestation outside a Seed model schema no longer stores it as a seed.
 - An Html body whose local file is missing is read from a file already downloaded under its transaction id, else from `/raw/{id}` on each read gateway once. When no gateway has it, one `console.warn` names the transaction and each gateway's answer (status, `timeout` or `network error`), once per transaction per page load. The read no longer falls back to arweave-js `getData`, which can't serve a bundled data item and logged four console lines per miss, or to a download that asked the same gateways again.
@@ -25,6 +25,28 @@ All notable changes to this package are documented in this file.
 - Downloads keep a `seed-private/v1` envelope (an encrypted upload, ADR 0033) whole as `encrypted/<txId>` instead of filing ciphertext as an image or file by its Content-Type or a sniff. `DownloadAllFilesResult` has `encryptedTransactionIds`; code that builds its own result (a mock, say) needs the field. The Html storage-seed fallback doesn't return an envelope as the body, and passes bytes from a blob source through the Arweave content read transform.
 
 - New `SeedConfig.blobSources`, `setBlobSources` and the `BlobSource` interface (ADR 0026, "Blob store reads"): where to read files whose `storage_transaction_id` isn't an Arweave transaction id, such as `ipfs://<cid>` ids from a publish `BlobStore`. The downloader fetches those from the source's URLs and checks the SHA-256 the source gives, and the file is named by the source's key. Ids no source claims are read from the Arweave gateways as before.
+
+### Commits
+
+#### Features
+
+- open private Versions on a reading device (170f1789)
+- publish: encrypt the uploads of private properties (739895e2)
+- private flag on schema file properties (3b62e2a8)
+- encryptUpload hook in the publish upload builder (1815e386)
+- keep unopened encrypted envelopes out of text and media reads (ee9a618e)
+- BlobSource reads for storage ids that aren't Arweave ids (9c8471da)
+
+#### Fixes
+
+- eas, query, publish: identify schemas by definition-derived UID, not by name (63610e20)
+- arweave: one gateway pass and one warning per missed Html body (99aa5031)
+- publish: chunk pinned-nonce log reads; record unpinned sends; check the in-app sender (42cca8e7)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
+- export the types exported reads return; correct the 0.8.1 changelog (a4905a96)
+- publish: count linked back references in summarizePublishWork and the cost estimate (cc0a3601)
+- refuse reserved names before writing a schema version or creating a model (07f70d36)
+- wait for a staged file's write before saving it, and report a changed upload on Node (3ecfd585)
 
 ## 0.8.1 (2026-11-04)
 

@@ -1,9 +1,16 @@
 # @seedprotocol/vite
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - **Breaking:** the RDF sidecar check defaults to `seed.schema.json` and `seed.schema.context.jsonld`, the names `seed-rdf` now defaults to. They were `seedSchema.json` and `seedSchema.context.jsonld`. Rename the files or set `rdfSidecar: { schema }`.
 - The RDF sidecar check runs again when the app's `package.json` changes while `@seedprotocol/rdf` is missing, so installing rdf with the dev server running checks the sidecar. It used to wait for the next edit to the schema or the sidecar.
+
+### Commits
+
+#### Fixes
+
+- archive, arweave, rdf: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+- release: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

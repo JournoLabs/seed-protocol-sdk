@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - A body no read gateway returned is read again on the next cache hit. `getSeed`, `getSeeds` and `queryBySchema` cached such a record with its transaction URL in place of the body and served it until the seed changed on EAS, so a post read while gateways didn't have its body yet showed the URL for good in that process. The cached entry is updated once the body loads. Within `maxAge`, a collection still comes back without the retry.
 - `SeedRecord.unreadStorage` names the storage fields whose body no read gateway returned; absent when every body was read. `hydrateArweaveRichTextInItems` returns the same names for each item.
@@ -15,6 +15,21 @@ All notable changes to this package are documented in this file.
 - `hydrateArweaveRichTextInItems` leaves the link in place when the body is an encrypted envelope (ADR 0033) that no read transform decrypted.
 
 - `@seedprotocol/query/ens` reads ENS names through a viem client you pass in (ADR 0032, [docs/ENS.md](../../docs/ENS.md)). `getSeedPublication` reads the `io.seedprotocol.publication` text record (JSON: `schema`, `publisher`, `feed`, `chainId`) and the contenthash, and returns the `schemaName` and `publisher` to pass to `queryBySchema`. `getEnsContenthash` and `decodeContenthash` decode EIP-1577 contenthashes for IPFS, IPNS, Swarm and Arweave. `getEnsNames` maps attester addresses to primary names. Wildcard names and CCIP-Read resolvers work through the Universal Resolver. viem and `multiformats` are now dependencies; the package root doesn't import them.
+
+### Commits
+
+#### Features
+
+- changelogs for many seeds in one getSeeds read (eb4cc6db)
+- sdk: keep unopened encrypted envelopes out of text and media reads (ee9a618e)
+- read ENS names through @seedprotocol/query/ens (7d9aaea4)
+
+#### Fixes
+
+- read an unread Arweave body again on a cache hit (0c4822d2)
+- eas, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
+- eas, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

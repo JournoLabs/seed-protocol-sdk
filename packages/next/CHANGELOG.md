@@ -1,5 +1,13 @@
 # @seedprotocol/next
 
+## 0.8.2 (2026-11-09)
+
+### Commits
+
+#### Fixes
+
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
+
 ## 0.8.1 (2026-11-04)
 
 No user-facing changes; released at the same version as the other packages.

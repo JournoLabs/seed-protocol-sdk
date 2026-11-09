@@ -1,11 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - A lookup into a single (non-List) property reports no misses once one value has an entry: the first match fills it, and the other values (from `values` or a split) aren't reported to `onUnmatched` or as `applyMappingAsync` errors, and don't keep the row `needsLookup`. A byline of Mira Chen and Sam Ortiz with an entry for Mira only gave `author` Mira's ref and a miss for Sam, so an import counting misses as failures logged a filled property as skipped. With no value matched, every value is still reported. New `resolveTargetLookup(mapping, source, target)` applies the rule; a List property keeps every match and reports every miss.
 - `renderLookup` renders in every layout: rows with `slots.lookups: 'section'` (by property or by source) show one host editor per lookup row after the rows, and wires with `slots.lookups: 'row'` shows the editor in the property's card. Both rendered nothing.
 - **Breaking (types):** `FieldMapperRow` has `sampleValues`, each value a lookup on its source reads. A lookup row is `needsLookup` until each has an entry, so a picker built on `sampleValue` (the first value) couldn't clear it. Code that builds its own rows must supply it.
 - New `migrateMappingLookups(document)` for documents saved before 0.8.0: it moves `MappingDocument.lookups` onto each property's lookup edge as `lookup.entries`, keeps an edge's own entry where both have one, drops `lookups`, and returns `unused`, the properties whose table had no lookup edge. 0.8.0 ignored the table, so each of its values showed up as a miss.
+
+### Commits
+
+#### Fixes
+
+- feed: single-relation lookups, renderLookup in every layout, Atom updated (1f31bff2)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

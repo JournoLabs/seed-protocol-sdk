@@ -2,13 +2,21 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - **Breaking:** `seed-rdf` reads `seed.schema.json` when `--schema` isn't given, and the sidecar defaults to `seed.schema.context.jsonld`. They were `seedSchema.json` and `seedSchema.context.jsonld`, names neither the SDK nor its docs use. Rename the files or pass `--schema`. The name is exported as `DEFAULT_SCHEMA_FILE`.
 - `seedVocabulary(base)` throws a `TypeError` for a base without a trailing `/`, as `iriScheme` does. It wrote `{base}ns#` IRIs that didn't match the graph's.
 - `suggestTerms` suggests `schema:associatedMedia` for an Html property named `html`, `body` or `content`. It suggested `schema:text`, whose range is Text, for a value that is a storage seed's IRI.
 - The state graph links no seed for any unfilled reference slot (a relation value below 2^32). It skipped only `0x…20`, so `stateGraph` given another placeholder linked it as a seed.
 - `engines.node` is `>=20.18.1`, the floor of its dependencies `@seedprotocol/eas` and `@seedprotocol/query`. It said `>=20.12.0`, where those dependencies don't install.
+
+### Commits
+
+#### Fixes
+
+- archive, arweave, vite: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+- query, eas: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

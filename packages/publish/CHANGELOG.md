@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - New `PublishManager.giveUpPublish(seedLocalId)` ends a publish waiting in `attestationFailureRecoverable`, `attestationFailureRecoverableDirectToEas` or `attestationOutcomeUnknown` as `failed`, keeping its error, so the row has its `errorCode`. Those states take a new `giveUp` event, which goes through the new `checkingGiveUp` state and back to the waiting state while an attestation attempt for the seed is open. `stopPublish` was the only way out, and it records `interrupted` and clears the error (ADR 0030).
 - New `PublishManager.settleAttestationAttempt(seedLocalId, publisherAddress)` settles a seed's open attestation attempts from the chain when no publish is waiting on them: it records landed transactions, closes reverted ones and never sends. It resolves an `AttestationSettleResult`: `settled`, `unknown` with the attempt and a reason, or `running` while a publish of the seed runs in this tab or another tab holds its lock (ADR 0030).
@@ -36,6 +36,37 @@ All notable changes to this project will be documented in this file.
 - `estimatePublishCost` counts a reference back to an item the publish creates, as a publish through the contract attests it, unless `useDirectEas` is set. New option `backReferences` (`'link'` or `'defer'`) overrides that. It counted one attestation too few per back reference.
 - Cost estimates take the storage price from Turbo's `/v1/price/bytes`, the payment service in `payment.userStorage` or ArDrive's. If Turbo doesn't answer, they use Arweave's `/price` on the configured gateway, then on arweave.net. They used to ask only the configured gateway, so `estimatePublishCost` and `estimateArchiveAnchorCost` threw behind an upload proxy with no `/price` route.
 - New `PublishConfig.blobStore` and the `BlobStore` interface (ADR 0026): where Image, File, Html and Json bytes go. Publish calls its `prepare` for the ids, `send` for the uploads, and `assertStored` before attesting. The default, exported as `arweaveBlobStore`, does what publish did before. `anchorArchive` always uploads to Arweave. Readers on other devices need the store's `BlobSource` in `SeedConfig.blobSources` to load the files.
+
+### Commits
+
+#### Features
+
+- classify attestation errors that repeat on retry (690b138f)
+- giveUp ends a waiting publish as failed once no attempt is open (8243103d)
+- settle a seed's open attempt with no run waiting on it (2c33193e)
+- encryption, eas: bind encryption keys to the account; make the EOA stanza opt-in (74e59a83)
+- eas: verify encryption keys on chain and revoke on rotation (2d4db080)
+- encrypt the uploads of private properties (739895e2)
+- register an encryption key from the user's account (f6d227d1)
+- publishLockHolder says which tab runs a seed's publish (d2b5af1a)
+- BlobStore seam with Arweave as the default store (321c6760)
+
+#### Fixes
+
+- settle waits for restore; keep sendAttested off verifyPublishChain (b0be9d46)
+- eas, query, sdk: identify schemas by definition-derived UID, not by name (63610e20)
+- archive, arweave, rdf, vite: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+- archive anchor estimate, signer fallback and retry note (ef16a1d8)
+- batch 16 publish fixes outside nonce pinning (6fb4b179)
+- chunk pinned-nonce log reads; record unpinned sends; check the in-app sender (42cca8e7)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
+- sdk: count linked back references in summarizePublishWork and the cost estimate (cc0a3601)
+- storage price from Turbo, with Arweave /price as the fallback (7c2d1606)
+
+#### Other
+
+- settle open attempts outside the reconcile actor, with a reason when unknown (4e592dc7)
+- adr: any wallet registers schemas; readers identify them by UID (f019f1f7)
 
 ## 0.8.1 (2026-11-04)
 

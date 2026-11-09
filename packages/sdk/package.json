@@ -1,7 +1,7 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.8.1",
-  "description": "Official TypeScript SDK for Seed Protocol \u2014 local-first ORM with SQLite/OPFS, syncing via Ethereum Attestation Service (EAS) and Arweave.",
+  "version": "0.8.2",
+  "description": "Official TypeScript SDK for Seed Protocol — local-first ORM with SQLite/OPFS, syncing via Ethereum Attestation Service (EAS) and Arweave.",
   "keywords": [
     "seed-protocol",
     "local-first",

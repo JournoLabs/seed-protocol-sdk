@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.2 (2026-11-09)
 
 - Reads pick schemas by UID, never by an attested name (ADR 0035). Anyone can attach any name to any schema, and anyone can register a Seed definition again with a resolver; OP Sepolia already has two schemas named `image`.
   - New `seedSchemaUid(definition)`: the UID Seed registers a definition under (zero resolver, revocable), the same on every chain. New `seedSchemaModelName(schemaUid, definition)` and `withSeedSchemaNames(seeds)`.
@@ -13,6 +13,20 @@ All notable changes to this package are documented in this file.
 - **Breaking:** `getSchemaNamesBySchemaUids` returns, for each Seed model schema, the one name its definition gives, and leaves out other schemas. It returned every name attested onto each schema.
 - New `getEncryptionKeysFromEas({ attester, includeRevoked })` returns an account's `seedprotocol.encryptionKey` registrations, newest first (those from the same second ordered by uid, so every reader gets the same order), with the key id, suite, the three public keys, the binding signature and the keystore manifest transaction decoded (`EncryptionKeyRegistration`). It doesn't check the binding signature. New constants `ENCRYPTION_KEY_SCHEMA_DEF`, `ENCRYPTION_KEY_SCHEMA_UID` and `ENCRYPTION_KEY_SCHEMA_NAME`.
 - `getArchiveAnchorsFromEas`, `getReportedAttestationUids` and `getSeedsByUidsFromEas` ask the indexer with lower-case uids. An upper-case uid found nothing.
+
+### Commits
+
+#### Features
+
+- encryption, publish: bind encryption keys to the account; make the EOA stanza opt-in (74e59a83)
+- publish: verify encryption keys on chain and revoke on rotation (2d4db080)
+- publish: register an encryption key from the user's account (f6d227d1)
+
+#### Fixes
+
+- query, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
+- query, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 
