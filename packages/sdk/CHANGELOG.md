@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.
+- `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
+
 ## 0.8.2 (2026-11-09)
 
 - Sync takes a seed's model from its schema's definition (`post` for `bytes32 post`) instead of the first name attested onto the schema, which anyone can add (ADR 0035). A relation that points at an attestation outside a Seed model schema no longer stores it as a seed.

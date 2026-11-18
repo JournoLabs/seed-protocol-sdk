@@ -228,6 +228,7 @@ export {
   deletePublishProcessesByIds,
   getArweaveTransactionIds,
   getEasPayload,
+  resumesOnNextLoad,
 } from './hooks'
 export type { UsePublishCostEstimateResult } from './hooks'
 export type { PublishProcessRecord, PublishProcessStatus } from './hooks/useItemPublishStatus'

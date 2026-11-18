@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { isRestorableSnapshot, parkInterruptedAttestation } from './restorableSnapshot'
+import { resumesOnNextLoad } from '../../../hooks/publishProcessHelpers'
 
 describe('parkInterruptedAttestation', () => {
   test('a state that can send comes back waiting for a retry, with no actor to re-run', () => {
@@ -54,5 +55,23 @@ describe('isRestorableSnapshot', () => {
     ]) {
       expect(isRestorableSnapshot({ value, context: {} })).toBe(false)
     }
+  })
+})
+
+// What a host reads from a publish_processes row to say what the next load does with it.
+describe('resumesOnNextLoad', () => {
+  const row = (snapshot: unknown) => ({ persistedSnapshot: JSON.stringify(snapshot) })
+
+  test('follows the restore rule for an in-progress publish', () => {
+    expect(resumesOnNextLoad(row({ status: 'active', value: 'creatingAttestations', context: {} }))).toBe(true)
+    expect(resumesOnNextLoad(row({ status: 'active', value: 'uploadingViaBundler', context: {} }))).toBe(false)
+    expect(
+      resumesOnNextLoad(row({ status: 'active', value: 'uploadingViaBundler', context: { bundlerUploadNotNeeded: true } })),
+    ).toBe(true)
+  })
+
+  test('a finished or unreadable snapshot does not resume', () => {
+    expect(resumesOnNextLoad(row({ status: 'done', value: 'success', context: {} }))).toBe(false)
+    expect(resumesOnNextLoad({ persistedSnapshot: '{not json' })).toBe(false)
   })
 })

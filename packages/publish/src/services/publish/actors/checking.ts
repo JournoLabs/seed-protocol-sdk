@@ -18,8 +18,12 @@ import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
 import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
 import { estimateUpload } from '../../publishCost/uploadEstimate'
+import { assertPublishFits, PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
+import { encodeMultiPublish } from '~/helpers/contracts'
+import { normalizePublishRequest } from './publishRequestNormalize'
 
 const activePublishProcesses = new Set<string>()
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 export async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
   const cfg = getPublishConfig()
@@ -179,16 +183,27 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
 
         // Validate the payload the route will build: the contract links back references, direct
         // EAS defers them. Before an undeployed smart account is deployed below, so an invalid item
-        // costs no transaction.
+        // costs no transaction. Each upload gets a placeholder id of an Arweave id's length, so the
+        // payload has the storage transaction attestations it will send, at their size.
+        const placeholderUploads = uploads.uploadTargets.map((target) => ({ ...target, txId: PLACEHOLDER_ARWEAVE_TX_ID }))
         const validate = async (): Promise<boolean> => {
-          const validation = await (validateItemForPublish as any)(item, [], {
+          const validation = await validateItemForPublish(item, placeholderUploads, {
             publishMode: publishMode ?? 'patch',
             backReferences: attestationStrategy === 'multiPublish' ? 'link' : 'defer',
           })
-          if (validation.isValid) return true
-          activePublishProcesses.delete(item.seedLocalId)
-          sendBack({ type: 'validationFailed', errors: validation.errors })
-          return false
+          if (!validation.isValid) {
+            activePublishProcesses.delete(item.seedLocalId)
+            sendBack({ type: 'validationFailed', errors: validation.errors })
+            return false
+          }
+          // multiPublish sends the whole graph in one transaction: refuse one too large before
+          // anything is uploaded. The send checks again, with the gas estimate.
+          if (attestationStrategy === 'multiPublish') {
+            const requests = validation.payload.map((request) => normalizePublishRequest(request))
+            const calldata = encodeMultiPublish(ZERO_ADDRESS, requests).data
+            assertPublishFits(address.trim(), requests, { calldata })
+          }
+          return true
         }
         if (!(await validate())) return
 

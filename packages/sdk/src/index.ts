@@ -429,6 +429,7 @@ export {
   estimateDataUriByteLength,
   type PublishWorkSummary,
   type PublishUploadSummary,
+  type PublishUploadTarget,
   type SummarizePublishWorkOptions,
 } from './db/read/summarizePublishWork'
 

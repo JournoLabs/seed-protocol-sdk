@@ -13,6 +13,9 @@ const GAS_PER_NEW_PAIR = 350_000n
 
 const ZERO_UID = `0x${'0'.repeat(64)}`
 
+/** Stands in for an Arweave transaction id before the upload: every id is 43 characters. */
+export const PLACEHOLDER_ARWEAVE_TX_ID = 'A'.repeat(43)
+
 type SizedRequest = {
   localId?: string
   seedUid?: string
