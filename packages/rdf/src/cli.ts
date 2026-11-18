@@ -3,6 +3,7 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { DEFAULT_SCHEMA_FILE } from './defaults.js'
 import type { RdfSidecar } from './lens.js'
+import { needsIds, withSchemaIds } from './schemaIds.js'
 import { SUGGESTED_PREFIXES, checkSidecar, suggestTerms, syncSidecar, type SidecarSchema } from './sidecar.js'
 
 const USAGE = `Usage:
@@ -19,7 +20,10 @@ const USAGE = `Usage:
       or adds them to the sidecar (creating it if needed) with --write. Review before committing.
 
 Default --schema: ${DEFAULT_SCHEMA_FILE}. Default --sidecar: the schema's path with .context.jsonld
-in place of .json.`
+in place of .json.
+
+Exit codes: 0 done, 1 stale or unreadable terms (check), 2 usage or input error, 3 anything else,
+such as a sidecar it can't write.`
 
 export type CliIo = {
   readonly cwd: string
@@ -56,7 +60,8 @@ const target = (t: { model: string; property?: string }) => (t.property ? `${t.m
 
 /**
  * Runs `seed-rdf` with `args` (without the program name) and returns its exit code: 0 when done,
- * 1 when `check` finds stale or unreadable terms, 2 on a usage or input error.
+ * 1 when `check` finds stale or unreadable terms, 2 on a usage or input error, 3 on any other
+ * error (a file it can't read or write, say), printed as one line.
  */
 export async function runRdfCli(args: readonly string[], io: CliIo): Promise<number> {
   try {
@@ -85,8 +90,10 @@ export async function runRdfCli(args: readonly string[], io: CliIo): Promise<num
     const sidecarFile = values.sidecar
       ? path.resolve(io.cwd, values.sidecar)
       : schemaFile.replace(/(\.json)?$/, '.context.jsonld')
-    const schema = await readJson<SidecarSchema>(schemaFile, 'schema')
-    if (!schema.id) throw new UsageError(`The schema at ${schemaFile} has no id; the SDK assigns one when it writes the schema`)
+    const read = await readJson<SidecarSchema>(schemaFile, 'schema')
+    const schema = withSchemaIds(read)
+    if (!schema.id) throw new UsageError(`The schema at ${schemaFile} has no id and no metadata.name to derive one from`)
+    if (needsIds(read)) io.err(`[Seed Protocol] ${path.basename(schemaFile)} leaves out ids; using the ones the SDK derives from the names`)
     const options = { base: values.base }
 
     if (command === 'suggest') {
@@ -131,14 +138,17 @@ export async function runRdfCli(args: readonly string[], io: CliIo): Promise<num
     }
     if (report.unmapped.length > 0) {
       io.out('Unmapped (exported under protocol IRIs):')
-      for (const t of report.unmapped) io.out(`  ${target(t)}${t.id ? ` (${t.id})` : ' (no id yet)'}`)
+      for (const t of report.unmapped) io.out(`  ${target(t)}${t.id ? ` (${t.id})` : ' (no id)'}`)
     }
     if (report.contextOutdated || report.versionOutdated) {
       io.out('The sidecar is behind the schema; run `seed-rdf sync --write` to update @context and schemaVersion.')
     }
     return report.stale.length > 0 || report.invalid.length > 0 ? 1 : 0
   } catch (error) {
-    if (!(error instanceof UsageError) && !(error instanceof TypeError)) throw error
+    if (!(error instanceof UsageError) && !(error instanceof TypeError)) {
+      io.err(`[Seed Protocol] ${error instanceof Error ? error.message : String(error)}`)
+      return 3
+    }
     io.err(`[Seed Protocol] ${error.message}`)
     if (error instanceof UsageError && error.showUsage) io.err(USAGE)
     return 2

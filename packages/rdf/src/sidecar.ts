@@ -1,6 +1,7 @@
 import { easName, fuzzyNameKey } from '@seedprotocol/eas'
 import { XSD, iriScheme } from './iri.js'
 import { RELATION_TYPES, canonicalJson, expandTerm, prefixesOf, type RdfLens, type RdfSidecar } from './lens.js'
+import { withSchemaIds } from './schemaIds.js'
 
 export type SidecarContextOptions = {
   /** Base of the protocol class for a model whose properties are mapped but which isn't. Default PROVISIONAL_BASE_IRI. */
@@ -17,7 +18,9 @@ export type SidecarContext = { readonly [key: string]: unknown }
  * `xsd:dateTime`. A model without a term keeps its protocol class. Terms that can't be expanded are
  * left out.
  */
-export function sidecarContext({ schema, sidecar }: RdfLens, options: SidecarContextOptions = {}): SidecarContext {
+export function sidecarContext(lens: RdfLens, options: SidecarContextOptions = {}): SidecarContext {
+  const { sidecar } = lens
+  const schema = withSchemaIds(lens.schema)
   const prefixes = prefixesOf(sidecar)
   const usable = (id: string | undefined): string | undefined => {
     const term = id ? sidecar.terms[id] : undefined
@@ -60,7 +63,7 @@ export type SidecarReport = {
   readonly stale: readonly { readonly id: string; readonly term: string }[]
   /** Terms that aren't an IRI or a name with a prefix in `@context`. */
   readonly invalid: readonly { readonly id: string; readonly term: string }[]
-  /** Models and properties with no term. One without an `id` can't be mapped until the schema assigns it one. */
+  /** Models and properties with no term. */
   readonly unmapped: readonly SchemaTarget[]
   /** `@context` differs from {@link sidecarContext}, as after a rename: `syncSidecar` rewrites it. */
   readonly contextOutdated: boolean
@@ -80,7 +83,7 @@ function targets(schema: SidecarSchema): SchemaTarget[] {
 
 function assertSameSchema({ schema, sidecar }: RdfLens): void {
   if (!schema.id || schema.id !== sidecar.schemaId) {
-    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id'}`)
+    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id or metadata.name'}`)
   }
 }
 
@@ -89,6 +92,7 @@ export function checkSidecar(
   lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar },
   options: SidecarContextOptions = {},
 ): SidecarReport {
+  lens = { ...lens, schema: withSchemaIds(lens.schema) }
   assertSameSchema(lens)
   const { schema, sidecar } = lens
   const all = targets(schema)
@@ -113,6 +117,7 @@ export function syncSidecar(
   lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar },
   options: SidecarContextOptions = {},
 ): RdfSidecar {
+  lens = { ...lens, schema: withSchemaIds(lens.schema) }
   assertSameSchema(lens)
   const { schema, sidecar } = lens
   const { schemaId, schemaVersion, terms, '@context': _context, ...rest } = sidecar
@@ -216,10 +221,11 @@ export type TermSuggestion = SchemaTarget & { readonly id: string; readonly term
 /**
  * Draft schema.org and dcterms terms for the unmapped models and properties whose names have a
  * common meaning (`title`, `summary`, `author`, `publishedAt`, `coverImage`), for the developer to
- * review. Names it doesn't know, and models or properties without an id, get no suggestion. The
+ * review. Names it doesn't know get no suggestion. The
  * terms use the prefixes in {@link SUGGESTED_PREFIXES}.
  */
 export function suggestTerms(lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar }): TermSuggestion[] {
+  lens = { ...lens, schema: withSchemaIds(lens.schema) }
   assertSameSchema(lens)
   const { schema, sidecar } = lens
   const suggestions: TermSuggestion[] = []

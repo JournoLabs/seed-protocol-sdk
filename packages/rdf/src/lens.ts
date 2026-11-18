@@ -1,6 +1,7 @@
 import { easName, isNameMatchLevel, matchEasName, type NameMatchLevel } from '@seedprotocol/eas'
 import { listRelationEasName } from '@seedprotocol/query'
 import { assertIri } from './iri.js'
+import { withSchemaIds } from './schemaIds.js'
 
 type LensProperty = {
   readonly id?: string
@@ -20,7 +21,9 @@ type LensModel = {
 
 /** As much of a schema file as the lens reads. A `SchemaFileFormat` can be passed as it is. */
 export type LensSchema = {
+  /** Missing here and on models and properties, ids are derived from the names as the SDK derives them. */
   readonly id?: string
+  readonly metadata?: { readonly name?: string }
   readonly nameMatch?: string
   readonly models: { readonly [modelName: string]: LensModel }
 }
@@ -96,9 +99,11 @@ export function expandTerm(term: string, prefixes: ReadonlyMap<string, string>):
  * Reads a lens for one export. A sidecar written for another schema throws; a term that matches no
  * model or property, or can't be expanded, is a warning, and the export uses the protocol IRI.
  */
-export function compileLens({ schema, sidecar }: RdfLens): CompiledLens {
+export function compileLens(lens: RdfLens): CompiledLens {
+  const { sidecar } = lens
+  const schema = withSchemaIds(lens.schema)
   if (!schema.id || schema.id !== sidecar.schemaId) {
-    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id'}`)
+    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id or metadata.name'}`)
   }
   const prefixes = prefixesOf(sidecar)
   const warnings: string[] = []

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -109,5 +109,36 @@ describe('seed-rdf suggest', () => {
     expect(written.terms).toEqual({ 'model-post': 'schema:BlogPosting', 'prop-title': 'dcterms:title', 'prop-summary': 'dcterms:abstract' })
     expect(written['@context']).toMatchObject({ dcterms: 'http://purl.org/dc/terms/', schema: 'https://schema.org/' })
     expect(await run('check')).toBe(0)
+  })
+})
+
+describe('a schema file without ids, as the tutorial writes it', () => {
+  const tutorial = { metadata: { name: 'Blog' }, models: { Post: { properties: { title: { type: 'Text' } } } } }
+
+  it('uses the ids the SDK derives, and says so', async () => {
+    await write('seed.schema.json', tutorial)
+    expect(await run('suggest', '--write')).toBe(0)
+    const written = await read('seed.schema.context.jsonld')
+    expect(written.schemaId).toBe('5945b0f13a')
+    expect(written.terms).toEqual({ '313a8733b8': 'schema:BlogPosting', d594dfebd3: 'dcterms:title' })
+    err = []
+    expect(await run('check')).toBe(0)
+    expect(err).toEqual(['[Seed Protocol] seed.schema.json leaves out ids; using the ones the SDK derives from the names'])
+  })
+
+  it('exits 2 when there is no name to derive them from', async () => {
+    await write('seed.schema.json', { models: tutorial.models })
+    expect(await run('check')).toBe(2)
+    expect(err[0]).toMatch(/no id and no metadata\.name/)
+  })
+})
+
+describe('unexpected errors', () => {
+  it('exit 3 with one line, not the code for stale terms', async () => {
+    await write('seed.schema.context.jsonld', sidecar)
+    await chmod(path.join(dir, 'seed.schema.context.jsonld'), 0o444)
+    expect(await run('sync', '--write')).toBe(3)
+    expect(err).toHaveLength(1)
+    expect(err[0]).toMatch(/^\[Seed Protocol\] EACCES/)
   })
 })

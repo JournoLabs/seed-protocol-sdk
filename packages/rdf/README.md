@@ -184,7 +184,10 @@ seed-rdf suggest --write    # add them to the sidecar, creating it if needed
 ```
 
 Each command reads `seed.schema.json` and `seed.schema.context.jsonld` in the working directory;
-`--schema` and `--sidecar` take other paths. `sync` and `suggest` print what they would write
+`--schema` and `--sidecar` take other paths. A schema file without ids works: missing ids are derived
+from `metadata.name` and the model and property names, as the SDK derives them when it loads the file.
+The commands exit 0 when done, 1 when `check` finds stale or unreadable terms, 2 on a usage or input
+error, and 3 on anything else, such as a sidecar they can't write. `sync` and `suggest` print what they would write
 unless given `--write`, and `sync` keeps stale terms: removing a mapping is your call. The same
 functions are exported as `checkSidecar`, `syncSidecar`, `suggestTerms` and `sidecarContext`.
 
