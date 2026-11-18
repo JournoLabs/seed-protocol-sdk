@@ -157,6 +157,17 @@ describe('state graph', () => {
     expect(quads).toContain(AUTHOR_1.slice(2))
   })
 
+  it('links no seed for the all-zero bytes32, in a relation or a list', async () => {
+    const zero = `0x${'0'.repeat(64)}`
+    const post = (await getSeedAttestations([POST], { source: 'local' })).get(POST)!
+    const properties = post.properties.map((p) =>
+      p.easName === 'html' ? { ...p, value: zero } : p.easName === 'author_identity_ids' ? { ...p, value: [AUTHOR_1, zero] } : p,
+    )
+    const quads = toNQuads(stateGraph([{ ...post, properties }], { chainId: CHAIN_ID }))
+    expect(quads).not.toContain(zero.slice(2))
+    expect(quads).toContain(AUTHOR_1.slice(2))
+  })
+
   it("gives a storage seed's transaction as an ar:// content IRI beside the attested value", () => {
     expect(objects(at(HTML), `${B}ns#content`).map((o) => o.value)).toEqual([`ar://${TRANSACTION_ID}`])
     expect(objects(at(HTML), `${B}p/string/storage_transaction_id`).map((o) => o.value)).toEqual([TRANSACTION_ID])

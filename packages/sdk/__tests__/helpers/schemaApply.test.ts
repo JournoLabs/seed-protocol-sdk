@@ -138,6 +138,15 @@ testDescribe('applySchemaFile', () => {
     expect(result.skipped).toBe(true)
   }, 60_000)
 
+  it('derives the ids @seedprotocol/rdf derives for a schema file without ids', () => {
+    // rdf's withSchemaIds (packages/rdf/src/schemaIds.ts) checks the same vector.
+    expect([deriveSchemaFileId('Blog'), deriveSchemaFileId('Blog', 'Post'), deriveSchemaFileId('Blog', 'Post', 'title')]).toEqual([
+      '5945b0f13a',
+      '313a8733b8',
+      'd594dfebd3',
+    ])
+  })
+
   it('assigns missing ids once, from the names, and keeps them when the schema changes', async () => {
     const name = 'Apply Stable Ids'
     const base: SchemaFileInput = {

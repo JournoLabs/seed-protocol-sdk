@@ -131,6 +131,8 @@ class NodeBuilder {
   }
 }
 
+const ZERO_BYTES32 = /^0x0{64}$/i
+
 function propertyObject(
   iris: IriScheme,
   property: SeedPropertyAttestation,
@@ -139,9 +141,9 @@ function propertyObject(
 ): RdfObject | null {
   const { easType, value } = property
   if (property.isRelation) {
-    // An unfilled reference slot (a small number, 0x…20 among them) names no seed
+    // An unfilled reference slot (a small number, 0x…20 among them) and the all-zero bytes32 name no seed
     const seeds = (typeof value === 'string' ? [value] : Array.isArray(value) ? value : []).filter(
-      (uid) => !isUnfilledReference(uid),
+      (uid) => !isUnfilledReference(uid) && !ZERO_BYTES32.test(uid),
     )
     if (typeof value === 'string') return seeds[0] ? iri(iris.attestation(seeds[0])) : null
     return { kind: 'list', items: seeds.map((uid) => iri(iris.attestation(uid))) }

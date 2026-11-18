@@ -25,13 +25,36 @@ type SidecarReport = {
 }
 type CheckSidecar = (lens: { schema: unknown; sidecar: unknown }) => SidecarReport
 
-async function loadCheckSidecar(root: string): Promise<CheckSidecar | undefined> {
-  let entry: string
+/**
+ * @seedprotocol/rdf's ESM entry, from the nearest `node_modules/@seedprotocol/rdf` at or above
+ * `root`. Read from disk rather than with Node's resolver: Node 24.21 keeps failing a resolve that
+ * failed once in this process while `node_modules/@seedprotocol/` existed, which it always does
+ * beside @seedprotocol/vite, so an install during the dev server would never be seen.
+ */
+function findRdfEntry(root: string): string | undefined {
+  for (let dir = root; ; dir = path.dirname(dir)) {
+    const manifest = path.join(dir, 'node_modules/@seedprotocol/rdf/package.json')
+    if (fs.existsSync(manifest)) {
+      const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
+        exports?: { '.'?: { import?: { default?: string } } }
+        main?: string
+      }
+      const entry = pkg.exports?.['.']?.import?.default ?? pkg.main
+      return entry ? path.resolve(path.dirname(manifest), entry) : undefined
+    }
+    if (path.dirname(dir) === dir) break
+  }
+  // Layouts without node_modules folders (Yarn PnP) go through the resolver.
   try {
-    entry = createRequire(path.join(root, 'package.json')).resolve('@seedprotocol/rdf')
+    return createRequire(path.join(root, 'package.json')).resolve('@seedprotocol/rdf')
   } catch {
     return undefined
   }
+}
+
+async function loadCheckSidecar(root: string): Promise<CheckSidecar | undefined> {
+  const entry = findRdfEntry(root)
+  if (!entry) return undefined
   const { checkSidecar } = (await import(pathToFileURL(entry).href)) as { checkSidecar?: CheckSidecar }
   return checkSidecar
 }

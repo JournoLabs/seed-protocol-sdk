@@ -114,15 +114,27 @@ describe('rdfSidecar dev check', () => {
 
   it('checks the sidecar once @seedprotocol/rdf is installed while the server runs', async () => {
     const root = app({ withRdf: false })
+    // As in an app: @seedprotocol/vite is already there. Node 24.21 then keeps failing a resolve of
+    // @seedprotocol/rdf that failed once in this process, even after rdf is installed.
+    fs.mkdirSync(path.join(root, 'node_modules/@seedprotocol/vite'), { recursive: true })
     writeJson(root, 'seed.schema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
     const { server, logged, watcher } = devServer(root)
     await watchRdfSidecar(server, {})
     expect(logged).toHaveLength(1)
-    fs.mkdirSync(path.join(root, 'node_modules/@seedprotocol'), { recursive: true })
     fs.symlinkSync(rdfPackage, path.join(root, 'node_modules/@seedprotocol/rdf'), 'dir')
     watcher.emit('change', path.join(root, 'package.json'))
     await vi.waitFor(() => expect(logged.join()).toMatch(/schema:gone/))
     expect(logged.filter((m) => m.includes('install @seedprotocol/rdf'))).toHaveLength(1)
+  })
+
+  it('checks a schema file without ids, as the tutorial writes it, against the ids the SDK derives', async () => {
+    const root = app()
+    writeJson(root, 'seed.schema.json', { metadata: { name: 'Blog' }, models: { Post: { properties: { title: { type: 'Text' } } } } })
+    writeJson(root, 'seed.schema.context.jsonld', { schemaId: '5945b0f13a', terms: { '313a8733b8': 'schema:BlogPosting', gone: 'schema:gone' } })
+    const { server, logged } = devServer(root)
+    await watchRdfSidecar(server, {})
+    expect(logged.join('\n')).toMatch(/term "schema:gone" names gone/)
+    expect(logged.join('\n')).not.toMatch(/not a schema with no id/)
   })
 
   it('reports a sidecar for another schema, and reads the paths it is given', async () => {
