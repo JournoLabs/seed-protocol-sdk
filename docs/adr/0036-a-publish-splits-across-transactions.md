@@ -96,8 +96,8 @@ part claims one.
 part and then goes on with the loop instead of returning; it returns only once the root's part is
 recorded. A restore, a retry after a failed record and a retry after a revert all land in that loop.
 
-`unrecordedAttestation`, `publishedBatch` and `easPayload` describe the whole run: the batch and the
-payload collect every part, and `onPublished` fires once, after the root's part.
+`unrecordedAttestation` names one part, as it named the one transaction before. `publishedBatch` and
+`easPayload` collect every part, and `onPublished` fires once, after the root's part.
 
 ### A host's nonce key covers every part
 
@@ -113,7 +113,9 @@ reports every part it finds.
 new one. The parked run's row is marked `interrupted`, as `stopPublish` does. The new run takes the
 parked run's uploads: an upload is reused when its `itemPropertyLocalId` and content hash match an
 upload the new run needs, and the blob store still reports it stored. Anything else uploads again,
-so an edit to a file property after the failure isn't attested with the old file.
+so an edit to a file property after the failure isn't attested with the old file. The new run also
+takes the parked run's count of recorded parts and, unless the host passes its own, its `nonceKey`,
+so its next part sends under the next part's key.
 
 A seed with an open attempt, in any state, gets a new outcome, `attempt_open`, from `startPublish`,
 and nothing starts. The host settles the attempt (`retryAttestations`,
