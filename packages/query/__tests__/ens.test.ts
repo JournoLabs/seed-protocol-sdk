@@ -86,6 +86,11 @@ describe('decodeContenthash', () => {
     expect(() => decodeContenthash('0xe301ffff')).toThrow(/not a CID/)
     expect(() => decodeContenthash('0xe3z1')).toThrow(/not hex/)
   })
+
+  it('throws a TypeError, like the others, on a codec cut off mid-varint', () => {
+    expect(() => decodeContenthash('0xe3')).toThrow(TypeError)
+    expect(() => decodeContenthash('0xe3')).toThrow(/codec/)
+  })
 })
 
 describe('parseSeedPublicationRecord', () => {

@@ -130,6 +130,11 @@ describe('lean seed queries', () => {
     expect(requests.map((r) => r.operation)).toEqual(['GetSeedsLean'])
   })
 
+  it('getSeedsBySchemaName attaches the EAS name whatever form the model name came in', async () => {
+    seedsResponse = [seed('0x1', POST_SCHEMA)]
+    expect((await getSeedsBySchemaName('Post', 10))[0]!.schema.schemaNames).toEqual([{ name: 'post' }])
+  })
+
   it("getSeedsBySchemaName filters by the model schema's UID, not by attested names", async () => {
     await getSeedsBySchemaName('BlogPost', 10)
     const { where } = requests[0]!.variables

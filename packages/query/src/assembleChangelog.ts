@@ -40,21 +40,22 @@ export async function assembleSeedChangelog(
     dataSource.getVersionsForSeed(seedUid),
   ])
   const seedLike = seed ?? { id: seedUid, refUID: '', schemaId: '', timeCreated: 0, decodedDataJson: '' }
-  const changelogs = await assembleSeedChangelogs([seedLike], versions, options, dataSource)
+  const { changelogs } = await assembleSeedChangelogs([seedLike], versions, options, dataSource)
   return changelogs.get(seedLike.id.toLowerCase())!
 }
 
 /**
  * Changelogs for many seeds from their Versions (as read, revoked ones included or not) and one
- * request for the properties of every live Version. Keyed by lowercase seed UID, one entry per
- * seed in `seeds`.
+ * request for the properties of every live Version. `changelogs` is keyed by lowercase seed UID,
+ * one entry per seed in `seeds`; `properties` is what that request returned, from each Version's
+ * attester, which covers the Version a record of the seed is assembled at.
  */
 export async function assembleSeedChangelogs(
   seeds: readonly AttestationLike[],
   versions: readonly AttestationLike[],
   options: Pick<GetSeedOptions, 'changelog'> | undefined,
   dataSource: QueryDataSource,
-): Promise<Map<string, AssembleSeedChangelogResult>> {
+): Promise<{ changelogs: Map<string, AssembleSeedChangelogResult>; properties: AttestationLike[] }> {
   const changelogOpts: ChangelogOptions = options?.changelog ?? {}
   const granularity = changelogOpts.granularity ?? 'version'
 
@@ -115,5 +116,5 @@ export async function assembleSeedChangelogs(
       changelog: applyChangelogFilters(changelog, changelogOpts),
     })
   }
-  return result
+  return { changelogs: result, properties }
 }

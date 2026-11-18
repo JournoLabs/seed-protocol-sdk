@@ -1,3 +1,4 @@
+import { easName } from '@seedprotocol/eas'
 import { generateCollectionETag, generateItemETag } from './etag.js'
 import { MemoryCache } from './MemoryCache.js'
 import type {
@@ -92,6 +93,7 @@ export class CacheManager {
     schemaName: string,
     optionsKey: string,
   ): Promise<CachedCollectionData | null> {
+    schemaName = easName(schemaName)
     if (!this.config.enabled) return null
 
     try {
@@ -126,6 +128,7 @@ export class CacheManager {
     optionsKey: string,
     data: Omit<CachedCollectionData, 'etag'>,
   ): Promise<CachedCollectionData | null> {
+    schemaName = easName(schemaName)
     if (!this.config.enabled) return null
 
     try {
@@ -244,8 +247,9 @@ export class CacheManager {
     return cached?.etag === check.etag ? { collection: cached, listed: check.listed } : null
   }
 
-  /** Every options variant of the schema's collection. */
+  /** Every options variant of the schema's collection. The model name can be in any form (`Post`, `post`). */
   async clearCollection(schemaName: string): Promise<void> {
+    schemaName = easName(schemaName)
     for (const key of this.collectionChecks.keys()) {
       if (key.startsWith(`${schemaName}\n`)) this.collectionChecks.delete(key)
     }

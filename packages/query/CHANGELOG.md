@@ -2,6 +2,13 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- **Breaking:** `viem` is an optional peer dependency, used only by `@seedprotocol/query/ens`. Apps that read ENS add `viem@^2` themselves; `archive`, `rdf` and other installs of query no longer pull it in. Without it, `@seedprotocol/query/ens` still imports and `decodeContenthash` and `parseSeedPublicationRecord` work, while `getEnsContenthash`, `getSeedPublication` and `getEnsNames` reject with the new `EnsViemMissingError` (code `ENS_VIEM_MISSING`).
+- `queryBySchema` and `queryBySchemaForMonth` give every record the model's EAS name (`easName`), as `getSeed` and `getSeeds` do, whatever form the name was passed in. `queryBySchema('Post')` returned records with `schemaName: 'Post'`, and a later `getSeed` of one of them returned `'Post'` from the item cache where a fresh read returned `'post'`. Collections are cached under the EAS name too, so `queryBySchema('Post')` and `queryBySchema('post')` share one, and `CacheManager.clearCollection` and `getCollection` take the name in any form. `clearCollection('post')` left a collection read as `'Post'` cached.
+- `getSeeds` and `getSeed` with `include: 'data+changelog'` read the properties once and build the data from the changelog's read: three indexer requests (seeds, versions, properties) before related seeds, not four. `getSeed` with a changelog also no longer reads the seed and its versions a second time.
+- `decodeContenthash` throws a `TypeError` for a contenthash whose codec is cut off mid-varint (`0xe3`), as its JSDoc says. It threw the `RangeError` from `multiformats`.
+
 ## 0.8.2 (2026-11-09)
 
 - A body no read gateway returned is read again on the next cache hit. `getSeed`, `getSeeds` and `queryBySchema` cached such a record with its transaction URL in place of the body and served it until the seed changed on EAS, so a post read while gateways didn't have its body yet showed the URL for good in that process. The cached entry is updated once the body loads. Within `maxAge`, a collection still comes back without the retry.

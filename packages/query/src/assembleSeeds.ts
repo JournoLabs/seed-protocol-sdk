@@ -243,6 +243,11 @@ async function processSeeds(
     versions?: AttestationLike[]
     /** Versions to assemble instead of the latest, by lowercase seed UID (see VersionPin). */
     pins?: ReadonlyMap<string, VersionPin>
+    /**
+     * Properties of every live version of these seeds, already fetched (see AssembleRequest), so
+     * the request isn't made again.
+     */
+    properties?: readonly AttestationLike[]
   } = {},
 ): Promise<void> {
   const seedUids: string[] = []
@@ -327,10 +332,11 @@ async function processSeeds(
 
   if (latestVersionUids.length === 0) return
 
-  const rawProperties = keepAttestationsFromRefAttester(
-    await dataSource.getPropertiesForVersionUids(latestVersionUids),
-    itemVersions,
-  ).filter((property) => {
+  const assembledVersionUids = new Set(latestVersionUids)
+  const fetchedProperties = opts.properties
+    ? opts.properties.filter((property) => assembledVersionUids.has(property.refUID))
+    : await dataSource.getPropertiesForVersionUids(latestVersionUids)
+  const rawProperties = keepAttestationsFromRefAttester(fetchedProperties, itemVersions).filter((property) => {
     const asOf = asOfByVersionUid.get(property.refUID)
     return asOf === undefined || property.timeCreated <= asOf
   })
@@ -595,6 +601,11 @@ export type AssembleRequest = {
    * seeds are always assembled at their latest version.
    */
   pins?: ReadonlyMap<string, VersionPin>
+  /**
+   * Properties of every live Version of `seeds`, already fetched (see assembleSeedChangelogs), so
+   * they aren't read again. Applies to `seeds` only, like `pins`.
+   */
+  properties?: readonly AttestationLike[]
 }
 
 /**
@@ -642,6 +653,7 @@ export async function assembleSeedRecords(
     dropUnpublishedSeeds: true,
     versions: request.versions,
     pins: request.pins && activePins(request.pins),
+    properties: request.properties,
   })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(

@@ -8,6 +8,11 @@ query.
 Every function takes a viem client on the chain that holds the ENS registry, usually mainnet.
 Seeds can be attested on another chain; the client here is only for ENS.
 
+`viem` is an optional peer of `@seedprotocol/query`, so install it alongside:
+`npm install @seedprotocol/query viem`. Without it, `decodeContenthash` and
+`parseSeedPublicationRecord` still work, and the reads reject with `EnsViemMissingError`
+(code `ENS_VIEM_MISSING`).
+
 ```ts
 import { createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'

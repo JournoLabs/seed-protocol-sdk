@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
+
 ## 0.8.2 (2026-11-09)
 
 - Sync takes a seed's model from its schema's definition (`post` for `bytes32 post`) instead of the first name attested onto the schema, which anyone can add (ADR 0035). A relation that points at an attestation outside a Seed model schema no longer stores it as a seed.

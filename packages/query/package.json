@@ -69,14 +69,22 @@
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
     "multiformats": "^13.4.2",
-    "pluralize": "^8.0.0",
+    "pluralize": "^8.0.0"
+  },
+  "peerDependencies": {
     "viem": "^2.46.2"
+  },
+  "peerDependenciesMeta": {
+    "viem": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "1.4.3",
     "@types/pluralize": "^0.0.33",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
+    "viem": "^2.46.2",
     "vite": "^8.0.0",
     "vitest": "^4.1.11"
   },

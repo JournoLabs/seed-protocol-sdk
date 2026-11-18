@@ -1,19 +1,63 @@
-import {
-  BaseError,
-  ContractFunctionRevertedError,
-  decodeFunctionResult,
-  encodeFunctionData,
-  getChainContractAddress,
-  toHex,
-  type Address,
-  type Chain,
-  type Client,
-  type Transport,
-} from 'viem'
-import { readContract } from 'viem/actions'
-import { getEnsAddress, getEnsName, getEnsText, namehash, normalize, packetToBytes } from 'viem/ens'
+import type { Address, Chain, Client, Transport } from 'viem'
 import { decodeContenthash, type EnsContenthash } from './contenthash.js'
 import { parseSeedPublicationRecord, SEED_PUBLICATION_TEXT_KEY } from './publicationRecord.js'
+
+/**
+ * Thrown by the ENS reads when `viem`, an optional peer of `@seedprotocol/query` used only by
+ * `@seedprotocol/query/ens`, isn't installed. `decodeContenthash` and `parseSeedPublicationRecord`
+ * don't need it.
+ */
+export class EnsViemMissingError extends Error {
+  readonly code = 'ENS_VIEM_MISSING'
+  constructor(options?: { cause?: unknown }) {
+    super('@seedprotocol/query/ens reads ENS through viem, which is not installed: add viem@^2 to your dependencies', options)
+    this.name = 'EnsViemMissingError'
+  }
+}
+
+/** A failed import of a missing package, here or in a cause (module loaders may wrap it). */
+function isModuleNotFound(err: unknown): boolean {
+  for (let e = err as { code?: unknown; cause?: unknown } | null | undefined, depth = 0; e && depth < 5; e = e.cause as typeof e, depth++) {
+    if (e.code === 'ERR_MODULE_NOT_FOUND' || e.code === 'MODULE_NOT_FOUND') return true
+  }
+  return false
+}
+
+/** viem's modules, loaded on the first read so `/ens` itself imports without viem. */
+async function loadViem() {
+  try {
+    const {
+      BaseError,
+      ContractFunctionRevertedError,
+      decodeFunctionResult,
+      encodeFunctionData,
+      getChainContractAddress,
+      toHex,
+    } = await import('viem')
+    const { readContract } = await import('viem/actions')
+    const { getEnsAddress, getEnsName, getEnsText, namehash, normalize, packetToBytes } = await import('viem/ens')
+    return {
+      BaseError,
+      ContractFunctionRevertedError,
+      decodeFunctionResult,
+      encodeFunctionData,
+      getChainContractAddress,
+      toHex,
+      readContract,
+      getEnsAddress,
+      getEnsName,
+      getEnsText,
+      namehash,
+      normalize,
+      packetToBytes,
+    }
+  } catch (err) {
+    if (isModuleNotFound(err)) throw new EnsViemMissingError({ cause: err })
+    throw err
+  }
+}
+
+type Viem = Awaited<ReturnType<typeof loadViem>>
 
 /** A viem client on the chain that holds the ENS registry (mainnet, or Sepolia for test names). */
 export type EnsClient = Client<Transport, Chain | undefined>
@@ -106,6 +150,24 @@ export async function getEnsContenthash(
   client: EnsClient,
   { name, ...options }: { name: string } & EnsReadOptions,
 ): Promise<EnsContenthash | null> {
+  return readContenthash(await loadViem(), client, { name, ...options })
+}
+
+async function readContenthash(
+  viem: Viem,
+  client: EnsClient,
+  { name, ...options }: { name: string } & EnsReadOptions,
+): Promise<EnsContenthash | null> {
+  const {
+    decodeFunctionResult,
+    encodeFunctionData,
+    getChainContractAddress,
+    namehash,
+    normalize,
+    packetToBytes,
+    readContract,
+    toHex,
+  } = viem
   const normalized = normalize(name)
   const address =
     options.universalResolverAddress ??
@@ -127,7 +189,7 @@ export async function getEnsContenthash(
       ],
     })
   } catch (err) {
-    if (isNoRecordError(err)) return null
+    if (isNoRecordError(viem, err)) return null
     throw err
   }
   if (data === '0x') return null
@@ -147,10 +209,12 @@ export async function getSeedPublication(
   client: EnsClient,
   { name, ...options }: { name: string } & EnsReadOptions,
 ): Promise<SeedPublication | null> {
+  const viem = await loadViem()
+  const { getEnsAddress, getEnsText, normalize } = viem
   const normalized = normalize(name)
   const [text, contenthash] = await Promise.all([
     getEnsText(client, { name: normalized, key: SEED_PUBLICATION_TEXT_KEY, ...options }),
-    getEnsContenthash(client, { name: normalized, ...options }),
+    readContenthash(viem, client, { name: normalized, ...options }),
   ])
   if (text === null) return null
 
@@ -178,6 +242,7 @@ export async function getEnsNames(
   addresses: readonly string[],
   options: EnsReadOptions = {},
 ): Promise<Map<string, string | null>> {
+  const { getEnsName } = await loadViem()
   const unique = [...new Set(addresses.map((a) => a.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a)))]
   const names = await Promise.all(
     unique.map((address) => getEnsName(client, { address: address as Address, ...options })),
@@ -185,7 +250,7 @@ export async function getEnsNames(
   return new Map(unique.map((address, i) => [address, names[i] ?? null]))
 }
 
-function isNoRecordError(err: unknown): boolean {
+function isNoRecordError({ BaseError, ContractFunctionRevertedError }: Viem, err: unknown): boolean {
   if (!(err instanceof BaseError)) return false
   const cause = err.walk((e) => e instanceof ContractFunctionRevertedError)
   return cause instanceof ContractFunctionRevertedError && NO_RECORD_ERRORS.has(cause.data?.errorName ?? '')

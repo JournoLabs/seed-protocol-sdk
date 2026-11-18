@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
+
 ## 0.8.2 (2026-11-09)
 
 - Reads pick schemas by UID, never by an attested name (ADR 0035). Anyone can attach any name to any schema, and anyone can register a Seed definition again with a resolver; OP Sepolia already has two schemas named `image`.

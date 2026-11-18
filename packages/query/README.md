@@ -236,7 +236,7 @@ For local reads, also ensure the SDK client has initialized (registers `register
 
 ## ENS (`@seedprotocol/query/ens`)
 
-Go from an ENS name to its publication's Seeds, decode a contenthash, and show attesters by name. Every function takes a viem client on the ENS chain. See [docs/ENS.md](../../docs/ENS.md).
+Go from an ENS name to its publication's Seeds, decode a contenthash, and show attesters by name. Every function takes a viem client on the ENS chain; `viem` is an optional peer, so install it yourself (`npm install viem`). See [docs/ENS.md](../../docs/ENS.md).
 
 ```ts
 import { getSeedPublication } from '@seedprotocol/query/ens'

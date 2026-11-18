@@ -249,6 +249,19 @@ describe('getSeeds with a changelog', () => {
     ])
   })
 
+  it('reads seeds, versions and properties once each for data+changelog, from getSeeds or getSeed', async () => {
+    const { post } = addPostWithHistory(1)
+    const both = { ...withChangelog, include: 'data+changelog' } as const
+    const many = (await getSeeds([post], both)).get(post)!
+    expect(totalCalls()).toBe(3)
+
+    vi.clearAllMocks()
+    const one = (await getSeed(post, both))!
+    expect(totalCalls()).toBe(3)
+    expect(one.data).toEqual(many.data)
+    expect(one.changelog).toEqual(many.changelog)
+  })
+
   it('leaves a revoked version out of the changelog', async () => {
     const { post, v2 } = addPostWithHistory(1)
     chain.versions.find((v) => v.id === v2)!.revoked = true

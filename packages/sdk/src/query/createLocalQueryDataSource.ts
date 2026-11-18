@@ -253,7 +253,7 @@ async function listPublishedSeedRows(
       )
   // Prefer exact type match (EAS schema names are usually lowercase singular)
   const typeCandidates = Array.from(
-    new Set([schemaName, schemaName.toLowerCase(), snakeType.toLowerCase()]),
+    new Set([schemaName, schemaName.toLowerCase(), snakeType.toLowerCase(), easName(schemaName)]),
   )
 
   const rows = await appDb
@@ -308,8 +308,8 @@ async function listPublishedSeedRows(
     )
     if (!hasPublished) continue
 
-    // Force requested schema name so assembleSeeds filters correctly
-    att.schema = { schemaNames: [{ name: schemaName }] }
+    // The requested model's EAS name, as the remote source gives it
+    att.schema = { schemaNames: [{ name: easName(schemaName) }] }
 
     if (opts?.startTs != null || opts?.endTs != null) {
       const t = att.timeCreated
