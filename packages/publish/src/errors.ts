@@ -181,9 +181,16 @@ export type PublishNonceKeyErrorCode =
   | 'NONCE_KEY_DIRECT_EAS'
   /** A UserOp already landed under the key, so a send under it can't land. */
   | 'NONCE_KEY_SPENT'
+  /**
+   * The wallet sent without the key (a thirdweb smart wallet built without `seedAccountNonce`), so
+   * the key doesn't stop a second try from landing. The transaction went out: `transactionHash`.
+   */
+  | 'NONCE_KEY_UNUSED'
 
 /**
- * `CreatePublishOptions.nonceKey` can't be used for this publish. Nothing was sent. On
+ * `CreatePublishOptions.nonceKey` can't be used for this publish. Nothing was sent, except on
+ * `NONCE_KEY_UNUSED`: the transaction in `transactionHash` went out without the key, its attempt is
+ * kept with that hash, and a retry settles it from the chain rather than sending again. On
  * `NONCE_KEY_SPENT` an earlier try landed, or reverted, under the key: `findPublishByNonceKey`
  * says which. A reverted try needs a new key to publish again.
  */
@@ -194,6 +201,8 @@ export class PublishNonceKeyError extends Error {
     public readonly nonceKey: string,
     /** The account the key belongs to, when known. */
     public readonly sender?: string,
+    /** `NONCE_KEY_UNUSED` only: the transaction sent without the key. */
+    public readonly transactionHash?: string,
   ) {
     super(message)
     this.name = 'PublishNonceKeyError'

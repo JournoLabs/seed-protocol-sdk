@@ -24,8 +24,9 @@ Every tab sees the same `in_progress` rows in `publish_processes`. `publishLockH
 from `@seedprotocol/publish` reads the lock to say which tab runs one: `'here'`, `'other-tab'` or
 `'none'`. `'none'` on an `in_progress` row means the tab running it closed. No open tab picks it up;
 the next tab to load restores it. The answer can change without the row changing, when the running
-tab closes, so re-reading only on row changes misses that. Without Web Locks every tab runs its own
-publishes, and the answer is `'here'`.
+tab closes, so re-reading only on row changes misses that. Without Web Locks (Bun, old browsers)
+every tab runs its own publishes, and the answer is `'here'`. Node has Web Locks for one process, so
+there it answers as in a browser, for that process's publishes.
 
 That lock names one seed, and an attestation transaction can cover several. The open rows in
 `publish_attempts` cover the rest: they are in the shared database, and the check and the insert are

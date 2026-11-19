@@ -24,8 +24,8 @@ export async function settleAttestationAttempt(
   publisher: string,
   hasRun: (seedLocalId: string) => boolean,
 ): Promise<AttestationSettleResult> {
-  // Where Web Locks are missing publishLockHolder answers 'here' for every seed, so 'here' counts
-  // only when this tab holds the lock.
+  // Where Web Locks are missing (Bun, old browsers; Node has them) publishLockHolder answers 'here'
+  // for every seed, so 'here' counts only when this tab holds the lock.
   if (hasRun(seedLocalId) || isHoldingPublishLock(seedLocalId)) return { status: 'running' }
   if ((await publishLockHolder(seedLocalId)) === 'other-tab') return { status: 'running' }
 
