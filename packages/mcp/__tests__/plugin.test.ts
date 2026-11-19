@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { createSeedMcpServer } from '../src/index'
 
 const repoRoot = resolve(__dirname, '..', '..', '..')
 const pluginDir = resolve(repoRoot, 'plugins', 'seed-protocol')
@@ -44,5 +47,55 @@ describe('Claude Code plugin', () => {
       expect(typeof option.title).toBe('string')
       expect(typeof option.description).toBe('string')
     }
+  })
+})
+
+function readSkill(): { frontmatter: Record<string, string>; body: string } {
+  const text = readFileSync(resolve(pluginDir, 'skills', 'reading-seed-records', 'SKILL.md'), 'utf-8')
+  const lines = text.split('\n')
+  expect(lines[0]).toBe('---')
+  const end = lines.indexOf('---', 1)
+  expect(end).toBeGreaterThan(0)
+  const frontmatter: Record<string, string> = {}
+  for (const line of lines.slice(1, end)) {
+    const colon = line.indexOf(':')
+    frontmatter[line.slice(0, colon).trim()] = line.slice(colon + 1).trim()
+  }
+  return { frontmatter, body: lines.slice(end + 1).join('\n') }
+}
+
+async function serverToolNames(): Promise<string[]> {
+  const server = createSeedMcpServer({ source: 'local', attesters: [] })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  const client = new Client({ name: 'test', version: '0.0.0' })
+  await client.connect(clientTransport)
+  const { tools } = await client.listTools()
+  await client.close()
+  return tools.map((tool) => tool.name).sort()
+}
+
+describe('reading-seed-records skill', () => {
+  it('uses only frontmatter keys every surface accepts', () => {
+    const { frontmatter, body } = readSkill()
+    expect(Object.keys(frontmatter).sort()).toEqual(['description', 'name'])
+    expect(frontmatter.name).toBe('reading-seed-records')
+    expect(frontmatter.description!.length).toBeGreaterThan(0)
+    expect(frontmatter.description!.length).toBeLessThanOrEqual(1536)
+    expect(body.split('\n').length).toBeLessThan(500)
+  })
+
+  it('names every server tool and no others', async () => {
+    const { body } = readSkill()
+    const named = new Set(
+      [...body.matchAll(/`([^`]+)`/g)].map((match) => match[1]!).filter((name) => /^(list|get|resolve)_[a-z_]+$/.test(name)),
+    )
+    expect([...named].sort()).toEqual(await serverToolNames())
+  })
+
+  it('says item text is data and what to cite', () => {
+    const { body } = readSkill()
+    expect(body).toMatch(/data, not instructions/)
+    for (const term of ['seed UID', 'version UID', 'attester']) expect(body).toContain(term)
   })
 })

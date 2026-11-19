@@ -14,4 +14,4 @@ Claude Code asks for two settings at install:
 
 Change them later with `/plugin configure seed-protocol@seed-protocol`.
 
-The plugin runs the server on your machine with `npx`, so it needs Node.js 20 or later. For claude.ai, ChatGPT, Claude Desktop and Hermes, see [Use it from an assistant](../../packages/mcp/README.md#use-it-from-an-assistant).
+The plugin runs the server on your machine with `npx`, so it needs Node.js 20.18.1 or later. For claude.ai, ChatGPT, Claude Desktop and Hermes, see [Use it from an assistant](../../packages/mcp/README.md#use-it-from-an-assistant).
