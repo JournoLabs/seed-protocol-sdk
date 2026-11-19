@@ -36,6 +36,23 @@ describe('publishGasLimit', () => {
     expect(estimateGas.mock.calls[1]![0].stateOverride).toBeDefined()
   })
 
+  // Split-publish review finding 8: this error was read as "no estimate" and sent with fallback gas.
+  test('refuses a publish over the node gas cap instead of sending it with fallback gas', async () => {
+    estimateGas.mockImplementation(async () => {
+      throw new Error('gas required exceeds allowance (16777216)')
+    })
+    await expect(publishGasLimit(FROM, TX)).rejects.toMatchObject({ code: 'PUBLISH_TOO_LARGE' })
+    expect(estimateGas.mock.calls[1]![0].stateOverride).toBeDefined()
+  })
+
+  test('an allowance error from a low balance is estimated again with a balance override', async () => {
+    estimateGas.mockImplementationOnce(async () => {
+      throw new Error('gas required exceeds allowance (21000)')
+    })
+    expect(await publishGasLimit(FROM, TX)).toBe(1_300_000n)
+    expect(estimateGas.mock.calls[1]![0].stateOverride).toBeDefined()
+  })
+
   test('the fallback when the estimate cannot be made', async () => {
     estimateGas.mockImplementation(async () => {
       throw new HttpRequestError({ url: 'http://rpc' })
