@@ -89,6 +89,13 @@ For full guides on schema, models, properties, items, files, and the CLI, see **
 | [`@seedprotocol/mapping`](packages/mapping) | Field mapping from external sources to models |
 | [`@seedprotocol/eas`](packages/eas) | EAS GraphQL read client |
 | [`@seedprotocol/arweave`](packages/arweave) | Arweave gateway client |
+| [`@seedprotocol/next`](packages/next) | Next.js config helper for browser apps |
+| [`@seedprotocol/archive`](packages/archive) | BagIt archive bags with Dublin Core and PREMIS metadata |
+| [`@seedprotocol/rdf`](packages/rdf) | RDF export: N-Quads, Turtle and JSON-LD |
+| [`@seedprotocol/ipfs`](packages/ipfs) | IPFS blob store for publishes and `ipfs://` reads |
+| [`@seedprotocol/licensing`](packages/licensing) | License terms, catalog and deeds |
+| [`@seedprotocol/encryption`](packages/encryption) | `seed-private/v1` envelopes and encryption identities for private Versions |
+| [`@seedprotocol/mcp`](packages/mcp) | Read-only MCP server over published Seed content |
 
 ## License
 

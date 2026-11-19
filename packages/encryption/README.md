@@ -1,7 +1,7 @@
 # @seedprotocol/encryption
 
-Encryption for Seed Protocol private Versions. Not published yet: the package is `private` until
-private Versions ship (ADR 0033).
+Encryption for Seed Protocol private Versions (ADR 0033): an author publishes a Version only their
+own identity, and its recovery phrase, can read.
 
 - `encryptEnvelope` / `decryptEnvelope`: the `seed-private/v1` envelope, specified in
   [SPEC.md](SPEC.md). No SDK dependency, so a reader can decrypt without the SDK.
@@ -136,3 +136,14 @@ await openAllEncryptedDownloads()
 
 Until then, a private Image, File or Html value reads as `valueStatus: 'encrypted'`. Don't register a
 decrypting Arweave read transform in a process that builds public feeds.
+
+## Not supported yet
+
+- Sharing a private Version with other readers or collaborators, and subscriptions. Every upload is
+  wrapped only to the recipient keys you pass to `createPrivateUploadEncryptor`.
+- Linking a second device from one that is already unlocked. On a new device, open the keystore
+  manifest with the recovery phrase.
+- Reading private Versions in Node: the SDK downloads files only in the browser.
+- Without a key, a private ItemStorage value reads as `valueStatus: 'missing'`, not `'encrypted'`;
+  only Image, File and Html values report `'encrypted'`.
+- Loading one property on its own downloads its kept envelope again.

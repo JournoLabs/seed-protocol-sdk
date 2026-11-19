@@ -185,9 +185,8 @@ export const TProperty = Type.Object({
   htmlEmbeddedDataUriPolicy: Type.Optional(THtmlEmbeddedDataUriPolicy),
   /**
    * Encrypted when its Version is published (ADR 0033), through `@seedprotocol/publish`'s
-   * `encryptPrivateUpload`. `@seedprotocol/encryption`, which builds that encryptor, isn't on npm
-   * yet, so with the released packages a publish of a private value throws
-   * `PrivateUploadNotEncryptedError`.
+   * `encryptPrivateUpload`, which `createPrivateUploadEncryptor` from `@seedprotocol/encryption`
+   * builds. Without one, a publish of a private value throws `PrivateUploadNotEncryptedError`.
    */
   private: Type.Optional(Type.Boolean()),
 })

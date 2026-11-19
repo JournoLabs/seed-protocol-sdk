@@ -29,6 +29,7 @@ const SYNC_PACKAGES = [
   'archive',
   'rdf',
   'ipfs',
+  'encryption',
   'licensing',
   'mcp',
   // Private, but published manifests list it in devDependencies (workspace refs become this version).

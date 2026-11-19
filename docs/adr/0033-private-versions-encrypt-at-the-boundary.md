@@ -1,8 +1,7 @@
 # 0033. Private Versions encrypt at the publish and read boundaries; access can only be withheld going forward
 
-- **Status:** Accepted. The SDK, publish and arweave code shipped in 0.8.2, but
-  `@seedprotocol/encryption` isn't on npm (`private: true`), so private Versions can't be
-  published from the npm packages yet.
+- **Status:** Accepted. The SDK, publish and arweave code shipped in 0.8.2;
+  `@seedprotocol/encryption` is published from 0.8.3.
 - **Date:** 2026-11-04
 - **Scope:** new `@seedprotocol/encryption`; `@seedprotocol/sdk` (upload builder, EAS sync, file
   downloads, schema files); `@seedprotocol/arweave` (content reads); `@seedprotocol/query`

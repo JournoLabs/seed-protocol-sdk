@@ -1,7 +1,6 @@
 {
   "name": "@seedprotocol/encryption",
-  "version": "0.8.1",
-  "private": true,
+  "version": "0.8.2",
   "description": "Encryption for Seed Protocol private Versions: the seed-private/v1 envelope format and entitlement adapters",
   "keywords": [
     "seed-protocol",
@@ -35,7 +34,8 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
-    "test": "vitest run --reporter=default"
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js && node ../../scripts/check-publish-manifest.js"
   },
   "devDependencies": {
     "@hpke/core": "^1.10.0",
@@ -62,5 +62,8 @@
     "@noble/curves": "^2.4.0",
     "@noble/post-quantum": "^0.7.1",
     "@scure/bip39": "^2.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
