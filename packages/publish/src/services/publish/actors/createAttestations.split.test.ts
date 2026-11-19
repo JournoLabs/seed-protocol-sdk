@@ -37,6 +37,10 @@ let txCount = 0
 /** Set to the EntryPoint when the publish wallet's sender pins its nonce. */
 let pinsNonceOn: string | undefined
 
+/** eth_estimateGas: no estimate unless a test says otherwise, so the local cut stands. */
+const estimateGas = mock(async (_args: { data: string }): Promise<bigint> => {
+  throw new Error('fetch failed')
+})
 const sendTransaction = mock(async (_tx: unknown) => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
 /** publish_attempts as far as these tests need it: the run of each attempt and whether it recorded. */
 let attemptRows: Array<{ id: string; publishRunId: string | null; status: string }> = []
@@ -78,6 +82,7 @@ mock.module('../../../helpers/chainClient', () => ({
   waitForPublishReceipt: async () => ({ logs: [] }),
   // EntryPoint.getNonce(sender, key): sequence 1 for a spent key.
   getPublishPublicClient: () => ({
+    estimateGas,
     readContract: async ({ args }: { args: [string, bigint] }) => (spentKeys.has(args[1]) ? 1n : 0n),
   }),
 }))
@@ -97,12 +102,11 @@ mock.module('../../../helpers/resolvePublishWallet', () => ({
   resolvePublishWallet: () => ({ txSender: { address: PUBLISHER, sendTransaction, ...(pinsNonceOn && { pinsNonceOn }) } }),
 }))
 mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
-// No RPC: an estimate that can't be made keeps the local cut, which these tests size.
+// The part estimate goes through the real estimatePublishGas over the estimateGas mock above.
 mock.module('../../../helpers/publishGas', () => ({
   ...realPublishGas,
   publishGasLimit: async () => 1_234_567n,
   publishGasCeiling: async () => 16_000_000n,
-  estimatePublishGas: async () => undefined,
 }))
 mock.module('../../arweaveL1Finalize/enqueue', () => ({
   enqueueArweaveL1FinalizeJobsFromPublishContext: async () => {},
@@ -189,6 +193,10 @@ beforeEach(() => {
   txCount = 0
   // Forces a split at small sizes: four new author seeds fit (1.94M with headroom), the Post doesn't.
   publishConfig = { maxPublishGas: 2_000_000n }
+  estimateGas.mockReset()
+  estimateGas.mockImplementation(async () => {
+    throw new Error('fetch failed')
+  })
   sendTransaction.mockClear()
   sendTransaction.mockImplementation(async () => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
   claimPublishAttempt.mockClear()
@@ -227,6 +235,19 @@ describe('createAttestations: a publish over one transaction', () => {
     publishConfig = {}
     await run()
     expect(sends()).toEqual([[...AUTHORS, POST]])
+  })
+
+  // Split-publish review finding 8: the node's "exceeds allowance" error used to count as fitting.
+  test('a part the node says is over its gas cap is cut shorter', async () => {
+    publishConfig = {}
+    let wholeLength: number | undefined
+    estimateGas.mockImplementation(async ({ data }) => {
+      wholeLength ??= data.length
+      if (data.length >= wholeLength) throw new Error('gas required exceeds allowance (16777216)')
+      return 1_000_000n
+    })
+    await run()
+    expect(sends()).toEqual([PART_1_AUTHORS, [POST]])
   })
 
   test('a landed part found by reconcile is recorded, then the rest is sent', async () => {

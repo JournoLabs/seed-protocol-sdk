@@ -1,7 +1,7 @@
 import { size, zeroAddress } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
 import { encodeMultiPublish, localIdWordOf, slotWordsOf, type MultiPublishRequest } from './contracts'
-import { PUBLISH_GAS_HEADROOM_BPS } from './publishGas'
+import { PUBLISH_GAS_HEADROOM_BPS, type PublishGasEstimate } from './publishGas'
 import { localPublishGas, maxPublishGas, PUBLISH_MAX_CALLDATA_BYTES } from './publishSize'
 
 /**
@@ -173,13 +173,14 @@ export function expectedPartCount(requests: MultiPublishRequest[], from?: string
 /**
  * The number of leading units to send as the next part: the longest prefix the local estimate
  * allows ({@link localPrefixLength}), shortened by bisection until `estimate` (gas with headroom)
- * is at most `ceiling`. An estimate that can't be made (`undefined`) accepts its prefix, which is
- * then sent with `publishGasLimit`'s fallback gas.
+ * is at most `ceiling`. An estimate over the node's own cap (`'over_cap'`) doesn't fit. An estimate
+ * that can't be made (`undefined`) accepts its prefix, which is then sent with `publishGasLimit`'s
+ * fallback gas.
  * @throws ManagedAccountPublishError `PUBLISH_TOO_LARGE` when the first unit doesn't fit on its own
  */
 export async function fitPublishPart(
   units: PublishUnit[],
-  estimate: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>,
+  estimate: (requests: MultiPublishRequest[]) => Promise<PublishGasEstimate>,
   ceiling: bigint,
 ): Promise<number> {
   const local = localPrefixLength(units)
@@ -188,6 +189,7 @@ export async function fitPublishPart(
   }
   const fits = async (count: number) => {
     const gas = await estimate(partRequests(units, count))
+    if (gas === 'over_cap') return false
     return gas === undefined || gas <= ceiling
   }
   if (await fits(local)) return local
