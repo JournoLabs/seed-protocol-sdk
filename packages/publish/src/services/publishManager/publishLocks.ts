@@ -8,7 +8,8 @@ const logger = debug('seedProtocol:PublishManager:publishLocks')
  * a Web Lock for its seed; the browser releases it when the tab closes or crashes, and the next tab
  * to restore picks the publish up. See docs/MULTI_TAB.md.
  *
- * Where Web Locks are missing (Node, Bun, old browsers) every lock is granted, as before.
+ * Where Web Locks are missing (Bun, old browsers) every lock is granted, as before. Node has
+ * `navigator.locks`, which covers one process, so there a seed's publish runs once per process.
  */
 
 type LockManagerLike = Pick<LockManager, 'request' | 'query'>
@@ -86,7 +87,8 @@ export type PublishLockHolder = 'here' | 'other-tab' | 'none'
  * Whether this tab runs the seed's publish, another tab does, or no tab holds its lock. Every tab
  * sees the same `in_progress` rows in `publish_processes`; this tells them apart. `'none'` for an
  * `in_progress` row means the tab that ran it closed: it stays unrun until a tab loads and restores
- * it. Where Web Locks are missing every tab runs its own publishes, so the answer is `'here'`.
+ * it. Where Web Locks are missing (Bun, old browsers) every tab runs its own publishes, so the answer is
+ * `'here'`. Node has them for its process: there the answer is `'none'` for a seed no publish holds.
  */
 export async function publishLockHolder(seedLocalId: string): Promise<PublishLockHolder> {
   if (held.has(seedLocalId)) return 'here'

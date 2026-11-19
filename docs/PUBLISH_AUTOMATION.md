@@ -241,6 +241,12 @@ A key is spent once a UserOp lands under it, reverted or not. A publish fails wi
 doesn't pin (`NONCE_KEY_NOT_PINNED`), or it would attest directly to EAS (`NONCE_KEY_DIRECT_EAS`). After
 a revert, publish again under a new key, such as the job id with a try count.
 
+A thirdweb smart wallet wrapped with `fromThirdwebAccount(account, { pinsNonce: true })` but built
+without `overrides.getAccountNonce: seedAccountNonce` passes that check and then sends under a nonce of
+its own. The publish then fails with `NONCE_KEY_UNUSED` after the send, with the transaction in
+`transactionHash`; its attempt keeps that hash, so a retry settles the transaction from the chain
+instead of sending again. Build the wallet with `seedAccountNonce` before using `nonceKey`.
+
 Readers should treat **EAS attester (ManagedAccount)** as authorship. Bind Arweave owners with:
 
 ```ts
