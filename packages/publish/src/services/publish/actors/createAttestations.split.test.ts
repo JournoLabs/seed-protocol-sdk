@@ -40,6 +40,8 @@ let pinsNonceOn: string | undefined
 const sendTransaction = mock(async (_tx: unknown) => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
 /** publish_attempts as far as these tests need it: the run of each attempt and whether it recorded. */
 let attemptRows: Array<{ id: string; publishRunId: string | null; status: string }> = []
+/** What findOpenPublishAttempts returns: attempts claimed and not settled. */
+let openAttempts: unknown[] = []
 const claimPublishAttempt = mock(async (attempt: { id: string; requests: string; publishRunId: string | null }) => {
   attemptRows.push({ id: attempt.id, publishRunId: attempt.publishRunId, status: 'sending' })
   return undefined
@@ -59,7 +61,7 @@ let spentKeys = new Set<bigint>()
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   claimPublishAttempt,
-  findOpenPublishAttempts: async () => [],
+  findOpenPublishAttempts: async () => openAttempts,
   updatePublishAttempt: async () => {},
   countRecordedPublishParts: async (runIds: string[]) =>
     attemptRows.filter((a) => a.publishRunId && runIds.includes(a.publishRunId) && a.status === 'recorded').length,
@@ -110,6 +112,8 @@ const { createAttestations } = await import('./createAttestations')
 const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
 const { publishMachine } = await import('../index')
 const { publishNonceKey } = await import('../../../helpers/pinnedNonce')
+const { normalizePublishRequest } = await import('./publishRequestNormalize')
+const { partRequests, publishUnits } = await import('../../../helpers/publishParts')
 
 const attestation = (schema: `0x${string}`, data: `0x${string}`, easType?: string) => ({
   schema,
@@ -180,6 +184,7 @@ const PART_1_AUTHORS = AUTHORS
 beforeEach(() => {
   recorded = new Set()
   attemptRows = []
+  openAttempts = []
   spentKeys = new Set()
   txCount = 0
   // Forces a split at small sizes: four new author seeds fit (1.94M with headroom), the Post doesn't.
@@ -262,6 +267,32 @@ describe('createAttestations: a publish over one transaction', () => {
     await pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-r' }))
     expect(sends()).toEqual([[POST]])
     expect(sentKeys()).toEqual([publishNonceKey('run-7', 2)])
+  })
+
+  test('a resume sends the open attempt\'s own part, though the payload now cuts differently', async () => {
+    // Part 1 was claimed with three authors under its pinned key and never landed. The rebuilt
+    // payload now fits four, so a re-cut part would not be the requests the attempt stores.
+    const units = publishUnits(payload().map(normalizePublishRequest))
+    const stored = JSON.stringify(partRequests(units, 3), (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
+    const key = publishNonceKey('run-7', 1)
+    openAttempts = [
+      {
+        id: 'part-1',
+        publishRunId: 'run-r',
+        step: 'multiPublish',
+        requests: stored,
+        sender: PUBLISHER,
+        entryPoint: `0x${'7'.repeat(40)}`,
+        nonceKey: key.toString(),
+      },
+    ]
+    const { item } = await pinning(() =>
+      run({ nonceKey: 'run-7', publishRunId: 'run-r', resumeAttemptId: 'part-1' }),
+    )
+    expect(sentKeys()[0]).toBe(key)
+    expect(recordMultiPublishReceipt.mock.calls[0]![0].requests.map((r) => r.localId)).toEqual(AUTHORS.slice(0, 3))
+    expect(recordMultiPublishReceipt.mock.calls[0]![0].attemptId).toBe('part-1')
+    expect(item.seedUid).toBe(uidOf(POST))
   })
 
   test('a run that replaced one under the same nonceKey goes on from its parts', async () => {

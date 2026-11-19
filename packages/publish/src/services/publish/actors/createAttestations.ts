@@ -2,7 +2,7 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload, UnrecordedAttestation } from '../../../types'
-import type { IItem } from '@seedprotocol/sdk'
+import { findOpenPublishAttempts, type IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
@@ -368,25 +368,15 @@ async function executeCreateAttestations(
     })
 
     let resumeAttemptId = context.resumeAttemptId
+    // A resumed attempt goes again with the requests it stored: sendAttested sends under its key
+    // only those, and a payload cut again (by a new RPC estimate, say) can differ from them.
+    let resumedPart = resumeAttemptId ? await openAttemptPart(resumeAttemptId, item.seedLocalId) : undefined
     let lastSent: string | undefined
     for (;;) {
-      // The contract creates every seed of a part before it attests any property, so a relation
-      // back to an item in the same part is filled now rather than left for a later publish.
-      const requestData = await (
-        item.getPublishPayload as (
-          uploads: typeof uploadDataWithTxIds,
-          opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
-        ) => ReturnType<typeof item.getPublishPayload>
-      )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
-      const reqs = Array.isArray(requestData) ? requestData : [requestData]
-      const units = publishUnits(reqs.map((req: any) => normalizePublishRequest(req)))
-      if (units.length === 0) {
-        // Every rebuilt payload holds at least the root until its part records.
-        throw new Error('The publish payload is empty; nothing was sent.')
-      }
-
-      const count = await fitPublishPart(units, estimateMultiPublish, await publishGasCeiling())
-      const part = partRequests(units, count)
+      const { part, isWhole } = resumedPart
+        ? { part: resumedPart, isWhole: false }
+        : await nextPart(item, uploadDataWithTxIds, context, estimateMultiPublish)
+      resumedPart = undefined
       const serialized = JSON.stringify(part, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
       if (serialized === lastSent) {
         // Recording a part publishes its seeds, so the rebuilt payload can't hold the same part.
@@ -424,8 +414,53 @@ async function executeCreateAttestations(
         attester: attesterAddress,
       }
       parts.push(await recordPart(context, item, receipt, landed))
-      if (heldRoot(part, item.seedLocalId) || count === units.length) return finish()
+      if (heldRoot(part, item.seedLocalId) || isWhole) return finish()
     }
+}
+
+/** Fields a publish request holds as bigints, which an attempt row stores as decimal strings. */
+const BIGINT_REQUEST_FIELDS = new Set(['expirationTime', 'value', 'elementIndex'])
+
+/**
+ * The requests open attempt `attemptId` claimed, as they were sent; undefined when it is no longer
+ * open or isn't a multiPublish. Bigints come back from their strings, so the requests serialize to
+ * the stored text again, which is what sendAttested checks a resume against.
+ */
+async function openAttemptPart(attemptId: string, seedLocalId: string): Promise<MultiPublishRequest[] | undefined> {
+  const attempt = (await findOpenPublishAttempts([seedLocalId])).find((a) => a.id === attemptId)
+  if (!attempt || attempt.step !== 'multiPublish') return undefined
+  return JSON.parse(attempt.requests, (key, v) =>
+    BIGINT_REQUEST_FIELDS.has(key) && typeof v === 'string' ? BigInt(v) : v,
+  ) as MultiPublishRequest[]
+}
+
+/**
+ * The next part of the publish: the payload rebuilt from the rows, cut to the longest prefix of
+ * units that fits. `isWhole` when that is every unit left.
+ */
+async function nextPart(
+  item: IItem<any>,
+  uploads: Array<PublishUpload & { txId: string }>,
+  context: PublishMachineContext,
+  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>,
+): Promise<{ part: MultiPublishRequest[]; isWhole: boolean }> {
+  // The contract creates every seed of a part before it attests any property, so a relation
+  // back to an item in the same part is filled now rather than left for a later publish.
+  const requestData = await (
+    item.getPublishPayload as (
+      uploads: Array<PublishUpload & { txId: string }>,
+      opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
+    ) => ReturnType<typeof item.getPublishPayload>
+  )(uploads, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
+  const reqs = Array.isArray(requestData) ? requestData : [requestData]
+  const units = publishUnits(reqs.map((req: any) => normalizePublishRequest(req)))
+  if (units.length === 0) {
+    // Every rebuilt payload holds at least the root until its part records.
+    throw new Error('The publish payload is empty; nothing was sent.')
+  }
+
+  const count = await fitPublishPart(units, estimateMultiPublish, await publishGasCeiling())
+  return { part: partRequests(units, count), isWhole: count === units.length }
 }
 
 /**
