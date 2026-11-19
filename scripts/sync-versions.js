@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const rootDir = join(__dirname, '..')
+const defaultRootDir = join(__dirname, '..')
 
 /** Packages synced to the SDK version. */
 const SYNC_PACKAGES = [
@@ -52,10 +52,33 @@ function writePackageJson(path, data) {
 }
 
 /**
+ * The Claude Code plugin starts @seedprotocol/mcp at a pinned version, and its own version matches,
+ * so the plugin's skill always describes the tools of the server it starts.
+ */
+function syncClaudePlugin(rootDir, targetVersion) {
+  const pluginDir = join(rootDir, 'plugins', 'seed-protocol')
+  const manifestPath = join(pluginDir, '.claude-plugin', 'plugin.json')
+  const manifest = readPackageJson(manifestPath)
+  manifest.version = targetVersion
+  writePackageJson(manifestPath, manifest)
+
+  const mcpPath = join(pluginDir, '.mcp.json')
+  const mcp = readPackageJson(mcpPath)
+  for (const server of Object.values(mcp.mcpServers ?? {})) {
+    server.args = server.args?.map((arg) =>
+      arg.startsWith('@seedprotocol/mcp@') ? `@seedprotocol/mcp@${targetVersion}` : arg,
+    )
+  }
+  writePackageJson(mcpPath, mcp)
+  console.log(`[Version Sync] Updated Claude plugin to ${targetVersion}`)
+}
+
+/**
  * Syncs versions across all supported packages
  * @param {string} newVersion - Optional version to set. If not provided, uses SDK version as source of truth
+ * @param {{ rootDir?: string }} options - rootDir defaults to this repository
  */
-function syncVersions(newVersion = null) {
+function syncVersions(newVersion = null, { rootDir = defaultRootDir } = {}) {
   const packages = Object.fromEntries(
     SYNC_PACKAGES.map((name) => {
       const packagePath = join(rootDir, 'packages', name, 'package.json')
@@ -98,6 +121,8 @@ function syncVersions(newVersion = null) {
       )
     }
   }
+
+  syncClaudePlugin(rootDir, targetVersion)
 
   console.log('[Version Sync] Version synchronization complete!')
   console.log(`[Version Sync] Root: ${rootPackage.version}`)

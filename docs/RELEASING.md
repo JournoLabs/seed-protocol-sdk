@@ -148,6 +148,10 @@ git push --atomic origin main v0.7.3
 The tag must point at a commit whose committed version matches it, or the run fails
 before anything publishes.
 
+The version sync (`scripts/sync-versions.js`, which `release` and `new-version` run) also
+moves the Claude Code plugin in `plugins/seed-protocol/`: its `plugin.json` version and the
+`@seedprotocol/mcp@<version>` its `.mcp.json` starts.
+
 ### When a release fails before publishing
 
 If the tag's run fails before any package reaches npm (a flaky test, say), the version
