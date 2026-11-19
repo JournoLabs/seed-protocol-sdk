@@ -52,4 +52,15 @@ describe('resolveMediaRef', () => {
       expect(r.href).toContain(TX_43)
     }
   })
+
+  it('returns unresolved, not a gateway link, for an envelope this device has no key for', async () => {
+    vi.spyOn(BaseFileManager, 'getFilesPath').mockImplementation((...parts: string[]) => `/files/${parts.join('/')}`)
+    vi.spyOn(BaseFileManager, 'pathExists').mockImplementation(async (path: string) => path === `/files/encrypted/${TX_43}`)
+    const r = await resolveMediaRef(TX_43)
+    expect(r).toEqual({
+      status: 'unresolved',
+      reason: 'encrypted',
+      classification: { kind: 'arweaveTxId', txId: TX_43 },
+    })
+  })
 })

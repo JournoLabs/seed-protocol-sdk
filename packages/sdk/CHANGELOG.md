@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `resolveMediaRef` resolves a transaction this device holds only as an unopened `seed-private/v1` envelope to `{ status: 'unresolved', reason: 'encrypted' }`. It returned a gateway link, which served the ciphertext. `useResolvedMediaRef` reports `unresolved` for it.
 - **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
 - **Breaking:** The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
 - `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.

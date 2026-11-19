@@ -2,18 +2,24 @@ import {
   BaseArweaveClient,
   classifyMediaRef,
   type ResolveMediaRefOptions,
+  type MediaRefClassification,
   type ResolveMediaRefResult,
 } from '@seedprotocol/arweave'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
+import { hasEncryptedDownload } from './envelopeContent'
 import { convertTxIdToImage } from './localImageBlobUrl'
 
 /** Classification and feed-field helpers live in `@seedprotocol/arweave`; resolving needs the local DB and files. */
 
-async function resolveTxId(txId: string): Promise<ResolveMediaRefResult> {
+async function resolveTxId(txId: string, classification: MediaRefClassification): Promise<ResolveMediaRefResult> {
   const local = await convertTxIdToImage(txId)
   if (local) {
     return { status: 'ready', href: local, source: 'localBlob' }
+  }
+  // A kept envelope means the gateway would serve ciphertext (ADR 0033).
+  if (await hasEncryptedDownload(txId)) {
+    return { status: 'unresolved', reason: 'encrypted', classification }
   }
   return {
     status: 'ready',
@@ -61,7 +67,7 @@ export async function resolveMediaRef(
         classification,
       }
     case 'arweaveTxId':
-      return resolveTxId(classification.txId)
+      return resolveTxId(classification.txId, classification)
     case 'seedUid': {
       const appDb = BaseDb.getAppDb()
       if (!appDb) {
@@ -79,7 +85,7 @@ export async function resolveMediaRef(
           classification,
         }
       }
-      return resolveTxId(storageTransactionId)
+      return resolveTxId(storageTransactionId, classification)
     }
     default:
       return {
