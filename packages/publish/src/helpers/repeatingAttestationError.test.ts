@@ -31,6 +31,18 @@ describe('isRepeatingAttestationError', () => {
     expect(isRepeatingAttestationError(new PublishChainConfigError(11155420, ['no EAS']))).toBe(true)
   })
 
+  // Batch 17 item 7b: a restored publish has its error as the plain object the snapshot's JSON kept
+  test('matches a nonce key or chain config error restored from a saved snapshot', () => {
+    const restore = (error: Error) => JSON.parse(JSON.stringify({ context: { error } })).context.error
+    expect(isRepeatingAttestationError(restore(new PublishNonceKeyError('no', 'NONCE_KEY_NOT_PINNED', 'k')))).toBe(true)
+    expect(isRepeatingAttestationError(restore(new PublishChainConfigError(11155420, ['no EAS'])))).toBe(true)
+  })
+
+  test('false for NONCE_KEY_UNUSED, whose send a retry settles from its hash', () => {
+    const err = new PublishNonceKeyError('unused', 'NONCE_KEY_UNUSED', 'k', undefined, `0x${'a'.repeat(64)}`)
+    expect(isRepeatingAttestationError(err)).toBe(false)
+  })
+
   test('false for a timeout, an unknown outcome and other managed-account codes', () => {
     expect(isRepeatingAttestationError(new Error('Timed out while waiting for transaction'))).toBe(false)
     expect(

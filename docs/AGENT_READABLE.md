@@ -12,6 +12,9 @@ provenance attached. Three outputs cover that, and a site serves them beside its
 The `.md` suffix and `/llms.txt` follow the [llms.txt proposal](https://llmstxt.org). Agents look
 there first, so a site that uses other paths should still link them from `/llms.txt`.
 
+An agent that runs tools instead of browsing can read the same content, without a website, through
+[`@seedprotocol/mcp`](../packages/mcp/README.md).
+
 ## An item as Markdown
 
 ```ts

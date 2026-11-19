@@ -28,7 +28,8 @@ export type FromThirdwebAccountOptions = {
    * The account's wallet honours `SeedTxRequest.nonceKey`: it comes from `getManagedAccountWallet`,
    * or is a smart wallet built with `overrides.getAccountNonce: seedAccountNonce`. Any other
    * account gets its nonce from Thirdweb. A send whose wallet never asks `seedAccountNonce` warns
-   * and calls `SeedTxRequest.onNonceKeyIgnored`, so publish records the attempt as unpinned.
+   * and calls `SeedTxRequest.onNonceKeyIgnored`, so publish records the attempt as unpinned, and
+   * fails the publish with `NONCE_KEY_UNUSED` when the host gave `CreatePublishOptions.nonceKey`.
    */
   pinsNonce?: boolean
 }

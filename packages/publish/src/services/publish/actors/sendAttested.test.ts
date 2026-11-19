@@ -331,6 +331,21 @@ describe('sendAttested: a host nonce key', () => {
     expect(rows).toEqual([])
   })
 
+  // Batch 17 item 5 (D60): a thirdweb smart wallet built without seedAccountNonce ignores the key
+  test('a send that ignored the host key fails with NONCE_KEY_UNUSED and keeps its hash for reconcile', async () => {
+    send.mockImplementationOnce((async (_key: bigint, onNonceKeyIgnored: () => void) => {
+      onNonceKeyIgnored()
+      return { transactionHash: HASH }
+    }) as never)
+    await expect(sendAttested(pinned({ hostNonceKey: 'run-7' }))).rejects.toMatchObject({
+      name: 'PublishNonceKeyError',
+      code: 'NONCE_KEY_UNUSED',
+      nonceKey: 'run-7',
+      transactionHash: HASH,
+    })
+    expect(rows[0]).toMatchObject({ status: 'sent', txHash: HASH, nonceKey: null, entryPoint: null })
+  })
+
   test('a sender that does not pin, or a direct EAS step, is refused before the send', async () => {
     await expect(sendAttested({ ...attempt(), hostNonceKey: 'run-7' })).rejects.toMatchObject({
       code: 'NONCE_KEY_NOT_PINNED',

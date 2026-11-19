@@ -6,7 +6,12 @@ import {
 } from '@seedprotocol/sdk'
 import debug from 'debug'
 import type { Address, Hex } from 'viem'
-import { AttestationAttemptOpenError, isManagedAccountPublishError, PublishTransactionRevertedError } from '~/errors'
+import {
+  AttestationAttemptOpenError,
+  isManagedAccountPublishError,
+  PublishNonceKeyError,
+  PublishTransactionRevertedError,
+} from '~/errors'
 import { getPublishBlockNumber, waitForPublishReceipt } from '~/helpers/chainClient'
 import { getPublishViemChain } from '~/helpers/chainConfig'
 import { usableHostNonceKey } from '~/helpers/hostNonceKey'
@@ -74,7 +79,8 @@ export type AttestedSend = {
  * The one way an attestation transaction goes out: commits an attempt row first, and refuses when
  * an open attempt covers any of these seeds, whichever run, retry or restore got here.
  * @throws AttestationAttemptOpenError when an open attempt is in the way; nothing was sent
- * @throws PublishNonceKeyError when `hostNonceKey` can't be used; nothing was sent
+ * @throws PublishNonceKeyError when `hostNonceKey` can't be used; nothing was sent. With code
+ *   `NONCE_KEY_UNUSED` the send went out without the key, and the attempt is kept with its hash
  * @throws whatever `send` throws, after closing the attempt when that error settles what happened
  */
 export async function sendAttested({
@@ -155,8 +161,21 @@ export async function sendAttested({
     if (status && !inconclusive) await moveAttempt(attemptId, status)
     throw err
   }
+  const keyUnused = nonceKeyIgnored
   await unpin()
   await moveAttempt(attemptId, 'sent', transactionHash)
+  if (keyUnused && hostNonceKey !== undefined) {
+    // The attempt stays open with its hash, so a retry or reconcile settles it from the chain.
+    throw new PublishNonceKeyError(
+      `nonceKey "${hostNonceKey}" wasn't used: the wallet sent transaction ${transactionHash} under a nonce of its own, ` +
+        'so the key can\'t stop a second try from landing. Build the thirdweb smart wallet with ' +
+        'overrides.getAccountNonce: seedAccountNonce, or publish without nonceKey.',
+      'NONCE_KEY_UNUSED',
+      hostNonceKey,
+      sender.address,
+      transactionHash,
+    )
+  }
   return { attemptId, transactionHash }
 }
 
