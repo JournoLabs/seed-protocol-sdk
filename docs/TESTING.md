@@ -231,6 +231,13 @@ git config core.hooksPath .githooks
 
 `git push --no-verify` skips it once. Lint takes about 5s on a dev machine.
 
+The same setting turns on `.githooks/commit-msg`, which rejects a commit message that names no
+GitHub issue. Use `Refs #N` for work toward an issue and `Completes #N` on the commit that finishes
+it, or a `Refs: none` line for work with no issue. On rejection it lists the open Ready and In
+progress issues on the project board. `git commit --no-verify` skips it once.
+`scripts/reconcile-issues.js` reads those references and moves issues along the board; it prints
+what it would change unless given `--apply`.
+
 **`bun run ci:local`** runs the job's `run:` steps in order: `bun install --frozen-lockfile`,
 `playwright install chromium`, `bun run lint`, the package build, then `bun run test`. It reads the
 steps from `release.yml`, so a step added there runs here too. The first failure stops the run, and
