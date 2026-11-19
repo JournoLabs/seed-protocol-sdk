@@ -51,6 +51,16 @@ function writePackageJson(path, data) {
   writeFileSync(path, content, 'utf-8')
 }
 
+const PLUGIN_FILES = ['plugins/seed-protocol/.claude-plugin/plugin.json', 'plugins/seed-protocol/.mcp.json']
+
+/**
+ * Whether `syncVersions` may have written this repo-relative path: a package.json or a plugin file.
+ * @param {string} file
+ */
+function isVersionSyncFile(file) {
+  return file.endsWith('package.json') || PLUGIN_FILES.includes(file)
+}
+
 /**
  * The Claude Code plugin starts @seedprotocol/mcp at a pinned version, and its own version matches,
  * so the plugin's skill always describes the tools of the server it starts.
@@ -131,7 +141,7 @@ function syncVersions(newVersion = null, { rootDir = defaultRootDir } = {}) {
   }
 }
 
-export { syncVersions, SYNC_PACKAGES }
+export { isVersionSyncFile, syncVersions, SYNC_PACKAGES }
 
 // Only run when invoked as a CLI script (not when imported by new-version.js)
 const isDirectRun =

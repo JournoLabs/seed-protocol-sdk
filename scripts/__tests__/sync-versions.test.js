@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AWAITING_FIRST_PUBLISH, PUBLISH_ORDER } from '../release-channel.js'
-import { SYNC_PACKAGES, syncVersions } from '../sync-versions.js'
+import { SYNC_PACKAGES, isVersionSyncFile, syncVersions } from '../sync-versions.js'
 
 describe('SYNC_PACKAGES', () => {
   it('bumps every package a release publishes or will publish', () => {
@@ -49,5 +49,21 @@ describe('syncVersions', () => {
       mcpServers: { 'seed-protocol': { ...server, args: ['-y', '@seedprotocol/mcp@1.2.3'] } },
     })
     assert.equal(readJson(join(rootDir, 'packages', 'mcp', 'package.json')).version, '1.2.3')
+  })
+})
+
+describe('isVersionSyncFile', () => {
+  it('accepts every file the sync writes and nothing else', () => {
+    for (const file of [
+      'package.json',
+      'packages/mcp/package.json',
+      'plugins/seed-protocol/.claude-plugin/plugin.json',
+      'plugins/seed-protocol/.mcp.json',
+    ]) {
+      assert.equal(isVersionSyncFile(file), true, file)
+    }
+    for (const file of ['packages/mcp/src/server.ts', 'plugins/seed-protocol/README.md', '.mcp.json']) {
+      assert.equal(isVersionSyncFile(file), false, file)
+    }
   })
 })

@@ -42,7 +42,7 @@ import {
   remoteTagCommit,
   retryProblems,
 } from './release-channel.js'
-import { syncVersions } from './sync-versions.js'
+import { isVersionSyncFile, syncVersions } from './sync-versions.js'
 import { planReleaseChangelogs, writeReleaseChangelogs } from './changelog.js'
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -294,10 +294,10 @@ async function main() {
 
   syncVersions(target)
   const changed = lines(git(['diff', '--name-only']))
-  const unexpected = changed.filter((f) => !f.endsWith('package.json'))
+  const unexpected = changed.filter((f) => !isVersionSyncFile(f))
   if (unexpected.length > 0) {
     git(['checkout', '--', '.'])
-    throw new Error(`Version sync changed more than package.json files (${unexpected.join(', ')}); reverted.`)
+    throw new Error(`Version sync changed files other than package.json and the Claude plugin (${unexpected.join(', ')}); reverted.`)
   }
 
   const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range })

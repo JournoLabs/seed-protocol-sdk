@@ -9,7 +9,7 @@ Gives Claude Code read access to content published with Seed Protocol: it lists 
 
 Claude Code asks for two settings at install:
 
-- **Publishers**: comma-separated attester addresses. When set, `list_seeds` reads these publications by default and refuses others. When blank, each request names the publication's address.
+- **Publishers**: comma-separated `0x` attester addresses. When set, the server reads only seeds these addresses attested and refuses any other. When blank, `list_seeds` asks for the publication's address, and the other tools read any seed by UID.
 - **Chain ID**: the EAS chain to read. The default, `11155420`, is OP Sepolia.
 
 Change them later with `/plugin configure seed-protocol@seed-protocol`.

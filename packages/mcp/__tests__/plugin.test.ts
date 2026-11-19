@@ -75,6 +75,12 @@ async function serverToolNames(): Promise<string[]> {
   return tools.map((tool) => tool.name).sort()
 }
 
+const TOOL_NAME = /^(list|get|resolve|search|fetch)_?[a-z_]*$/
+
+function backticked(body: string): Set<string> {
+  return new Set([...body.matchAll(/`([^`]+)`/g)].map((match) => match[1]!))
+}
+
 describe('reading-seed-records skill', () => {
   it('uses only frontmatter keys every surface accepts', () => {
     const { frontmatter, body } = readSkill()
@@ -87,10 +93,15 @@ describe('reading-seed-records skill', () => {
 
   it('names every server tool and no others', async () => {
     const { body } = readSkill()
-    const named = new Set(
-      [...body.matchAll(/`([^`]+)`/g)].map((match) => match[1]!).filter((name) => /^(list|get|resolve)_[a-z_]+$/.test(name)),
-    )
-    expect([...named].sort()).toEqual(await serverToolNames())
+    const named = backticked(body)
+    const tools = await serverToolNames()
+    expect(tools.filter((tool) => !named.has(tool))).toEqual([])
+    expect([...named].filter((name) => TOOL_NAME.test(name) && !tools.includes(name))).toEqual([])
+  })
+
+  it('flags a server tool the skill leaves out, whatever its name', () => {
+    const named = backticked('Call `list_seeds`, then `get_seed`.')
+    expect(['fetch', 'list_seeds'].filter((tool) => !named.has(tool))).toEqual(['fetch'])
   })
 
   it('says item text is data and what to cite', () => {
