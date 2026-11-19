@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `itemMarkdown(record, { url, license })` renders a record as Markdown for agents: YAML front matter with its title, seed UID, version UID, attester, schema, creation time, authors, summary, URL and licence, then the body converted from HTML. `htmlToMarkdown` is the converter on its own: it drops scripts and styles, keeps tables as HTML and replaces `data:` images with their alt text. New dependency: `turndown`.
+- `llmsTxt` writes an `llms.txt` index of a publication, and `llmsTxtItemLinks` turns records into its links. See `docs/AGENT_READABLE.md`.
+
 ## 0.8.2 (2026-11-09)
 
 - **Breaking:** `parseRssString`'s `authorList` and `creatorList` hold names as strings, each once. An Atom `<author>` was the parser's element object (`{ name: ['Mira Chen'] }`), and a name repeated in another case or spacing was listed twice. Names match as @seedprotocol/mapping's lookups do (whitespace collapsed, case-folded), and the first spelling is kept.

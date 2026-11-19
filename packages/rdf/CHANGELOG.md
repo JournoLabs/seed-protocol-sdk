@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `jsonLdScript(doc)` wraps a JSON-LD document in a `<script type="application/ld+json">` element for an HTML page, escaping `<`, `>`, `&` and U+2028/U+2029 so no value can end the element.
 - A schema file without ids, such as the `seed.schema.json` the docs' tutorial writes, works with `seed-rdf`, `checkSidecar`, `syncSidecar`, `suggestTerms`, `sidecarContext`, `toShacl` and the state graph's lens. Missing schema, model and property ids are derived from `metadata.name` and the model and property names, as the SDK derives them when it loads the file, and `seed-rdf` notes that on stderr. `seed-rdf check` exited 2 with "has no id". The SDK keeps ids a stored schema already had, so the two differ when a file once carried other ids and then dropped them.
 - The state graph links no seed for the all-zero `bytes32` either. It linked `0x00…00` as a seed.
 - `seed-rdf` exits 3 with a one-line message on an unexpected error, such as `sync --write` to a sidecar it can't write. It printed a stack trace and exited 1, the code `check` uses for stale or unreadable terms.
