@@ -379,8 +379,9 @@ export const PublishManager = {
    * Ends a publish waiting after a failed attestation (`attestationFailureRecoverable`, its direct
    * EAS twin, or `attestationOutcomeUnknown`) as `failed`, keeping its error, unlike `stopPublish`,
    * which records it `interrupted` and clears the error. It ends the run only once no attestation
-   * attempt for the seed is open; otherwise the run keeps waiting, and `retryAttestations` settles
-   * the attempt. Read `query(seedLocalId)` to see which happened. Does nothing in any other state, or
+   * attempt for the seed is open; otherwise the run keeps waiting and logs a warning naming the
+   * attempt. From `attestationOutcomeUnknown`, `resolveAttestationAttempt` settles it; from the other
+   * states, `retryAttestations` does. Read `query(seedLocalId)` to see which happened. Does nothing in any other state, or
    * when this tab has no publish for the seed.
    */
   giveUpPublish: (seedLocalId: string) => publishManager.send({ type: 'GIVE_UP', seedLocalId }),

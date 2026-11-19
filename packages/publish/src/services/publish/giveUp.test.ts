@@ -71,7 +71,40 @@ describe('giveUp', () => {
       actor.send({ type: 'retry' } as any)
       await waitFor(actor, (s) => s.value === 'reconcilingAttestations')
     })
+
+    test(`says why it keeps waiting in ${value}, naming the attempt and the way out`, async () => {
+      open = async () => [{ id: 'attempt1' }]
+      const warn = spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { actor } = waitingRun(value)
+        const seen: unknown[] = []
+        actor.subscribe((s) => seen.push(s.value))
+        actor.start()
+        actor.send({ type: 'giveUp' } as any)
+        await waitFor(actor, (s) => s.value === value && seen.includes('checkingGiveUp'))
+        expect(warn).toHaveBeenCalledTimes(1)
+        const message = String(warn.mock.calls[0]?.[0])
+        expect(message).toContain('"post"')
+        expect(message).toContain('attempt1')
+        expect(message).toContain(value === 'attestationOutcomeUnknown' ? 'resolveAttestationAttempt' : 'retryAttestations')
+      } finally {
+        warn.mockRestore()
+      }
+    })
   }
+
+  test("doesn't warn when giveUp ends the run", async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { actor } = waitingRun('attestationOutcomeUnknown')
+      actor.start()
+      actor.send({ type: 'giveUp' } as any)
+      await waitFor(actor, (s) => s.value === 'failure')
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 
   test("stays waiting when the attempts can't be read", async () => {
     open = async () => {

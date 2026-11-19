@@ -19,6 +19,7 @@ import {
   rewritingHtmlEmbedded,
   revokeRetractedProperties,
 } from './actors'
+import { giveUpWaitsMessage, type GiveUpCheck } from './actors/checkGiveUp'
 import {
   PublishMachineStates,
 } from '~/helpers/constants'
@@ -44,6 +45,13 @@ function attestationUsesMultiPublish(context: Partial<PublishMachineContext>): b
   if (s === 'multiPublish') return true
   if (s === 'directEas') return false
   return !getPublishConfig().useDirectEas
+}
+
+/** Says why a giveUp left the run waiting. Runs before `giveUpFrom` is cleared. */
+function warnGiveUpWaits({ context, event }: { context: Partial<PublishMachineContext>; event: unknown }): void {
+  const { attemptId } = (event as { output: GiveUpCheck }).output
+  const seedLocalId = String(context.item?.seedLocalId)
+  console.warn(giveUpWaitsMessage(seedLocalId, attemptId, context.giveUpFrom ?? 'attestationFailureRecoverable'))
 }
 
 /** Extract error from event. Supports event.error (custom events like uploadError) and event.data (XState fromPromise invoke errors). */
@@ -544,20 +552,20 @@ export const publishMachine = setup({
           {
             guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverable',
             target  : 'attestationFailureRecoverable',
-            actions : assign({ giveUpFrom : () => undefined }),
+            actions : [ warnGiveUpWaits, assign({ giveUpFrom : () => undefined }) ],
           },
           {
             guard   : ( { context } ) => context.giveUpFrom === 'attestationFailureRecoverableDirectToEas',
             target  : 'attestationFailureRecoverableDirectToEas',
-            actions : assign({ giveUpFrom : () => undefined }),
+            actions : [ warnGiveUpWaits, assign({ giveUpFrom : () => undefined }) ],
           },
           {
             guard   : ( { context } ) => context.giveUpFrom === 'attestationOutcomeUnknown',
             target  : 'attestationOutcomeUnknown',
-            actions : assign({ giveUpFrom : () => undefined }),
+            actions : [ warnGiveUpWaits, assign({ giveUpFrom : () => undefined }) ],
           },
           // A snapshot saved without giveUpFrom still lands in a state that takes retry.
-          { target : 'attestationFailureRecoverable' },
+          { target : 'attestationFailureRecoverable', actions : warnGiveUpWaits },
         ],
         onError : [
           {
