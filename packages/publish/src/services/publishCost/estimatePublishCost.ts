@@ -1,6 +1,6 @@
 import type { IItem } from '@seedprotocol/sdk'
 import type { TransactionTag } from '@seedprotocol/sdk'
-import { getPublishConfig } from '~/config'
+import { getConfigRef, getPublishConfig } from '~/config'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { signedDataItemByteLength } from '~/helpers/arweave'
 import { getTurboFreeUploadLimitBytes } from '~/helpers/turbo'
@@ -230,13 +230,22 @@ function priceEstimate(
 }
 
 /**
- * How the estimate counts a reference back to an item the publish creates: deferred (not counted)
- * with `useDirectEas`, else linked (counted), as the publish contract attests it. An EOA publisher
- * without `useDirectEas` also attests directly, so its estimate can count references it defers.
+ * How the estimate counts a reference back to an item the publish creates, by the route the publish
+ * takes: linked (counted) through the publish contract, deferred (not counted) when it attests
+ * directly to EAS, as with `useDirectEas` or a registered wallet whose publisher is an EOA. Linked
+ * when there is no config or wallet, or the publisher's account can't be read.
  */
-function defaultBackReferences(): 'link' | 'defer' {
+async function defaultBackReferences(): Promise<'link' | 'defer'> {
+  const config = getConfigRef()
+  if (!config) return 'link'
+  if (config.useDirectEas) return 'defer'
+  if (config.useModularExecutor) return 'link'
+  const wallet = getPublishWallet()
+  const publisher = wallet?.publisherAddress ?? wallet?.txSender.address
+  if (!publisher) return 'link'
   try {
-    return getPublishConfig().useDirectEas ? 'defer' : 'link'
+    const { resolveAttestationStrategy } = await import('../publish/actors/checking')
+    return (await resolveAttestationStrategy(publisher)) === 'multiPublish' ? 'link' : 'defer'
   } catch {
     return 'link'
   }
@@ -253,7 +262,7 @@ export async function estimatePublishCost(
     const { summarizePublishWork } = await import('@seedprotocol/sdk')
     work = await summarizePublishWork(item, {
       publishMode: options?.publishMode,
-      backReferences: options?.backReferences ?? defaultBackReferences(),
+      backReferences: options?.backReferences ?? (await defaultBackReferences()),
     })
   }
   if (options?.uploadTags) flags.uploadTags = options.uploadTags

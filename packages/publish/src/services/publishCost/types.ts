@@ -72,7 +72,9 @@ export type EstimatePublishCostOptions = {
   publishMode?: PublishMode
   /**
    * How references back to items this publish creates are counted (`summarizePublishWork`'s
-   * option). Defaults to `'defer'` with `useDirectEas`, else `'link'`, the publish contract's rule.
+   * option). Defaults to the route the publish takes: `'defer'` when it attests directly to EAS
+   * (`useDirectEas`, or a registered wallet whose publisher is an EOA), else `'link'`, the publish
+   * contract's rule.
    */
   backReferences?: 'link' | 'defer'
   /** Skip summarize + network; used by tests and the watcher reprice path. */

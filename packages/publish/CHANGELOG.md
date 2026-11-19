@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 - A multiPublish too large for one transaction fails in `checking` with `PUBLISH_TOO_LARGE`, before any upload is paid for. `checking` builds the payload with a 43-character placeholder for each upload's Arweave id, so storage transaction attestations are sized as they will be sent, and checks it against `maxPublishGas` and the calldata limit. The send checks again with the gas estimate.
 - New `resumesOnNextLoad(record)` says whether the next load resumes an in-progress publish row, by the rule the publish manager restores with: a publish saved mid bundler upload doesn't resume unless it had nothing to upload, and is marked `interrupted`. False for a finished or unreadable snapshot.
+- `findPublishByNonceKey` takes `maxBlocks`, how far behind the chain head `fromBlock` may be: 1,000,000 blocks (100 `eth_getLogs` calls) by default. A `bigint` changes the cap and `Infinity` removes it. Further back it throws a `RangeError` naming the option before reading any logs; it walked to the head with no bound, about 5,100 calls from block 0 on OP Sepolia. A finite `number` throws a `TypeError`.
+- `estimateArchiveAnchorCost` with `rates` needs no `initPublish` under the default `tagPolicy: 'discoverable'`, as in 0.8.1; without a config the estimate has no `arweaveUploadTags`. It threw "Call initPublish() …".
+- `estimatePublishCost` leaves out references back to items the publish creates for a registered wallet whose publisher is an EOA without `useDirectEas`, which attests directly to EAS and defers them. It counted one attestation too many per back reference there. The default follows the route the publish takes, reading the publisher's account code once per estimate.
 
 ## 0.8.2 (2026-11-09)
 

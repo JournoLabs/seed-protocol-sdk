@@ -181,7 +181,7 @@ const actor = await PublishManager.createPublish(item, managedAddress, onChainWa
 1. Executor module installed and initialized for the ManagedAccount; session key enrolled with module-only `approvedTargets`
 2. The module's `getEAS(account)` already matches publish config (automation keys cannot change it)
 3. `PublishWallet.txSender` can submit ManagedAccount UserOps signed by the session key
-4. EAS schemas for the models automation publishes are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. While the owner wallet is connected (the same wallet used for `enrollPublishAutomation`), call `ensureEasSchemasForModels(['Post'], userWallet, { schemaName })`. It reads the loaded model definitions, needs no item, and registers each model's schema, every property's, those of the storage models (Image, File, Html) and the models that relation and list properties reach (`followRefs`, default true), and `string storage_transaction_id`. A call with everything registered only reads, so call it whenever the owner is present, not only at enrollment: a new schema version can add a property. `{ dryRun: true }` returns the missing definitions without sending. Each missing schema costs two transactions (register, then name it).
+4. EAS schemas for the models automation publishes are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. Any wallet that sends its own transactions can register them ([ADR 0035](adr/0035-any-wallet-registers-schemas.md)); while the user's wallet is connected (the one used for `enrollPublishAutomation`), call `ensureEasSchemasForModels(['Post'], userWallet, { schemaName })`. It reads the loaded model definitions, needs no item, and registers each model's schema, every property's, those of the storage models (Image, File, Html) and the models that relation and list properties reach (`followRefs`, default true), and `string storage_transaction_id`. A call with everything registered only reads, so call it whenever the user's wallet is connected, not only at enrollment: a new schema version can add a property. `{ dryRun: true }` returns the missing definitions without sending. Each missing schema costs two transactions (register, then name it).
 
    A publish needs a schema only for what it attests: the seed's model and the properties that have a value (or an empty value that removes an earlier attestation). A missing one fails before the UserOp with `EasSchemasNotRegisteredError` (`code: 'EAS_SCHEMAS_NOT_REGISTERED'`), whose `missing` lists every missing definition.
 
@@ -218,7 +218,9 @@ Before a try, `findPublishByNonceKey({ sender: managedAddress, nonceKey, fromBlo
 tries did, from EntryPoint with no local rows. `sequence` 0 means nothing landed and the publish can go
 ahead. Otherwise `userOp` is the landed UserOp: with `success` its transaction holds the Seed, and
 without it the try reverted and attested nothing. Save a block from before the first try with the job
-to use as `fromBlock`.
+to use as `fromBlock`. Logs are read 10,000 blocks per `eth_getLogs` call, and a `fromBlock` more than
+`maxBlocks` behind the head (default 1,000,000, 100 calls) throws a `RangeError` before any read. Pass a
+larger `bigint`, or `Infinity` for no cap.
 
 Pass `modelName` with the published item's model to get its Seed uid with a successful UserOp:
 `userOp.seedUids` lists the new Seeds of that model the sender attested in that UserOp, and
@@ -292,7 +294,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - [ ] Keep accounts with automation keys sponsored and free of ETH, and handle `AUTOMATION_ACCOUNT_FUNDED` from enroll
 - [ ] Handle `AUTOMATION_UNSUPPORTED_ACCOUNT` from enroll (Router accounts without the executor extension) and `AUTOMATION_PREFLIGHT_FAILED` from publish
 - [ ] Revoke attestations with the user's wallet, not the automation key
-- [ ] Register content schemas with the owner wallet via `ensureEasSchemasForModels` whenever the owner is present (automation keys cannot register schemas)
+- [ ] Register content schemas with the user's wallet via `ensureEasSchemasForModels` whenever it is connected (automation keys cannot register schemas)
 - [ ] Use a UserOp-capable `PublishWallet` for on-chain txs; `fromEthersWallet` is fine for DataItem signing only
 - [ ] Pass a `nonceKey` that every try of a job shares, from a sender that pins its nonce, when tries run in separate processes or create new items
 - [ ] Use `assertStorageBoundToIdentity` (or equivalent) before treating Arweave owners as the identity
