@@ -9,6 +9,7 @@ import {
   summarizePublishUploads,
   summarizePublishWork,
 } from '@/db/read/summarizePublishWork'
+import { validateItemForPublish } from '@/db/read/getPublishPayload'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -115,11 +116,39 @@ testDescribe('summarizePublishWork integration', () => {
     expect(work.uploadCount).toBeGreaterThanOrEqual(1)
     expect(work.uploadBytes).toBeGreaterThanOrEqual(2048)
     // The publish size check reads the same sizes without counting attestations
-    expect(await summarizePublishUploads(item)).toEqual({
+    const uploads = await summarizePublishUploads(item)
+    expect(uploads).toMatchObject({
       uploadCount: work.uploadCount,
       uploadBytes: work.uploadBytes,
       uploadSizes: work.uploadSizes,
       unpublishedRelatedItems: work.unpublishedRelatedItems,
     })
+    expect(uploads.uploadTargets.map((t) => t.seedLocalId)).toContain(image.seedLocalId)
+  }, 30000)
+
+  it('builds the payload the publish sends from one placeholder transaction per upload target', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({ title: 'Sized before upload' })
+    const dir = BaseFileManager.getFilesPath('images')
+    await BaseFileManager.createDirIfNotExists(dir)
+    const fileName = `summarize-targets-${item.seedLocalId}.bin`
+    await BaseFileManager.saveFile(`${dir}/${fileName}`, new Uint8Array(64).fill(3).buffer)
+    const image = await Item.create({ modelName: 'Image' } as any)
+    await waitForPropertyInstances(image as any)
+    await setRow(item.seedLocalId!, ['coverImage', 'coverImageId'], {
+      propertyValue: image.seedLocalId,
+      refResolvedValue: fileName,
+      localStorageDir: 'images',
+    })
+
+    const { uploadTargets } = await summarizePublishUploads(item)
+    const placeholders = uploadTargets.map((t) => ({ ...t, txId: 'x'.repeat(43) }))
+    const before = await validateItemForPublish(item, [], { backReferences: 'link' })
+    const sized = await validateItemForPublish(item, placeholders, { backReferences: 'link' })
+    if (!before.isValid || !sized.isValid) throw new Error('expected a valid payload')
+
+    // The image's storage transaction is attested only once its upload has an id.
+    const attestationsOf = (payload: typeof sized.payload, localId: string) =>
+      payload.find((r) => r.localId === localId)?.listOfAttestations.length ?? 0
+    expect(attestationsOf(sized.payload, image.seedLocalId)).toBe(attestationsOf(before.payload, image.seedLocalId) + 1)
   }, 30000)
 })

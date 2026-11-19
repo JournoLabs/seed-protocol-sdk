@@ -109,10 +109,23 @@ async function propertyWork(
   return clear.retract ? { attestations: 0, revocations: clear.retractScope.length } : { attestations: 1, revocations: 0 }
 }
 
+/** The seed (and property) whose storage transaction attests one upload. */
+export type PublishUploadTarget = Pick<
+  PublishUploadSource,
+  'seedLocalId' | 'versionLocalId' | 'itemPropertyName' | 'itemPropertyLocalId'
+>
+
 export type PublishUploadSummary = Pick<
   PublishWorkSummary,
   'uploadCount' | 'uploadBytes' | 'uploadSizes' | 'unpublishedRelatedItems'
->
+> & {
+  /**
+   * Every upload the publish makes, empty files included, in upload order. Each becomes a storage
+   * transaction attestation on its seed, so `validateItemForPublish` given one placeholder
+   * transaction id per target builds the payload the publish will send.
+   */
+  uploadTargets: PublishUploadTarget[]
+}
 
 async function summarizeUploads(sources: PublishUploadSource[]): Promise<Pick<PublishWorkSummary, 'uploadCount' | 'uploadBytes' | 'uploadSizes'>> {
   const acc = { uploadCount: 0, uploadBytes: 0, uploadSizes: [] as number[] }
@@ -137,8 +150,15 @@ export const summarizePublishUploads = async (
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishUploadSummary> => {
   const graph = await getPublishGraph(item, { publishMode: options?.publishMode ?? 'patch' })
-  const uploads = await summarizeUploads(await getPublishUploadSources(graph))
-  return { ...uploads, unpublishedRelatedItems: graph.unpublishedRelatedItems }
+  const sources = await getPublishUploadSources(graph)
+  const uploads = await summarizeUploads(sources)
+  const uploadTargets = sources.map(({ seedLocalId, versionLocalId, itemPropertyName, itemPropertyLocalId }) => ({
+    seedLocalId,
+    versionLocalId,
+    itemPropertyName,
+    itemPropertyLocalId,
+  }))
+  return { ...uploads, unpublishedRelatedItems: graph.unpublishedRelatedItems, uploadTargets }
 }
 
 /**

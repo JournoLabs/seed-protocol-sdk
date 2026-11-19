@@ -4,6 +4,8 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.
+- `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
 - The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
 
 ## 0.8.2 (2026-11-09)

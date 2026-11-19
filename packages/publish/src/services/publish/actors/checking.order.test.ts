@@ -11,11 +11,13 @@ const ADDRESS = '0x' + 'e'.repeat(40)
 const schemaRegistrations: string[] = []
 const schemaWallets: unknown[] = []
 
+const realConfig = await import('~/config')
+const realChainClient = await import('~/helpers/chainClient')
 mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
   isItemOwned: async () => true,
-  validateItemForPublish: async () => ({ isValid: true, errors: [] }),
-  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [] }),
+  validateItemForPublish: async () => ({ isValid: true, errors: [], payload: [] }),
+  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [], uploadTargets: [] }),
   getPendingRetractions: async () => [{ propertyName: 'title' }],
   RelatedItemUnpublishedError,
 }))
@@ -31,13 +33,14 @@ mock.module('../helpers/ensureEasSchemas', () => ({
   },
 }))
 mock.module('~/helpers/chainClient', () => ({
+  ...realChainClient,
   getAccountCodeKind: async () => 'contract',
   readUntil: async <T,>(read: () => Promise<T>) => read(),
 }))
 let registeredWallet: unknown = null
 mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => registeredWallet }))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => false }))
-mock.module('~/config', () => ({ getPublishConfig: () => ({ useModularExecutor: false, useDirectEas: false }) }))
+mock.module('~/config', () => ({ ...realConfig, getPublishConfig: () => ({ useModularExecutor: false, useDirectEas: false }) }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
 mock.module('../../../helpers/verifyPublishChain', () => ({ verifyPublishChain: async () => {} }))
 

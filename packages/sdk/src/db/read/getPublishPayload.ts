@@ -615,15 +615,15 @@ export const getPublishPayload = async (
   return multiPublishPayload
 }
 
-export type ValidateItemForPublishResult = {
-  isValid: boolean
-  errors: PublishValidationError[]
-}
+export type ValidateItemForPublishResult =
+  | { isValid: true; errors: []; payload: MultiPublishPayload }
+  | { isValid: false; errors: PublishValidationError[] }
 
 /**
- * Validates an item for publishing without performing Arweave or EAS work.
- * Use in the checking step to fail fast before creating transactions.
- * Pass empty array for uploadedTransactions when validating before Arweave upload.
+ * Validates an item for publishing without performing Arweave or EAS work, and returns the payload
+ * when it is valid. Pass an empty array for uploadedTransactions before the Arweave upload, or one
+ * placeholder transaction id per `summarizePublishUploads` upload target to build the payload the
+ * publish will send, sized as it will be.
  */
 export const validateItemForPublish = async (
   item: { seedLocalId: string; modelName?: string },
@@ -631,8 +631,8 @@ export const validateItemForPublish = async (
   options?: GetPublishPayloadOptions,
 ): Promise<ValidateItemForPublishResult> => {
   try {
-    await getPublishPayload(item, uploadedTransactions, options)
-    return { isValid: true, errors: [] }
+    const payload = await getPublishPayload(item, uploadedTransactions, options)
+    return { isValid: true, errors: [], payload }
   } catch (err) {
     if (err instanceof PublishValidationFailedError) {
       return { isValid: false, errors: err.validationErrors }

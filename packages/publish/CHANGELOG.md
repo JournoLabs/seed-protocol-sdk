@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- A multiPublish too large for one transaction fails in `checking` with `PUBLISH_TOO_LARGE`, before any upload is paid for. `checking` builds the payload with a 43-character placeholder for each upload's Arweave id, so storage transaction attestations are sized as they will be sent, and checks it against `maxPublishGas` and the calldata limit. The send checks again with the gas estimate.
+- New `resumesOnNextLoad(record)` says whether the next load resumes an in-progress publish row, by the rule the publish manager restores with: a publish saved mid bundler upload doesn't resume unless it had nothing to upload, and is marked `interrupted`. False for a finished or unreadable snapshot.
+
 ## 0.8.2 (2026-11-09)
 
 - New `PublishManager.giveUpPublish(seedLocalId)` ends a publish waiting in `attestationFailureRecoverable`, `attestationFailureRecoverableDirectToEas` or `attestationOutcomeUnknown` as `failed`, keeping its error, so the row has its `errorCode`. Those states take a new `giveUp` event, which goes through the new `checkingGiveUp` state and back to the waiting state while an attestation attempt for the seed is open. `stopPublish` was the only way out, and it records `interrupted` and clears the error (ADR 0030).

@@ -14,22 +14,25 @@ const harness = {
   unpublished: [] as UnpublishedRelatedItem[],
 }
 const ensureEasSchemasForItem = mock(async () => {})
-const validateItemForPublish = mock(async () => ({ isValid: true, errors: [] }))
+const validateItemForPublish = mock(async () => ({ isValid: true, errors: [], payload: [] }))
 
+const realConfig = await import('~/config')
+const realChainClient = await import('~/helpers/chainClient')
 mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
   isItemOwned: async () => true,
   validateItemForPublish,
-  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: harness.unpublished }),
+  summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: harness.unpublished, uploadTargets: [] }),
   RelatedItemUnpublishedError,
 }))
 mock.module('~/helpers/chainClient', () => ({
+  ...realChainClient,
   getAccountCodeKind: async () => 'contract',
   readUntil: async <T,>(read: () => Promise<T>) => read(),
 }))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => false }))
 mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem }))
-mock.module('~/config', () => ({ getPublishConfig: () => ({ useModularExecutor: true }) }))
+mock.module('~/config', () => ({ ...realConfig, getPublishConfig: () => ({ useModularExecutor: true }) }))
 mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => null }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
 mock.module('../../../helpers/verifyPublishChain', () => ({ verifyPublishChain: async () => {} }))
