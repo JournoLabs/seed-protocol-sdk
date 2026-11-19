@@ -1,0 +1,26 @@
+{
+  "name": "seed-protocol",
+  "version": "0.8.2",
+  "description": "Read content published with Seed Protocol, with its version history and provenance.",
+  "author": {
+    "name": "JournoLabs"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/mcp",
+  "repository": "https://github.com/JournoLabs/seed-protocol-sdk",
+  "license": "MIT",
+  "userConfig": {
+    "attesters": {
+      "type": "string",
+      "title": "Publishers",
+      "description": "Comma-separated publisher (attester) addresses to read by default. Leave blank to name a publisher in each request.",
+      "required": false
+    },
+    "chain_id": {
+      "type": "string",
+      "title": "Chain ID",
+      "description": "EAS chain to read attestations from. 11155420 is OP Sepolia.",
+      "required": false,
+      "default": "11155420"
+    }
+  }
+}

@@ -13,7 +13,8 @@ The `.md` suffix and `/llms.txt` follow the [llms.txt proposal](https://llmstxt.
 there first, so a site that uses other paths should still link them from `/llms.txt`.
 
 An agent that runs tools instead of browsing can read the same content, without a website, through
-[`@seedprotocol/mcp`](../packages/mcp/README.md).
+[`@seedprotocol/mcp`](../packages/mcp/README.md), which Claude Code installs as the
+[Seed Protocol plugin](../plugins/seed-protocol/README.md).
 
 ## An item as Markdown
 

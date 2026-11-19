@@ -1,0 +1,16 @@
+{
+  "name": "seed-protocol",
+  "owner": {
+    "name": "JournoLabs"
+  },
+  "metadata": {
+    "description": "Seed Protocol plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "seed-protocol",
+      "source": "./plugins/seed-protocol",
+      "description": "Read content published with Seed Protocol, with its version history and provenance."
+    }
+  ]
+}
