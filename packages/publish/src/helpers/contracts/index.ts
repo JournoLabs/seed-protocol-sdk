@@ -68,7 +68,7 @@ const placeholder = (sourceIndex: number): Hex => toHex(BigInt(sourceIndex + 1),
 const ZERO_WORD: Hex = `0x${'0'.repeat(64)}`
 
 /** A local id as getPublishPayload writes a relation to a draft; undefined past 32 bytes. */
-const localIdWordOf = (localId: string): Hex | undefined =>
+export const localIdWordOf = (localId: string): Hex | undefined =>
   new TextEncoder().encode(localId).length <= 32 ? stringToHex(localId, { size: 32 }) : undefined
 
 const byteLength = (data: Hex): number => (data.length - 2) / 2
@@ -83,6 +83,15 @@ function canonicalListLength(data: Hex): number | undefined {
   if (BigInt(wordAt(data, 0)) !== 32n) return undefined
   const count = BigInt(wordAt(data, 32))
   return count === BigInt((length - 64) / 32) ? Number(count) : undefined
+}
+
+/**
+ * The words a relation slot can hold in attested `data`: the value itself when it is one `bytes32`,
+ * each element when it is a canonical `bytes32[]`, else none.
+ */
+export function slotWordsOf(data: Hex): Hex[] {
+  if (byteLength(data) === 32) return [data]
+  return Array.from({ length: canonicalListLength(data) ?? 0 }, (_, k) => wordAt(data, 64 + 32 * k))
 }
 
 /**
@@ -168,9 +177,7 @@ function prepareReferences(requests: MultiPublishRequest[]) {
     for (const a of list) {
       for (const entry of a.data) {
         const isList = byteLength(entry.data) !== 32
-        const words = isList
-          ? Array.from({ length: canonicalListLength(entry.data) ?? 0 }, (_, k) => wordAt(entry.data, 64 + 32 * k))
-          : [entry.data]
+        const words = slotWordsOf(entry.data)
         // Only a relation: `true` and small numbers encode to the same word as a placeholder.
         if (a._easType === 'bytes32' || a._easType === 'bytes32[]') {
           words.forEach((word, k) => {
