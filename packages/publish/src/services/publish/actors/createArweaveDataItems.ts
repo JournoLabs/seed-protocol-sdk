@@ -19,22 +19,52 @@ export type CreateArweaveDataItemsResult = {
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
 
 /**
+ * An upload of a parked run that a run replacing it can use (ADR 0036): one whose
+ * `itemPropertyLocalId` and `contentHash` match an upload this run needs, and that the blob store
+ * still holds.
+ */
+async function reusableTxId(
+  upload: PublishUploadData,
+  reusable: PublishMachineContext['reusableUploads'],
+): Promise<string | undefined> {
+  if (!upload.contentHash) return undefined
+  const match = reusable?.find(
+    (r) => r.itemPropertyLocalId === upload.itemPropertyLocalId && r.contentHash === upload.contentHash,
+  )
+  if (!match) return undefined
+  try {
+    await getBlobStore().assertStored([match.txId])
+    return match.txId
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Fixes each upload's id in the configured blob store (phase 1 or phase 2), with signers from the
- * publish, else the config.
+ * publish, else the config. An upload a replaced run already stored (`reusableUploads`) keeps its
+ * id and isn't signed or uploaded again.
  */
 export async function prepareUploads(
   uploadDataList: PublishUploadData[],
-  context: Pick<PublishMachineContext, 'signDataItems' | 'dataItemSigner' | 'publishAuthorization'>,
+  context: Pick<PublishMachineContext, 'signDataItems' | 'dataItemSigner' | 'publishAuthorization' | 'reusableUploads'>,
 ): Promise<CreateArweaveDataItemsResult> {
   const config = getPublishConfig()
-  const prepared = await getBlobStore().prepare(uploadDataList, {
-    signDataItems: context.signDataItems ?? config.signDataItems,
-    dataItemSigner: context.dataItemSigner ?? config.dataItemSigner,
-    publishAuthorization: context.publishAuthorization,
-  })
+  const reusedIds = await Promise.all(uploadDataList.map((u) => reusableTxId(u, context.reusableUploads)))
+  const toPrepare = uploadDataList.filter((_, i) => reusedIds[i] === undefined)
+  const prepared =
+    toPrepare.length > 0
+      ? await getBlobStore().prepare(toPrepare, {
+          signDataItems: context.signDataItems ?? config.signDataItems,
+          dataItemSigner: context.dataItemSigner ?? config.dataItemSigner,
+          publishAuthorization: context.publishAuthorization,
+        })
+      : { ids: [] as string[], pending: undefined }
+  let next = 0
+  const ids = reusedIds.map((id) => id ?? prepared.ids[next++]!)
 
   return {
-    arweaveTransactions: prepared.ids.map((id, i) => ({
+    arweaveTransactions: ids.map((id, i) => ({
       transaction: { id },
       versionId: uploadDataList[i]?.versionLocalId,
       modelName: uploadDataList[i]?.itemPropertyName,
@@ -45,9 +75,10 @@ export async function prepareUploads(
       seedLocalId: u.seedLocalId,
       versionLocalId: u.versionLocalId,
       transactionToSign: null,
+      ...(u.contentHash && { contentHash: u.contentHash }),
     })),
     signedDataItems: prepared.pending,
-    bundlerUploadNotNeeded: prepared.pending === undefined || uploadDataList.length === 0,
+    bundlerUploadNotNeeded: prepared.pending === undefined || toPrepare.length === 0,
   }
 }
 

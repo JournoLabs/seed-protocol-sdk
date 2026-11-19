@@ -26,6 +26,8 @@ export type PublishUpload = {
   seedLocalId: string
   versionLocalId: string
   transactionToSign: unknown
+  /** Hex SHA-256 of the upload's content, when known: a run replacing this one reuses it on a match. */
+  contentHash?: string
 }
 
 /** Arweave transaction info used in publish/upload flow. */
@@ -136,6 +138,12 @@ export interface PublishMachineContext {
    * derived from {@link nonceKey}. Saved with the publish.
    */
   attestationPartsRecorded?: number
+  /**
+   * Uploads of the parked run this run replaced (ADR 0036). An upload whose `itemPropertyLocalId`
+   * and `contentHash` match one this run needs, and that the blob store still holds, is used as it
+   * is rather than uploaded again.
+   */
+  reusableUploads?: Array<PublishUpload & { txId: string }>
   /** CreatePublishOptions.nonceKey: the host's id that the attestation nonce key comes from. */
   nonceKey?: string
   /** An attempt reconcile found not landed: the next send repeats it under its nonce key. */

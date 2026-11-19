@@ -14,8 +14,12 @@ export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undef
 
 /**
  * `started`: the publish was spawned; `publish` is its actor. It hasn't finished: use
- * {@link publishItem} (or `item.publish()`) to wait for that. `already_publishing`: that seed is
- * already publishing in this tab or another, so nothing started.
+ * {@link publishItem} (or `item.publish()`) to wait for that. A run of the seed in this tab parked
+ * after a failed attestation is replaced by it, reusing its uploads (ADR 0036).
+ * `already_publishing`: that seed is publishing in this tab or another, so nothing started.
+ * `attempt_open`: an attestation attempt for the seed is open and may still land, so nothing
+ * started; settle it with `retryAttestations`, `settleAttestationAttempt` or
+ * `resolveAttestationAttempt` first.
  */
 export type EnsureWalletThenPublishResult =
   | {
@@ -25,6 +29,7 @@ export type EnsureWalletThenPublishResult =
       started: PublishStarted
     }
   | { outcome: 'already_publishing' }
+  | { outcome: 'attempt_open' }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
   | { outcome: 'needs_deploy' }
@@ -33,7 +38,12 @@ export type EnsureWalletThenPublishResult =
 /** Spawns the publish and reports whether it started (waits for the spawn, not the publish). */
 export async function startPublish(
   ...args: Parameters<typeof PublishManager.createPublish>
-): Promise<{ outcome: 'started'; publish: import('xstate').ActorRef<any, any>; started: PublishStarted } | { outcome: 'already_publishing' }> {
+): Promise<
+  | { outcome: 'started'; publish: import('xstate').ActorRef<any, any>; started: PublishStarted }
+  | { outcome: 'already_publishing' }
+  | { outcome: 'attempt_open' }
+> {
+  if ((await PublishManager.publishBlocker(args[0].seedLocalId)) === 'attempt_open') return { outcome: 'attempt_open' }
   const publish = await PublishManager.createPublish(...args)
   if (!publish) return { outcome: 'already_publishing' }
   return { outcome: 'started', publish, started: Promise.resolve(publish) }
