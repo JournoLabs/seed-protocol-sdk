@@ -27,6 +27,10 @@ const response: Response = await handleFeedRequest('posts', 'rss', request.heade
 
 `handleArchiveFeedRequest(collection, year, month, format)` serves RFC 5005 monthly archives. `createFeed(items, schemaName, format)` serializes items you have already fetched (e.g. via `getFeedItemsBySchemaName`).
 
+## Markdown and llms.txt for agents
+
+`itemMarkdown(record, { url, license })` renders a record from `getSeed` or `queryBySchema` as Markdown with its seed UID, version UID and attester in front matter. `llmsTxt` and `llmsTxtItemLinks` write a publication's `/llms.txt`. See [docs/AGENT_READABLE.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/AGENT_READABLE.md).
+
 ## P2P distribution
 
 HTTP hosting is optional. To publish the same generated feeds onto Hyperdrive / Hyperswarm (and serve them to classic RSS readers over localhost), use **`@seedprotocol/feed-hyper`** and its `seed-feed` CLI. See [packages/feed-hyper/README.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/feed-hyper/README.md) and [docs/FEED_HYPER.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FEED_HYPER.md).

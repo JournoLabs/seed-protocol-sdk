@@ -15,6 +15,17 @@ export {
   type SiteConfigOverrides,
 } from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
+export {
+  htmlToMarkdown,
+  itemMarkdown,
+  llmsTxt,
+  llmsTxtItemLinks,
+  type ItemLicense,
+  type ItemMarkdownOptions,
+  type LlmsTxtInput,
+  type LlmsTxtLink,
+  type LlmsTxtSection,
+} from './agentReadable';
 export type { FeedConfig, FeedFormat, FeedItem } from './types';
 export {
   initializeFeedPlatform,

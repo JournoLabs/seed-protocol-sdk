@@ -109,7 +109,8 @@ The release commit also adds a `## X.Y.Z (date)` section to the CHANGELOG.md of 
 `## Unreleased` notes, if any, and ends with the commits since the last release that touched
 the package, grouped into Breaking, Features, Fixes and Other from their conventional-commit
 subjects (`fix(publish): ...`). test, ci, chore and version-bump commits are left out, and so
-are changes to the CHANGELOG.md itself. A package with neither notes nor commits gets the
+are changes to the CHANGELOG.md itself, to tests and fixtures, and to the `scripts` of the
+package's package.json when that is all a commit changes in the package. A package with neither notes nor commits gets the
 heading and "No user-facing changes", since it is published at the new version anyway.
 The plan lists how many commits each changelog gets.
 
@@ -122,6 +123,13 @@ So write `## Unreleased` notes for changes a user needs explained (breaking chan
 options, migrations); the commit list covers the rest. The plan warns about each package with
 a feat or breaking commit and no Unreleased notes. Commit subjects end up in the changelog,
 so write them for a reader.
+
+Start the note for a breaking change with `**Breaking:**`, or `**Breaking (types):**` when only
+code that builds or matches on a type breaks, and keep those notes above the others. A change is
+breaking when code or data that worked before stops working or gives other results: a removed or
+renamed export, a new required field, a call that now throws, a listing that returns other
+records, a bag that hashes differently. When the commit behind such a note had no `!` or footer,
+move its line under `#### Breaking` in the release commit, since the generator can't tell.
 
 Sections from 0.5.1 to 0.7.4 were backfilled from git history. Versions published without
 a committed version bump (0.5.2, 0.6.1–0.6.2, 0.6.4–0.6.6) are folded into the next section.

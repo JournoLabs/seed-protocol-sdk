@@ -8,7 +8,7 @@ export type { RdfNode, RdfObject, StateGraph, StateGraphOptions } from './graph.
 export type { LensSchema, RdfLens, RdfSidecar } from './lens.js'
 export { toQuads, toNQuads } from './quads.js'
 export { toTurtle } from './turtle.js'
-export { toJsonLd } from './jsonld.js'
+export { jsonLdScript, toJsonLd } from './jsonld.js'
 export type { JsonLdDocument } from './jsonld.js'
 export { seedVocabulary } from './vocabulary.js'
 export { DEFAULT_SCHEMA_FILE } from './defaults.js'

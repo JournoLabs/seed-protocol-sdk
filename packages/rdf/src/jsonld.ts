@@ -48,3 +48,20 @@ export function toJsonLd(graph: StateGraph): JsonLdDocument {
   for (const [prefix, ns] of prefixes) if (used.has(prefix)) context[prefix] = ns
   return { '@context': context, '@graph': nodes }
 }
+
+const SCRIPT_ESCAPES: Record<string, string> = {
+  '<': '\\u003c',
+  '>': '\\u003e',
+  '&': '\\u0026',
+  '\u2028': '\\u2028',
+  '\u2029': '\\u2029',
+}
+
+/**
+ * `doc` as a `<script type="application/ld+json">` element for an HTML page. `<`, `>`, `&` and the
+ * line and paragraph separators are written as `\u` escapes, so no value can end the element.
+ */
+export function jsonLdScript(doc: JsonLdDocument): string {
+  const json = JSON.stringify(doc).replace(/[<>&\u2028\u2029]/g, (c) => SCRIPT_ESCAPES[c]!)
+  return `<script type="application/ld+json">${json}</script>`
+}

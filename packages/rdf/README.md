@@ -39,6 +39,10 @@ toQuads(graph)    // RDF/JS quads for N3.js, Comunica, Oxigraph or rdf-ext
 
 To export seeds you have already read, pass the entries of `getSeedAttestations` to `stateGraph`.
 
+`jsonLdScript(toJsonLd(graph))` gives the graph as a `<script type="application/ld+json">` element
+for a page's `<head>`, with `<`, `>` and `&` escaped so no value can end the element. See
+[Pages agents can read](../../docs/AGENT_READABLE.md).
+
 ## What the graph contains
 
 For each seed, at its head Version (or the pinned one):

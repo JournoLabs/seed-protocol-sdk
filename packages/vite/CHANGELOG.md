@@ -12,9 +12,12 @@
 
 ### Commits
 
-#### Fixes
+#### Breaking
 
 - archive, arweave, rdf: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+
+#### Fixes
+
 - release: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
