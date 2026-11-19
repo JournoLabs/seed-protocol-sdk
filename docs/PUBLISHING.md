@@ -249,8 +249,12 @@ A publish waiting in `attestationFailureRecoverable`, `attestationFailureRecover
 with its error kept, so the row reads `failed` with `errorCode`, where `stopPublish` records
 `interrupted` and clears the error. While an attempt is open it doesn't end: it passes through
 `checkingGiveUp` and goes back to the state it came from, since a send that may still land must not be
-hidden. Read `PublishManager.query(seedLocalId)` to see which happened. A publish saved during that
-check is restored in the state it came from.
+hidden. It then logs a warning naming the open attempt and what settles it. From
+`attestationOutcomeUnknown` that is `resolveAttestationAttempt` with the transaction hash, or
+`{ resend: true }`, which sends again; `settleAttestationAttempt` refuses while the run waits. From the
+other two states, `retryAttestations` settles the attempt and a second `giveUpPublish` ends the run.
+Read `PublishManager.query(seedLocalId)` to see which happened. A publish saved during that check is
+restored in the state it came from.
 
 Nothing goes to `failure` on its own. `isRepeatingAttestationError(error)` is true for errors that come
 back on every retry until something outside the publish changes: `PublishNonceKeyError`,
