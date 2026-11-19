@@ -39,13 +39,14 @@ export {
   lookupEntriesFromMapping,
   lookupRefsFromEntries,
   resolveLookup,
+  resolveTargetLookup,
   splitLookupValue,
   DEFAULT_LOOKUP_SEPARATORS,
   shapeLookupValue,
   withLookupEntries,
   withLookupSplit,
 } from './relationLookup'
-export type { LookupResolution } from './relationLookup'
+export type { LookupResolution, SourceLookupResolution } from './relationLookup'
 export { migrateMappingLookups } from './migrateMappingLookups'
 export { autoMap } from './autoMap'
 export { classifyUrl, looksLikeUrl } from './classifyUrl'

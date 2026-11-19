@@ -51,14 +51,15 @@ export type GetPublishUploadsOptions = {
 
 /**
  * A private property's upload had no encryptor, or the encryptor returned nothing. Nothing was
- * uploaded: a private value is never sent as plaintext.
+ * uploaded: a private value is never sent as plaintext. `@seedprotocol/encryption`, which builds the
+ * encryptor, isn't on npm yet, so an app on the released packages can't publish private Versions.
  */
 export class PrivateUploadNotEncryptedError extends Error {
   readonly code = 'PRIVATE_UPLOAD_NOT_ENCRYPTED' as const
 
   constructor(readonly itemPropertyName: string) {
     super(
-      `Cannot publish ${itemPropertyName}: it is private and no encryptor encrypted it. Configure encryptPrivateUpload (see @seedprotocol/encryption).`,
+      `Cannot publish ${itemPropertyName}: it is private and no encryptor encrypted it. Private Versions can't be published from the npm packages yet: @seedprotocol/encryption, which builds the encryptor, isn't released. Publish this property without private: true for now.`,
     )
     this.name = 'PrivateUploadNotEncryptedError'
     Object.setPrototypeOf(this, PrivateUploadNotEncryptedError.prototype)

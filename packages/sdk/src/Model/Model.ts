@@ -442,8 +442,8 @@ export class Model {
         )
       : undefined
 
-    // Refuses a name that can't publish before there's an instance to leave behind. A model from a
-    // schema file (an id) passes: loading the file already refused such names.
+    // Refuses a name that can't publish before there's an instance to leave behind, with or
+    // without an `id` or `modelFileId`.
     try {
       assertNewModelCanPublish(uniqueModelName, propertyDefinitions)
     } catch (error) {

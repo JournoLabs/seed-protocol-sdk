@@ -147,7 +147,8 @@ async function summarizeUploads(sources: PublishUploadSource[]): Promise<Pick<Pu
  */
 export const summarizePublishUploads = async (
   item: { seedLocalId: string; modelName?: string },
-  options?: SummarizePublishWorkOptions,
+  // No `backReferences`: references don't change what a publish uploads.
+  options?: Pick<SummarizePublishWorkOptions, 'publishMode'>,
 ): Promise<PublishUploadSummary> => {
   const graph = await getPublishGraph(item, { publishMode: options?.publishMode ?? 'patch' })
   const sources = await getPublishUploadSources(graph)

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `resolveTargetLookup` and its result type `SourceLookupResolution` are exported. The 0.8.2 CHANGELOG named `resolveTargetLookup` as new, but the entry didn't export it.
+- `previewForEdge` without `target` previews a lookup with a match as its refs only. It reported the other values as misses, as for a List, which a filled single `Relation` doesn't have. Pass `target` to see a List's misses.
+- A repeated `dc:creator` or Atom `author` takes `value` from the first of `values`, so a copy edge writes the spelling a lookup reads. With feed's parser `value` was rss-parser's `author` as written (`'Mira  Chen'`) while `values[0]` was normalized (`'Mira Chen'`).
+
 ## 0.8.2 (2026-11-09)
 
 - A lookup into a single (non-List) property reports no misses once one value has an entry: the first match fills it, and the other values (from `values` or a split) aren't reported to `onUnmatched` or as `applyMappingAsync` errors, and don't keep the row `needsLookup`. A byline of Mira Chen and Sam Ortiz with an entry for Mira only gave `author` Mira's ref and a miss for Sam, so an import counting misses as failures logged a filled property as skipped. With no value matched, every value is still reported. New `resolveTargetLookup(mapping, source, target)` applies the rule; a List property keeps every match and reports every miss.

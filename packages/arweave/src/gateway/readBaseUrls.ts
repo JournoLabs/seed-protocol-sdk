@@ -112,7 +112,8 @@ export async function fetchArweaveRawFromBaseUrl(
  * before it reaches L1 or the public hosts. The configured host (`BaseArweaveClient.getBaseUrl()`)
  * goes last when the resolved list leaves it out.
  * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`); `decode: false`
- * returns the transaction's bytes as stored, as `getTransactionData` does.
+ * skips only that transform and still reads `/raw` from every gateway here. On `getTransactionData`,
+ * `decode: false` also skips the preferred gateways, since their `/raw` is already decoded.
  */
 export async function readArweaveRawAcrossGateways(
   transactionId: string,
@@ -150,8 +151,11 @@ export async function readArweaveRawAcrossGateways(
   const preferred = await tryUrls(getPreferredArweaveReadBaseUrls())
   if (preferred) return { bytes: preferred, attempts }
 
+  // The host before the probe, which may move it to the first healthy gateway: the configured one
+  // (setHost), else the default, is tried last.
+  const configuredBaseUrl = BaseArweaveClient.getBaseUrl()
   await ensureArweaveReadGatewayForFallback()
-  const bytes = await tryUrls([...getResolvedArweaveReadBaseUrls(options), BaseArweaveClient.getBaseUrl()])
+  const bytes = await tryUrls([...getResolvedArweaveReadBaseUrls(options), configuredBaseUrl])
   return { bytes, attempts }
 }
 

@@ -244,7 +244,12 @@ export function rssItemToSources(item: Record<string, unknown>): SourceNode[] {
     }
 
     const values = repeatedValues(item, key)
-    if (values) node.values = values
+    if (values) {
+      node.values = values
+      // The first in the parser's spelling, which can differ in whitespace from `values[0]`
+      // (feed's lists are normalized), so a copy edge writes what a lookup reads.
+      node.value = values[0]!
+    }
 
     // Feature image URLs: attach class hint when value looks like a URL
     if (

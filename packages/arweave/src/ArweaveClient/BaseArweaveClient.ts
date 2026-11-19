@@ -221,7 +221,9 @@ export abstract class BaseArweaveClient {
   /**
    * Transaction data from the platform client. Decoded data goes through `transformArweaveContent`
    * when a read transform is registered (see `content/arweaveContent.ts`); `decode: false` returns
-   * the encoded data as is.
+   * the encoded data as is, and the default client then skips the preferred gateways, whose `/raw` is
+   * already decoded. The across-gateways reads (`readArweaveRawAcrossGateways`) treat `decode: false`
+   * differently: they skip only the transform.
    */
   static async getTransactionData(
     transactionId: string,

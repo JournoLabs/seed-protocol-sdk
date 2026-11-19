@@ -110,7 +110,9 @@ export type PreviewForEdgeOptions = {
 /**
  * Sync row preview aligned with `applyMapping`.
  * `extract`/`file` stay descriptive (sync apply skips them).
- * `lookup` shows a stored-entry hit when present; otherwise a pending placeholder.
+ * `lookup` shows a stored-entry hit when present; otherwise a pending placeholder. Without `target`,
+ * once a value matches it shows the matched refs and no misses, since a single (non-List) target
+ * has none then; pass `target` to see a List's misses.
  * Plain copy shows the coerced value when a target is known.
  */
 export function previewForEdge(
@@ -142,6 +144,8 @@ export function previewForEdge(
     }
     const { refs, misses } = resolveTargetLookup(mapping, source, options?.target)
     const missing = misses.map(({ value }) => `‹lookup ref for "${truncateSample(value, 48)}"›`)
+    // Without a target it may be a single Relation, which a match fills: show no misses.
+    if (refs.length > 0 && !options?.target) return truncateSample(refs.join(', '), 80)
     if (refs.length > 0) {
       const shaped = options?.target ? shapeLookupValue(refs, options.target) : refs
       const shown = Array.isArray(shaped) ? shaped : [shaped]

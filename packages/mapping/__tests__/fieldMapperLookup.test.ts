@@ -104,6 +104,15 @@ describe('a source that repeats', () => {
     expect(previewForEdge(byline, 'lookup', { mapping: edge, target: author, propertyName: 'author' })).toBe('sam')
   })
 
+  // Batch 17 item 16
+  it('without a target, previews the matched refs and no misses: it may be a single Relation', () => {
+    const preview = previewForEdge(byline, 'lookup', { mapping: mapping([{ value: 'Sam Ortiz', refs: ['sam'] }]) })
+    expect(preview).toBe('sam')
+    expect(previewForEdge(byline, 'lookup', { mapping: mapping([]) })).toBe(
+      '‹lookup ref for "Mira Chen"›, ‹lookup ref for "Sam Ortiz"›',
+    )
+  })
+
   it('previews every value', () => {
     const preview = (entries: LookupEntry[]) =>
       previewForEdge(byline, 'lookup', { mapping: mapping(entries), target: targets[0] })

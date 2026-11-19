@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- The across-gateways reads try the host from before the read-gateway probe last: the one `setHost` configured, else the default `arweave.net`. Without `setHost`, a probe that moved the host past a failing `arweave.net` (to `zigza.xyz`, say) made the probe's pick the host tried last, and `arweave.net` wasn't tried.
+- `getTransactionData`'s and `readArweaveRawAcrossGateways`'s JSDoc say what `decode: false` skips on each: the preferred gateways and the read transform on `getTransactionData`, only the transform on the across-gateways reads.
+
 ## 0.8.2 (2026-11-09)
 
 - **Breaking:** `fetchArweaveRawFromBaseUrl` returns `{ baseUrl, outcome, response? }` instead of `Response | undefined`. `outcome` is the HTTP status, `'timeout'` or `'network'`; `response` is set only for a 2xx answer.

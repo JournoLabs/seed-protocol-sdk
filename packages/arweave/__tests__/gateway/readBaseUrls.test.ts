@@ -236,6 +236,25 @@ describe('readArweaveRawAcrossGateways', () => {
     expect(rawUrls).toHaveLength(new Set(rawUrls).size)
   })
 
+  // Batch 17 item 9: without setHost the probe moves the host, and the host tried last was the probe's pick
+  it('tries the host from before the gateway probe last, not the one the probe picked', async () => {
+    BaseArweaveClient.applyProbedReadGateway('arweave.net') // no setHost: the probe may move the host
+    resetArweaveReadGatewayForTests()
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s === 'https://arweave.net/info') return new Response('', { status: 503 })
+      if (s.endsWith('/info')) return new Response('{}', { status: 200 })
+      if (s === `https://arweave.net/raw/${TX}`) return new Response('from arweave.net', { status: 200 })
+      return new Response('', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { bytes, attempts } = await readArweaveRawAcrossGateways(TX, { fallbackHosts: ['b.example'] })
+    expect(BaseArweaveClient.getBaseUrl()).not.toBe('https://arweave.net')
+    expect(new TextDecoder().decode(bytes)).toBe('from arweave.net')
+    expect(attempts.at(-1)).toEqual({ baseUrl: 'https://arweave.net', outcome: 200 })
+  })
+
   it('tries the configured host when the resolved gateways leave it out', async () => {
     BaseArweaveClient.setHost(PROXY)
     setResolvedSeedGatewayEndpoints(

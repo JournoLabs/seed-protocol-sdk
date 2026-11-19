@@ -170,6 +170,16 @@ describe('repeated bylines', () => {
     })
   })
 
+  // Batch 17 item 17: feed's parser normalizes the lists but leaves rss-parser's `author` as written
+  it('gives value the first of values, so a copy edge writes the spelling a lookup reads', () => {
+    const sources = rssItemToSources({ title: 'Both', author: 'Mira  Chen', authorList: ['Mira Chen', 'Sam Ortiz'] })
+    const node = sources.find((s) => s.id === 'rss-author')
+    expect(node?.value).toBe('Mira Chen')
+    expect(node?.values).toEqual(['Mira Chen', 'Sam Ortiz'])
+    const copy: FieldMapping = { sourceId: 'rss-author', propertyName: 'title' }
+    expect(applyMapping(sources, [copy], [title])).toEqual({ title: 'Mira Chen' })
+  })
+
   it('collects each value across the feed', async () => {
     const { items } = await rssXmlToSources(REPEATED_RSS)
     expect(collectLookupValues(items, edge('rss-creator', []))).toEqual(['Mira Chen', 'Sam Ortiz'])
