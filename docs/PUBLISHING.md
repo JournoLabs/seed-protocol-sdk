@@ -71,7 +71,9 @@ When using the publish package with `ConnectButton` and its publish flow:
    Once a part is recorded (step 4), its Seeds are published, so the payload is built again from
    the rows: it holds only what is left, and the relation slots of later parts hold the recorded
    Seed uids. The publish ends when the part holding the item has been recorded. An edit saved
-   between parts goes into a later part. Between parts a reader sees the earlier parts' Seeds
+   between parts to an item no part has sent yet goes out with it. An edit to an item an earlier
+   part published waits until that item is published itself, since the payload doesn't include a
+   published related item. Between parts a reader sees the earlier parts' Seeds
    published and the item not yet; if a part fails, those Seeds stay published and a retry, a
    restore or a new publish carries on with what is left. `snapshot.context.expectedPublishTransactions`
    says, after `checking`, how many parts the local estimate expects; the RPC estimates can raise
@@ -208,8 +210,11 @@ whose tries don't, such as a server job that creates a new item per try, passes 
 A publish split across transactions (step 3 of the [publish flow](#publish-flow-recommended)) sends
 each part as its own attempt, so each part has its own row and its own nonce key, and a part's
 attempt is recorded before the next part claims one. A retry or restore that finds a part landed
-records it and sends the rest. `snapshot.context.attestationPartsRecorded` counts the parts the
-publish has recorded.
+records it and sends the rest. With a host `nonceKey`, the number of parts already sent is read from
+the publish's recorded attempts, so a tab that reloads between parts goes on under the next part's
+key. Each part clears its Seeds' co-publish rows as it records. The `createAttestations` output
+(`easPayload`, and `publishedBatch` in the context) holds the parts the finishing try recorded; a
+publish that went on from parts recorded by an earlier try leaves those out.
 
 Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
 `describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
@@ -260,8 +265,11 @@ Publishing a seed whose publish waits in `attestationFailureRecoverable` or
 it is stopped and recorded `interrupted`, as `stopPublish` does, and the new publish starts. The new
 publish reuses an upload of the old one when its property and content hash match and the blob store
 still holds it; anything else, such as a file edited since, uploads again. It also takes the old
-publish's `attestationPartsRecorded` and, unless the host passes its own, its `nonceKey`, so a split
-publish sends its next part under the next part's key. While an attempt for the seed is open, in any
+publish's `nonceKey`, unless the host passes its own, and with it the parts sent under that key, so a
+split publish sends its next part under the next part's key. A different key, or none, starts at
+part 1. If the old publish was retried after Publish found it waiting, it keeps running and Publish
+gives `already_publishing`. A Publish sent while restore is running waits for it, so a waiting
+publish that restore brings back is replaced too. While an attempt for the seed is open, in any
 state, Publishing again starts nothing: `startPublish` and `ensureWalletThenPublish` return
 `{ outcome: 'attempt_open' }`, `item.publish` rejects naming `retryAttestations`, and
 `PublishManager.createPublish` resolves `undefined`. Settle the attempt with `retryAttestations`,

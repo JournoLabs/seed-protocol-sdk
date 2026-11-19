@@ -6,6 +6,7 @@ All notable changes to this package are documented in this file.
 
 - `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.
 - `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
+- New `countRecordedPublishParts(publishRunIds)` counts the recorded `multiPublish` attempts of those publish runs: the parts of a split publish already on chain (ADR 0036).
 
 ## 0.8.2 (2026-11-09)
 
