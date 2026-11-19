@@ -29,4 +29,32 @@ describe('parseCli', () => {
   it('prints help', () => {
     expect(parseCli(['-h'], {})).toEqual({ kind: 'help' })
   })
+
+  it('serves HTTP with defaults for port, host and rate limit', () => {
+    expect(parseCli(['--http'], {})).toEqual({
+      kind: 'run',
+      options: { attesters: [] },
+      http: { port: 3000, host: '127.0.0.1', allowedOrigins: [], rateLimit: 120, trustProxy: false },
+    })
+  })
+
+  it('reads the HTTP flags', () => {
+    const result = parseCli(
+      ['--http', '--port', '8080', '--host', '0.0.0.0', '--allowed-origin', 'https://a.example', '--rate-limit', '0', '--trust-proxy'],
+      {},
+    )
+    expect(result.kind === 'run' && result.http).toEqual({
+      port: 8080,
+      host: '0.0.0.0',
+      allowedOrigins: ['https://a.example'],
+      rateLimit: 0,
+      trustProxy: true,
+    })
+  })
+
+  it('rejects HTTP flags without --http, a bad port and an origin with a path', () => {
+    expect(parseCli(['--port', '8080'], {})).toEqual({ kind: 'error', message: '--port needs --http' })
+    expect(parseCli(['--http', '--port', '70000'], {}).kind).toBe('error')
+    expect(parseCli(['--http', '--allowed-origin', 'https://a.example/app'], {}).kind).toBe('error')
+  })
 })
