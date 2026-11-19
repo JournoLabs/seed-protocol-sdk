@@ -218,6 +218,8 @@ export const publishMachine = setup({
             attestationStrategy: ({ event }) =>
               (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
                 .attestationStrategy,
+            expectedPublishTransactions: ({ event }) =>
+              (event as { expectedPublishTransactions?: number }).expectedPublishTransactions,
           }),
         },
         skipArweave: [
@@ -241,6 +243,8 @@ export const publishMachine = setup({
               attestationStrategy: ({ event }) =>
                 (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
                   .attestationStrategy,
+              expectedPublishTransactions: ({ event }) =>
+                (event as { expectedPublishTransactions?: number }).expectedPublishTransactions,
             }),
           },
         ],

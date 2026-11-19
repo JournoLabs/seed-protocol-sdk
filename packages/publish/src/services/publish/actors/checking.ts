@@ -18,12 +18,11 @@ import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
 import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
 import { estimateUpload } from '../../publishCost/uploadEstimate'
-import { assertPublishFits, PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
-import { encodeMultiPublish } from '~/helpers/contracts'
+import { PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
+import { expectedPartCount } from '~/helpers/publishParts'
 import { normalizePublishRequest } from './publishRequestNormalize'
 
 const activePublishProcesses = new Set<string>()
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 export async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
   const cfg = getPublishConfig()
@@ -186,6 +185,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         // costs no transaction. Each upload gets a placeholder id of an Arweave id's length, so the
         // payload has the storage transaction attestations it will send, at their size.
         const placeholderUploads = uploads.uploadTargets.map((target) => ({ ...target, txId: PLACEHOLDER_ARWEAVE_TX_ID }))
+        let expectedPublishTransactions: number | undefined
         const validate = async (): Promise<boolean> => {
           const validation = await validateItemForPublish(item, placeholderUploads, {
             publishMode: publishMode ?? 'patch',
@@ -196,12 +196,12 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
             sendBack({ type: 'validationFailed', errors: validation.errors })
             return false
           }
-          // multiPublish sends the whole graph in one transaction: refuse one too large before
-          // anything is uploaded. The send checks again, with the gas estimate.
+          // multiPublish sends the graph in as many parts as it needs (ADR 0036): refuse one item or
+          // cycle too large for a transaction on its own before anything is uploaded, and count the
+          // parts. The send cuts each part again, with the gas estimate.
           if (attestationStrategy === 'multiPublish') {
             const requests = validation.payload.map((request) => normalizePublishRequest(request))
-            const calldata = encodeMultiPublish(ZERO_ADDRESS, requests).data
-            assertPublishFits(address.trim(), requests, { calldata })
+            expectedPublishTransactions = expectedPartCount(requests, address.trim())
           }
           return true
         }
@@ -250,7 +250,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         }
 
         const needsArweave = await itemNeedsArweaveUpload(item)
-        const payload = { attestationStrategy } as const
+        const payload = { attestationStrategy, expectedPublishTransactions } as const
         if (needsArweave) {
           sendBack({ type: 'validPublishProcess', ...payload })
         } else {

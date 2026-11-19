@@ -93,6 +93,12 @@ export interface PublishMachineContext {
    * fall back to `getPublishConfig().useDirectEas`.
    */
   attestationStrategy?: 'multiPublish' | 'directEas'
+  /**
+   * Set when leaving `checking` on the `multiPublish` route: how many transactions the publish is
+   * expected to go out in (ADR 0036). A lower bound from the local gas estimate; the RPC estimates
+   * the send makes can raise it. Absent on direct EAS.
+   */
+  expectedPublishTransactions?: number
   /** `patch` (default): attest only pending properties on current Version. `new_version`: new Version + full snapshot. */
   publishMode?: PublishMode
   /**
