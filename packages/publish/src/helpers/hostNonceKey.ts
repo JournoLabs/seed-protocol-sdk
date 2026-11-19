@@ -29,16 +29,18 @@ export async function nonceKeySender(
 }
 
 /**
- * The EntryPoint nonce key for `CreatePublishOptions.nonceKey`, once it is known to be usable: a
- * pinning sender, a publish through the Seed contract, and no UserOp landed under it yet.
+ * The EntryPoint nonce key for part `part` (default 1) of a publish sent with
+ * `CreatePublishOptions.nonceKey`, once it is known to be usable: a pinning sender, a publish through
+ * the Seed contract, and no UserOp landed under that part's key yet.
  * @throws PublishNonceKeyError when any of those fails; nothing has been sent
  */
 export async function usableHostNonceKey(params: {
   nonceKey: string
+  part?: number
   sender: Pick<SeedTxSender, 'address' | 'pinsNonceOn'> | undefined
   directEas: boolean
 }): Promise<bigint> {
-  const { nonceKey, sender, directEas } = params
+  const { nonceKey, part = 1, sender, directEas } = params
   if (directEas) {
     throw new PublishNonceKeyError(
       'nonceKey needs a publish through the Seed contract; attesting directly to EAS sends several transactions, which one key can\'t cover.',
@@ -56,7 +58,7 @@ export async function usableHostNonceKey(params: {
       sender?.address,
     )
   }
-  const key = publishNonceKey(nonceKey)
+  const key = publishNonceKey(nonceKey, part)
   if ((await readNonceSequence(sender.pinsNonceOn as Address, sender.address as Address, key)) > 0n) {
     throw new PublishNonceKeyError(
       `A UserOp from ${sender.address} already landed under this nonceKey, so this publish can't. ` +

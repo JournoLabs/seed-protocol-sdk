@@ -39,7 +39,8 @@ When using the publish package with `ConnectButton` and its publish flow:
    `getPublishUploadData`), `summarizePublishWork`, `summarizePublishUploads`, the Html passes and
    `ensureEasSchemasForItem` read that graph; none of them reads a loaded Item. In a cycle (A ↔ B, or a draft pointing back at the draft
    being published), a publish through the contract attests both sides, since the contract creates
-   every seed first (`getPublishPayload` option `backReferences: 'link'`). Direct EAS can only attest
+   every seed of a transaction first (`getPublishPayload` option `backReferences: 'link'`); a cycle
+   always goes out in one transaction, as step 3 describes. Direct EAS can only attest
    the uid of a seed created before the item, so there the reference back to the item still being
    walked is left out of this publish (`'defer'`, the default); it keeps no attestation uid, and the
    next publish of its item attests it with the target's uid.
@@ -50,12 +51,34 @@ When using the publish package with `ConnectButton` and its publish flow:
    account that is not deployed yet is refused rather than sent down this path: deploy it first,
    then publish.
 
-   The publish contract takes the whole payload in one transaction. It creates every Seed and
+   The publish contract takes a payload in one `multiPublish` transaction. It creates every Seed and
    Version first, then writes each new Seed uid into the properties that reference it
    (`propertiesToUpdate`: a relation, or one element of a list), then attests the properties.
    Before sending, `encodeMultiPublish` puts a placeholder in each of those slots and refuses a
    payload the contract would revert on, or one that still attests a draft's local id that no
    reference fills.
+
+   A payload too large for one transaction goes out in several, in the same publish
+   ([ADR 0036](adr/0036-a-publish-splits-across-transactions.md)). The requests are grouped into
+   units: one request, or every request of one cycle of references, which is never split. Units
+   keep the payload's referenced-first order, so a part only references parts sent before it. Each
+   part is the longest run of leading units whose local gas estimate, with 30% headroom, is under
+   `maxPublishGas` and whose calldata is under 120,000 bytes, shortened by bisection until the RPC
+   gas estimate from the sending account, with the same headroom, is under the lower of
+   `maxPublishGas` and the block gas limit. When that estimate can't be made the part is sent as
+   it is. A reference from a part to a later one is dropped from the earlier part's request.
+
+   Once a part is recorded (step 4), its Seeds are published, so the payload is built again from
+   the rows: it holds only what is left, and the relation slots of later parts hold the recorded
+   Seed uids. The publish ends when the part holding the item has been recorded. An edit saved
+   between parts to an item no part has sent yet goes out with it. An edit to an item an earlier
+   part published waits until that item is published itself, since the payload doesn't include a
+   published related item. Between parts a reader sees the earlier parts' Seeds
+   published and the item not yet; if a part fails, those Seeds stay published and a retry, a
+   restore or a new publish carries on with what is left. `snapshot.context.expectedPublishTransactions`
+   says, after `checking`, how many parts the local estimate expects; the RPC estimates can raise
+   it. `ManagedAccountPublishError` with code `PUBLISH_TOO_LARGE` now means one item, or one cycle,
+   is too large for a transaction on its own; `checking` refuses it before anything is uploaded.
 
    Direct EAS attests requests in order, so a link must target its own request or a later one; it
    refuses a payload that doesn't (`ManagedAccountPublishError`, `PUBLISH_PREFLIGHT_FAILED`) before
@@ -184,6 +207,15 @@ The nonce key comes from the attempt, so it covers tries that share a database a
 whose tries don't, such as a server job that creates a new item per try, passes its own id as
 `CreatePublishOptions.nonceKey`; see [Tries that don't share a database](PUBLISH_AUTOMATION.md#tries-that-dont-share-a-database).
 
+A publish split across transactions (step 3 of the [publish flow](#publish-flow-recommended)) sends
+each part as its own attempt, so each part has its own row and its own nonce key, and a part's
+attempt is recorded before the next part claims one. A retry or restore that finds a part landed
+records it and sends the rest. With a host `nonceKey`, the number of parts already sent is read from
+the publish's recorded attempts, so a tab that reloads between parts goes on under the next part's
+key. Each part clears its Seeds' co-publish rows as it records. The `createAttestations` output
+(`easPayload`, and `publishedBatch` in the context) holds the parts the finishing try recorded; a
+publish that went on from parts recorded by an earlier try leaves those out.
+
 Show `attestationOutcomeUnknown` to the author, since Publishing again is refused until it settles.
 `describePublishRun` gives it `awaitingRetry: true`, `item.publish` rejects, and
 `snapshot.context.error` is an `AttestationOutcomeUnknownError` (code `ATTESTATION_OUTCOME_UNKNOWN`)
@@ -226,7 +258,24 @@ back on every retry until something outside the publish changes: `PublishNonceKe
 `PUBLISH_TOO_LARGE`, `MULTI_PUBLISH_NOT_ROUTED`, `USEROP_REVERTED`, `USEROP_FAILED_NO_REASON`,
 `MANAGED_ACCOUNT_NOT_DEPLOYED` or `EXECUTOR_MODULE_NOT_INSTALLED`. A host can offer giving up first for
 these. A retry can still succeed after the author deploys the account, installs the module or adds
-funds, and a new publish uploads to Arweave again.
+funds.
+
+Publishing a seed whose publish waits in `attestationFailureRecoverable` or
+`attestationFailureRecoverableDirectToEas` in this tab, with no open attempt, replaces that publish:
+it is stopped and recorded `interrupted`, as `stopPublish` does, and the new publish starts. The new
+publish reuses an upload of the old one when its property and content hash match and the blob store
+still holds it; anything else, such as a file edited since, uploads again. It also takes the old
+publish's `nonceKey`, unless the host passes its own, and with it the parts sent under that key, so a
+split publish sends its next part under the next part's key. A different key, or none, starts at
+part 1. If the old publish was retried after Publish found it waiting, it keeps running and Publish
+gives `already_publishing`. A Publish sent while restore is running waits for it, so a waiting
+publish that restore brings back is replaced too. While an attempt for the seed is open, in any
+state, Publishing again starts nothing: `startPublish` and `ensureWalletThenPublish` return
+`{ outcome: 'attempt_open' }`, `item.publish` rejects naming `retryAttestations`, and
+`PublishManager.createPublish` resolves `undefined`. Settle the attempt with `retryAttestations`,
+`settleAttestationAttempt` or `resolveAttestationAttempt` first. `PublishManager.publishBlocker(seedLocalId)`
+says which applies: `'none'`, `'running'`, `'parked'` or `'attempt_open'`. A publish in any other
+state still gives `already_publishing`, as does one another tab runs.
 
 Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
 retry. `PublishManager.getRestoreStatus()` returns `outcome`, one of `pending`, `restored`, `dbNotReady`

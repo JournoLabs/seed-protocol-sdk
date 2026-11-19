@@ -28,11 +28,14 @@ export function nonceKeyForAttempt(attemptId: string): bigint {
 }
 
 /**
- * The EntryPoint nonce key for `CreatePublishOptions.nonceKey`: a host's own id for a publish (a job
- * or run id), so every try of that publish sends under one key, from any process, and lands once.
+ * The EntryPoint nonce key for part `part` of a publish sent with `CreatePublishOptions.nonceKey`: a
+ * host's own id for a publish (a job or run id), so every try of that part sends under one key, from
+ * any process, and lands once. A publish too large for one transaction goes out in parts (ADR
+ * 0036); part 1 uses the key a publish of one transaction always used, and each later part its own.
  */
-export function publishNonceKey(hostKey: string): bigint {
-  return BigInt(keccak256(stringToHex(`seed-publish-nonce-key:${hostKey}`))) >> 64n
+export function publishNonceKey(hostKey: string, part = 1): bigint {
+  const name = part === 1 ? `seed-publish-nonce-key:${hostKey}` : `seed-publish-nonce-key:${hostKey}:part:${part}`
+  return BigInt(keccak256(stringToHex(name))) >> 64n
 }
 
 /** The first nonce under `key`, the one a pinned send uses. */
@@ -126,22 +129,29 @@ async function seedUidsOfUserOp(params: {
     .map((a) => a.uid)
 }
 
+type NonceKeyUserOp = {
+  transactionHash: Hex
+  success: boolean
+  /**
+   * With `modelName` and `success`: the uids of the new Seeds of that model the sender attested in
+   * this UserOp, other UserOps in the same transaction left out. Empty when the publish made no new
+   * Seed of it, as when the item was already published.
+   */
+  seedUids?: string[]
+  /** `seedUids[0]` when it holds exactly one uid: the root Seed when `modelName` is the root's model. */
+  seedUid?: string
+}
+
 export type PublishByNonceKey = {
-  /** How many UserOps have landed under the key: 0 means none, and a send under it can still land. */
+  /** How many UserOps have landed under part 1's key: 0 means none, and a send under it can still land. */
   sequence: bigint
-  /** The landed UserOp, when `sequence` is above 0 and its event is at or after `fromBlock`. */
-  userOp?: {
-    transactionHash: Hex
-    success: boolean
-    /**
-     * With `modelName` and `success`: the uids of the new Seeds of that model the sender attested in
-     * this UserOp, other UserOps in the same transaction left out. Empty when the publish made no new
-     * Seed of it, as when the item was already published.
-     */
-    seedUids?: string[]
-    /** `seedUids[0]` when it holds exactly one uid: the root Seed when `modelName` is the root's model. */
-    seedUid?: string
-  }
+  /** Part 1's landed UserOp, when `sequence` is above 0 and its event is at or after `fromBlock`. */
+  userOp?: NonceKeyUserOp
+  /**
+   * Every part that landed, part 1 first, read until a part's key has sequence 0. A publish of one
+   * transaction has at most one. The root Seed is in the last part of a finished publish.
+   */
+  parts: Array<{ part: number; sequence: bigint; userOp?: NonceKeyUserOp }>
 }
 
 /** {@link findPublishByNonceKey}'s default `maxBlocks`: 100 log reads of 10,000 blocks. */
@@ -185,12 +195,26 @@ export async function findPublishByNonceKey(params: {
       `findPublishByNonceKey: fromBlock ${fromBlock} is ${head - fromBlock} blocks behind the head ${head}, more than maxBlocks (${cap}). Pass a later fromBlock, a larger maxBlocks, or maxBlocks: Infinity.`,
     )
   }
-  const key = publishNonceKey(params.nonceKey)
-  const sequence = await readNonceSequence(entryPoint, sender, key)
-  if (sequence === 0n) return { sequence }
-  const log = await findPinnedUserOpLog({ entryPoint, sender, key, fromBlock, head })
-  if (!log) return { sequence }
-  const userOp: NonNullable<PublishByNonceKey['userOp']> = {
+  const parts: PublishByNonceKey['parts'] = []
+  for (let part = 1; ; part++) {
+    const key = publishNonceKey(params.nonceKey, part)
+    const sequence = await readNonceSequence(entryPoint, sender, key)
+    if (sequence === 0n) break
+    const userOp = await landedUserOp({ entryPoint, sender, key, fromBlock, head, modelName })
+    parts.push({ part, sequence, ...(userOp && { userOp }) })
+  }
+  const [first] = parts
+  if (!first) return { sequence: 0n, parts }
+  return { sequence: first.sequence, ...(first.userOp && { userOp: first.userOp }), parts }
+}
+
+async function landedUserOp(
+  params: PinnedUserOpParams & { modelName?: string },
+): Promise<NonceKeyUserOp | undefined> {
+  const { entryPoint, sender, modelName } = params
+  const log = await findPinnedUserOpLog(params)
+  if (!log) return undefined
+  const userOp: NonceKeyUserOp = {
     transactionHash: log.transactionHash!,
     success: log.args.success === true,
   }
@@ -204,5 +228,5 @@ export async function findPublishByNonceKey(params: {
     })
     if (userOp.seedUids.length === 1) userOp.seedUid = userOp.seedUids[0]
   }
-  return { sequence, userOp }
+  return userOp
 }

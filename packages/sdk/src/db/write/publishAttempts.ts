@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { publishAttempts, type PublishAttemptType } from '@/seedSchema'
 
@@ -36,6 +36,28 @@ export async function findOpenPublishAttempts(seedLocalIds: string[]): Promise<P
     .where(inArray(publishAttempts.status, OPEN_STATUSES))
   const seeds = new Set(seedLocalIds)
   return open.filter((row) => overlaps(row, seeds))
+}
+
+/**
+ * How many `multiPublish` transactions the runs `publishRunIds` recorded: the parts of a split
+ * publish already on chain (ADR 0036). Read from the rows rather than a run's saved state, which a
+ * reload between parts can leave behind.
+ */
+export async function countRecordedPublishParts(publishRunIds: string[]): Promise<number> {
+  if (publishRunIds.length === 0) return 0
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('countRecordedPublishParts: the database is not ready')
+  const rows: Array<{ id: string }> = await db
+    .select({ id: publishAttempts.id })
+    .from(publishAttempts)
+    .where(
+      and(
+        inArray(publishAttempts.publishRunId, publishRunIds),
+        eq(publishAttempts.step, 'multiPublish'),
+        eq(publishAttempts.status, 'recorded'),
+      ),
+    )
+  return rows.length
 }
 
 /**

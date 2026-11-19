@@ -1,6 +1,6 @@
 # 0036. A publish too large for one transaction goes out in several, and a new publish replaces a parked one
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-18
 - **Scope:** `@seedprotocol/publish` (`createAttestations`, `checking`, reconcile, `PublishManager.createPublish`,
   `startPublish`), `@seedprotocol/sdk` publish payload. Amends [ADR 0030](0030-attestation-sends-are-journaled.md).
@@ -69,7 +69,9 @@ is a run of consecutive units in the dependency order, sent as one `multiPublish
 
 The loop keeps no plan between parts. A retry, a restore or a new run (below) rebuilds the payload
 and gets only what is left, so all three continue a split publish the same way. An edit the author
-saves between parts goes into a later part, as it would go into a retry today.
+saves between parts to an item no part has sent yet goes out with that item. An edit to an item an
+earlier part published waits for that item's own publish: `getPublishGraph` doesn't walk into a
+published target, so the rebuilt payload doesn't hold it.
 
 ### Fitting a part
 
@@ -97,7 +99,9 @@ part and then goes on with the loop instead of returning; it returns only once t
 recorded. A restore, a retry after a failed record and a retry after a revert all land in that loop.
 
 `unrecordedAttestation` names one part, as it named the one transaction before. `publishedBatch` and
-`easPayload` collect every part, and `onPublished` fires once, after the root's part.
+`easPayload` hold the parts the finishing `createAttestations` call recorded; a call that went on from
+parts recorded earlier (a retry, a restore, a replacing run) leaves those out. Each part clears its
+seeds' co-publish rows as it records. `onPublished` fires once, after the root's part.
 
 ### A host's nonce key covers every part
 
@@ -105,6 +109,11 @@ recorded. A restore, a retry after a failed record and a retry after a revert al
 `NONCE_KEY_SPENT`. Part 1 keeps the key the host gave. Part *k* > 1 uses the key derived from the
 host's key and *k*. `findPublishByNonceKey` reads parts 1, 2, … until a key with sequence 0 and
 reports every part it finds.
+
+How many parts went out under the key is read from the run's recorded `publish_attempts` rows
+(`countRecordedPublishParts`, by `publishRunId`), not from its saved state. The snapshot is saved
+when the machine moves on, so a tab that reloads between parts would restore a count that misses the
+last part and send under its spent key.
 
 ### A new publish replaces a parked run and reuses its uploads
 
@@ -114,8 +123,14 @@ new one. The parked run's row is marked `interrupted`, as `stopPublish` does. Th
 parked run's uploads: an upload is reused when its `itemPropertyLocalId` and content hash match an
 upload the new run needs, and the blob store still reports it stored. Anything else uploads again,
 so an edit to a file property after the failure isn't attested with the old file. The new run also
-takes the parked run's count of recorded parts and, unless the host passes its own, its `nonceKey`,
-so its next part sends under the next part's key.
+takes the parked run's `nonceKey`, unless the host passes its own, and with it the number of parts
+the parked run, and any run it replaced, sent under that key, read from their recorded attempts. Its
+next part sends under the next part's key. A different key, or none, starts at part 1, so
+`findPublishByNonceKey` finds the new key's parts from its first.
+
+`createPublish` checks again that the run is parked when it replaces it: a retry that started in
+between keeps its run, and the Publish returns `already_publishing`. A Publish sent while restore is
+running waits for restore, so a parked run restore brings back is replaced like any other.
 
 A seed with an open attempt, in any state, gets a new outcome, `attempt_open`, from `startPublish`,
 and nothing starts. The host settles the attempt (`retryAttestations`,

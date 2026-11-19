@@ -9,11 +9,16 @@ import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUn
  */
 const ADDRESS = '0x' + 'e'.repeat(40)
 const ZERO = `0x${'0'.repeat(64)}`
-const harness = { attestedBytes: 0, uploadsSeen: [] as { seedLocalId?: string; txId: string }[][] }
+const harness = {
+  attestedBytes: 0,
+  uploadsSeen: [] as { seedLocalId?: string; txId: string }[][],
+  /** When set, the payload instead of one request of `attestedBytes`. */
+  payload: undefined as unknown[] | undefined,
+}
 
-const payloadOf = (bytes: number) => [
+const payloadOf = (bytes: number, localId = 'post0001') => [
   {
-    localId: 'post0001',
+    localId,
     seedUid: ZERO,
     seedSchemaUid: `0x${'1'.repeat(64)}`,
     versionUid: ZERO,
@@ -36,7 +41,7 @@ mock.module('@seedprotocol/sdk', () => ({
   isItemOwned: async () => true,
   validateItemForPublish: async (_item: unknown, uploads: { seedLocalId?: string; txId: string }[]) => {
     harness.uploadsSeen.push(uploads)
-    return { isValid: true, errors: [], payload: payloadOf(harness.attestedBytes) }
+    return { isValid: true, errors: [], payload: harness.payload ?? payloadOf(harness.attestedBytes) }
   },
   summarizePublishUploads: async () => ({
     uploadCount: 1,
@@ -63,7 +68,7 @@ const wallet = { signer: { address: ADDRESS }, txSender: { address: ADDRESS } }
 
 const runChecking = async (seedLocalId: string) => {
   const { checking } = await import('./checking')
-  const events: { type: string; error?: Error }[] = []
+  const events: { type: string; error?: Error; expectedPublishTransactions?: number }[] = []
   const actor = createActor(
     createMachine({
       invoke: {
@@ -82,13 +87,14 @@ const runChecking = async (seedLocalId: string) => {
 }
 
 describe('checking: publish size', () => {
-  test('refuses a publish over the gas limit with PUBLISH_TOO_LARGE before any upload', async () => {
+  test('one item over the limit still refuses before uploading', async () => {
     // 30,000 attested bytes is over 16M gas at what EAS charges to store them.
+    harness.payload = undefined
     harness.attestedBytes = 30_000
     harness.uploadsSeen.length = 0
     const verdict = await runChecking('tooLarge02')
     expect(verdict.type).toBe('checkingFailed')
-    expect(verdict.error).toMatchObject({ code: 'PUBLISH_TOO_LARGE' })
+    expect(verdict.error).toMatchObject({ code: 'PUBLISH_TOO_LARGE', message: expect.stringContaining('post0001') })
     // Sized with an Arweave id's length standing in for the upload not yet made.
     expect(harness.uploadsSeen[0]).toEqual([
       { seedLocalId: 'image001', itemPropertyName: 'storageTransactionId', txId: expect.stringMatching(/^.{43}$/) },
@@ -96,8 +102,18 @@ describe('checking: publish size', () => {
   }, TEST_TIMEOUT_MS)
 
   test('goes ahead with a publish that fits', async () => {
+    harness.payload = undefined
     harness.attestedBytes = 100
     const verdict = await runChecking('fits0001')
     expect(verdict.type).toBe('validPublishProcess')
+    expect(verdict.expectedPublishTransactions).toBe(1)
+  }, TEST_TIMEOUT_MS)
+
+  test('a graph over one transaction passes checking and reports its parts', async () => {
+    // 50 new seeds need 17.5M gas, over 16M: 35 fit in a transaction with headroom.
+    harness.payload = Array.from({ length: 50 }, (_, i) => payloadOf(0, `item${String(i).padStart(4, '0')}`)[0]!)
+    const verdict = await runChecking('split001')
+    expect(verdict.type).toBe('validPublishProcess')
+    expect(verdict.expectedPublishTransactions).toBe(2)
   }, TEST_TIMEOUT_MS)
 })

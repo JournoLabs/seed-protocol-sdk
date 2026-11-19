@@ -1,5 +1,5 @@
 import type { Item } from '@seedprotocol/sdk'
-import { enqueueActions } from 'xstate'
+import { enqueueActions, type AnyActorRef } from 'xstate'
 import { getPublishConfig } from '~/config'
 import {
   isPublishWallet,
@@ -13,6 +13,10 @@ import { subscribe } from '../actors/subscribe'
 import { dataItemSignerForPublish, getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { settleCreatePublish } from '../createPublishResult'
 import { holdItemUntilStopped } from '../holdPublishItem'
+import { markInProgressPublishInterrupted } from '../actors/savePublish'
+import { stopScopedOrStandaloneChild } from './stopScopedOrStandaloneChild'
+import { isParkedRun } from '../parkedRun'
+import type { ReplaceParked } from '..'
 
 function coerceWallet(account: unknown): PublishWallet | undefined {
   if (!account) return undefined
@@ -42,15 +46,16 @@ function coerceDataItemSigner(
   return undefined
 }
 
-export const createPublish = enqueueActions(({ event, enqueue }) => {
+export const createPublish = enqueueActions(({ context: managerContext, event, enqueue, self }) => {
   const ev = event as unknown as {
     item: Item<any>
     address?: string
     account?: unknown
     options?: import('~/config').CreatePublishOptions
     createToken?: number
+    replaceParked?: ReplaceParked
   }
-  const { item, address, account, options, createToken } = ev
+  const { item, address, account, options, createToken, replaceParked } = ev
 
   const hasAddress = address != null && typeof address === 'string' && address.trim().length > 0
   if (!hasAddress) {
@@ -58,6 +63,31 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     settleCreatePublish(createToken, undefined)
     return
   }
+
+  // A run parked after a failed attestation is ended as stopPublish ends it, keeping the lock this
+  // publish holds, and the new run takes over from it (ADR 0036). It's checked again here: a retry
+  // since PublishManager.createPublish looked may be sending, and then nothing is replaced.
+  const existing = managerContext.publishProcesses.get(item.seedLocalId)
+  const parked = replaceParked && isParkedRun(existing) ? existing : undefined
+  if (parked) {
+    void markInProgressPublishInterrupted(item.seedLocalId).catch((error) => {
+      console.warn(`[createPublish] Failed to mark the parked publish of "${item.seedLocalId}" interrupted:`, error)
+    })
+    stopScopedOrStandaloneChild(self, parked as AnyActorRef, enqueue)
+    const parkedSubscription = managerContext.subscriptions.get(item.seedLocalId)
+    if (parkedSubscription) stopScopedOrStandaloneChild(self, parkedSubscription as AnyActorRef, enqueue)
+    enqueue.assign(({ context }) => {
+      const publishProcesses = new Map(context.publishProcesses)
+      publishProcesses.delete(item.seedLocalId)
+      const subscriptions = new Map(context.subscriptions)
+      subscriptions.delete(item.seedLocalId)
+      return { ...context, publishProcesses, subscriptions }
+    })
+  }
+  const nonceKey = options?.nonceKey ?? (parked ? replaceParked?.nonceKey : undefined)
+  // Parts count against the key they went out under, so a different key, or none, starts at part 1.
+  const nonceKeyPartsInherited =
+    parked && nonceKey !== undefined && nonceKey === replaceParked?.nonceKey ? replaceParked.nonceKeyParts : 0
 
   enqueue.assign(({ context, spawn }) => {
     const { publishProcesses } = context
@@ -110,7 +140,9 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
           uplinkBitsPerSecond: publishCfg.uplinkBitsPerSecond,
         },
         confirmUpload: options?.confirmUpload === true,
-        ...(options?.nonceKey !== undefined && { nonceKey: options.nonceKey }),
+        ...(nonceKey !== undefined && { nonceKey }),
+        ...(parked && replaceParked && { reusableUploads: replaceParked.reuseUploads }),
+        ...(nonceKeyPartsInherited > 0 && { nonceKeyPartsInherited }),
       },
     })
 

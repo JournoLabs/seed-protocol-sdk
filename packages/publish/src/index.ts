@@ -200,7 +200,7 @@ export type {
   EnsureEasSchemasResult,
 } from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
-export { PublishManager } from './services/publishManager'
+export { PublishManager, type PublishBlocker } from './services/publishManager'
 export type { AttestationSettleResult } from './services/publishManager/settleAttestationAttempt'
 export {
   publishLockHolder,

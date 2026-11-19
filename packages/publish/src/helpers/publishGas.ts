@@ -18,47 +18,63 @@ const withHeadroom = (gas: bigint) => (gas * PUBLISH_GAS_HEADROOM_BPS) / 10_000n
 const lower = (a: bigint, b: bigint) => (a < b ? a : b)
 
 /**
- * The gas limit to send `tx` from `from` with: its estimate plus {@link PUBLISH_GAS_HEADROOM_BPS}.
- * When the estimate can't be made it is {@link PUBLISH_GAS_FALLBACK}, or `localEstimate` with
- * headroom when that is higher, never above {@link maxPublishGas}. A whole publish graph goes in one
- * transaction, so a large one can need more than that limit or a block holds; that throws
- * `PUBLISH_TOO_LARGE` before anything is sent. Call it after the transaction's simulation passed:
- * a revert here is not reported as one.
+ * The most gas one publish transaction may use: {@link maxPublishGas}, or the block gas limit when
+ * that is lower. A failed block read keeps the configured limit.
  */
-export async function publishGasLimit(from: string, tx: SeedTxRequest, localEstimate = 0n): Promise<bigint> {
-  const client = getPublishPublicClient()
+export async function publishGasCeiling(): Promise<bigint> {
+  let blockGasLimit: bigint | undefined
+  try {
+    blockGasLimit = (await getPublishPublicClient().getBlock()).gasLimit
+  } catch {
+    blockGasLimit = undefined
+  }
+  return blockGasLimit === undefined ? maxPublishGas() : lower(maxPublishGas(), blockGasLimit)
+}
+
+/**
+ * `tx`'s gas estimate from `from`, plus {@link PUBLISH_GAS_HEADROOM_BPS}, or `undefined` when it
+ * can't be made. An unfunded sender is estimated again with a balance override: OP chains charge
+ * the L1 data fee up front, as in simulateCallFromAccount.
+ */
+export async function estimatePublishGas(from: string, tx: SeedTxRequest): Promise<bigint | undefined> {
   const estimate = (withBalance: boolean) =>
-    client.estimateGas({
+    getPublishPublicClient().estimateGas({
       account: from as Address,
       to: tx.to,
       data: tx.data,
       value: tx.value,
-      // OP chains charge the L1 data fee up front, as in simulateCallFromAccount.
       ...(withBalance ? { stateOverride: [{ address: from as Address, balance: parseEther('1000') }] } : {}),
     })
-  let estimated: bigint
   try {
     try {
-      estimated = await estimate(false)
+      return withHeadroom(await estimate(false))
     } catch (err) {
       if (!isInsufficientFunds(err)) throw err
-      estimated = await estimate(true)
+      return withHeadroom(await estimate(true))
     }
   } catch {
+    return undefined
+  }
+}
+
+/**
+ * The gas limit to send `tx` from `from` with: {@link estimatePublishGas}. When the estimate can't
+ * be made it is {@link PUBLISH_GAS_FALLBACK}, or `localEstimate` with headroom when that is higher,
+ * never above {@link maxPublishGas}. An estimate over {@link publishGasCeiling} throws
+ * `PUBLISH_TOO_LARGE` before anything is sent; the part was fitted to the ceiling already, so this
+ * is the last check. Call it after the transaction's simulation passed: a revert here is not
+ * reported as one.
+ */
+export async function publishGasLimit(from: string, tx: SeedTxRequest, localEstimate = 0n): Promise<bigint> {
+  const gas = await estimatePublishGas(from, tx)
+  if (gas === undefined) {
     const local = withHeadroom(localEstimate)
     return lower(local > PUBLISH_GAS_FALLBACK ? local : PUBLISH_GAS_FALLBACK, maxPublishGas())
   }
-  const gas = withHeadroom(estimated)
-  // A failed block read keeps a good estimate: the configured limit still caps it.
-  const blockGasLimit = await client.getBlock().then(
-    (block) => block.gasLimit,
-    () => undefined,
-  )
-  const limit = blockGasLimit === undefined ? maxPublishGas() : lower(maxPublishGas(), blockGasLimit)
+  const limit = await publishGasCeiling()
   if (gas > limit) {
     throw new ManagedAccountPublishError(
-      `This publish needs about ${gas} gas, over the limit of ${limit}; nothing was sent. ` +
-        'Publish some of its related drafts on their own first.',
+      `This transaction needs about ${gas} gas, over the limit of ${limit}; nothing was sent.`,
       'PUBLISH_TOO_LARGE',
       from,
     )

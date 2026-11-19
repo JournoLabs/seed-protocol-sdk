@@ -165,4 +165,9 @@ describe('publishItem', () => {
     ensureResult = { outcome: 'already_publishing' }
     await expect(publishItem(item)).rejects.toThrow('already publishing in this tab or another')
   })
+
+  test('attempt_open throws a message naming retryAttestations', async () => {
+    ensureResult = { outcome: 'attempt_open' }
+    await expect(publishItem(item)).rejects.toThrow("PublishManager.retryAttestations('seed-1')")
+  })
 })
