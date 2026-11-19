@@ -36,6 +36,8 @@ let recorded = new Set<string>()
 let author2Edited = false
 let publishConfig: Record<string, unknown> = {}
 let txCount = 0
+/** Set to the EntryPoint when the publish wallet's sender pins its nonce. */
+let pinsNonceOn: string | undefined
 
 const sendTransaction = mock(async (_tx: unknown) => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
 const claimPublishAttempt = mock(async (_attempt: { id: string; requests: string }) => undefined)
@@ -82,7 +84,7 @@ mock.module('../../../helpers/executorModuleReadiness', () => ({
   assertExecutorModuleReadyForAccount: async () => {},
 }))
 mock.module('../../../helpers/resolvePublishWallet', () => ({
-  resolvePublishWallet: () => ({ txSender: { address: PUBLISHER, sendTransaction } }),
+  resolvePublishWallet: () => ({ txSender: { address: PUBLISHER, sendTransaction, ...(pinsNonceOn && { pinsNonceOn }) } }),
 }))
 mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted: async () => {} }))
 // No RPC: an estimate that can't be made keeps the local cut, which these tests size.
@@ -99,6 +101,7 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 const { createAttestations } = await import('./createAttestations')
 const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
 const { publishMachine } = await import('../index')
+const { publishNonceKey } = await import('../../../helpers/pinnedNonce')
 
 const attestation = (schema: `0x${string}`, data: `0x${string}`, easType?: string) => ({
   schema,
@@ -248,6 +251,17 @@ describe('createAttestations: a publish over one transaction', () => {
     const { result } = await run({ attestationPartsRecorded: 1 })
     expect(sends()).toEqual([[POST]])
     expect(result.attestationPartsRecorded).toBe(2)
+  })
+
+  test('a host nonceKey sends each part under its own part key', async () => {
+    pinsNonceOn = `0x${'7'.repeat(40)}`
+    try {
+      await run({ nonceKey: 'run-7' })
+    } finally {
+      pinsNonceOn = undefined
+    }
+    const keys = sendTransaction.mock.calls.map(([tx]) => (tx as { nonceKey?: bigint }).nonceKey)
+    expect(keys).toEqual([publishNonceKey('run-7', 1), publishNonceKey('run-7', 2)])
   })
 
   test('a revert in part 2 leaves part 1 recorded and the run failing', async () => {

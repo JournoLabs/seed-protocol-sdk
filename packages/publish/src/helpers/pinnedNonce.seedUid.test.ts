@@ -29,7 +29,8 @@ const getTransactionReceipt = mock(async (_: unknown) => ({ logs: receiptLogs })
 mock.module('./chainClient', () => ({
   ...realChainClient,
   getPublishPublicClient: () => ({
-    readContract: async () => chainNonce,
+    // Only part 1's key has a UserOp landed; every other key reads sequence 0.
+    readContract: async ({ args }: { args: [string, bigint] }) => (args[1] === KEY ? chainNonce : pinnedNonce(args[1])),
     getLogs: async () => [userOpLog],
     getBlockNumber: async () => 100n,
     getTransactionReceipt,
@@ -77,10 +78,8 @@ const find = (modelName?: string) =>
 describe('findPublishByNonceKey with modelName', () => {
   test('gives the Seed of the model this UserOp attested, not the other UserOps’ in the transaction', async () => {
     landed((i) => [attested(i, POST_SCHEMA, ROOT_UID), attested(i + 1, VERSION_SCHEMA, VERSION_UID)])
-    expect(await find('Post')).toEqual({
-      sequence: 1n,
-      userOp: { transactionHash: TX, success: true, seedUids: [ROOT_UID], seedUid: ROOT_UID },
-    })
+    const userOp = { transactionHash: TX, success: true, seedUids: [ROOT_UID], seedUid: ROOT_UID }
+    expect(await find('Post')).toEqual({ sequence: 1n, userOp, parts: [{ part: 1, sequence: 1n, userOp }] })
   })
 
   test('two new Seeds of the model: both uids and no seedUid', async () => {

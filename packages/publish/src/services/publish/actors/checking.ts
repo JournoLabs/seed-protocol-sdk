@@ -242,6 +242,8 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           const directEas = attestationStrategy === 'directEas'
           await usableHostNonceKey({
             nonceKey: context.nonceKey,
+            // A run that replaced a parked split publish goes on from its next part (ADR 0036).
+            part: (context.attestationPartsRecorded ?? 0) + 1,
             sender: directEas ? publishWallet.txSender : await nonceKeySender(publishWallet, address.trim()),
             directEas,
           })

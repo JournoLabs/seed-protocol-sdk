@@ -413,6 +413,7 @@ async function sendParts(
           send,
           resumeAttemptId,
           hostNonceKey: context.nonceKey,
+          part: partsBefore + parts.length + 1,
         }),
       )
       // Reconcile's resume names the first send only.

@@ -61,14 +61,14 @@ const { pinnedNonce, publishNonceKey } = await import('~/helpers/pinnedNonce')
 const pinning = { signer: { address: PUBLISHER }, txSender: { address: PUBLISHER, pinsNonceOn: ENTRY_POINT } }
 
 let n = 0
-const runChecking = async (address: string, wallet: unknown, nonceKey = 'run-7') => {
+const runChecking = async (address: string, wallet: unknown, nonceKey = 'run-7', extra: Record<string, unknown> = {}) => {
   const { checking } = await import('./checking')
   const events: { type: string; error?: Error & { code?: string } }[] = []
   const machine = createMachine({
     invoke: {
       src: checking,
       input: {
-        context: { item: { seedLocalId: `seed${++n}` }, wallet, address, publishMode: 'patch', nonceKey },
+        context: { item: { seedLocalId: `seed${++n}` }, wallet, address, publishMode: 'patch', nonceKey, ...extra },
       },
     },
     on: { '*': { actions: ({ event }) => events.push(event as any) } },
@@ -102,6 +102,16 @@ describe('checking: CreatePublishOptions.nonceKey', () => {
     const event = await runChecking(PUBLISHER, pinning)
     expect(event.type).toBe('checkingFailed')
     expect(event.error).toMatchObject({ code: 'NONCE_KEY_SPENT', sender: PUBLISHER })
+  }, TEST_TIMEOUT_MS)
+
+  test('a run that goes on from a recorded part checks the next part key', async () => {
+    harness.codeKind = 'contract'
+    // Part 1's key is spent; part 2's is read and unused.
+    harness.chainNonce = 0n
+    harness.nonceReads = []
+    const event = await runChecking(PUBLISHER, pinning, 'run-7', { attestationPartsRecorded: 1 })
+    expect(event.type).toBe('validPublishProcess')
+    expect(harness.nonceReads.map((args) => args[1])).toEqual([publishNonceKey('run-7', 2)])
   }, TEST_TIMEOUT_MS)
 
   // Batch 16 item 41: ConnectButton's in-app wallet; the publish sends from the ManagedAccount
