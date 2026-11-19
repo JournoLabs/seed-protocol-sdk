@@ -13,10 +13,11 @@ import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
-import { AttestationPartsError, AttestationRecordError, ManagedAccountPublishError } from '~/errors'
+import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
 import { estimatePublishGas, publishGasCeiling, publishGasLimit } from '~/helpers/publishGas'
 import { fitPublishPart, partRequests, publishUnits } from '~/helpers/publishParts'
+import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
@@ -97,11 +98,13 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
 }
 
 type CreateAttestationsResult = {
-  /** Every part's requests, in the order they were sent. */
+  /**
+   * The requests of the parts this call recorded, in the order they were sent. A call that went on
+   * from parts recorded earlier (a retry, a restore, a replaced run) leaves those out.
+   */
   easPayload: unknown
+  /** The uids of the parts this call recorded, as {@link easPayload}. */
   publishedBatch: PublishMachineContext['publishedBatch']
-  /** The parts this run recorded, earlier attempts included. */
-  attestationPartsRecorded: number
 }
 
 export const createAttestations = fromPromise(
@@ -282,32 +285,17 @@ type RecordedPart = {
 const heldRoot = (requests: unknown[], seedLocalId: string) =>
   requests.some((r) => (r as { localId?: string } | undefined)?.localId === seedLocalId)
 
-async function executeCreateAttestations(
-  context: PublishMachineContext,
-  loaded: IItem<any>[],
-): Promise<CreateAttestationsResult> {
-  const partsBefore = context.attestationPartsRecorded ?? 0
-  const parts: RecordedPart[] = []
-  try {
-    return await sendParts(context, loaded, parts)
-  } catch (err) {
-    // The machine keeps the count of recorded parts for a retry's nonce key (ADR 0036).
-    if (parts.length > 0) throw new AttestationPartsError(partsBefore + parts.length, err)
-    throw err
-  }
-}
-
 /**
  * Sends the publish as one `multiPublish` per part (ADR 0036): rebuild the payload from the rows,
  * cut the longest prefix of units that fits, send it, record it, and repeat until the part that
  * held the root is recorded. Recorded seeds are published, so each rebuilt payload holds only what
- * is left and references earlier parts by uid. `parts` collects what this call recorded.
+ * is left and references earlier parts by uid.
  */
-async function sendParts(
+async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
-  parts: RecordedPart[],
 ): Promise<CreateAttestationsResult> {
+    const parts: RecordedPart[] = []
     const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
@@ -335,8 +323,9 @@ async function sendParts(
       item = await waitForItem(item.seedLocalId)
       loaded.push(item)
     }
-    const partsBefore = context.attestationPartsRecorded ?? 0
-    const finish = () => finishAttested(context, item, parts, partsBefore + parts.length)
+    // Read from the recorded attempts, so a reload between parts goes on from the right key (ADR 0036).
+    const partsBefore = await partsSentUnderNonceKey(context)
+    const finish = () => finishAttested(context, item, parts)
 
     // A part landed and recording it failed: repeat the record from its receipt. A retry that
     // reached the send would attest it a second time.
@@ -391,8 +380,12 @@ async function sendParts(
       )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
       const reqs = Array.isArray(requestData) ? requestData : [requestData]
       const units = publishUnits(reqs.map((req: any) => normalizePublishRequest(req)))
+      if (units.length === 0) {
+        // Every rebuilt payload holds at least the root until its part records.
+        throw new Error('The publish payload is empty; nothing was sent.')
+      }
 
-      const count = units.length === 0 ? 0 : await fitPublishPart(units, estimateMultiPublish, await publishGasCeiling())
+      const count = await fitPublishPart(units, estimateMultiPublish, await publishGasCeiling())
       const part = partRequests(units, count)
       const serialized = JSON.stringify(part, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
       if (serialized === lastSent) {
@@ -455,7 +448,22 @@ async function recordPart(
   }).catch((err) => {
     throw new AttestationRecordError(landed, err)
   })
+  await clearCoPublishRows(requests)
   return { receipt, requests, attributed }
+}
+
+/**
+ * Clears the co-publish rows of the seeds a recorded part published. Done per part, so a publish
+ * that fails or reloads after a part has left nothing of that part behind.
+ */
+async function clearCoPublishRows(requests: Array<{ localId?: string } | undefined>): Promise<void> {
+  try {
+    const { clearHtmlEmbeddedImageCoPublishRows } = await import('@seedprotocol/sdk')
+    const published = new Set(requests.flatMap((r) => (r?.localId ? [r.localId] : [])))
+    for (const seedLocalId of published) await clearHtmlEmbeddedImageCoPublishRows(seedLocalId)
+  } catch {
+    /* best-effort cleanup */
+  }
 }
 
 /** Finishes the publish once the root's part is recorded: the root's seed uid, cleanup, the batch. */
@@ -463,7 +471,6 @@ async function finishAttested(
   context: PublishMachineContext,
   item: IItem<any>,
   parts: RecordedPart[],
-  attestationPartsRecorded: number,
 ): Promise<CreateAttestationsResult> {
     const address = context.address as string
     const effectiveRequests = parts.flatMap((p) => p.requests)
@@ -486,15 +493,8 @@ async function finishAttested(
 
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
 
-    try {
-      // The item's co-publish rows and those of the related drafts published with it.
-      const { clearHtmlEmbeddedImageCoPublishRows } = await import('@seedprotocol/sdk')
-      const published = new Set<string>([item.seedLocalId])
-      for (const r of effectiveRequests) if (r?.localId) published.add(r.localId)
-      for (const seedLocalId of published) await clearHtmlEmbeddedImageCoPublishRows(seedLocalId)
-    } catch {
-      /* best-effort cleanup */
-    }
+    // The root's rows, in case the part that recorded it didn't name it (each part cleared its own).
+    await clearCoPublishRows([{ localId: item.seedLocalId }])
 
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
     const rootForBatch =
@@ -512,5 +512,5 @@ async function finishAttested(
         })
       : null
 
-    return { easPayload, publishedBatch, attestationPartsRecorded }
+    return { easPayload, publishedBatch }
 }

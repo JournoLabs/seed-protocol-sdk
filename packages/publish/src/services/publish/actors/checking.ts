@@ -20,6 +20,7 @@ import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfi
 import { estimateUpload } from '../../publishCost/uploadEstimate'
 import { PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
 import { expectedPartCount } from '~/helpers/publishParts'
+import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { normalizePublishRequest } from './publishRequestNormalize'
 
 const activePublishProcesses = new Set<string>()
@@ -243,7 +244,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           await usableHostNonceKey({
             nonceKey: context.nonceKey,
             // A run that replaced a parked split publish goes on from its next part (ADR 0036).
-            part: (context.attestationPartsRecorded ?? 0) + 1,
+            part: (await partsSentUnderNonceKey(context)) + 1,
             sender: directEas ? publishWallet.txSender : await nonceKeySender(publishWallet, address.trim()),
             directEas,
           })

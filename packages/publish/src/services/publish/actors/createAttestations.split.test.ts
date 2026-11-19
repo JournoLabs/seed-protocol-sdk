@@ -32,33 +32,38 @@ const uidOf = (localId: string) => stringToHex(`uid:${localId}`, { size: 32 })
 
 /** Local ids recorded so far: published seeds, as far as the payload is concerned. */
 let recorded = new Set<string>()
-/** Set by a test: author2 is edited after part 1 records, so it comes back as a patch. */
-let author2Edited = false
 let publishConfig: Record<string, unknown> = {}
 let txCount = 0
 /** Set to the EntryPoint when the publish wallet's sender pins its nonce. */
 let pinsNonceOn: string | undefined
 
 const sendTransaction = mock(async (_tx: unknown) => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
-const claimPublishAttempt = mock(async (_attempt: { id: string; requests: string }) => undefined)
-/** Set by a test: author2 is edited right after the first part records. */
-let editAuthor2AfterFirstRecord = false
-const recordMultiPublishReceipt = mock(async ({ requests }: { requests: Array<{ localId: string; seedUid?: string }> }) => {
-  for (const r of requests) {
-    // Recording the patch publishes the edit.
-    if (r.localId === 'author2' && r.seedUid !== ZERO) author2Edited = false
-    recorded.add(r.localId)
-  }
-  if (editAuthor2AfterFirstRecord && recordMultiPublishReceipt.mock.calls.length === 1) author2Edited = true
-  return { requests: requests.map((r) => ({ ...r, seedUid: uidOf(r.localId), versionUid: h('9') })), attributed: [] }
+/** publish_attempts as far as these tests need it: the run of each attempt and whether it recorded. */
+let attemptRows: Array<{ id: string; publishRunId: string | null; status: string }> = []
+const claimPublishAttempt = mock(async (attempt: { id: string; requests: string; publishRunId: string | null }) => {
+  attemptRows.push({ id: attempt.id, publishRunId: attempt.publishRunId, status: 'sending' })
+  return undefined
 })
+const recordMultiPublishReceipt = mock(
+  async ({ requests, attemptId }: { requests: Array<{ localId: string; seedUid?: string }>; attemptId?: string }) => {
+    for (const r of requests) recorded.add(r.localId)
+    const row = attemptRows.find((a) => a.id === attemptId)
+    if (row) row.status = 'recorded'
+    return { requests: requests.map((r) => ({ ...r, seedUid: uidOf(r.localId), versionUid: h('9') })), attributed: [] }
+  },
+)
+const clearHtmlEmbeddedImageCoPublishRows = mock(async (_seedLocalId: string) => {})
+/** EntryPoint nonce keys a UserOp already landed under. */
+let spentKeys = new Set<bigint>()
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   claimPublishAttempt,
   findOpenPublishAttempts: async () => [],
   updatePublishAttempt: async () => {},
-  clearHtmlEmbeddedImageCoPublishRows: async () => {},
+  countRecordedPublishParts: async (runIds: string[]) =>
+    attemptRows.filter((a) => a.publishRunId && runIds.includes(a.publishRunId) && a.status === 'recorded').length,
+  clearHtmlEmbeddedImageCoPublishRows,
 }))
 mock.module('../../../config', () => ({
   ...realConfig,
@@ -69,7 +74,10 @@ mock.module('../../../helpers/chainClient', () => ({
   getPublishBlockNumber: async () => 100n,
   isContractDeployed: async () => true,
   waitForPublishReceipt: async () => ({ logs: [] }),
-  getPublishPublicClient: () => ({ readContract: async () => 0n }),
+  // EntryPoint.getNonce(sender, key): sequence 1 for a spent key.
+  getPublishPublicClient: () => ({
+    readContract: async ({ args }: { args: [string, bigint] }) => (spentKeys.has(args[1]) ? 1n : 0n),
+  }),
 }))
 mock.module('./recordMultiPublishReceipt', () => ({ recordMultiPublishReceipt }))
 mock.module('../helpers/receiptAttestationMs', () => ({
@@ -124,18 +132,6 @@ function payload() {
       { publishLocalId: POST, propertySchemaUid: SCHEMA_AUTHORS, listElement: true, elementIndex: AUTHORS.indexOf(localId) },
     ],
   }))
-  if (author2Edited && recorded.has('author2')) {
-    requests.push({
-      localId: 'author2',
-      seedUid: uidOf('author2'),
-      seedSchemaUid: SCHEMA_AUTHOR_SEED,
-      versionUid: h('9'),
-      versionSchemaUid: SCHEMA_VERSION,
-      seedIsRevocable: true,
-      listOfAttestations: [attestation(SCHEMA_NAME, stringToHex('a new name', { size: 32 }))],
-      propertiesToUpdate: [],
-    })
-  }
   const authors = AUTHORS.map((id) => (recorded.has(id) ? uidOf(id) : stringToHex(id, { size: 32 })))
   requests.push({
     localId: POST,
@@ -150,19 +146,19 @@ function payload() {
   return requests
 }
 
-const makeItem = () => ({
+const makeItem = (build: () => unknown[] = payload) => ({
   seedLocalId: POST,
   seedUid: undefined as string | undefined,
   getPublishUploads: async () => [],
-  getPublishPayload: async () => payload(),
+  getPublishPayload: async () => build(),
   persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
 })
 
 const contextFor = (item: ReturnType<typeof makeItem>, extra: Record<string, unknown> = {}) =>
   ({ address: PUBLISHER, account: {}, item, arweaveTransactions: [], publishUploads: [], publishMode: 'patch', ...extra }) as any
 
-const run = async (extra: Record<string, unknown> = {}) => {
-  const item = makeItem()
+const run = async (extra: Record<string, unknown> = {}, build?: () => unknown[]) => {
+  const item = makeItem(build)
   const actor = createActor(createAttestations, { input: { context: contextFor(item, extra), event: {} } })
   actor.start()
   return { item, result: await toPromise(actor) }
@@ -183,8 +179,8 @@ const PART_1_AUTHORS = AUTHORS
 
 beforeEach(() => {
   recorded = new Set()
-  author2Edited = false
-  editAuthor2AfterFirstRecord = false
+  attemptRows = []
+  spentKeys = new Set()
   txCount = 0
   // Forces a split at small sizes: four new author seeds fit (1.94M with headroom), the Post doesn't.
   publishConfig = { maxPublishGas: 2_000_000n }
@@ -192,7 +188,21 @@ beforeEach(() => {
   sendTransaction.mockImplementation(async () => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
   claimPublishAttempt.mockClear()
   recordMultiPublishReceipt.mockClear()
+  clearHtmlEmbeddedImageCoPublishRows.mockClear()
 })
+
+/** The nonce key each send went out under. */
+const sentKeys = () => sendTransaction.mock.calls.map(([tx]) => (tx as { nonceKey?: bigint }).nonceKey)
+
+/** Runs `body` with a publish wallet whose sender pins its nonce, as a host `nonceKey` needs. */
+async function pinning<T>(body: () => Promise<T>): Promise<T> {
+  pinsNonceOn = `0x${'7'.repeat(40)}`
+  try {
+    return await body()
+  } finally {
+    pinsNonceOn = undefined
+  }
+}
 
 describe('createAttestations: a publish over one transaction', () => {
   test('a graph over the limit goes out as two multiPublish sends, root in the last', async () => {
@@ -205,63 +215,74 @@ describe('createAttestations: a publish over one transaction', () => {
     const attemptIds = claimPublishAttempt.mock.calls.map(([a]) => a.id)
     expect(new Set(attemptIds).size).toBe(2)
     expect(item.seedUid).toBe(uidOf(POST))
-    expect(result.attestationPartsRecorded).toBe(2)
     expect((result.easPayload as unknown[]).length).toBe(5)
   })
 
   test('a graph that fits is one send', async () => {
     publishConfig = {}
-    const { result } = await run()
+    await run()
     expect(sends()).toEqual([[...AUTHORS, POST]])
-    expect(result.attestationPartsRecorded).toBe(1)
   })
 
   test('a landed part found by reconcile is recorded, then the rest is sent', async () => {
     const part1 = payload().slice(0, 4)
-    const { result } = await run({
+    await run({
       unrecordedAttestation: { attemptId: 'part-1', transactionHash: h('7'), requests: part1, attester: PUBLISHER },
     })
     expect(recordMultiPublishReceipt.mock.calls[0]![0].requests.map((r) => r.localId)).toEqual(AUTHORS)
     expect(sends()).toEqual([[POST]])
-    expect(result.attestationPartsRecorded).toBe(2)
   })
 
   test('a landed part that held the root ends the run without sending', async () => {
     recorded = new Set(AUTHORS)
     const part2 = payload()
-    const { item, result } = await run({
-      attestationPartsRecorded: 1,
+    const { item } = await run({
       unrecordedAttestation: { attemptId: 'part-2', transactionHash: h('7'), requests: part2, attester: PUBLISHER },
     })
     expect(sends()).toEqual([])
     expect(item.seedUid).toBe(uidOf(POST))
-    expect(result.attestationPartsRecorded).toBe(2)
-  })
-
-  test('an edit saved between parts goes into a later part', async () => {
-    editAuthor2AfterFirstRecord = true
-    const { result } = await run()
-    expect(sends()).toEqual([PART_1_AUTHORS, ['author2', POST]])
-    expect(sendTransaction).toHaveBeenCalledTimes(2)
-    expect(result.attestationPartsRecorded).toBe(2)
   })
 
   test('a restore between parts sends only what is left', async () => {
     recorded = new Set(AUTHORS)
-    const { result } = await run({ attestationPartsRecorded: 1 })
+    await run()
     expect(sends()).toEqual([[POST]])
-    expect(result.attestationPartsRecorded).toBe(2)
   })
 
   test('a host nonceKey sends each part under its own part key', async () => {
-    pinsNonceOn = `0x${'7'.repeat(40)}`
-    try {
-      await run({ nonceKey: 'run-7' })
-    } finally {
-      pinsNonceOn = undefined
-    }
-    const keys = sendTransaction.mock.calls.map(([tx]) => (tx as { nonceKey?: bigint }).nonceKey)
-    expect(keys).toEqual([publishNonceKey('run-7', 1), publishNonceKey('run-7', 2)])
+    await pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-a' }))
+    expect(sentKeys()).toEqual([publishNonceKey('run-7', 1), publishNonceKey('run-7', 2)])
+  })
+
+  test('a restore after part 1 with a host nonceKey sends the rest under part 2\'s key', async () => {
+    // Part 1 landed and recorded, then the tab reloaded: the saved run knows nothing of it.
+    recorded = new Set(AUTHORS)
+    attemptRows = [{ id: 'part-1', publishRunId: 'run-r', status: 'recorded' }]
+    spentKeys = new Set([publishNonceKey('run-7', 1)])
+    await pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-r' }))
+    expect(sends()).toEqual([[POST]])
+    expect(sentKeys()).toEqual([publishNonceKey('run-7', 2)])
+  })
+
+  test('a run that replaced one under the same nonceKey goes on from its parts', async () => {
+    recorded = new Set(AUTHORS)
+    spentKeys = new Set([publishNonceKey('run-7', 1)])
+    await pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-new', nonceKeyPartsInherited: 1 }))
+    expect(sentKeys()).toEqual([publishNonceKey('run-7', 2)])
+  })
+
+  test('a part that records clears its seeds\' co-publish rows, though a later part fails', async () => {
+    sendTransaction.mockImplementation(async () => {
+      if (txCount++ === 1) throw new Error('execution reverted')
+      return { transactionHash: `0x${txCount.toString(16).padStart(64, '0')}` }
+    })
+    await expect(run()).rejects.toThrow('execution reverted')
+    expect(clearHtmlEmbeddedImageCoPublishRows.mock.calls.map(([id]) => id).sort()).toEqual(AUTHORS)
+  })
+
+  test('an empty payload sends nothing', async () => {
+    await expect(run({}, () => [])).rejects.toThrow('The publish payload is empty')
+    expect(sendTransaction).not.toHaveBeenCalled()
   })
 
   test('a revert in part 2 leaves part 1 recorded and the run failing', async () => {
@@ -286,7 +307,6 @@ describe('createAttestations: a publish over one transaction', () => {
     }
     const { context } = actor.getSnapshot()
     expect([...recorded].sort()).toEqual(AUTHORS)
-    expect(context.attestationPartsRecorded).toBe(1)
     expect((context.error as Error).message).toBe('execution reverted')
     actor.stop()
   })

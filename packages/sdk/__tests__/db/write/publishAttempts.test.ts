@@ -4,6 +4,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { publishAttempts } from '@/seedSchema'
 import {
   claimPublishAttempt,
+  countRecordedPublishParts,
   findOpenPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
@@ -15,9 +16,9 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
-const attempt = (seedLocalIds: string[]): NewPublishAttempt => ({
+const attempt = (seedLocalIds: string[], publishRunId = 'run'): NewPublishAttempt => ({
   id: generateId(),
-  publishRunId: 'run',
+  publishRunId,
   seedLocalId: seedLocalIds[0]!,
   seedLocalIds,
   step: 'multiPublish',
@@ -114,5 +115,23 @@ testDescribe('publish attempts', () => {
     }
     await expect(recordPublishRequests([failing], { attemptId: first.id })).rejects.toThrow('write failed')
     expect(await statusOf(first.id)).toBe('landed')
+  })
+  it('countRecordedPublishParts counts the recorded multiPublish attempts of the given runs', async () => {
+    const runA = generateId()
+    const runB = generateId()
+    const recorded = async (seeds: string[], run: string, step = 'multiPublish') => {
+      const row = { ...attempt(seeds, run), step }
+      await claimPublishAttempt(row)
+      await updatePublishAttempt(row.id, { status: 'recorded' })
+    }
+    await recorded([seedA], runA)
+    await recorded([seedB], runA)
+    await recorded([generateId()], runB)
+    await recorded([generateId()], runA, 'seed')
+    const open = attempt([generateId()], runA)
+    await claimPublishAttempt(open)
+    expect(await countRecordedPublishParts([runA])).toBe(2)
+    expect(await countRecordedPublishParts([runA, runB])).toBe(3)
+    expect(await countRecordedPublishParts([])).toBe(0)
   })
 })

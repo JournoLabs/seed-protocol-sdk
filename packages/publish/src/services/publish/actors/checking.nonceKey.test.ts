@@ -31,6 +31,7 @@ mock.module('@seedprotocol/sdk', () => ({
   validateItemForPublish: async () => ({ isValid: true, errors: [], payload: [] }),
   summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [], uploadTargets: [] }),
   RelatedItemUnpublishedError,
+  countRecordedPublishParts: async (runIds: string[]) => (runIds.includes('run-r') ? 1 : 0),
 }))
 mock.module('~/helpers/chainClient', () => ({
   ...realChainClient,
@@ -106,10 +107,10 @@ describe('checking: CreatePublishOptions.nonceKey', () => {
 
   test('a run that goes on from a recorded part checks the next part key', async () => {
     harness.codeKind = 'contract'
-    // Part 1's key is spent; part 2's is read and unused.
+    // Part 1 is recorded in the run's attempts, not its saved state; part 2's key is read and unused.
     harness.chainNonce = 0n
     harness.nonceReads = []
-    const event = await runChecking(PUBLISHER, pinning, 'run-7', { attestationPartsRecorded: 1 })
+    const event = await runChecking(PUBLISHER, pinning, 'run-7', { publishRunId: 'run-r' })
     expect(event.type).toBe('validPublishProcess')
     expect(harness.nonceReads.map((args) => args[1])).toEqual([publishNonceKey('run-7', 2)])
   }, TEST_TIMEOUT_MS)

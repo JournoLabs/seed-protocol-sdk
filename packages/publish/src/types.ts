@@ -134,10 +134,11 @@ export interface PublishMachineContext {
   /** A `multiPublish` that landed and failed to record: a retry records it instead of sending. */
   unrecordedAttestation?: UnrecordedAttestation
   /**
-   * The `multiPublish` parts this run has recorded (ADR 0036). Part *k* sends under the *k*th key
-   * derived from {@link nonceKey}. Saved with the publish.
+   * Parts the runs this one replaced recorded under the same {@link nonceKey} (ADR 0036). Set only
+   * when this run took that key over from a parked run. This run's own parts are read from its
+   * recorded attempts, so part *k* sends under the *k*th key derived from `nonceKey`.
    */
-  attestationPartsRecorded?: number
+  nonceKeyPartsInherited?: number
   /**
    * Uploads of the parked run this run replaced (ADR 0036). An upload whose `itemPropertyLocalId`
    * and `contentHash` match one this run needs, and that the blob store still holds, is used as it

@@ -23,7 +23,7 @@ import {
   PublishMachineStates,
 } from '~/helpers/constants'
 import { getPublishConfig } from '~/config'
-import { AttestationPartsError, AttestationRecordError } from '~/errors'
+import { AttestationRecordError } from '~/errors'
 
 
 const {
@@ -49,15 +49,7 @@ function attestationUsesMultiPublish(context: Partial<PublishMachineContext>): b
 /** Extract error from event. Supports event.error (custom events like uploadError) and event.data (XState fromPromise invoke errors). */
 function getErrorFromEvent(event: unknown): unknown {
   const e = event as { error?: unknown; data?: unknown }
-  const err = e.error ?? e.data
-  return err instanceof AttestationPartsError ? err.cause : err
-}
-
-/** The parts a failed `createAttestations` recorded (ADR 0036), else what the context had. */
-function partsRecordedFromEvent(context: Partial<PublishMachineContext>, event: unknown): number | undefined {
-  const e = event as { error?: unknown; data?: unknown }
-  const err = e.error ?? e.data
-  return err instanceof AttestationPartsError ? err.partsRecorded : context.attestationPartsRecorded
+  return e.error ?? e.data
 }
 
 export const publishMachine = setup({
@@ -120,7 +112,6 @@ export const publishMachine = setup({
         const err = getErrorFromEvent(event,)
         return err instanceof AttestationRecordError ? err.unrecorded : context.unrecordedAttestation
       },
-      attestationPartsRecorded : ( { context, event, }, ) => partsRecordedFromEvent(context, event,),
     },),
     assignErrorCreatingAttestationsDirectToEas : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -439,8 +430,6 @@ export const publishMachine = setup({
               (event.output as { publishedBatch?: PublishMachineContext['publishedBatch'] })
                 ?.publishedBatch ?? null,
             unrecordedAttestation : () => undefined,
-            attestationPartsRecorded : ( { event, }, ) =>
-              (event.output as { attestationPartsRecorded?: number })?.attestationPartsRecorded,
           },),
         },
         onError : {

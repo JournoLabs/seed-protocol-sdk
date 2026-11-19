@@ -3,6 +3,8 @@ import { BaseDb, findOpenPublishAttempts, Item, updatePublishAttempt } from '@se
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
+import { isParkedRun } from './parkedRun'
+import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
 import { giveUpPublish } from './actions/giveUpPublish'
@@ -23,13 +25,13 @@ import debug from 'debug'
 const logger = debug('seedProtocol:PublishManager:index')
 
 /**
- * What a run replacing a parked one takes from it (ADR 0036): its uploads, its count of recorded
- * parts, and its host `nonceKey`.
+ * What a run replacing a parked one takes from it (ADR 0036): its uploads, its host `nonceKey`, and
+ * how many parts went out under that key. The count goes with the key only.
  */
 export type ReplaceParked = {
   reuseUploads: Array<import('../../types').PublishUpload & { txId: string }>
-  attestationPartsRecorded: number
   nonceKey?: string
+  nonceKeyParts: number
 }
 
 /**
@@ -38,9 +40,6 @@ export type ReplaceParked = {
  * a new publish replaces it. `running`: this tab's run is in any other state.
  */
 export type PublishBlocker = 'none' | 'running' | 'parked' | 'attempt_open'
-
-/** The states a new publish replaces: attestation failed and no attempt is open. */
-const PARKED_STATES = new Set(['attestationFailureRecoverable', 'attestationFailureRecoverableDirectToEas'])
 
 export interface PublishManagerMachineContext {
   publishProcesses: Map<string, import('xstate').ActorRef<any, any>>
@@ -178,8 +177,8 @@ const publishManager = createActor(publishManagerMachine, {
 /** Whether a publish of the seed runs or waits in this tab. A finished one doesn't count. */
 const hasRun = (seedLocalId: string) => publishManager.getSnapshot().context.publishProcesses.has(seedLocalId)
 
-/** What a run replacing the parked run of the seed takes from it, from that run's snapshot. */
-function replaceParkedFrom(seedLocalId: string): ReplaceParked | undefined {
+/** What a run replacing the parked run of the seed takes from it, from that run's snapshot and attempts. */
+async function replaceParkedFrom(seedLocalId: string): Promise<ReplaceParked | undefined> {
   const run = publishManager.getSnapshot().context.publishProcesses.get(seedLocalId)
   if (!run) return undefined
   const context = (run.getSnapshot() as { context?: import('../../types').PublishMachineContext }).context
@@ -191,8 +190,8 @@ function replaceParkedFrom(seedLocalId: string): ReplaceParked | undefined {
   })
   return {
     reuseUploads,
-    attestationPartsRecorded: context?.attestationPartsRecorded ?? 0,
     ...(context?.nonceKey !== undefined && { nonceKey: context.nonceKey }),
+    nonceKeyParts: context ? await partsSentUnderNonceKey(context) : 0,
   }
 }
 
@@ -294,7 +293,7 @@ export const PublishManager = {
     if (BaseDb.isAppDbReady() && (await findOpenPublishAttempts([seedLocalId])).length > 0) return 'attempt_open'
     const run = publishManager.getSnapshot().context.publishProcesses.get(seedLocalId)
     if (!run) return 'none'
-    return PARKED_STATES.has(String(run.getSnapshot().value)) ? 'parked' : 'running'
+    return isParkedRun(run) ? 'parked' : 'running'
   },
   /**
    * Spawn a publish. Resolves with the child actor once it exists.
@@ -316,8 +315,10 @@ export const PublishManager = {
       console.warn(`[createPublish] "${seedLocalId}" is already publishing in another tab; skipping.`)
       return undefined
     }
+    // A run restore brings back isn't in the map until restore ends; a parked one is replaced.
+    if (publishManagerStarted && publishManager.getSnapshot().value !== 'active') await PublishManager.ready()
     const blocker = await PublishManager.publishBlocker(seedLocalId)
-    const replaceParked = blocker === 'parked' ? replaceParkedFrom(seedLocalId) : undefined
+    const replaceParked = blocker === 'parked' ? await replaceParkedFrom(seedLocalId) : undefined
     const publishProcess =
       blocker === 'running' || blocker === 'attempt_open'
         ? undefined
