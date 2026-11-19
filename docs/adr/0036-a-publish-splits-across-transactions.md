@@ -1,6 +1,6 @@
 # 0036. A publish too large for one transaction goes out in several, and a new publish replaces a parked one
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-18
 - **Scope:** `@seedprotocol/publish` (`createAttestations`, `checking`, reconcile, `PublishManager.createPublish`,
   `startPublish`), `@seedprotocol/sdk` publish payload. Amends [ADR 0030](0030-attestation-sends-are-journaled.md).

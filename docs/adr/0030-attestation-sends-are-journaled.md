@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-31
 - **Scope:** `@seedprotocol/publish`, `packages/sdk/src/db/write/publishAttempts.ts`
+- Amended by [0036](0036-a-publish-splits-across-transactions.md)
 
 ## Context
 
