@@ -230,7 +230,8 @@ export function extendReleaseSection(text, { version, date, commitGroups }) {
 /**
  * Commits in `range` (e.g. `v0.7.2..HEAD`) that touched packages/<dir>, newest first, without merges.
  * Changes to the package's CHANGELOG.md don't count, so changelog edits don't list themselves, and
- * neither do changes to its tests and fixtures, which ship nothing.
+ * neither do changes to its tests and fixtures, which ship nothing. A commit whose only change to
+ * the package is to its package.json `scripts` is left out too.
  * @param {string} rootDir
  * @param {string} dir
  * @param {string} range
@@ -254,6 +255,32 @@ export function packageCommits(rootDir, dir, range) {
       const [sha, subject, body = ''] = record.split('\x1f')
       return { sha, subject, body }
     })
+    .filter(({ sha }) => !touchesOnlyManifestScripts(rootDir, dir, sha, pathspecs))
+}
+
+/**
+ * Whether `sha`'s only change to packages/<dir> is to the `scripts` of its package.json. Scripts
+ * such as `prepublishOnly` run in this repo, not in an install, so the package ships the same.
+ * @param {string} rootDir
+ * @param {string} dir
+ * @param {string} sha
+ * @param {string[]} pathspecs
+ */
+function touchesOnlyManifestScripts(rootDir, dir, sha, pathspecs) {
+  const git = (...args) => execFileSync('git', args, { cwd: rootDir, encoding: 'utf-8' })
+  const manifest = `packages/${dir}/package.json`
+  const files = git('show', '--format=', '--name-only', sha, '--', ...pathspecs).split('\n').filter(Boolean)
+  if (files.length !== 1 || files[0] !== manifest) return false
+  const withoutScripts = (rev) => {
+    try {
+      const { scripts: _scripts, ...rest } = JSON.parse(git('show', `${rev}:${manifest}`))
+      return JSON.stringify(rest)
+    } catch {
+      return null
+    }
+  }
+  const before = withoutScripts(`${sha}^`)
+  return before !== null && before === withoutScripts(sha)
 }
 
 /**

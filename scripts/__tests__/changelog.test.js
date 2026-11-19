@@ -269,4 +269,30 @@ describe('planReleaseChangelogs for a release', () => {
     assert.deepEqual(lines['packages/next/CHANGELOG.md'], [])
     assert.deepEqual(lines['packages/publish/CHANGELOG.md'], [])
   })
+
+  it("doesn't list a commit for a package whose package.json scripts are all it touched", () => {
+    const manifest = (scripts, extra = {}) => JSON.stringify({ name: 'x', version: '0.8.0', scripts, ...extra }, null, 2)
+    const write = (file, content) => {
+      mkdirSync(join(root, file, '..'), { recursive: true })
+      writeFileSync(join(root, file), content)
+    }
+    write('packages/react/package.json', manifest({ build: 'vite build' }))
+    write('packages/feed/package.json', manifest({ build: 'vite build' }))
+    write('packages/eas/package.json', manifest({ build: 'vite build' }))
+    run('add', '-A')
+    run('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--quiet', '-m', 'chore: manifests')
+
+    write('packages/react/package.json', manifest({ build: 'vite build', prepublishOnly: 'node check.js' }))
+    write('packages/feed/package.json', manifest({ build: 'vite build', prepublishOnly: 'node check.js' }, { engines: { node: '>=20' } }))
+    write('packages/eas/package.json', manifest({ build: 'vite build', prepublishOnly: 'node check.js' }))
+    write('packages/eas/src/index.js', '1')
+    run('add', '-A')
+    run('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--quiet', '-m', 'fix(release): check manifests')
+
+    const plan = planReleaseChangelogs({ rootDir: root, packages: ['react', 'feed', 'eas'], version: '0.8.0', date: '2026-11-01', range: 'HEAD~1..HEAD' })
+    const lines = Object.fromEntries(plan.map((p) => [p.path, p.commitLines]))
+    assert.deepEqual(lines['packages/react/CHANGELOG.md'], [])
+    assert.equal(lines['packages/feed/CHANGELOG.md'].length, 1)
+    assert.equal(lines['packages/eas/CHANGELOG.md'].length, 1)
+  })
 })

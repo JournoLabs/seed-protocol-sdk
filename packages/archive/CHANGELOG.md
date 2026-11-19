@@ -5,9 +5,9 @@ All notable changes to this package are documented in this file.
 ## 0.8.2 (2026-11-09)
 
 - **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and their types are exported from `@seedprotocol/archive/seed`, not the main entry (ADR 0031). The main entry no longer imports `@seedprotocol/sdk`, so `createBag`, `validateBag`, `verifyArchive`, `readBagInfo`, the path manifest functions, `parseArchiveDocument`, `dublinCoreXml` and `premisXml` load without it again, as in 0.8.0. In 0.8.1 `import '@seedprotocol/archive'` failed with `ERR_MODULE_NOT_FOUND` when the SDK wasn't installed. Change `import { exportArchive } from '@seedprotocol/archive'` to `'@seedprotocol/archive/seed'`.
+- **Breaking (bag format):** reproducible bags are format 2 (`Seed-Bag-Format: 2`). `EAS-Attester` in `bag-info.txt`, and the attester agent in `premis.xml`, are EIP-55 checksummed in every bag. An ordinary bag wrote the address as the database stored it, in lower case; a reproducible bag already wrote EAS's checksummed form. `Bag-Software-Agent` is `@seedprotocol/archive exportArchive (...)` and the PREMIS software agent is `@seedprotocol/archive`; both named `@seedprotocol/sdk`. Format 1 bags, which 0.8.1 wrote, don't rebuild: a reproducible export of the same seed at the same `asOf` has other bytes and another tagmanifest hash, so a bag anchored with 0.8.1 doesn't reproduce byte for byte, and `verifyArchiveAgainstChain` reports a format-1 bag's rebuild `not_checked` (ADR 0028, ADR 0031).
 - `ArchiveClockSource`, the type of `attestedAtClock` in `item.json`, is exported from `@seedprotocol/archive/seed`.
 - `exportArchive` takes `Item.find`'s result without a cast: `ExportableItem.getService` returns any actor whose snapshot is an object. It required a snapshot type with `context`, which `IItem<any>` doesn't have (TS2345).
-- **Breaking (bag format):** `EAS-Attester` in `bag-info.txt`, and the attester agent in `premis.xml`, are EIP-55 checksummed in every bag. An ordinary bag wrote the address as the database stored it, in lower case; a reproducible bag already wrote EAS's checksummed form. `Bag-Software-Agent` is `@seedprotocol/archive exportArchive (...)` and the PREMIS software agent is `@seedprotocol/archive`; both named `@seedprotocol/sdk`. A reproducible bag of a seed exported before this change has different bytes and a different tagmanifest hash now, so a bag anchored with 0.8.1 doesn't reproduce byte for byte (ADR 0031).
 - A reproducible bag holds each file it reads from Arweave (item storage, storage seeds, embedded images) as the transaction's bytes when a content read transform is registered. It held the transform's output; ADR 0028 says the transaction's bytes. For a private Version that is the ciphertext.
 - `verifyPublishedArchive`: when the anchor is found but its path manifest or tag files can't be read, `anchor`, `identity`, `record` and `fixity` are `not_checked` with the read error. `anchor` said "There is no anchored hash to compare with", which blamed the anchor for a gateway failure. The `asOf` option's comment says it must equal the anchor's `covered_until`.
 - `engines.node` is `>=20.18.1`, the floor of its dependencies `@seedprotocol/eas` and `@seedprotocol/query`. It said `>=20.12.0`, where those dependencies don't install.
@@ -15,9 +15,12 @@ All notable changes to this package are documented in this file.
 
 ### Commits
 
-#### Fixes
+#### Breaking
 
 - arweave, rdf, vite: archive /seed entry, bag format 2, raw reads, rdf defaults (ce7c0ca8)
+
+#### Fixes
+
 - query, eas, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
 - release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 - index.html at the manifest root for HyperBEAM gateways (fa734bd9)
@@ -44,15 +47,20 @@ All notable changes to this package are documented in this file.
 - verifyPublishedArchive, a browser entry that checks a bag against its anchor (7e95bff1)
 - a bag on Arweave as a path manifest (ac1f80da)
 - verifyArchive, VERIFY.txt and verifyArchiveAgainstChain (a20bd6e5)
+- sdk: reproducible bags from EAS and Arweave, with asOf (046de15a)
+- sdk: reproducible archive bags and clock sources (a584ba15)
 
 #### Fixes
 
 - sdk: a reproducible bag describes the record, and can wait for it (946566a9)
+- sdk: reproducible bags ignore revocations and local file names (8aac4ad7)
+- sdk: exportArchive keeps published relations, as seed uids (2f54a005)
 
 #### Other
 
 - archive is an add-on over the SDK (ADR 0031) (a142092d)
 - exportArchive moves from the SDK into archive (38df2da0)
+- sdk: ADR 0028 for the reproducible bag format, and Seed-Bag-Format in bag-info (cc103c79)
 
 ## 0.8.0 (2026-10-30)
 

@@ -4,68 +4,70 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
+- **Breaking:** The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
 - `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.
 - `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
 - New `countRecordedPublishParts(publishRunIds)` counts the recorded `multiPublish` attempts of those publish runs: the parts of a split publish already on chain (ADR 0036).
-- The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
 - `PrivateUploadNotEncryptedError`'s message says private Versions can't be published from the npm packages yet, since `@seedprotocol/encryption` isn't released; it pointed at that package. `TProperty.private`'s JSDoc says the same.
-- **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
 
 ## 0.8.2 (2026-11-09)
 
+- **Breaking (types):** `DownloadAllFilesResult.encryptedTransactionIds` is required, so code that builds its own result (a mock, say) adds it. `IItemProperty.valueStatus` and `ItemProperty.valueStatus` can be `'encrypted'`, which an exhaustive `switch` on them has to handle.
+- **Breaking:** `fetchArweaveRawFromBaseUrl`, re-exported from `@seedprotocol/arweave`, returns `{ baseUrl, outcome, response? }` (see the @seedprotocol/arweave changelog).
+- **Breaking:** `seedVitePlugin`'s RDF sidecar check (from `@seedprotocol/sdk/vite`) defaults to `seed.schema.json` and `seed.schema.context.jsonld`; it read `seedSchema.json` and `seedSchema.context.jsonld` (see the @seedprotocol/vite changelog).
+- **Breaking:** `Model.create` refuses a model or property name EAS can't use (a reserved Solidity ABI word) when given an `id` or `modelFileId` too. It resolved, wrote no row and left the model in `schema.models`, and the next `saveNewVersion()` rejected.
 - Sync takes a seed's model from its schema's definition (`post` for `bytes32 post`) instead of the first name attested onto the schema, which anyone can add (ADR 0035). A relation that points at an attestation outside a Seed model schema no longer stores it as a seed.
 - An Html body whose local file is missing is read from a file already downloaded under its transaction id, else from `/raw/{id}` on each read gateway once. When no gateway has it, one `console.warn` names the transaction and each gateway's answer (status, `timeout` or `network error`), once per transaction per page load. The read no longer falls back to arweave-js `getData`, which can't serve a bundled data item and logged four console lines per miss, or to a download that asked the same gateways again.
-- **Breaking:** `fetchArweaveRawFromBaseUrl`, re-exported from `@seedprotocol/arweave`, returns `{ baseUrl, outcome, response? }` (see the @seedprotocol/arweave changelog).
 - Private Versions open on a reading device (ADR 0033). `setEnvelopeDecryptor(fn)` registers how this tab opens a downloaded envelope (`createEnvelopeDecryptor` in `@seedprotocol/encryption` builds one from unlocked identities). Downloads then write each envelope's plaintext where a plain download of it would go, routed by the content type inside the envelope; `DownloadAllFilesResult` has `decryptedTransactionIds`, and `encryptedTransactionIds` now lists only envelopes left unopened. `openAllEncryptedDownloads()` opens envelopes kept from earlier downloads, for an app that unlocks after syncing; it never writes over plaintext already on disk. An Image, File or Html value downloaded as an envelope this device can't open has `valueStatus: 'encrypted'` (a new value) and a `missingFile` with `encrypted: true` and its `transactionId`, and reads again once its plaintext lands. Bulk downloads no longer fetch a kept envelope again, which a private ItemStorage composite was on every run.
 - Private properties' uploads are encrypted: a private property's storage seed, an image embedded in a private Html property, and a composite whose ItemStorage properties are private go through `GetPublishUploadsOptions.encryptUpload`, which is now called only for those uploads. Without an encryptor, or when it returns nothing, building the uploads throws the new `PrivateUploadNotEncryptedError` (code `PRIVATE_UPLOAD_NOT_ENCRYPTED`) and nothing is uploaded. `summarizePublishUploads` and `summarizePublishWork` size a private upload as its envelope, at most, so cost estimates and upload limits include padding and the key wrap.
 - `updatePublishAttempt` takes `{ nonceKey: null, entryPoint: null }`, which records that an attempt's send went out under a key of the wallet's own.
 - `@seedprotocol/sdk/vite` exports `RdfSidecarOptions`, the type of the plugin's `rdfSidecar` option.
-- **Breaking:** `seedVitePlugin`'s RDF sidecar check (from `@seedprotocol/sdk/vite`) defaults to `seed.schema.json` and `seed.schema.context.jsonld`; it read `seedSchema.json` and `seedSchema.context.jsonld` (see the @seedprotocol/vite changelog).
-- **Breaking:** `Model.create` refuses a model or property name EAS can't use (a reserved Solidity ABI word) when given an `id` or `modelFileId` too. It resolved, wrote no row and left the model in `schema.models`, and the next `saveNewVersion()` rejected.
 - `Model.create` takes property definitions in schema-file shape (`type`, `items`, `model`) as well as `dataType`/`refValueType`/`ref`. A List of relations given as `{ type: 'List', items: { type: 'Relation', model: 'Tag' } }` was refused when its name was a reserved word, though the same property loads from a schema file.
 - `saveNewVersion()` and `renameModelProperty()` check names, types and rules before writing anything. A reserved rename used to leave a version file the next init couldn't apply; `renameModelProperty` resolved with that file's path, and `saveNewVersion` rejected after writing it.
 - `summarizePublishWork` takes `backReferences` (`'link'` or `'defer'`, the default), as `getPublishPayload` does. With `'defer'` it left out the reference back to an item the publish creates, which a publish through the contract attests.
 - The types `FoundSeedRow`, `PublishAttemptType`, `ResolvedModelRecord` and `SyncedPropertyName`, which exported functions return, are exported.
-
 - An Image or File value assigned as a `File` or `Blob` could be saved short, with no error: the outbox read its staged copy while the copy was still being written (Node's `fs.promises.writeFile` creates the file, then writes it 512 KiB at a time), and stored those bytes as the final file. `await property.save()` resolved and publish uploaded the short file with a matching `Content-SHA-256`. The outbox now waits until the staged copy's write is done.
 - On Node, `readPublishUploadBytes` rejects a file changed during the publish with `PublishUploadChangedError`. It rejected with the `NotReadableError` from `fs.openAsBlob`'s Blob, so the documented error never came.
 - Schema file properties take `private: true` (ADR 0033) on Html, Json, File, Image and ItemStorage Text properties, whose values are uploaded. It is stored in the property's definition (`private` on its entry in `getPropertyDefinitions(modelId)`) and kept when the schema is saved. A value other than `true` or `false`, the flag on a scalar or relation, or a model whose ItemStorage properties are part private rejects the file. A publish refuses to attest a private scalar from a model defined in code.
 - `GetPublishUploadsOptions.encryptUpload` (ADR 0033): called with each upload's plaintext, real MIME type and target; when it returns bytes, those are uploaded instead, `Content-SHA-256` hashes them, `Content-Type` is `application/octet-stream`, the returned tags are added and `arweaveUploadTags` are left off. Types `PublishUploadToEncrypt` and `EncryptedPublishUpload` are exported. `@seedprotocol/publish` passes its `encryptPrivateUpload` config; `@seedprotocol/encryption`, which builds one, isn't on npm yet.
-- Downloads keep a `seed-private/v1` envelope (an encrypted upload, ADR 0033) whole as `encrypted/<txId>` instead of filing ciphertext as an image or file by its Content-Type or a sniff. `DownloadAllFilesResult` has `encryptedTransactionIds`; code that builds its own result (a mock, say) needs the field. The Html storage-seed fallback doesn't return an envelope as the body, and passes bytes from a blob source through the Arweave content read transform.
-
+- Downloads keep a `seed-private/v1` envelope (an encrypted upload, ADR 0033) whole as `encrypted/<txId>` instead of filing ciphertext as an image or file by its Content-Type or a sniff. `DownloadAllFilesResult` has `encryptedTransactionIds`. The Html storage-seed fallback doesn't return an envelope as the body, and passes bytes from a blob source through the Arweave content read transform.
 - New `SeedConfig.blobSources`, `setBlobSources` and the `BlobSource` interface (ADR 0026, "Blob store reads"): where to read files whose `storage_transaction_id` isn't an Arweave transaction id, such as `ipfs://<cid>` ids from a publish `BlobStore`. The downloader fetches those from the source's URLs and checks the SHA-256 the source gives, and the file is named by the source's key. Ids no source claims are read from the Arweave gateways as before.
 
 ### Commits
 
+#### Breaking
+
+- arweave: one gateway pass and one warning per missed Html body (99aa5031)
+- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
+- refuse reserved names before writing a schema version or creating a model (07f70d36)
+- open private Versions on a reading device (170f1789)
+- keep unopened encrypted envelopes out of text and media reads (ee9a618e)
+
 #### Features
 
-- open private Versions on a reading device (170f1789)
 - publish: encrypt the uploads of private properties (739895e2)
 - private flag on schema file properties (3b62e2a8)
 - encryptUpload hook in the publish upload builder (1815e386)
-- keep unopened encrypted envelopes out of text and media reads (ee9a618e)
 - BlobSource reads for storage ids that aren't Arweave ids (9c8471da)
 
 #### Fixes
 
 - eas, query, publish: identify schemas by definition-derived UID, not by name (63610e20)
-- arweave: one gateway pass and one warning per missed Html body (99aa5031)
 - publish: chunk pinned-nonce log reads; record unpinned sends; check the in-app sender (42cca8e7)
-- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 - export the types exported reads return; correct the 0.8.1 changelog (a4905a96)
 - publish: count linked back references in summarizePublishWork and the cost estimate (cc0a3601)
-- refuse reserved names before writing a schema version or creating a model (07f70d36)
 - wait for a staged file's write before saving it, and report a changed upload on Node (3ecfd585)
 
 ## 0.8.1 (2026-11-04)
 
-- **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ArchiveSeedRef`, `ExportableItem`, `ExportArchiveOptions`, `ExportArchiveResult` and `ArchiveChainVerification` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
+- **Breaking:** `exportArchive`, `ArchiveExportError` and the types `ArchiveExportErrorCode`, `ArchiveOmission`, `ExportArchiveOptions` and `ExportArchiveResult` moved to `@seedprotocol/archive`, from both `@seedprotocol/sdk` and `@seedprotocol/sdk/node`. Import them from there and install it; the SDK no longer depends on archive (ADR 0031).
+- **Breaking:** `PublishUploadData` has `blob: Blob` instead of `data: Uint8Array`. `getPublishUploadData` opens each file without reading it into memory: OPFS `getFile()` in the browser, `fs.openAsBlob` in Node, through the new `BaseFileManager.openBlob`. Content-SHA-256 is computed in chunks and the MIME sniff reads the first 4 KiB. New `readPublishUploadBytes(upload)` loads an upload and rejects when its bytes no longer match `contentHash`, because a Blob of a file that changed can return other bytes without an error.
+- **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`.
 - The main entry exports the reads `exportArchive` uses, among them `findSeedRow`, `getPropertyDefinitions`, `resolveSyncedPropertyName`, `storedValueKind` and the new `getVersionHistoryRows(seedLocalId)`, every Version row of a seed with its attestation and revocation times.
 - `getEasSchemaUidForModel(modelName)` is exported: the EAS schema uid of a model's Seeds, from the cache, `model_uids`, then EAS.
 - `readPublishUploadBytes` rejects a changed file with `PublishUploadChangedError` (code `UPLOAD_CHANGED_DURING_PUBLISH`, with `itemPropertyName`).
-- **Breaking:** `PublishUploadData` has `blob: Blob` instead of `data: Uint8Array`. `getPublishUploadData` opens each file without reading it into memory: OPFS `getFile()` in the browser, `fs.openAsBlob` in Node, through the new `BaseFileManager.openBlob`. Content-SHA-256 is computed in chunks and the MIME sniff reads the first 4 KiB. New `readPublishUploadBytes(upload)` loads an upload and rejects when its bytes no longer match `contentHash`, because a Blob of a file that changed can return other bytes without an error.
 - New `publish_attempts` table, with `claimPublishAttempt`, `findOpenPublishAttempts` and `updatePublishAttempt`, for `@seedprotocol/publish`. `recordPublishRequests` takes `{ attemptId }` and ends that attempt in its own transaction.
-- **Breaking:** `recordPublishRequest` is now `recordPublishRequests(records)`: all of one publish transaction's seed, version and property uids in one database transaction, repeatable from the same records, and rejecting when the database isn't ready (it used to return without recording). New type `PublishRequestRecord`.
 - `client.stop()`, `client.unload()` and `client.resetLocalData()` end a running EAS sync before closing the database. Network waits end at once, a database write in progress finishes first, and a pending `client.syncFromEas()` rejects with `EAS sync stopped: the client stopped`. The sync used to keep running, and a queued one started, against a closed or deleted database.
 
 ### Commits
@@ -85,22 +87,10 @@ All notable changes to this package are documented in this file.
 - publish: pin each UserOp attempt to its own EntryPoint nonce key (5d9fbee8)
 - publish: reconcile open attempts before any retry or restore sends (ec41d7f5)
 - publish: journal attestation sends, refuse one that may double-attest (7243e1a0)
-- publish: anchorArchive, a bag on Arweave attested on its Version (a4acb5ee)
-- archive: a bag on Arweave as a path manifest (ac1f80da)
-- reproducible bags from EAS and Arweave, with asOf (046de15a)
-- archive: verifyArchive, VERIFY.txt and verifyArchiveAgainstChain (a20bd6e5)
-- reproducible archive bags and clock sources (a584ba15)
 
 #### Fixes
 
-- a reproducible bag describes the record, and can wait for it (946566a9)
 - stopping the client ends a running EAS sync (a958da87)
-- reproducible bags ignore revocations and local file names (8aac4ad7)
-- exportArchive keeps published relations, as seed uids (2f54a005)
-
-#### Other
-
-- ADR 0028 for the reproducible bag format, and Seed-Bag-Format in bag-info (cc103c79)
 
 ## 0.8.0 (2026-10-30)
 
