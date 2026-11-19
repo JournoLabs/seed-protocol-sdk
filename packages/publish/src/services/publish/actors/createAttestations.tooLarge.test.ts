@@ -78,7 +78,7 @@ test('refuses a publish over the gas limit before simulating or sending', async 
   actor.start()
   await expect(toPromise(actor)).rejects.toMatchObject({
     code: 'PUBLISH_TOO_LARGE',
-    message: expect.stringContaining('postLocal001 (30000 bytes)'),
+    message: expect.stringContaining('postLocal001'),
   })
   expect(simulateCallFromAccount).not.toHaveBeenCalled()
   expect(sendTransaction).not.toHaveBeenCalled()

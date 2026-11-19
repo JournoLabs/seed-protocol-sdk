@@ -60,6 +60,7 @@ mock.module('thirdweb/utils', () => ({
 mock.module('../services/publishManager', () => ({
   PublishManager: {
     createPublish: (...args: unknown[]) => createPublishMock(...args),
+    publishBlocker: async () => 'none',
   },
 }))
 

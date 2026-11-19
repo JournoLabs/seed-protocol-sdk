@@ -1,8 +1,10 @@
 import { ActorRefFrom, createActor, setup } from 'xstate'
-import { findOpenPublishAttempts, Item, updatePublishAttempt } from '@seedprotocol/sdk'
+import { BaseDb, findOpenPublishAttempts, Item, updatePublishAttempt } from '@seedprotocol/sdk'
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
+import { isParkedRun } from './parkedRun'
+import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
 import { giveUpPublish } from './actions/giveUpPublish'
@@ -22,6 +24,23 @@ import debug from 'debug'
 
 const logger = debug('seedProtocol:PublishManager:index')
 
+/**
+ * What a run replacing a parked one takes from it (ADR 0036): its uploads, its host `nonceKey`, and
+ * how many parts went out under that key. The count goes with the key only.
+ */
+export type ReplaceParked = {
+  reuseUploads: Array<import('../../types').PublishUpload & { txId: string }>
+  nonceKey?: string
+  nonceKeyParts: number
+}
+
+/**
+ * What stands in the way of a new publish of a seed. `attempt_open`: an attestation attempt for it
+ * is open, whatever the run's state. `parked`: this tab's run waits after a failed attestation and
+ * a new publish replaces it. `running`: this tab's run is in any other state.
+ */
+export type PublishBlocker = 'none' | 'running' | 'parked' | 'attempt_open'
+
 export interface PublishManagerMachineContext {
   publishProcesses: Map<string, import('xstate').ActorRef<any, any>>
   subscriptions: Map<string, import('xstate').ActorRef<any, import('xstate').EventObject>>
@@ -34,7 +53,7 @@ export interface PublishManagerMachineContext {
 
 type PublishManagerEvent =
   | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions']; status: PublishRestoreStatus }
-  | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown; options?: import('../../config').CreatePublishOptions; createToken?: number }
+  | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown; options?: import('../../config').CreatePublishOptions; createToken?: number; replaceParked?: ReplaceParked }
   | { type: 'ADD_SUBSCRIPTION'; seedLocalId: string; newSubscription?: import('xstate').ActorRef<any, any> }
   | { type: 'REQUEST_SAVE_PUBLISH'; seedLocalId: string; publishProcess?: unknown; triggerPublishDone?: boolean }
   | { type: 'SAVE_PUBLISH_DONE'; seedLocalId: string; triggerPublishDone?: boolean }
@@ -158,6 +177,24 @@ const publishManager = createActor(publishManagerMachine, {
 /** Whether a publish of the seed runs or waits in this tab. A finished one doesn't count. */
 const hasRun = (seedLocalId: string) => publishManager.getSnapshot().context.publishProcesses.has(seedLocalId)
 
+/** What a run replacing the parked run of the seed takes from it, from that run's snapshot and attempts. */
+async function replaceParkedFrom(seedLocalId: string): Promise<ReplaceParked | undefined> {
+  const run = publishManager.getSnapshot().context.publishProcesses.get(seedLocalId)
+  if (!run) return undefined
+  const context = (run.getSnapshot() as { context?: import('../../types').PublishMachineContext }).context
+  const transactions = context?.arweaveTransactions ?? []
+  const uploads = (context?.publishUploads ?? []) as import('../../types').PublishUpload[]
+  const reuseUploads = uploads.flatMap((upload, i) => {
+    const txId = transactions[i]?.transaction?.id
+    return upload && typeof txId === 'string' ? [{ ...upload, txId }] : []
+  })
+  return {
+    reuseUploads,
+    ...(context?.nonceKey !== undefined && { nonceKey: context.nonceKey }),
+    nonceKeyParts: context ? await partsSentUnderNonceKey(context) : 0,
+  }
+}
+
 /**
  * `snapshot.status === 'active'` is true before `start()` and while restore is running.
  * This flag is the only signal that `start()` has been called. Calling it twice throws.
@@ -248,9 +285,23 @@ export const PublishManager = {
     return () => sub.unsubscribe()
   },
   /**
+   * What stands in the way of publishing the seed now ({@link PublishBlocker}). Another tab's
+   * publish isn't seen here: {@link PublishManager.createPublish} finds it by its lock.
+   */
+  publishBlocker: async (seedLocalId: string): Promise<PublishBlocker> => {
+    // With no database yet there are no attempts to read; the send's claim checks again.
+    if (BaseDb.isAppDbReady() && (await findOpenPublishAttempts([seedLocalId])).length > 0) return 'attempt_open'
+    const run = publishManager.getSnapshot().context.publishProcesses.get(seedLocalId)
+    if (!run) return 'none'
+    return isParkedRun(run) ? 'parked' : 'running'
+  },
+  /**
    * Spawn a publish. Resolves with the child actor once it exists.
-   * Resolves `undefined` when the address is missing or that seed is already in flight, in this
-   * tab or another one. This promise means the process started, not that the chain publish finished.
+   * Resolves `undefined` when the address is missing, when an attestation attempt for the seed is
+   * open, or when that seed is already in flight, in this tab or another one. A run of the seed in
+   * this tab parked after a failed attestation is stopped, its row marked `interrupted`, and
+   * replaced: the new run reuses its stored uploads and goes on from its recorded parts (ADR 0036).
+   * This promise means the process started, not that the chain publish finished.
    */
   createPublish: async (
     item: InstanceType<typeof Item>,
@@ -264,10 +315,17 @@ export const PublishManager = {
       console.warn(`[createPublish] "${seedLocalId}" is already publishing in another tab; skipping.`)
       return undefined
     }
-    const publishProcess = await new Promise<import('xstate').ActorRef<any, any> | undefined>((resolve) => {
-      const createToken = registerCreatePublishResolver(resolve)
-      publishManager.send({ type: 'CREATE_PUBLISH', item, address, account, options, createToken })
-    })
+    // A run restore brings back isn't in the map until restore ends; a parked one is replaced.
+    if (publishManagerStarted && publishManager.getSnapshot().value !== 'active') await PublishManager.ready()
+    const blocker = await PublishManager.publishBlocker(seedLocalId)
+    const replaceParked = blocker === 'parked' ? await replaceParkedFrom(seedLocalId) : undefined
+    const publishProcess =
+      blocker === 'running' || blocker === 'attempt_open'
+        ? undefined
+        : await new Promise<import('xstate').ActorRef<any, any> | undefined>((resolve) => {
+            const createToken = registerCreatePublishResolver(resolve)
+            publishManager.send({ type: 'CREATE_PUBLISH', item, address, account, options, createToken, replaceParked })
+          })
     // Nothing spawned (e.g. no address): don't keep a lock this call took.
     if (!publishProcess && !heldBefore) releasePublishLock(seedLocalId)
     return publishProcess

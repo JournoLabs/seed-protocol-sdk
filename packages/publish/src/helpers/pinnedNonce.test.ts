@@ -8,6 +8,8 @@ const ENTRY_POINT = `0x${'e'.repeat(40)}` as `0x${string}`
 const TX = `0x${'1'.repeat(64)}` as `0x${string}`
 
 let chainNonce = 0n
+/** EntryPoint nonces by key, for reads that name a key; any other key reads `chainNonce`. */
+let noncesByKey = new Map<bigint, bigint>()
 let head = 100n
 let logs: { blockNumber?: bigint }[] = []
 /** Like sepolia.optimism.io: refuses a range over 10,000 blocks, and a range with no end. */
@@ -18,7 +20,11 @@ const getLogs = mock(async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock
 })
 mock.module('./chainClient', () => ({
   ...realChainClient,
-  getPublishPublicClient: () => ({ readContract: async () => chainNonce, getLogs, getBlockNumber: async () => head }),
+  getPublishPublicClient: () => ({
+    readContract: async ({ args }: { args: [string, bigint] }) => noncesByKey.get(args[1]) ?? chainNonce,
+    getLogs,
+    getBlockNumber: async () => head,
+  }),
 }))
 
 const { findPinnedUserOp, findPublishByNonceKey, nonceKeyForAttempt, pinnedNonce, publishNonceKey, readNonceSequence } =
@@ -85,20 +91,61 @@ describe('host nonce keys', () => {
     expect(key >> 192n).toBe(0n)
   })
 
+  test('part 1 keeps the key a host already uses', () => {
+    // The key publishes sent before splitting existed: a host's landed UserOps stay findable.
+    expect(publishNonceKey('run-7')).toBe(2489447104722643901636023200252504100820985383673806874650n)
+    expect(publishNonceKey('run-7', 1)).toBe(publishNonceKey('run-7'))
+  })
+
+  test('each later part has its own key', () => {
+    const keys = [1, 2, 3].map((part) => publishNonceKey('run-7', part))
+    expect(new Set(keys).size).toBe(3)
+    for (const key of keys) expect(key >> 192n).toBe(0n)
+    expect(publishNonceKey('run-7', 2)).not.toBe(publishNonceKey('run-8', 2))
+  })
+
+  /** `sequence` UserOps landed under part `part`'s key. */
+  const landed = (part: number, sequence: bigint) => {
+    const key = publishNonceKey('run-7', part)
+    noncesByKey.set(key, pinnedNonce(key) + sequence)
+    return key
+  }
+
   test('nothing landed: sequence 0 and no log read', async () => {
-    chainNonce = pinnedNonce(publishNonceKey('run-7'))
+    noncesByKey = new Map()
+    landed(1, 0n)
     getLogs.mockClear()
-    expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })).toEqual({ sequence: 0n })
+    expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })).toEqual({
+      sequence: 0n,
+      parts: [],
+    })
     expect(getLogs).not.toHaveBeenCalled()
   })
 
   test('landed: the UserOp, attested or reverted', async () => {
-    const key = publishNonceKey('run-7')
-    chainNonce = pinnedNonce(key) + 1n
+    noncesByKey = new Map()
+    const key = landed(1, 1n)
+    landed(2, 0n)
     logs = [log(pinnedNonce(key), false)]
+    const userOp = { transactionHash: TX, success: false }
     expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })).toEqual({
       sequence: 1n,
-      userOp: { transactionHash: TX, success: false },
+      userOp,
+      parts: [{ part: 1, sequence: 1n, userOp }],
     })
+  })
+
+  test('findPublishByNonceKey lists every landed part', async () => {
+    noncesByKey = new Map()
+    const first = landed(1, 1n)
+    const second = landed(2, 1n)
+    landed(3, 0n)
+    const TX2 = `0x${'2'.repeat(64)}` as `0x${string}`
+    logs = [log(pinnedNonce(first), true), { transactionHash: TX2, args: { nonce: pinnedNonce(second), success: true } }]
+    const found = await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n })
+    expect(found.parts.length).toBe(2)
+    expect(found.parts.map((p) => p.userOp?.transactionHash)).toEqual([TX, TX2])
+    expect(found.sequence).toBe(1n)
+    expect(found.userOp?.transactionHash).toBe(TX)
   })
 })

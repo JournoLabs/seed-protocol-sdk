@@ -64,8 +64,10 @@ export type AttestedSend = {
    * would let the old UserOp, if it is still pending, land beside this one.
    */
   resumeAttemptId?: string
-  /** CreatePublishOptions.nonceKey: a new attempt sends under the key derived from it. */
+  /** CreatePublishOptions.nonceKey: a new attempt sends under the key derived from it for `part`. */
   hostNonceKey?: string
+  /** Which part of a split publish this is (ADR 0036), from 1: picks the key `hostNonceKey` derives. */
+  part?: number
 }
 
 /**
@@ -85,6 +87,7 @@ export async function sendAttested({
   step = 'multiPublish',
   resumeAttemptId,
   hostNonceKey,
+  part,
 }: AttestedSend): Promise<{ attemptId: string; transactionHash: Hex }> {
   const serialized = JSON.stringify(requests, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
   const resumed = resumeAttemptId
@@ -106,7 +109,7 @@ export async function sendAttested({
     attemptId = crypto.randomUUID()
     nonceKey =
       hostNonceKey !== undefined
-        ? await usableHostNonceKey({ nonceKey: hostNonceKey, sender, directEas: step !== 'multiPublish' })
+        ? await usableHostNonceKey({ nonceKey: hostNonceKey, part, sender, directEas: step !== 'multiPublish' })
         : sender.pinsNonceOn
           ? nonceKeyForAttempt(attemptId)
           : undefined

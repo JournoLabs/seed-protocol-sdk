@@ -313,6 +313,14 @@ describe('sendAttested: a host nonce key', () => {
     expect(rows[0]!.nonceKey).toBe(publishNonceKey('run-7').toString())
   })
 
+  test('the second part sends under the second part key', async () => {
+    await sendAttested(pinned({ hostNonceKey: 'run-7', part: 2 }))
+    const [key] = send.mock.calls[0] as unknown as [bigint]
+    expect(key).toBe(publishNonceKey('run-7', 2))
+    expect(key).not.toBe(publishNonceKey('run-7'))
+    expect(rows[0]!.nonceKey).toBe(publishNonceKey('run-7', 2).toString())
+  })
+
   test('a key an earlier try landed under sends nothing and claims no attempt', async () => {
     chainNonce = pinnedNonce(publishNonceKey('run-7')) + 1n
     await expect(sendAttested(pinned({ hostNonceKey: 'run-7' }))).rejects.toMatchObject({

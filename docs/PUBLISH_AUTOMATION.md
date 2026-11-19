@@ -226,6 +226,14 @@ Pass `modelName` with the published item's model to get its Seed uid with a succ
 transaction are left out. A publish that creates other new Seeds of the same model, such as a related
 item of that model, gives more than one uid and no `seedUid`.
 
+A publish too large for one transaction goes out in parts
+([Publishing](PUBLISHING.md#publish-flow-recommended)), and one `nonceKey` covers them all: part 1
+sends under `publishNonceKey(nonceKey)`, the key a publish of one transaction uses, and part *k* under
+`publishNonceKey(nonceKey, k)`. `findPublishByNonceKey` reads parts 1, 2, … until a key with
+sequence 0 and lists them in `parts`, each with its `sequence` and `userOp`; `sequence` and `userOp`
+are part 1's. The item's Seed is in the last part of a finished publish, so read `seedUid` from the
+last entry of `parts`. A host that reads EntryPoint by its own key sees only part 1.
+
 A key is spent once a UserOp lands under it, reverted or not. A publish fails with
 `PublishNonceKeyError` before anything is uploaded when its key is spent (`NONCE_KEY_SPENT`), its sender
 doesn't pin (`NONCE_KEY_NOT_PINNED`), or it would attest directly to EAS (`NONCE_KEY_DIRECT_EAS`). After

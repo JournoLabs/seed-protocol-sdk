@@ -22,7 +22,7 @@ const thirdwebFlow = mock(async () => ({ outcome: 'no_address' as const }))
 mock.module('./ensureSmartWalletThenPublish', () => ({ ensureSmartWalletThenPublish: thirdwebFlow }))
 
 const createPublish = mock(async (..._args: unknown[]) => ({ id: 'publish' }))
-mock.module('../services/publishManager', () => ({ PublishManager: { createPublish } }))
+mock.module('../services/publishManager', () => ({ PublishManager: { createPublish, publishBlocker: async () => 'none' } }))
 
 const { ensureWalletThenPublish } = await import('./ensureWalletThenPublish')
 

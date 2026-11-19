@@ -331,6 +331,12 @@ export interface CreatePublishOptions {
    * Needs a wallet whose sender pins its nonce (`pinsNonceOn`), and a publish through the Seed
    * contract: either missing fails with `PublishNonceKeyError` before anything is uploaded. A key
    * is spent once a UserOp lands under it, reverted or not, and then fails the same way.
+   *
+   * One key covers a publish split across transactions (ADR 0036): part 1 sends under
+   * `publishNonceKey(nonceKey)` and part *k* under `publishNonceKey(nonceKey, k)`, and
+   * `findPublishByNonceKey` lists every part that landed. A run that replaces a parked publish of
+   * this item takes its count of recorded parts, and its `nonceKey` when this option is left out,
+   * so it sends its next part under the next part's key.
    */
   nonceKey?: string
 }

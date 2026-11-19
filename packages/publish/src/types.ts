@@ -26,6 +26,8 @@ export type PublishUpload = {
   seedLocalId: string
   versionLocalId: string
   transactionToSign: unknown
+  /** Hex SHA-256 of the upload's content, when known: a run replacing this one reuses it on a match. */
+  contentHash?: string
 }
 
 /** Arweave transaction info used in publish/upload flow. */
@@ -93,6 +95,12 @@ export interface PublishMachineContext {
    * fall back to `getPublishConfig().useDirectEas`.
    */
   attestationStrategy?: 'multiPublish' | 'directEas'
+  /**
+   * Set when leaving `checking` on the `multiPublish` route: how many transactions the publish is
+   * expected to go out in (ADR 0036). A lower bound from the local gas estimate; the RPC estimates
+   * the send makes can raise it. Absent on direct EAS.
+   */
+  expectedPublishTransactions?: number
   /** `patch` (default): attest only pending properties on current Version. `new_version`: new Version + full snapshot. */
   publishMode?: PublishMode
   /**
@@ -125,6 +133,18 @@ export interface PublishMachineContext {
   confirmUpload?: boolean
   /** A `multiPublish` that landed and failed to record: a retry records it instead of sending. */
   unrecordedAttestation?: UnrecordedAttestation
+  /**
+   * Parts the runs this one replaced recorded under the same {@link nonceKey} (ADR 0036). Set only
+   * when this run took that key over from a parked run. This run's own parts are read from its
+   * recorded attempts, so part *k* sends under the *k*th key derived from `nonceKey`.
+   */
+  nonceKeyPartsInherited?: number
+  /**
+   * Uploads of the parked run this run replaced (ADR 0036). An upload whose `itemPropertyLocalId`
+   * and `contentHash` match one this run needs, and that the blob store still holds, is used as it
+   * is rather than uploaded again.
+   */
+  reusableUploads?: Array<PublishUpload & { txId: string }>
   /** CreatePublishOptions.nonceKey: the host's id that the attestation nonce key comes from. */
   nonceKey?: string
   /** An attempt reconcile found not landed: the next send repeats it under its nonce key. */
