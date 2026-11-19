@@ -1,4 +1,4 @@
-import { keepAttestationsFromRefAttester } from '@seedprotocol/eas'
+import { easName, keepAttestationsFromRefAttester } from '@seedprotocol/eas'
 import { initializeQueryPlatform } from './bootstrap.js'
 import {
   assembleSeedRecords,
@@ -6,7 +6,7 @@ import {
   rehydrateUnreadStorage,
   type SeedDependencies,
 } from './assembleSeeds.js'
-import { assembleSeedChangelog, assembleSeedChangelogs } from './assembleChangelog.js'
+import { assembleSeedChangelogs } from './assembleChangelog.js'
 import {
   buildAssembleOptionsKey,
   getQueryCacheManager,
@@ -274,12 +274,14 @@ export function normalizeAttesters(attesters: readonly string[]): string[] | nul
  * Version from its attester, or whose Versions were all revoked, is left out; `limit` and `skip`
  * count listed Seeds, so a page can come back shorter than `limit`, even empty, with more after
  * it. `listed` is the number of Seeds listed for the page: page on (`skip += limit`) while it
- * equals `limit`.
+ * equals `limit`. `name` is the model name in any form (`BlogPost`, `blog_post`); records, cache keys
+ * and the listing use its EAS name (`blog_post`), as a read by uid does.
  */
 export async function queryBySchema(
-  schemaName: string,
+  name: string,
   options?: QueryBySchemaOptions,
 ): Promise<QueryBySchemaResult> {
+  const schemaName = easName(name)
   await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
@@ -491,11 +493,12 @@ export async function getSeed(
   let dependencies: SeedDependencies = { refUIDs: [trimmed], ids: [trimmed] }
 
   const pin = pinOf(options)
-  const assembleData = async (): Promise<SeedRecord | null> => {
+  const assembleData = async (properties?: readonly AttestationLike[]): Promise<SeedRecord | null> => {
     const assembled = await assembleSeedRecords([seed], options, dataSource, {
       schemaName,
       versions,
       pins: pin && new Map([[trimmed, pin]]),
+      properties,
     })
     const record = assembled.records[0]
     if (record) dependencies = assembled.dependencies.get(record.seedUid) ?? dependencies
@@ -505,14 +508,12 @@ export async function getSeed(
   if (!wantsChangelog(include)) {
     result = await assembleData()
   } else {
-    const { latestVersionUid, versionUids, changelog } = await assembleSeedChangelog(
-      trimmed,
-      options,
-      dataSource,
-    )
+    // From the seed and versions already read; the data reuses the changelog's properties.
+    const { changelogs, properties } = await assembleSeedChangelogs([seed], versions, options, dataSource)
+    const { latestVersionUid, versionUids, changelog } = changelogs.get(trimmed)!
 
     if (wantsData(include)) {
-      const record = await assembleData()
+      const record = await assembleData(properties)
       result = record ? { ...record, changelog } : null
     } else {
       result = {
@@ -624,11 +625,13 @@ export async function getSeeds(
       .map((uid) => seedByUid.get(uid))
       .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
 
-    const changelogs = wantsChangelog(include)
+    const read = wantsChangelog(include)
       ? await assembleSeedChangelogs(toAssemble, versions, options, dataSource)
       : undefined
+    const changelogs = read?.changelogs
+    // With a changelog, the data comes from the properties it read.
     const assembled = wantsData(include)
-      ? await assembleSeedRecords(toAssemble, options, dataSource, { versions, pins })
+      ? await assembleSeedRecords(toAssemble, options, dataSource, { versions, pins, properties: read?.properties })
       : changelogOnlyRecords(toAssemble, changelogs!)
     for (const assembledRecord of assembled.records) {
       const key = assembledRecord.seedUid.toLowerCase()
@@ -808,11 +811,12 @@ export async function getSeedAttestations(
  * No collection cache; may write-through to item cache when remote.
  */
 export async function queryBySchemaForMonth(
-  schemaName: string,
+  name: string,
   year: number,
   month: number,
   options?: AssembleOptions,
 ): Promise<SeedRecord[]> {
+  const schemaName = easName(name)
   await initializeQueryPlatform({ source: normalizeSourceMode(options?.source) })
   const mode = normalizeSourceMode(options?.source)
   const resolved = resolveQuerySource(mode)

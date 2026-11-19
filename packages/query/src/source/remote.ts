@@ -5,6 +5,7 @@ import {
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   EasClient,
+  easName,
   withExcludeRevokedFilter,
   GET_SEEDS_LEAN,
   modelSchemaDefinition,
@@ -68,7 +69,7 @@ export function createRemoteQueryDataSource(): QueryDataSource {
       // Every seed is of `schemaName`; the lean query doesn't select it.
       return (itemSeeds ?? []).map((seed) => ({
         ...seed,
-        schema: { schemaNames: [{ name: schemaName }] },
+        schema: { schemaNames: [{ name: easName(schemaName) }] },
       })) as AttestationLike[]
     },
 

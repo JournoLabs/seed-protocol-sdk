@@ -35,7 +35,7 @@ export function decodeContenthash(contenthash: string | Uint8Array): EnsContenth
   const bytes = typeof contenthash === 'string' ? hexToBytes(contenthash) : contenthash
   if (bytes.length === 0) return null
 
-  const [codec, codecLength] = varint.decode(bytes)
+  const [codec, codecLength] = decodeCodec(bytes)
   const payload = bytes.subarray(codecLength)
   if (payload.length === 0) throw new TypeError(`Contenthash has codec 0x${codec.toString(16)} and no content id`)
 
@@ -62,6 +62,14 @@ export function decodeContenthash(contenthash: string | Uint8Array): EnsContenth
     }
     default:
       throw new TypeError(`Contenthash codec 0x${codec.toString(16)} is not ipfs, ipns, swarm or arweave`)
+  }
+}
+
+function decodeCodec(bytes: Uint8Array): [number, number] {
+  try {
+    return varint.decode(bytes)
+  } catch (err) {
+    throw new TypeError(`Contenthash codec is not a varint: ${(err as Error).message}`)
   }
 }
 

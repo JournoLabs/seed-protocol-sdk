@@ -1,4 +1,5 @@
 import { checksumAddresses } from './utils.js'
+import { easName } from './easNames.js'
 import { indexerUid } from './indexerUid.js'
 import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanonical.js'
 import { keepAttestationsFromRefAttester } from './easRefAttester.js'
@@ -174,8 +175,8 @@ export const getSeedsFromSchemaUids = async ({
 
 /**
  * Seeds of the model `schemaName`, newest first, revoked ones left out: attestations under
- * `bytes32 <easName(schemaName)>` with the zero resolver, revocable (ADR 0008, ADR 0035). Names
- * attested onto schemas aren't consulted. With `uidPrefix`,
+ * `bytes32 <easName(schemaName)>` with the zero resolver, revocable (ADR 0008, ADR 0035). Each seed's
+ * `schema.schemaNames` is that EAS name. Names attested onto schemas aren't consulted. With `uidPrefix`,
  * only seeds whose UID starts with it; easscan matches it case-sensitively, so pass it lowercase
  * with `0x`. With `attesters`, only seeds attested by one of them, in any case; values that
  * aren't addresses are ignored, and if none is left there are no seeds. Both apply before
@@ -187,6 +188,7 @@ export const getSeedsBySchemaName = async (
   skip?: number,
   options?: { uidPrefix?: string; attesters?: readonly string[] },
 ) => {
+  const name = easName(schemaName)
   const skipVal = skip ?? 0
   const uidPrefix = options?.uidPrefix
   const attesters = options?.attesters ? checksumAddresses(options.attesters).sort() : undefined
@@ -207,7 +209,7 @@ export const getSeedsBySchemaName = async (
   const { itemSeeds } = (await timedFetchQuery(queryClient, {
     queryKey: [
       `getSeedsBySchemaName`,
-      schemaName,
+      name,
       limit,
       skipVal,
       uidPrefix ?? null,
@@ -217,7 +219,8 @@ export const getSeedsBySchemaName = async (
   })) as { itemSeeds: Attestation[] }
 
   // Every seed is of `schemaName`, so it is attached here instead of selected (see GET_SEEDS_LEAN).
-  return itemSeeds.map((seed) => withSchemaNames(seed, [schemaName]))
+  // The EAS name, as a read by uid gives it, whatever form `schemaName` came in.
+  return itemSeeds.map((seed) => withSchemaNames(seed, [name]))
 }
 
 const withSchemaNames = (seed: Attestation, names: string[]): Attestation =>

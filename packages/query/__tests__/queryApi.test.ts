@@ -611,6 +611,41 @@ describe('queryBySchema / getSeed caching', () => {
     })
   })
 
+  describe('schema name as given', () => {
+    // The listing attaches the name it was asked for, as getSeedsBySchemaName does.
+    const listAsNamed = () => {
+      const listed = mockGetSeedsBySchemaName.getMockImplementation()
+      mockGetSeedsBySchemaName.mockImplementation(async (name: string, ...rest: unknown[]) =>
+        ((await listed!(name, ...rest)) as AttestationLike[]).map((seed) => ({
+          ...seed,
+          schema: { schemaNames: [{ name }] },
+        })),
+      )
+    }
+
+    it('lists and caches under the EAS name, so a later getSeed agrees', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Named', 100)
+      listAsNamed()
+
+      const listed = await queryBySchema('Post', uncachedOpts)
+      expect(listed.items.map((r) => r.schemaName)).toEqual(['post'])
+      expect(mockGetSeedsBySchemaName.mock.calls[0]![0]).toBe('post')
+      const cached = await getSeed('0xseed1', { relations: 'expand', hydrateStorage: false })
+      expect(cached?.schemaName).toBe('post')
+    })
+
+    it('clearCollection takes the name in any form', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Named', 100)
+      await queryBySchema('Post', uncachedOpts)
+      await getQueryCacheManager().clearCollection('post')
+      expect(await getQueryCacheManager().getCollection('Post', optionsKey)).toBeNull()
+
+      await queryBySchema('post', uncachedOpts)
+      await getQueryCacheManager().clearCollection('Post')
+      expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
+    })
+  })
+
   it('cache:false bypasses collection cache', async () => {
     mockAssembledPost('0xseed1', '0xver1', 'A', 100)
     await queryBySchema('post', { ...uncachedOpts, cache: false })
