@@ -15,7 +15,7 @@ import {
   type PublishUploadData,
   type TransactionTag,
 } from '@seedprotocol/sdk'
-import { getPublishConfig } from '~/config'
+import { getConfigRef, getPublishConfig } from '~/config'
 import { ArchiveAnchorInterruptedError, ArchiveAnchorSchemaNotRegisteredError, type ArchiveAnchorResume } from '~/errors'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { getAttestedUidsFromReceipt, prepareEasAttest, ZERO_ADDRESS } from '~/helpers/easDirect'
@@ -358,7 +358,8 @@ export async function estimateArchiveAnchorCost(
       ? [
           { name: 'Archive-Part', value: 'manifest' },
           { name: 'Seed-Version-Uid', value: versionUid },
-          ...(getPublishConfig().arweaveUploadTags ?? []),
+          // Without initPublish there are no configured tags; `rates` alone prices the estimate.
+          ...(getConfigRef()?.arweaveUploadTags ?? []),
         ]
       : []
   const uploadBatches = files.length > 0 ? [files.length, 1] : [1]
@@ -367,8 +368,8 @@ export async function estimateArchiveAnchorCost(
 }
 
 /**
- * Registers the anchor schema and names it, once per chain, if it's missing. Needs the owner
- * wallet: a session key can't call SchemaRegistry.
+ * Registers the anchor schema and names it, once per chain, if it's missing. Any wallet can
+ * register it (ADR 0035), but a session key can't call SchemaRegistry.
  */
 export async function ensureArchiveAnchorSchema(account: PublishWallet | SeedTxSender): Promise<`0x${string}`> {
   const sender = isPublishWallet(account) ? account.txSender : account

@@ -253,8 +253,9 @@ const { uid, manifestTx, tagmanifestSha256, alreadyAnchored } = await anchorArch
   Tags on Arweave can't be removed. The policy covers the package's uploads, not a publish's.
 - It attests by the route a publish from the Version's attester takes, so a session key needs no
   new permission. The wallet must attest as that attester.
-- The schema has to exist first. Call `ensureArchiveAnchorSchema(wallet)` once per chain with the
-  owner wallet; without it `anchorArchive` throws `ArchiveAnchorSchemaNotRegisteredError` before
+- The schema has to exist first. Call `ensureArchiveAnchorSchema(wallet)` once per chain with any
+  wallet that sends its own transactions ([ADR 0035](adr/0035-any-wallet-registers-schemas.md)); a
+  session key can't. Without it `anchorArchive` throws `ArchiveAnchorSchemaNotRegisteredError` before
   uploading anything.
 
 `estimateArchiveAnchorCost(item)` returns a `PublishCostEstimate` for the files to upload, the

@@ -43,6 +43,8 @@ const state = {
   sendError: undefined as Error | undefined,
   /** Fails the nth signDataItems call. */
   failSign: undefined as number | undefined,
+  /** false: no initPublish, so getPublishConfig throws. */
+  config: true as boolean,
 }
 const sent: any[][] = []
 const sentDirect: any[] = []
@@ -59,13 +61,20 @@ mock.module('@seedprotocol/archive/seed', () => ({
 const realEas = await import('@seedprotocol/eas')
 mock.module('@seedprotocol/eas', () => ({ ...realEas, getArchiveAnchorsFromEas: async () => state.anchors }))
 const realConfig = await import('../../config')
+// Taken before mock.module, which rebinds realConfig's exports to the mock.
+const { getPublishConfig: realGetPublishConfig, setConfigRef } = realConfig
+const testConfig = () => ({
+  arweaveUploadTags: [{ name: 'App-Name', value: 'Test' }],
+  useDirectEas: state.strategy === 'directEas',
+  useModularExecutor: state.strategy === 'multiPublish',
+})
 mock.module('../../config', () => ({
   ...realConfig,
-  getPublishConfig: () => ({
-    arweaveUploadTags: [{ name: 'App-Name', value: 'Test' }],
-    useDirectEas: state.strategy === 'directEas',
-    useModularExecutor: state.strategy === 'multiPublish',
-  }),
+  getPublishConfig: () => {
+    if (!state.config) return realGetPublishConfig()
+    return testConfig()
+  },
+  getConfigRef: () => (state.config ? testConfig() : null),
 }))
 mock.module('../../helpers/schemaRegistry', () => ({
   getSchemaRecord: async () => (state.schema ? { uid: ARCHIVE_ANCHOR_SCHEMA_UID } : null),
@@ -337,6 +346,18 @@ describe('estimateArchiveAnchorCost', () => {
     const discoverable = await estimateArchiveAnchorCost(REF, { rates } as never)
     const hashOnly = await estimateArchiveAnchorCost(REF, { rates, tagPolicy: 'hash-only' } as never)
     expect(discoverable.arweave.chargedBytes).toBeGreaterThan(hashOnly.arweave.chargedBytes)
+  })
+
+  // Batch 17 item 7a
+  test('needs no initPublish when rates are given', async () => {
+    setConfigRef(null)
+    state.config = false
+    try {
+      const estimate = await estimateArchiveAnchorCost(REF, { rates } as never)
+      expect(estimate.work.attestationCount).toBe(1)
+    } finally {
+      state.config = true
+    }
   })
 
   test('a bag that is already anchored costs nothing', async () => {

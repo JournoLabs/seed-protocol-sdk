@@ -59,6 +59,8 @@ type PinnedUserOpParams = {
   sender: Address
   key: bigint
   fromBlock: bigint
+  /** The chain head, when the caller already read it. */
+  head?: bigint
 }
 
 /** The widest block range one `eth_getLogs` asks for: public RPCs such as sepolia.optimism.io refuse more. */
@@ -67,7 +69,7 @@ const LOG_SPAN = 10_000n
 async function findPinnedUserOpLog(params: PinnedUserOpParams) {
   const { entryPoint, sender, key, fromBlock } = params
   const client = getPublishPublicClient()
-  const head = await client.getBlockNumber()
+  const head = params.head ?? (await client.getBlockNumber())
   const nonce = pinnedNonce(key)
   for (let from = fromBlock; from <= head; from += LOG_SPAN) {
     const to = from + LOG_SPAN - 1n < head ? from + LOG_SPAN - 1n : head
@@ -152,15 +154,29 @@ export type PublishByNonceKey = {
   parts: Array<{ part: number; sequence: bigint; userOp?: NonceKeyUserOp }>
 }
 
+/** {@link findPublishByNonceKey}'s default `maxBlocks`: 100 log reads of 10,000 blocks. */
+const DEFAULT_MAX_BLOCKS = 1_000_000n
+
+function blockCap(maxBlocks: bigint | number | undefined): bigint | undefined {
+  if (maxBlocks === undefined) return DEFAULT_MAX_BLOCKS
+  if (typeof maxBlocks === 'bigint') return maxBlocks
+  if (maxBlocks === Infinity) return undefined
+  throw new TypeError(`findPublishByNonceKey: maxBlocks is a bigint or Infinity, got ${maxBlocks}`)
+}
+
 /**
  * What became of a publish sent with `CreatePublishOptions.nonceKey`, read from EntryPoint with no
  * local rows, for a host whose process restarted. A landed UserOp with `success: false` reverted
  * and attested nothing, but it still spent the key.
- * @param fromBlock a block before the first try; logs are read from there
+ * @param fromBlock a block before the first try; logs are read from there, 10,000 blocks per
+ *   `eth_getLogs` call
  * @param entryPoint defaults to EntryPoint v0.6, which ManagedAccounts use
  * @param modelName the published item's model: a successful UserOp then carries `seedUids` and
  *   `seedUid`, read from its transaction's `Attested` events on that model's Seed schema with the
  *   sender as attester. Throws when the model has no EAS schema uid.
+ * @param maxBlocks how far back from the chain head `fromBlock` may be, 1,000,000 blocks (100 log
+ *   reads) by default. A `bigint` changes the cap and `Infinity` removes it. Throws a `RangeError`
+ *   naming this option, before any log read, when `fromBlock` is further back.
  */
 export async function findPublishByNonceKey(params: {
   sender: Address
@@ -168,15 +184,23 @@ export async function findPublishByNonceKey(params: {
   fromBlock: bigint
   entryPoint?: Address
   modelName?: string
+  maxBlocks?: bigint | number
 }): Promise<PublishByNonceKey> {
   const entryPoint = params.entryPoint ?? entryPoint06Address
-  const { sender, modelName } = params
+  const { sender, modelName, fromBlock } = params
+  const cap = blockCap(params.maxBlocks)
+  const head = await getPublishPublicClient().getBlockNumber()
+  if (cap !== undefined && head - fromBlock > cap) {
+    throw new RangeError(
+      `findPublishByNonceKey: fromBlock ${fromBlock} is ${head - fromBlock} blocks behind the head ${head}, more than maxBlocks (${cap}). Pass a later fromBlock, a larger maxBlocks, or maxBlocks: Infinity.`,
+    )
+  }
   const parts: PublishByNonceKey['parts'] = []
   for (let part = 1; ; part++) {
     const key = publishNonceKey(params.nonceKey, part)
     const sequence = await readNonceSequence(entryPoint, sender, key)
     if (sequence === 0n) break
-    const userOp = await landedUserOp({ entryPoint, sender, key, fromBlock: params.fromBlock, modelName })
+    const userOp = await landedUserOp({ entryPoint, sender, key, fromBlock, head, modelName })
     parts.push({ part, sequence, ...(userOp && { userOp }) })
   }
   const [first] = parts

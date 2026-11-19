@@ -122,6 +122,59 @@ describe('host nonce keys', () => {
     expect(getLogs).not.toHaveBeenCalled()
   })
 
+  // Batch 17 item 6 (D61)
+  describe('maxBlocks', () => {
+    const landedOnce = () => {
+      noncesByKey = new Map()
+      const key = landed(1, 1n)
+      landed(2, 0n)
+      logs = [log(pinnedNonce(key), true)]
+    }
+
+    test('refuses a fromBlock over 1,000,000 blocks back, naming the option, before any log read', async () => {
+      landedOnce()
+      head = 2_000_000n
+      getLogs.mockClear()
+      try {
+        const read = findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 0n })
+        await expect(read).rejects.toBeInstanceOf(RangeError)
+        await expect(read).rejects.toThrow(/maxBlocks/)
+        expect(getLogs).not.toHaveBeenCalled()
+        // 1,000,000 back is still allowed
+        await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1_000_000n })
+      } finally {
+        head = 100n
+      }
+    })
+
+    test('a bigint changes the cap', async () => {
+      landedOnce()
+      head = 100n
+      await expect(findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n, maxBlocks: 10n })).rejects.toThrow(
+        RangeError,
+      )
+      expect((await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 90n, maxBlocks: 10n })).userOp)
+        .toMatchObject({ transactionHash: TX, success: true })
+    })
+
+    test('Infinity removes it', async () => {
+      landedOnce()
+      head = 2_000_000n
+      try {
+        const found = await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 0n, maxBlocks: Infinity })
+        expect(found.userOp).toMatchObject({ transactionHash: TX })
+      } finally {
+        head = 100n
+      }
+    })
+
+    test('a finite number is refused', async () => {
+      await expect(
+        findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n, maxBlocks: 5 }),
+      ).rejects.toBeInstanceOf(TypeError)
+    })
+  })
+
   test('landed: the UserOp, attested or reverted', async () => {
     noncesByKey = new Map()
     const key = landed(1, 1n)
