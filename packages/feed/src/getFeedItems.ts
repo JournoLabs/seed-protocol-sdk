@@ -310,7 +310,7 @@ const GUID_KEYS = new Set(['guid', 'Guid'])
  * Seed and need public ones. A `guid` keeps its value. Returns new arrays and objects; query's
  * records stay as they are.
  */
-function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown {
+export function withPublicArweaveLinks(value: unknown, publicBaseUrl: string): unknown {
   if (typeof value === 'string') {
     if (value.includes('<')) return publishedArweaveLinksInHtml(value, { publicBaseUrl })
     const link = parseArweaveTransactionLink(value)
