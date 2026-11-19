@@ -64,6 +64,46 @@ Put it behind a TLS proxy and give clients `https://your.host/mcp`. claude.ai co
 The server keeps no sessions and answers each request with JSON, so several instances can serve
 one URL. `GET` and `DELETE` get 405. Request bodies over 1 MB get 413.
 
+## Use it from an assistant
+
+The [`reading-seed-records` skill](../../plugins/seed-protocol/skills/reading-seed-records/SKILL.md)
+tells an agent how to find, read and cite Seed records with these tools. Install it alongside the
+server where the client supports skills.
+
+**Claude Code.** The [Seed Protocol plugin](../../plugins/seed-protocol/README.md) starts the server
+and adds the skill:
+
+```text
+/plugin marketplace add JournoLabs/seed-protocol-sdk
+/plugin install seed-protocol@seed-protocol
+```
+
+It asks for publisher addresses and a chain ID, both optional; change them with
+`/plugin configure seed-protocol@seed-protocol`.
+
+**Claude Desktop.** Add the JSON config from [Run it](#run-it) to `claude_desktop_config.json`. To
+add the skill, zip the `plugins/seed-protocol/skills/reading-seed-records` folder and upload it
+under Skills in Claude's settings.
+
+**Hermes.** Add the server to `~/.hermes/config.yaml`, then run `/reload-mcp`:
+
+```yaml
+mcp_servers:
+  seed-protocol:
+    command: npx
+    args: ["-y", "@seedprotocol/mcp"]
+    env:
+      SEED_MCP_ATTESTERS: "0xYourPublisherAddress"
+      EAS_CHAIN_ID: "11155420"
+```
+
+Copy the `plugins/seed-protocol/skills/reading-seed-records` folder into `~/.hermes/skills/` for
+the skill.
+
+**claude.ai and ChatGPT.** These reach the server by URL. Serve it with `--http` as in
+[Run it over HTTP](#run-it-over-http) and add `https://your.host/mcp` as a custom connector with no
+authentication. The skill can be uploaded to claude.ai as for Claude Desktop.
+
 ## Publishers
 
 Anyone can attest under a public schema, so a schema name alone doesn't identify a publication.
