@@ -8,14 +8,14 @@ import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
-import { encodeExecutorMultiPublish, encodeMultiPublish } from '~/helpers/contracts'
+import { encodeExecutorMultiPublish, encodeMultiPublish, type MultiPublishRequest } from '~/helpers/contracts'
 import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
 import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
-import { publishGasLimit } from '~/helpers/publishGas'
+import { estimatePublishGas, publishGasLimit } from '~/helpers/publishGas'
 import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
@@ -131,7 +131,12 @@ export async function resolveMultiPublishSender(source: {
   address: Address
   wallet?: unknown
   account?: unknown
-}): Promise<{ sendMultiPublish: SendMultiPublish; attesterAddress: string }> {
+}): Promise<{
+  sendMultiPublish: SendMultiPublish
+  attesterAddress: string
+  /** The gas `requests` need on this route, with headroom; `undefined` when it can't be estimated. */
+  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>
+}> {
   const { address } = source
   const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
   let routing = resolvePublishRouting({ useModularExecutor: false, publisherAddress: address })
@@ -214,12 +219,13 @@ export async function resolveMultiPublishSender(source: {
   // Every publish is simulated from the sending account first, so a call that would revert is
   // never sent and its decoded reason is reported. Automation also refuses to send when the
   // simulation cannot run; other routes go ahead. The gas limit is estimated from the same account.
+  const to = routing.txTargetAddress as Address
+  const from = routeToExecutorModule ? address : activeWallet.txSender.address
+  const encode = (requests: MultiPublishRequest[]) =>
+    routeToExecutorModule ? encodeExecutorMultiPublish(to, requests) : encodeMultiPublish(to, requests)
+
   const sendPublishTx: SendMultiPublish = async (requests, through) => {
-    const to = routing.txTargetAddress as Address
-    const unsized = routeToExecutorModule
-      ? encodeExecutorMultiPublish(to, requests)
-      : encodeMultiPublish(to, requests)
-    const from = routeToExecutorModule ? address : activeWallet.txSender.address
+    const unsized = encode(requests)
     if (routeToExecutorModule && unsized.value) {
       throw new ManagedAccountPublishError(
         `This publish needs ${unsized.value} wei with its attestations, but session keys are granted no native value; nothing was sent.`,
@@ -254,7 +260,11 @@ export async function resolveMultiPublishSender(source: {
     return through(send, activeWallet.txSender)
   }
 
-  return { sendMultiPublish: sendPublishTx, attesterAddress: routing.attesterAddress }
+  return {
+    sendMultiPublish: sendPublishTx,
+    attesterAddress: routing.attesterAddress,
+    estimateMultiPublish: (requests) => estimatePublishGas(from, encode(requests)),
+  }
 }
 
 async function executeCreateAttestations(

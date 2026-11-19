@@ -71,8 +71,7 @@ export function assertPublishFits(
 ): void {
   const refuse = (reason: string) =>
     new ManagedAccountPublishError(
-      `This publish ${reason}; nothing was sent. Largest: ${largestRequests(requests)}. ` +
-        'Publish some of its related drafts on their own first.',
+      `This transaction ${reason}; nothing was sent. Largest: ${largestRequests(requests)}.`,
       'PUBLISH_TOO_LARGE',
       from,
     )

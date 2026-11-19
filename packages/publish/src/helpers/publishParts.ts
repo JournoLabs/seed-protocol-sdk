@@ -169,3 +169,36 @@ export function expectedPartCount(requests: MultiPublishRequest[], from?: string
   }
   return parts
 }
+
+/**
+ * The number of leading units to send as the next part: the longest prefix the local estimate
+ * allows ({@link localPrefixLength}), shortened by bisection until `estimate` (gas with headroom)
+ * is at most `ceiling`. An estimate that can't be made (`undefined`) accepts its prefix, which is
+ * then sent with `publishGasLimit`'s fallback gas.
+ * @throws ManagedAccountPublishError `PUBLISH_TOO_LARGE` when the first unit doesn't fit on its own
+ */
+export async function fitPublishPart(
+  units: PublishUnit[],
+  estimate: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>,
+  ceiling: bigint,
+): Promise<number> {
+  const local = localPrefixLength(units)
+  if (local === 0) {
+    throw unitTooLargeError(units[0]!, `over ${maxPublishGas()} gas or ${PUBLISH_MAX_CALLDATA_BYTES} bytes of calldata`)
+  }
+  const fits = async (count: number) => {
+    const gas = await estimate(partRequests(units, count))
+    return gas === undefined || gas <= ceiling
+  }
+  if (await fits(local)) return local
+  // Largest count known to fit (0: none yet), and largest still possible.
+  let lo = 0
+  let hi = local - 1
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (await fits(mid)) lo = mid
+    else hi = mid - 1
+  }
+  if (lo === 0) throw unitTooLargeError(units[0]!, `its estimate is over ${ceiling} gas`)
+  return lo
+}

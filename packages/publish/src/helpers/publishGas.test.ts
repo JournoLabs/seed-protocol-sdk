@@ -12,7 +12,7 @@ mock.module('./chainClient', () => ({
   getPublishPublicClient: () => ({ estimateGas, getBlock }),
 }))
 
-const { publishGasLimit, PUBLISH_GAS_FALLBACK } = await import('./publishGas')
+const { publishGasCeiling, publishGasLimit, PUBLISH_GAS_FALLBACK } = await import('./publishGas')
 const { PUBLISH_MAX_GAS } = await import('./publishSize')
 
 afterEach(() => {
@@ -80,5 +80,20 @@ describe('publishGasLimit', () => {
       code: 'PUBLISH_TOO_LARGE',
       message: expect.stringContaining('over the limit of 12000000'),
     })
+  })
+})
+
+describe('publishGasCeiling', () => {
+  test('publishGasCeiling is the lower of the config limit and the block limit', async () => {
+    expect(await publishGasCeiling()).toBe(PUBLISH_MAX_GAS)
+    getBlock.mockImplementation(async () => ({ gasLimit: 12_000_000n }))
+    expect(await publishGasCeiling()).toBe(12_000_000n)
+  })
+
+  test('keeps the config limit when the block read fails', async () => {
+    getBlock.mockImplementation(async () => {
+      throw new HttpRequestError({ url: 'http://rpc', details: 'fetch failed' })
+    })
+    expect(await publishGasCeiling()).toBe(PUBLISH_MAX_GAS)
   })
 })
