@@ -5,25 +5,29 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - **Breaking:** `viem` is an optional peer dependency, used only by `@seedprotocol/query/ens`. Apps that read ENS add `viem@^2` themselves; `archive`, `rdf` and other installs of query no longer pull it in. Without it, `@seedprotocol/query/ens` still imports and `decodeContenthash` and `parseSeedPublicationRecord` work, while `getEnsContenthash`, `getSeedPublication` and `getEnsNames` reject with the new `EnsViemMissingError` (code `ENS_VIEM_MISSING`).
-- `queryBySchema` and `queryBySchemaForMonth` give every record the model's EAS name (`easName`), as `getSeed` and `getSeeds` do, whatever form the name was passed in. `queryBySchema('Post')` returned records with `schemaName: 'Post'`, and a later `getSeed` of one of them returned `'Post'` from the item cache where a fresh read returned `'post'`. Collections are cached under the EAS name too, so `queryBySchema('Post')` and `queryBySchema('post')` share one, and `CacheManager.clearCollection` and `getCollection` take the name in any form. `clearCollection('post')` left a collection read as `'Post'` cached.
+- **Breaking:** `queryBySchema` and `queryBySchemaForMonth` give every record the model's EAS name (`easName`), as `getSeed` and `getSeeds` do, whatever form the name was passed in. `queryBySchema('Post')` returned records with `schemaName: 'Post'`, and a later `getSeed` of one of them returned `'Post'` from the item cache where a fresh read returned `'post'`. Collections are cached under the EAS name too, so `queryBySchema('Post')` and `queryBySchema('post')` share one, and `CacheManager.clearCollection` and `getCollection` take the name in any form. `clearCollection('post')` left a collection read as `'Post'` cached.
 - `getSeeds` and `getSeed` with `include: 'data+changelog'` read the properties once and build the data from the changelog's read: three indexer requests (seeds, versions, properties) before related seeds, not four. `getSeed` with a changelog also no longer reads the seed and its versions a second time.
 - `decodeContenthash` throws a `TypeError` for a contenthash whose codec is cut off mid-varint (`0xe3`), as its JSDoc says. It threw the `RangeError` from `multiformats`.
 
 ## 0.8.2 (2026-11-09)
 
+- **Breaking:** `queryBySchema` and `queryBySchemaForMonth` list Seeds under the model's schema UID (`bytes32 <easName>`, zero resolver, revocable) instead of any schema carrying the name (ADR 0035). A schema someone else named the same no longer adds its attestations, and `BlogPost` lists the same Seeds as `blog_post`. A name in another case finds the model's Seeds: `queryBySchema('Post')` listed none and now lists the `post` Seeds.
+- **Breaking:** `readSeedAtTime` reads by the rule `getSeedAttestations({ asOf })` uses: it reads a uid in any case, throws a `RangeError` for an `asOf` that isn't finite, returns undefined for a seed created after `asOf`, and lists only the Versions made by then. It starts the query platform as the other reads do, with the one-copy check. It was case-sensitive, returned a seed before it existed and Versions after `asOf`, and threw `QueryClient not configured` in a fresh process.
 - A body no read gateway returned is read again on the next cache hit. `getSeed`, `getSeeds` and `queryBySchema` cached such a record with its transaction URL in place of the body and served it until the seed changed on EAS, so a post read while gateways didn't have its body yet showed the URL for good in that process. The cached entry is updated once the body loads. Within `maxAge`, a collection still comes back without the retry.
 - `SeedRecord.unreadStorage` names the storage fields whose body no read gateway returned; absent when every body was read. `hydrateArweaveRichTextInItems` returns the same names for each item.
 - `getSeeds` takes `getSeed`'s `include` and `changelog` options and returns `GetSeedResult` records, each with its own `changelog`. Every seed's changelog is built from one request for the properties of all their live Versions, so 40 seeds with `include: 'changelog'` are three indexer requests rather than three per seed. `since` and `limit` filter each seed's entries after that request. With `include: 'changelog'`, a seed whose Versions are all revoked is left out. The option types share the new `ChangelogReadOptions`.
 - A cached changelog from `getSeed` is read again when any of the seed's live Versions changes. It depended only on the Versions its entries named, so with `since` set, a patch to an older Version left the cached changelog in place.
-- `queryBySchema` and `queryBySchemaForMonth` list Seeds under the model's schema UID (`bytes32 <easName>`, zero resolver, revocable) instead of any schema carrying the name (ADR 0035). A schema someone else named the same no longer adds its attestations, and `BlogPost` lists the same Seeds as `blog_post`.
 - `QueryModels` accepts a `SchemaFileFormat['models']` from `@seedprotocol/sdk` with no cast, as its JSDoc said. It failed to compile (TS2559): every field of its property type was optional and shared none with a schema file's.
-- An unfilled reference slot (a relation value below 2^32 that the publisher's `multiPublish` never filled) is left out of changelog entries and `getSeedAttestations`, as records leave it out: a relation holding one is absent and a list drops it. A changelog showed the placeholder as a value change, and `getSeedAttestations` returned it as a related seed uid.
-- `readSeedAtTime` reads by the rule `getSeedAttestations({ asOf })` uses: it reads a uid in any case, throws a `RangeError` for an `asOf` that isn't finite, returns undefined for a seed created after `asOf`, and lists only the Versions made by then. It starts the query platform as the other reads do, with the one-copy check. It was case-sensitive, returned a seed before it existed and Versions after `asOf`, and threw `QueryClient not configured` in a fresh process.
+- An unfilled reference slot (a non-zero relation value below 2^32 that the publisher's `multiPublish` never filled) is left out of changelog entries and `getSeedAttestations`, as records leave it out: a relation holding one is absent and a list drops it. A changelog showed the placeholder as a value change, and `getSeedAttestations` returned it as a related seed uid.
 - `hydrateArweaveRichTextInItems` leaves the link in place when the body is an encrypted envelope (ADR 0033) that no read transform decrypted.
-
 - `@seedprotocol/query/ens` reads ENS names through a viem client you pass in (ADR 0032, [docs/ENS.md](../../docs/ENS.md)). `getSeedPublication` reads the `io.seedprotocol.publication` text record (JSON: `schema`, `publisher`, `feed`, `chainId`) and the contenthash, and returns the `schemaName` and `publisher` to pass to `queryBySchema`. `getEnsContenthash` and `decodeContenthash` decode EIP-1577 contenthashes for IPFS, IPNS, Swarm and Arweave. `getEnsNames` maps attester addresses to primary names. Wildcard names and CCIP-Read resolvers work through the Universal Resolver. viem and `multiformats` are now dependencies; the package root doesn't import them.
 
 ### Commits
+
+#### Breaking
+
+- eas, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
+- eas, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
 
 #### Features
 
@@ -34,9 +38,6 @@ All notable changes to this package are documented in this file.
 #### Fixes
 
 - read an unread Arweave body again on a cache hit (0c4822d2)
-- eas, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
-- eas, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
-- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

@@ -35,14 +35,14 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0023](0023-sealed-versions.md) | An owner can seal a Version; revoking a sealed value still removes it | Proposed |
 | [0024](0024-raw-tcp-tunnel-mode.md) | gateway-hyper carries raw TCP as a second protocol, on its own key | Accepted |
 | [0025](0025-gateway-neutral-html-links.md) | Published Html names one gateway; every Seed reader re-hosts its links | Accepted |
-| [0026](0026-statement-and-blob-stores.md) | Seeds publish through statement and blob stores, and link across stores through proxy Seeds | Proposed |
+| [0026](0026-statement-and-blob-stores.md) | Seeds publish through statement and blob stores, and link across stores through proxy Seeds | Accepted (blob stores; no StatementStore code yet) |
 | [0027](0027-publish-depends-on-wallet-interfaces.md) | Core publish depends on wallet interfaces and standard RPC, not vendor SDKs | Accepted |
 | [0028](0028-reproducible-bag-format.md) | A reproducible bag's bytes are a versioned format | Proposed |
 | [0029](0029-bag-anchor-attestation.md) | A bag is anchored by its own attestation on the Version | Proposed |
 | [0030](0030-attestation-sends-are-journaled.md) | Attestation sends are journaled, and UserOps pin their nonce | Accepted |
 | [0031](0031-archive-is-an-add-on-over-the-sdk.md) | Archive is an add-on over the SDK | Accepted |
 | [0032](0032-ens-reads-live-in-query.md) | ENS reads live in query, behind its `ens` subpath | Accepted |
-| [0033](0033-private-versions-encrypt-at-the-boundary.md) | Private Versions encrypt at the publish and read boundaries; access can only be withheld going forward | Proposed |
+| [0033](0033-private-versions-encrypt-at-the-boundary.md) | Private Versions encrypt at the publish and read boundaries; access can only be withheld going forward | Accepted (encryption not on npm) |
 | [0034](0034-license-terms-and-terms-hash.md) | License terms are a closed ODRL profile identified by termsHash | Accepted |
 | [0035](0035-any-wallet-registers-schemas.md) | Any wallet registers schemas; readers identify them by UID | Accepted |
 | [0036](0036-a-publish-splits-across-transactions.md) | A publish too large for one transaction goes out in several, and a new publish replaces a parked one | Accepted |

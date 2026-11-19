@@ -1,6 +1,7 @@
 # 0026. Seeds publish through statement and blob stores, and link across stores through proxy Seeds
 
-- **Status:** Proposed
+- **Status:** Accepted for the blob half: `BlobStore` and `BlobSource` shipped in 0.8.2.
+  `StatementStore` and the proxy Seeds have no code yet.
 - **Date:** 2026-10-27
 - **Scope:** `@seedprotocol/sdk` (publish payload, sync, uid checks, ownership, relations),
   `@seedprotocol/publish` (attestation strategies, uploads, verification), `@seedprotocol/eas`,

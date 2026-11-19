@@ -4,11 +4,11 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
+- **Breaking:** `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
 
 ## 0.8.2 (2026-11-09)
 
-- Reads pick schemas by UID, never by an attested name (ADR 0035). Anyone can attach any name to any schema, and anyone can register a Seed definition again with a resolver; OP Sepolia already has two schemas named `image`.
+- **Breaking:** Reads pick schemas by UID, never by an attested name (ADR 0035). Anyone can attach any name to any schema, and anyone can register a Seed definition again with a resolver; OP Sepolia already has two schemas named `image`.
   - New `seedSchemaUid(definition)`: the UID Seed registers a definition under (zero resolver, revocable), the same on every chain. New `seedSchemaModelName(schemaUid, definition)` and `withSeedSchemaNames(seeds)`.
   - `getSeedsBySchemaName(name)` lists attestations under `seedSchemaUid('bytes32 ' + easName(name))`. It matched schemas carrying that name, so a schema someone else named `post` was listed with Seed's. `BlogPost` and `blog_post` now list the same Seeds.
   - `getPublishedByFromEas`, `getPublishAuthorizationFromEas` and `getDomainOwnershipFromEas` without `schemaUid` filter by the UID of their definition instead of the schema name.
@@ -20,6 +20,10 @@ All notable changes to this package are documented in this file.
 
 ### Commits
 
+#### Breaking
+
+- query, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
+
 #### Features
 
 - encryption, publish: bind encryption keys to the account; make the EOA stanza opt-in (74e59a83)
@@ -28,9 +32,7 @@ All notable changes to this package are documented in this file.
 
 #### Fixes
 
-- query, sdk, publish: identify schemas by definition-derived UID, not by name (63610e20)
 - query, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
-- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 
