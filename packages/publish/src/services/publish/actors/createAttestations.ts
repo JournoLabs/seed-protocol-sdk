@@ -13,9 +13,10 @@ import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
-import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
+import { AttestationPartsError, AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
-import { estimatePublishGas, publishGasLimit } from '~/helpers/publishGas'
+import { estimatePublishGas, publishGasCeiling, publishGasLimit } from '~/helpers/publishGas'
+import { fitPublishPart, partRequests, publishUnits } from '~/helpers/publishParts'
 import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
 import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
@@ -96,8 +97,11 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
 }
 
 type CreateAttestationsResult = {
+  /** Every part's requests, in the order they were sent. */
   easPayload: unknown
   publishedBatch: PublishMachineContext['publishedBatch']
+  /** The parts this run recorded, earlier attempts included. */
+  attestationPartsRecorded: number
 }
 
 export const createAttestations = fromPromise(
@@ -267,9 +271,42 @@ export async function resolveMultiPublishSender(source: {
   }
 }
 
+/** A `multiPublish` of this run, recorded. */
+type RecordedPart = {
+  receipt: TransactionReceipt
+  /** The part's requests with the seed and version uids it created filled in. */
+  requests: any[]
+  attributed: Awaited<ReturnType<typeof recordMultiPublishReceipt>>['attributed']
+}
+
+const heldRoot = (requests: unknown[], seedLocalId: string) =>
+  requests.some((r) => (r as { localId?: string } | undefined)?.localId === seedLocalId)
+
 async function executeCreateAttestations(
   context: PublishMachineContext,
   loaded: IItem<any>[],
+): Promise<CreateAttestationsResult> {
+  const partsBefore = context.attestationPartsRecorded ?? 0
+  const parts: RecordedPart[] = []
+  try {
+    return await sendParts(context, loaded, parts)
+  } catch (err) {
+    // The machine keeps the count of recorded parts for a retry's nonce key (ADR 0036).
+    if (parts.length > 0) throw new AttestationPartsError(partsBefore + parts.length, err)
+    throw err
+  }
+}
+
+/**
+ * Sends the publish as one `multiPublish` per part (ADR 0036): rebuild the payload from the rows,
+ * cut the longest prefix of units that fits, send it, record it, and repeat until the part that
+ * held the root is recorded. Recorded seeds are published, so each rebuilt payload holds only what
+ * is left and references earlier parts by uid. `parts` collects what this call recorded.
+ */
+async function sendParts(
+  context: PublishMachineContext,
+  loaded: IItem<any>[],
+  parts: RecordedPart[],
 ): Promise<CreateAttestationsResult> {
     const { address } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
@@ -298,13 +335,16 @@ async function executeCreateAttestations(
       item = await waitForItem(item.seedLocalId)
       loaded.push(item)
     }
+    const partsBefore = context.attestationPartsRecorded ?? 0
+    const finish = () => finishAttested(context, item, parts, partsBefore + parts.length)
 
-    // The transaction landed and recording it failed: repeat the record from its receipt. A retry
-    // that reached the send would attest everything a second time.
+    // A part landed and recording it failed: repeat the record from its receipt. A retry that
+    // reached the send would attest it a second time.
     const unrecorded = context.unrecordedAttestation
     if (unrecorded) {
       const receipt = await waitForPublishReceipt(unrecorded.transactionHash)
-      return recordAttested(context, item, receipt, unrecorded, unrecorded.requests)
+      parts.push(await recordPart(context, item, receipt, unrecorded))
+      if (heldRoot(unrecorded.requests, item.seedLocalId)) return finish()
     }
 
     const txCount = arweaveTransactions.length
@@ -332,88 +372,115 @@ async function executeCreateAttestations(
 
     await getBlobStore().assertStored(uploadDataWithTxIds.map((u) => u.txId))
 
-    // The contract creates every seed before it attests any property, so a relation back to an item
-    // this publish creates is filled now rather than left for a later publish.
-    const requestData = await (
-      item.getPublishPayload as (
-        uploads: typeof uploadDataWithTxIds,
-        opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
-      ) => ReturnType<typeof item.getPublishPayload>
-    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
-
-    const reqs = Array.isArray(requestData) ? requestData : [requestData]
-
-    const { sendMultiPublish, attesterAddress } = await resolveMultiPublishSender({
+    const { sendMultiPublish, attesterAddress, estimateMultiPublish } = await resolveMultiPublishSender({
       address: address as Address,
       wallet: context.wallet,
       account: context.account,
     })
 
-    // One transaction for the whole graph: the contract creates every seed before it attests any
-    // property, so a reference in any direction is filled with its seed uid (encodeMultiPublish).
-    const normalizedRequests = reqs.map((req: any) => normalizePublishRequest(req))
-    const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-    const result = await sendMultiPublish(payloadForContract, (send, sender) =>
-      sendAttested({
-        publishRunId: context.publishRunId,
-        seedLocalId: item.seedLocalId,
-        requests: payloadForContract,
-        sender,
+    let resumeAttemptId = context.resumeAttemptId
+    let lastSent: string | undefined
+    for (;;) {
+      // The contract creates every seed of a part before it attests any property, so a relation
+      // back to an item in the same part is filled now rather than left for a later publish.
+      const requestData = await (
+        item.getPublishPayload as (
+          uploads: typeof uploadDataWithTxIds,
+          opts?: { publishMode?: 'patch' | 'new_version'; backReferences?: 'link' | 'defer' },
+        ) => ReturnType<typeof item.getPublishPayload>
+      )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
+      const reqs = Array.isArray(requestData) ? requestData : [requestData]
+      const units = publishUnits(reqs.map((req: any) => normalizePublishRequest(req)))
+
+      const count = units.length === 0 ? 0 : await fitPublishPart(units, estimateMultiPublish, await publishGasCeiling())
+      const part = partRequests(units, count)
+      const serialized = JSON.stringify(part, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
+      if (serialized === lastSent) {
+        // Recording a part publishes its seeds, so the rebuilt payload can't hold the same part.
+        throw new Error(
+          'The rebuilt publish payload repeats the part just recorded; nothing more was sent. Retry the publish.',
+        )
+      }
+      lastSent = serialized
+
+      const result = await sendMultiPublish(part, (send, sender) =>
+        sendAttested({
+          publishRunId: context.publishRunId,
+          seedLocalId: item.seedLocalId,
+          requests: part,
+          sender,
+          attester: attesterAddress,
+          send,
+          resumeAttemptId,
+          hostNonceKey: context.nonceKey,
+        }),
+      )
+      // Reconcile's resume names the first send only.
+      resumeAttemptId = undefined
+
+      const receipt = await waitForAttemptReceipt(result.attemptId, result.transactionHash)
+      if (!receipt) {
+        throw new Error('Failed to send transaction')
+      }
+
+      const landed: UnrecordedAttestation = {
+        attemptId: result.attemptId,
+        transactionHash: result.transactionHash,
+        requests: part,
         attester: attesterAddress,
-        send,
-        resumeAttemptId: context.resumeAttemptId,
-        hostNonceKey: context.nonceKey,
-      }),
-    )
-
-    const receipt = await waitForAttemptReceipt(result.attemptId, result.transactionHash)
-    if (!receipt) {
-      throw new Error('Failed to send transaction')
+      }
+      parts.push(await recordPart(context, item, receipt, landed))
+      if (heldRoot(part, item.seedLocalId) || count === units.length) return finish()
     }
-
-    const landed: UnrecordedAttestation = {
-      attemptId: result.attemptId,
-      transactionHash: result.transactionHash,
-      requests: payloadForContract,
-      attester: attesterAddress,
-    }
-    return recordAttested(context, item, receipt, landed, requestData)
 }
 
-/** Records a landed `multiPublish`, from its receipt, and finishes the publish. */
-async function recordAttested(
+/**
+ * Records one landed part from its receipt: every request in it records its own seed, version and
+ * property uids. The root's seed uid and the publish's cleanup wait for {@link finishAttested}.
+ */
+async function recordPart(
   context: PublishMachineContext,
   item: IItem<any>,
   receipt: TransactionReceipt,
   landed: UnrecordedAttestation,
-  easPayload: unknown,
+): Promise<RecordedPart> {
+  const { requests, attributed } = await recordMultiPublishReceipt({
+    receipt,
+    requests: landed.requests as Parameters<typeof recordMultiPublishReceipt>[0]['requests'],
+    rootSeedLocalId: item.seedLocalId,
+    publisherAddress: context.address as string,
+    attester: landed.attester,
+    attemptId: landed.attemptId,
+  }).catch((err) => {
+    throw new AttestationRecordError(landed, err)
+  })
+  return { receipt, requests, attributed }
+}
+
+/** Finishes the publish once the root's part is recorded: the root's seed uid, cleanup, the batch. */
+async function finishAttested(
+  context: PublishMachineContext,
+  item: IItem<any>,
+  parts: RecordedPart[],
+  attestationPartsRecorded: number,
 ): Promise<CreateAttestationsResult> {
     const address = context.address as string
-
-    // Every request in the transaction (the item and the related items published with it)
-    // records its own seed, version and property uids.
-    const { requests: effectiveRequests, attributed } = await recordMultiPublishReceipt({
-      receipt,
-      requests: landed.requests as Parameters<typeof recordMultiPublishReceipt>[0]['requests'],
-      rootSeedLocalId: item.seedLocalId,
-      publisherAddress: address,
-      attester: landed.attester,
-      attemptId: landed.attemptId,
-    }).catch((err) => {
-      throw new AttestationRecordError(landed, err)
-    })
+    const effectiveRequests = parts.flatMap((p) => p.requests)
+    const attributed = parts.flatMap((p) => p.attributed)
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)
     const itemWithPersist = item as {
       persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
     }
+    const rootPart = parts.find((p) => heldRoot(p.requests, item.seedLocalId)) ?? parts[parts.length - 1]
     const rootRequest = effectiveRequests.find((r) => r?.localId === item.seedLocalId)
     const rootSeedUid = rootRequest?.seedUid
-    if (rootSeedUid && rootSeedUid !== ZERO_BYTES32) {
-      const seedAttMs = await attestationMsFromReceipt(receipt)
+    if (rootSeedUid && rootSeedUid !== ZERO_BYTES32 && rootPart) {
+      const seedAttMs = await attestationMsFromReceipt(rootPart.receipt)
       await persistSeedUidSafely(itemWithPersist, address, seedAttMs)
     }
 
+    const easPayload = effectiveRequests
     logger('easPayload', easPayload)
 
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
@@ -444,5 +511,5 @@ async function recordAttested(
         })
       : null
 
-    return { easPayload, publishedBatch }
+    return { easPayload, publishedBatch, attestationPartsRecorded }
 }

@@ -221,6 +221,21 @@ export class AttestationRecordError extends Error {
 }
 
 /**
+ * Internal to the publish machine: carries how many parts of a split publish (ADR 0036) the run has
+ * recorded out of a failed `createAttestations`. The machine stores `partsRecorded` and keeps
+ * `cause` as the publish's error, so hosts never see this class.
+ */
+export class AttestationPartsError extends Error {
+  constructor(
+    public readonly partsRecorded: number,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'AttestationPartsError'
+  }
+}
+
+/**
  * True when `e` is a managed-account publish error. Uses `name` + `code` as a fallback
  * when `instanceof` fails across duplicate bundled class identities.
  */

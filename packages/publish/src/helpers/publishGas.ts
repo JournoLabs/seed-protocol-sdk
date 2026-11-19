@@ -22,12 +22,12 @@ const lower = (a: bigint, b: bigint) => (a < b ? a : b)
  * that is lower. A failed block read keeps the configured limit.
  */
 export async function publishGasCeiling(): Promise<bigint> {
-  const blockGasLimit = await getPublishPublicClient()
-    .getBlock()
-    .then(
-      (block) => block.gasLimit,
-      () => undefined,
-    )
+  let blockGasLimit: bigint | undefined
+  try {
+    blockGasLimit = (await getPublishPublicClient().getBlock()).gasLimit
+  } catch {
+    blockGasLimit = undefined
+  }
   return blockGasLimit === undefined ? maxPublishGas() : lower(maxPublishGas(), blockGasLimit)
 }
 
@@ -37,9 +37,8 @@ export async function publishGasCeiling(): Promise<bigint> {
  * the L1 data fee up front, as in simulateCallFromAccount.
  */
 export async function estimatePublishGas(from: string, tx: SeedTxRequest): Promise<bigint | undefined> {
-  const client = getPublishPublicClient()
   const estimate = (withBalance: boolean) =>
-    client.estimateGas({
+    getPublishPublicClient().estimateGas({
       account: from as Address,
       to: tx.to,
       data: tx.data,

@@ -125,6 +125,11 @@ export interface PublishMachineContext {
   confirmUpload?: boolean
   /** A `multiPublish` that landed and failed to record: a retry records it instead of sending. */
   unrecordedAttestation?: UnrecordedAttestation
+  /**
+   * The `multiPublish` parts this run has recorded (ADR 0036). Part *k* sends under the *k*th key
+   * derived from {@link nonceKey}. Saved with the publish.
+   */
+  attestationPartsRecorded?: number
   /** CreatePublishOptions.nonceKey: the host's id that the attestation nonce key comes from. */
   nonceKey?: string
   /** An attempt reconcile found not landed: the next send repeats it under its nonce key. */

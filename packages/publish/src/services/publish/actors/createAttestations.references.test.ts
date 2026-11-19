@@ -106,7 +106,13 @@ mock.module('../../../helpers/resolvePublishWallet', () => ({
 }))
 const assertMultiPublishRouted = mock(async (_target: string, _opts: { executorModule: boolean }) => {})
 mock.module('../../../helpers/multiPublishRoute', () => ({ assertMultiPublishRouted }))
-mock.module('../../../helpers/publishGas', () => ({ publishGasLimit: async () => 1_234_567n }))
+const realPublishGas = await import('../../../helpers/publishGas')
+mock.module('../../../helpers/publishGas', () => ({
+  ...realPublishGas,
+  publishGasLimit: async () => 1_234_567n,
+  publishGasCeiling: async () => 16_000_000n,
+  estimatePublishGas: async () => undefined,
+}))
 mock.module('../../arweaveL1Finalize/enqueue', () => ({
   enqueueArweaveL1FinalizeJobsFromPublishContext: async () => {},
 }))
