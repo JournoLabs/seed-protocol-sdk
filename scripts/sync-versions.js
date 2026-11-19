@@ -30,6 +30,7 @@ const SYNC_PACKAGES = [
   'rdf',
   'ipfs',
   'licensing',
+  'mcp',
   // Private, but published manifests list it in devDependencies (workspace refs become this version).
   'bundler-core',
 ]

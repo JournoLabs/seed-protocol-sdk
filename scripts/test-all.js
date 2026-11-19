@@ -22,6 +22,7 @@ export const PACKAGE_TESTS = [
   '@seedprotocol/vite',
   '@seedprotocol/query',
   '@seedprotocol/rdf',
+  '@seedprotocol/mcp',
   '@seedprotocol/eas',
   '@seedprotocol/arweave',
   '@seedprotocol/feed-hyper',

@@ -1,0 +1,68 @@
+{
+  "name": "@seedprotocol/mcp",
+  "version": "0.8.2",
+  "description": "MCP server that lets LLM agents read published Seed Protocol content from EAS attestations and Arweave, with each item's attester and attestation UIDs",
+  "keywords": [
+    "seed-protocol",
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "agents",
+    "eas",
+    "arweave"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "bin": {
+    "seed-mcp": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build && node ../../scripts/fix-dts-specifiers.js",
+    "test": "vitest run --reporter=default",
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js && node ../../scripts/check-publish-manifest.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@seedprotocol/feed": "workspace:*",
+    "@seedprotocol/query": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
