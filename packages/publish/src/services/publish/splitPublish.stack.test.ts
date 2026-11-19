@@ -184,7 +184,11 @@ describe('a split publish on the AA stack', () => {
     const { estimateMultiPublish } = await resolveMultiPublishSender({ address: publisher, wallet })
     const units = publishUnits(draftGraph('b', 5))
     expect(units).toHaveLength(6)
-    const gasOf = async (count: number) => (await estimateMultiPublish(partRequests(units, count)))!
+    const gasOf = async (count: number) => {
+      const gas = await estimateMultiPublish(partRequests(units, count))
+      if (typeof gas !== 'bigint') throw new Error(`no gas estimate for ${count} authors: ${gas}`)
+      return gas
+    }
     const threeAuthors = await gasOf(3)
     const fourAuthors = await gasOf(4)
     expect(fourAuthors).toBeGreaterThan(threeAuthors)

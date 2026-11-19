@@ -15,7 +15,7 @@ import {
 } from '~/helpers/executorModuleReadiness'
 import { AttestationRecordError, ManagedAccountPublishError } from '~/errors'
 import { explainUserOpError } from '~/helpers/describeRevert'
-import { estimatePublishGas, publishGasCeiling, publishGasLimit } from '~/helpers/publishGas'
+import { estimatePublishGas, publishGasCeiling, publishGasLimit, type PublishGasEstimate } from '~/helpers/publishGas'
 import { fitPublishPart, partRequests, publishUnits } from '~/helpers/publishParts'
 import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { assertPublishFits, localPublishGas } from '~/helpers/publishSize'
@@ -142,7 +142,7 @@ export async function resolveMultiPublishSender(source: {
   sendMultiPublish: SendMultiPublish
   attesterAddress: string
   /** The gas `requests` need on this route, with headroom; `undefined` when it can't be estimated. */
-  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>
+  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<PublishGasEstimate>
 }> {
   const { address } = source
   const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
@@ -442,7 +442,7 @@ async function nextPart(
   item: IItem<any>,
   uploads: Array<PublishUpload & { txId: string }>,
   context: PublishMachineContext,
-  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<bigint | undefined>,
+  estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<PublishGasEstimate>,
 ): Promise<{ part: MultiPublishRequest[]; isWhole: boolean }> {
   // The contract creates every seed of a part before it attests any property, so a relation
   // back to an item in the same part is filled now rather than left for a later publish.

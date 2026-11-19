@@ -31,6 +31,11 @@ describe('fitPublishPart', () => {
     expect(await fitPublishPart(units, async () => undefined, 10_000_000n)).toBe(8)
   })
 
+  test('a prefix over the node gas cap does not fit', async () => {
+    const estimate = async (requests: MultiPublishRequest[]) => (requests.length > 3 ? ('over_cap' as const) : 1_000_000n)
+    expect(await fitPublishPart(units, estimate, 10_000_000n)).toBe(3)
+  })
+
   test('one unit over the ceiling refuses', async () => {
     await expect(fitPublishPart(units, async () => 20_000_000n, 10_000_000n)).rejects.toMatchObject({
       code: 'PUBLISH_TOO_LARGE',
