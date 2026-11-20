@@ -56,7 +56,7 @@
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
-    "drizzle-orm": "^0.44.3",
+    "drizzle-orm": "^0.45.4",
     "ethers": "^6.14.0",
     "permissionless": "^0.4.0",
     "rdapper": "^0.13.0",

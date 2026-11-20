@@ -44,7 +44,7 @@
     "@seedprotocol/query": "workspace:*",
     "debug": "^4.4.1",
     "feedsmith": "^2.9.0",
-    "image-size": "^1.1.1",
+    "image-size": "^2.1.0",
     "pluralize": "^8.0.0",
     "rss-parser": "^3.13.0",
     "turndown": "7.2.0",

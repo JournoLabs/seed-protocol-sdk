@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Depends on `drizzle-orm` `^0.45.4` (was `^0.44.3`). Versions before 0.45.2 wrote names passed to `sql.identifier()` and `sql.as()` into SQL unescaped (CWE-89). An app that also imports `drizzle-orm` should move to 0.45 so both use one copy.
 - `resolveMediaRef` resolves a transaction this device holds only as an unopened `seed-private/v1` envelope to `{ status: 'unresolved', reason: 'encrypted' }`. It returned a gateway link, which served the ciphertext. `useResolvedMediaRef` reports `unresolved` for it.
 - **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
 - **Breaking:** The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.

@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Depends on `image-size` `^2.1.0` (was `^1.1.1`). Versions up to 2.0.2 loop forever on a crafted ICNS file; a feed reads the first 8 KB of each Arweave image to size it.
 - `itemMarkdown(record, { url, license })` renders a record as Markdown for agents: YAML front matter with its title, seed UID, version UID, attester, schema, creation time, authors, summary, URL and licence, then the body converted from HTML. `htmlToMarkdown` is the converter on its own: it drops scripts and styles, keeps tables as HTML and replaces `data:` images with their alt text. New dependency: `turndown`.
 - `llmsTxt` writes an `llms.txt` index of a publication, and `llmsTxtItemLinks` turns records into its links. See `docs/AGENT_READABLE.md`.
 

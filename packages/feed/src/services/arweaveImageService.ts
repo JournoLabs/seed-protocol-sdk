@@ -5,7 +5,7 @@ import {
   recordGatewayHostFailure,
   recordGatewayHostSuccess,
 } from '@seedprotocol/arweave'
-import sizeOf from 'image-size'
+import { imageSize } from 'image-size'
 import type { ImageMetadata } from '../types'
 
 export interface ArweaveImageServiceConfig {
@@ -167,7 +167,7 @@ export class ArweaveImageService {
     _contentType: string
   ): { width: number; height: number } {
     try {
-      const dimensions = sizeOf(buffer)
+      const dimensions = imageSize(buffer)
       if (dimensions.width && dimensions.height) {
         return {
           width: dimensions.width,
@@ -204,7 +204,7 @@ export class ArweaveImageService {
 
     // Try to detect from buffer magic bytes
     try {
-      const dimensions = sizeOf(buffer)
+      const dimensions = imageSize(buffer)
       if (dimensions.type) {
         return dimensions.type.toLowerCase()
       }
