@@ -4,6 +4,10 @@ import {
   ARCHIVE_ANCHOR_SCHEMA_UID,
   ENCRYPTION_KEY_SCHEMA_DEF,
   ENCRYPTION_KEY_SCHEMA_UID,
+  INCLUSION_SCHEMA_DEF,
+  INCLUSION_SCHEMA_UID,
+  STAFF_SCHEMA_DEF,
+  STAFF_SCHEMA_UID,
   VERSION_SCHEMA_DEF,
   VERSION_SCHEMA_UID,
 } from '../src/constants.js'
@@ -22,6 +26,14 @@ describe('seedSchemaUid', () => {
     [DOMAIN_OWNERSHIP_SCHEMA_DEF, '0x3c78a221b5a06b61155981a4cdd50556ddf71452dd26d59512163219c18f1e2a'],
     [PUBLISH_AUTHORIZATION_SCHEMA_DEF, '0x04d3bf31bb5c07640f222023ee63b37769a966fc1500e96543ea72fb45b28a19'],
     ['bytes32 image', '0x5442a1004fe4152a06ed806367a989942f7051bad21bbed5b98d855509f79aed'],
+  ])('%s', (definition, uid) => {
+    expect(seedSchemaUid(definition)).toBe(uid)
+  })
+
+  // Not registered on any chain yet; the UID follows from the definition alone.
+  it.each([
+    [INCLUSION_SCHEMA_DEF, INCLUSION_SCHEMA_UID],
+    [STAFF_SCHEMA_DEF, STAFF_SCHEMA_UID],
   ])('%s', (definition, uid) => {
     expect(seedSchemaUid(definition)).toBe(uid)
   })

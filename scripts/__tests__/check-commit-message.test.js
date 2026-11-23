@@ -44,8 +44,10 @@ describe('checkCommitMessage', () => {
     'squash! feat: x',
     'amend! feat: x',
     'chore(release): v0.8.3',
+    'chore: release 0.8.3',
+    'chore: release 0.8.3 (retry changelog)',
   ]) {
-    it(`skips "${subject.split(' ')[0]}" commits`, () => {
+    it(`skips "${subject}" commits`, () => {
       const r = checkCommitMessage(`${subject}\n`)
       assert.equal(r.ok, true)
       assert.equal(r.skipped, true)

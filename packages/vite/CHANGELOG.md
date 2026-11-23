@@ -1,9 +1,15 @@
 # @seedprotocol/vite
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - The RDF sidecar check finds `@seedprotocol/rdf` installed while the dev server runs on Node 24.21. It looks for `node_modules/@seedprotocol/rdf` at or above the root on disk and imports its entry by file URL; Node 24.21's resolver kept failing a lookup that failed once in the process. Layouts without `node_modules` (Yarn PnP) still go through the resolver.
 - The check reads a schema file without ids against the ids the SDK derives from its names, given an `@seedprotocol/rdf` with that change. It warned that the sidecar was for another schema.
+
+### Commits
+
+#### Fixes
+
+- rdf: schema files without ids, rdf found after install, zero refs, exit 3 (d446e29e)
 
 ## 0.8.2 (2026-11-09)
 

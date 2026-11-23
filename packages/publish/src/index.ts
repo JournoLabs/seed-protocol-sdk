@@ -65,6 +65,7 @@ export {
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
   EncryptionKeySchemaNotRegisteredError,
+  PairSchemaNotRegisteredError,
   type ArchiveAnchorResume,
   EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
@@ -315,3 +316,4 @@ export {
 } from './services/publishedBy/public'
 export * from './services/archiveAnchor/public'
 export * from './services/encryptionKey/public'
+export * from './services/pairs/public'

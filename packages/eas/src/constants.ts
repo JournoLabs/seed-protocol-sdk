@@ -50,3 +50,34 @@ export const ENCRYPTION_KEY_SCHEMA_UID =
 
 /** Schema #1 display name for {@link ENCRYPTION_KEY_SCHEMA_DEF}. */
 export const ENCRYPTION_KEY_SCHEMA_NAME = 'seedprotocol.encryptionKey'
+
+/**
+ * Schema of an Inclusion half: a post in a publication, agreed by both sides. The post seed's
+ * attester attests the author half, with `version` zero; the publication seed's attester attests
+ * the owner half, naming the Version of the post it pins. The answering half's refUID is the half
+ * it answers. Each half's recipient is the other side's seed attester. Revocable, zero resolver,
+ * like {@link VERSION_SCHEMA_DEF}.
+ */
+export const INCLUSION_SCHEMA_DEF = 'bytes32 publication,bytes32 post,bytes32 version'
+
+/** UID of {@link INCLUSION_SCHEMA_DEF}, the same on every chain. */
+export const INCLUSION_SCHEMA_UID =
+  '0xdd4e2a8d82fe9c59c2689e1db140eb4495266ffe92f26fed5584be1946735f9e'
+
+/** Schema #1 display name for {@link INCLUSION_SCHEMA_DEF}. */
+export const INCLUSION_SCHEMA_NAME = 'seedprotocol.inclusion'
+
+/**
+ * Schema of a Staff half: an identity named in a publication, agreed by both sides. The
+ * publication seed's attester asks with the owner half (refUID zero); the identity seed's attester
+ * answers with the person half, whose refUID is the owner half. Each half's recipient is the other
+ * side's seed attester. Revocable, zero resolver, like {@link VERSION_SCHEMA_DEF}.
+ */
+export const STAFF_SCHEMA_DEF = 'bytes32 publication,bytes32 identity'
+
+/** UID of {@link STAFF_SCHEMA_DEF}, the same on every chain. */
+export const STAFF_SCHEMA_UID =
+  '0x6948399be475f129d27e04ffcbb486132ed980fd2b6bcf2214b61d22e89b4d77'
+
+/** Schema #1 display name for {@link STAFF_SCHEMA_DEF}. */
+export const STAFF_SCHEMA_NAME = 'seedprotocol.staff'

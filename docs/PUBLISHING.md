@@ -419,6 +419,37 @@ initPublish({
 
 Allowlist clients: filter non-revoked PublishedBy rows by the known tool attester, then treat only the listed UIDs (or a matching `batchHash`) as tool-endorsed — later author patches outside that batch are not covered.
 
+## Inclusion and Staff halves
+
+An Inclusion puts a post in a publication; Staff names an identity in a publication. Both need the two sides to agree, so each side attests its own half under the same schema, and either side ends the pair by revoking its half. Which half a record is follows from its attester.
+
+| Schema | Definition | Half | Attested by | `refUID` |
+|--------|------------|------|-------------|----------|
+| `seedprotocol.inclusion` | `bytes32 publication,bytes32 post,bytes32 version` | author | the post seed's attester; `version` is zero | the owner half it answers, or zero (an offer) |
+| | | owner | the publication seed's attester; `version` is the Version of the post it pins | the author half it answers or updates, or zero (an ask) |
+| `seedprotocol.staff` | `bytes32 publication,bytes32 identity` | owner | the publication seed's attester | zero (an ask) |
+| | | person | the identity seed's attester | the owner half it answers |
+
+Both are revocable with the zero resolver; `INCLUSION_SCHEMA_UID` and `STAFF_SCHEMA_UID` in `@seedprotocol/eas` are the same on every chain. Every half's `recipient` is the attester of the other side's seed, so a party's waiting halves can be found by recipient.
+
+### APIs (`@seedprotocol/publish`)
+
+- `ensureInclusionSchema(wallet)` / `ensureStaffSchema(wallet)`: register and name the schema once per chain, from any wallet that isn't a session key.
+- `attestInclusionHalf({ wallet, half: 'author', publicationUid, postUid, refUid? })`
+- `attestInclusionHalf({ wallet, half: 'owner', publicationUid, postUid, versionUid, refUid? })`
+- `attestStaffHalf({ wallet, half: 'owner', publicationUid, identityUid })`
+- `attestStaffHalf({ wallet, half: 'person', publicationUid, identityUid, refUid })`
+- `revokeInclusionHalf({ wallet, uid })` / `revokeStaffHalf({ wallet, uid })`: only the half's attester can revoke it.
+
+The attest helpers read the seeds, the Version and the referenced half from the chain, and refuse before sending when:
+
+- the wallet doesn't send as the half's attester (an automation session key never does: send a ManagedAccount's half from the account itself);
+- both seeds have the same attester;
+- `versionUid` isn't a live Version of the post by the post seed's attester;
+- `refUid` isn't a live half of the same schema by the other side's attester, naming the same seeds.
+
+A missing schema throws `PairSchemaNotRegisteredError`. Each helper resolves to `{ uid, schemaUid, recipient, refUid }`.
+
 ## Revoking (Unpublishing)
 
 To revoke attestations and remove an item from feeds and discovery, call `item.unpublish()`. Revocation is permanent; see [ATTESTATION_REVOCATION.md](./ATTESTATION_REVOCATION.md) for permanence, UX guidance, and republishing.

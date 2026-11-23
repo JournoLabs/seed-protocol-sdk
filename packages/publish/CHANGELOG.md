@@ -2,8 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
+- New Inclusion and Staff half helpers (see docs/PUBLISHING.md): `ensureInclusionSchema`, `ensureStaffSchema`, `attestInclusionHalf`, `attestStaffHalf`, `revokeInclusionHalf`, `revokeStaffHalf`, `encodeInclusionData`, `encodeStaffData`, and `PairSchemaNotRegisteredError` (code `PAIR_SCHEMA_NOT_REGISTERED`). A half's `recipient` is the other side's seed attester and its `refUID` the half it answers. The attest helpers read the seeds, the pinned Version and the referenced half from the chain and refuse before sending when the wallet isn't the half's attester, both seeds share an attester, the Version isn't a live Version of the post by its attester, or the referenced half doesn't match.
 - Depends on `drizzle-orm` `^0.45.4` (was `^0.44.3`). Versions before 0.45.2 wrote names passed to `sql.identifier()` and `sql.as()` into SQL unescaped (CWE-89). An app that also imports `drizzle-orm` should move to 0.45 so both use one copy.
 - **Breaking:** Publishing a seed whose run in this tab waits in `attestationFailureRecoverable` or `attestationFailureRecoverableDirectToEas`, with no open attestation attempt, replaces that run instead of returning `already_publishing`: the old run is stopped and recorded `interrupted`, and the new one reuses its uploads where `itemPropertyLocalId` and content hash match and the blob store still holds them, and takes its `nonceKey` unless the host passes one, going on from the parts sent under that key; a different key, or none, starts at part 1. A run that a retry moved on before the replacement keeps running, and the Publish returns `already_publishing`. A Publish sent while restore runs waits for it, so a restored parked run is replaced too. Hosts that called `stopPublish` to get past a parked publish can drop that call.
 - **Breaking:** `startPublish` and `ensureWalletThenPublish` return the new outcome `attempt_open` when an attestation attempt for the seed is open, in any state; nothing starts. `PublishManager.createPublish` resolves `undefined` then, and `item.publish` rejects with a message naming `retryAttestations` and `settleAttestationAttempt`. New `PublishManager.publishBlocker(seedLocalId)` resolves `'none'`, `'running'`, `'parked'` or `'attempt_open'` (type `PublishBlocker`).
@@ -22,6 +23,32 @@ All notable changes to this project will be documented in this file.
 - New `resumesOnNextLoad(record)` says whether the next load resumes an in-progress publish row, by the rule the publish manager restores with: a publish saved mid bundler upload doesn't resume unless it had nothing to upload, and is marked `interrupted`. False for a finished or unreadable snapshot.
 - `estimateArchiveAnchorCost` with `rates` needs no `initPublish` under the default `tagPolicy: 'discoverable'`, as in 0.8.1; without a config the estimate has no `arweaveUploadTags`. It threw "Call initPublish() …".
 - `estimatePublishCost` leaves out references back to items the publish creates for a registered wallet whose publisher is an EOA without `useDirectEas`, which attests directly to EAS and defers them. It counted one attestation too many per back reference there. The default follows the route the publish takes, reading the publisher's account code once per estimate.
+
+### Commits
+
+#### Features
+
+- Publish replaces a parked run and reuses its uploads (f6838f6d)
+- refuse before uploads only when one unit is too large (2d3494c2)
+- derive a nonce key per part from a host nonceKey (90d78f15)
+- send a publish too large for one transaction as several parts (bfbc670f)
+- fit a publish part to the gas ceiling by RPC estimate (a62ed659)
+- cut a publish payload into dependency units and parts (689431ac)
+
+#### Fixes
+
+- giveUpPublish says why an open attempt keeps the run waiting (e652bc69)
+- treat "gas required exceeds allowance" as a part too large (c813c464)
+- fail a publish whose wallet ignored the host nonce key; restored error matching (81bfb2af)
+- resume a split publish from the attempt's stored requests (1145415c)
+- mapping, arweave, sdk: batch 17 Phase 5 (5df16a02)
+- count a split publish's parts from its recorded attempts (cd62989d)
+- maxBlocks on findPublishByNonceKey, anchor estimate without initPublish, EOA back references (813b0c0a)
+- refuse a publish too large for one transaction before uploading; export resumesOnNextLoad (8308dcfc)
+
+#### Other
+
+- split publishes across transactions (ADR 0036 accepted) (4b1b1b13)
 
 ## 0.8.2 (2026-11-09)
 
