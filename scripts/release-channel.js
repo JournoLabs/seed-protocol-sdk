@@ -36,7 +36,7 @@ export const PUBLISH_ORDER = [
 
 /**
  * Packages that have never been on npm. CI publishes with trusted publishing, which can't create
- * a package, so these stay out of PUBLISH_ORDER (publish, dist-tags, changelogs) until a
+ * a package, so these stay out of PUBLISH_ORDER (publish, dist-tags) until a
  * maintainer publishes them once by hand with `scripts/publish-package.js <name>` and adds their
  * trusted publishers (docs/RELEASING.md). Then move each one into PUBLISH_ORDER.
  */

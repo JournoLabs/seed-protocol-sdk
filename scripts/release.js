@@ -38,12 +38,19 @@ import {
   git,
   nextPatch,
   PUBLISH_ORDER,
+  AWAITING_FIRST_PUBLISH,
   releaseVersionProblems,
   remoteTagCommit,
   retryProblems,
 } from './release-channel.js'
 import { isVersionSyncFile, syncVersions } from './sync-versions.js'
 import { planReleaseChangelogs, writeReleaseChangelogs } from './changelog.js'
+
+/**
+ * AWAITING_FIRST_PUBLISH packages are version-synced and get published by hand at the released
+ * version, so their Unreleased notes move into its section too.
+ */
+const CHANGELOG_PACKAGES = [...PUBLISH_ORDER, ...AWAITING_FIRST_PUBLISH]
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MAIN_BRANCH = process.env.MAIN_BRANCH || 'main'
@@ -207,7 +214,7 @@ async function main() {
   // adds new sections for everything since the last release
   const changelogRange = args.retry ? (retriedTagCommit ? `${retriedTagCommit}..HEAD` : null) : range
   const changelogPlan = changelogRange
-    ? planReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range: changelogRange, extend: args.retry })
+    ? planReleaseChangelogs({ rootDir, packages: CHANGELOG_PACKAGES, version: target, date, range: changelogRange, extend: args.retry })
     : []
 
   console.log(`\n${args.retry ? 'Retry' : 'Release'} ${tag}`)
@@ -270,7 +277,7 @@ async function main() {
     // The commits after the failed release commit belong to this version: the next release's
     // changelog starts at the moved tag. Only CHANGELOG.md files change, and the tag run
     // repeats the tests on the tagged commit.
-    const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range: changelogRange, extend: true })
+    const changelogs = writeReleaseChangelogs({ rootDir, packages: CHANGELOG_PACKAGES, version: target, date, range: changelogRange, extend: true })
     if (changelogs.length > 0) {
       git(['add', '--', ...changelogs])
       git(['commit', '--quiet', '-m', `chore: release ${target} (retry changelog)`])
@@ -300,7 +307,7 @@ async function main() {
     throw new Error(`Version sync changed files other than package.json and the Claude plugin (${unexpected.join(', ')}); reverted.`)
   }
 
-  const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range })
+  const changelogs = writeReleaseChangelogs({ rootDir, packages: CHANGELOG_PACKAGES, version: target, date, range })
   if (changelogs.length > 0) git(['add', '--', ...changelogs])
   console.log(`\nChangelogs: ${changelogs.length > 0 ? changelogs.join(', ') : 'none changed'}`)
 
