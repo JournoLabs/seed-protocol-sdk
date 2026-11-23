@@ -31,6 +31,9 @@ there it answers as in a browser, for that process's publishes.
 `PublishManager.publishBlocker(seedLocalId)` tells another tab's publish apart by the state that tab
 last saved on the row: `'parked_in_other_tab'` when it waits after a failed attestation (ADR 0036),
 which is retried in that tab, and `'running_in_other_tab'` otherwise, including before its first save.
+`useItemPublishStatus` returns `heldBy`, the lock holder, and when it is `'other-tab'`, `publishValue`
+is that tab's saved state, so a publish parked there reads as waiting for a retry. The hook reads
+`heldBy` again when the row changes, not when the lock does.
 
 That lock names one seed, and an attestation transaction can cover several. The open rows in
 `publish_attempts` cover the rest: they are in the shared database, and the check and the insert are

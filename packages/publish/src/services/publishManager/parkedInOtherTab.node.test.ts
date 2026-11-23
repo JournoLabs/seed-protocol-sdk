@@ -19,34 +19,11 @@ const { PublishManager } = await import('./index')
 const { startPublish } = await import('../../helpers/ensureWalletThenPublish')
 const { publishLockName, setPublishLockManagerForTests } = await import('./publishLocks')
 const { TEST_TIMEOUT_MS } = await import('../../../test-utils/waitUntil')
+const { fakeLockManager } = await import('../../../test-utils/fakeLockManager')
 
 const ADDRESS = ethers.Wallet.createRandom().address
 const origReady = BaseDb.isAppDbReady.bind(BaseDb)
 const origGet = BaseDb.getAppDb.bind(BaseDb)
-
-/** Stand-in for the origin-wide Web Locks manager. `otherTab` holds names as another open tab would. */
-function fakeLockManager() {
-  const heldNames = new Set<string>()
-  const otherTab = { hold: (name: string) => heldNames.add(name) }
-  const locks = {
-    async request(name: string, options: LockOptions, callback: (lock: Lock | null) => unknown) {
-      if (heldNames.has(name)) {
-        if (options.ifAvailable) return callback(null)
-        throw new Error('fake lock manager only supports ifAvailable for held names')
-      }
-      heldNames.add(name)
-      try {
-        return await callback({ name, mode: 'exclusive' } as Lock)
-      } finally {
-        heldNames.delete(name)
-      }
-    },
-    async query(): Promise<LockManagerSnapshot> {
-      return { held: [...heldNames].map((name) => ({ name, mode: 'exclusive' })), pending: [] }
-    },
-  } as unknown as Pick<LockManager, 'request' | 'query'>
-  return { locks, otherTab }
-}
 
 type Row = { status: string; persistedSnapshot: string; completedAt?: number | null }
 

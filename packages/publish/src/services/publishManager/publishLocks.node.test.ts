@@ -13,36 +13,7 @@ import {
   tryHoldPublishLock,
 } from './publishLocks'
 import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../test-utils/waitUntil'
-
-/**
- * Stand-in for the origin-wide Web Locks manager (Bun has none). `otherTab` holds names the way
- * another open tab would.
- */
-function fakeLockManager() {
-  const heldNames = new Set<string>()
-  const otherTab = {
-    hold: (name: string) => heldNames.add(name),
-    release: (name: string) => heldNames.delete(name),
-  }
-  const locks = {
-    async request(name: string, options: LockOptions, callback: (lock: Lock | null) => unknown) {
-      if (heldNames.has(name)) {
-        if (options.ifAvailable) return callback(null)
-        throw new Error('fake lock manager only supports ifAvailable for held names')
-      }
-      heldNames.add(name)
-      try {
-        return await callback({ name, mode: 'exclusive' } as Lock)
-      } finally {
-        heldNames.delete(name)
-      }
-    },
-    async query(): Promise<LockManagerSnapshot> {
-      return { held: [...heldNames].map((name) => ({ name, mode: 'exclusive' })), pending: [] }
-    },
-  } as unknown as Pick<LockManager, 'request' | 'query'>
-  return { locks, otherTab, heldNames }
-}
+import { fakeLockManager } from '../../../test-utils/fakeLockManager'
 
 const origReady = BaseDb.isAppDbReady.bind(BaseDb)
 const origGet = BaseDb.getAppDb.bind(BaseDb)

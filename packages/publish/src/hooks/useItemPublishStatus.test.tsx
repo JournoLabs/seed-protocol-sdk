@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 // @ts-expect-error jsdom ships no types and @types/jsdom isn't installed
 import { JSDOM } from 'jsdom'
 import React, { act } from 'react'
@@ -11,11 +11,20 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, I
 // No DB at startup: restore finishes at once.
 process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '0'
 
+/** Rows the hooks' live query of `publish_processes` returns; undefined as with no running client. */
+let liveRows: unknown[] | undefined
+const realReact = await import('@seedprotocol/react')
+mock.module('@seedprotocol/react', () => ({ ...realReact, useLiveQuery: () => liveRows }))
+
 const { createRoot } = await import('react-dom/client')
 const { useItemPublishStatus } = await import('./useItemPublishStatus')
 const { PublishManager } = await import('../services/publishManager')
 const { subscribe } = await import('../services/publishManager/actors/subscribe')
 const { publishMachine } = await import('../services/publish')
+const { publishLockName, setPublishLockManagerForTests, tryHoldPublishLock } = await import(
+  '../services/publishManager/publishLocks'
+)
+const { fakeLockManager } = await import('../../test-utils/fakeLockManager')
 
 const origGetAppDb = BaseDb.getAppDb.bind(BaseDb)
 
@@ -103,5 +112,90 @@ describe('useItemPublishStatus', () => {
     expect(seen.at(-1)).toEqual({ value: 'success', isActive: false, hasProcess: false })
 
     await act(async () => root.unmount())
+  }, TEST_TIMEOUT_MS)
+})
+
+const rowIn = (value: string) => ({
+  id: 1,
+  seedLocalId: 'unused',
+  modelName: 'Post',
+  status: 'in_progress',
+  startedAt: 1,
+  persistedSnapshot: JSON.stringify({ status: 'active', value }),
+})
+
+type Seen = { value: string | undefined; heldBy: string | undefined; isActive: boolean }
+
+/** Renders the hook for `seedLocalId` and returns what each render saw. */
+async function watch(seedLocalId: string) {
+  const seen: Seen[] = []
+  const Probe = () => {
+    const status = useItemPublishStatus(seedLocalId)
+    seen.push({ value: status.publishValue, heldBy: status.heldBy, isActive: status.isActive })
+    return null
+  }
+  const root = createRoot(document.createElement('div'))
+  await act(async () => root.render(<Probe />))
+  return { seen, unmount: () => act(async () => root.unmount()) }
+}
+
+describe('useItemPublishStatus across tabs', () => {
+  let otherTab: ReturnType<typeof fakeLockManager>['otherTab']
+
+  const setUp = async () => {
+    await PublishManager.ready()
+    const fake = fakeLockManager()
+    setPublishLockManagerForTests(fake.locks)
+    otherTab = fake.otherTab
+    BaseDb.getAppDb = (() => heldDb(Promise.resolve())) as unknown as typeof BaseDb.getAppDb
+  }
+
+  afterEach(() => {
+    liveRows = undefined
+    setPublishLockManagerForTests(undefined)
+    BaseDb.getAppDb = origGetAppDb
+  })
+
+  test("another tab's parked run: heldBy is other-tab and publishValue is the saved state", async () => {
+    await setUp()
+    const seedLocalId = 'seed-parked-elsewhere'
+    otherTab.hold(publishLockName(seedLocalId))
+    liveRows = [rowIn('attestationFailureRecoverable')]
+    const { seen, unmount } = await watch(seedLocalId)
+    await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy !== undefined, 'the lock holder to be read'))
+    expect(seen.at(-1)).toEqual({ value: 'attestationFailureRecoverable', heldBy: 'other-tab', isActive: true })
+    await unmount()
+  }, TEST_TIMEOUT_MS)
+
+  test('an orphaned in_progress row: heldBy is none and publishValue stays undefined', async () => {
+    await setUp()
+    liveRows = [rowIn('attestationFailureRecoverable')]
+    const { seen, unmount } = await watch('seed-orphaned')
+    await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy !== undefined, 'the lock holder to be read'))
+    expect(seen.at(-1)).toEqual({ value: undefined, heldBy: 'none', isActive: true })
+    await unmount()
+  }, TEST_TIMEOUT_MS)
+
+  test("this tab's parked run: heldBy is here and publishValue comes from the run", async () => {
+    await setUp()
+    const seedLocalId = 'seed-parked-here'
+    expect(await tryHoldPublishLock(seedLocalId)).toBe(true)
+    const snapshot = publishMachine.resolveState({
+      value: 'attestationFailureRecoverable',
+      context: { item: { seedLocalId } } as never,
+    })
+    const run = createActor(publishMachine, { snapshot }).start()
+    PublishManager.getService().getSnapshot().context.publishProcesses.set(seedLocalId, run)
+    // The row trails the run: it still has the state before the failure.
+    liveRows = [rowIn('creatingAttestations')]
+    try {
+      const { seen, unmount } = await watch(seedLocalId)
+      await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy !== undefined, 'the lock holder to be read'))
+      expect(seen.at(-1)).toEqual({ value: 'attestationFailureRecoverable', heldBy: 'here', isActive: true })
+      await unmount()
+    } finally {
+      PublishManager.getService().getSnapshot().context.publishProcesses.delete(seedLocalId)
+      run.stop()
+    }
   }, TEST_TIMEOUT_MS)
 })
