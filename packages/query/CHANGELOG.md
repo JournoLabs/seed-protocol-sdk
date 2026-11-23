@@ -2,12 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - **Breaking:** `viem` is an optional peer dependency, used only by `@seedprotocol/query/ens`. Apps that read ENS add `viem@^2` themselves; `archive`, `rdf` and other installs of query no longer pull it in. Without it, `@seedprotocol/query/ens` still imports and `decodeContenthash` and `parseSeedPublicationRecord` work, while `getEnsContenthash`, `getSeedPublication` and `getEnsNames` reject with the new `EnsViemMissingError` (code `ENS_VIEM_MISSING`).
 - **Breaking:** `queryBySchema` and `queryBySchemaForMonth` give every record the model's EAS name (`easName`), as `getSeed` and `getSeeds` do, whatever form the name was passed in. `queryBySchema('Post')` returned records with `schemaName: 'Post'`, and a later `getSeed` of one of them returned `'Post'` from the item cache where a fresh read returned `'post'`. Collections are cached under the EAS name too, so `queryBySchema('Post')` and `queryBySchema('post')` share one, and `CacheManager.clearCollection` and `getCollection` take the name in any form. `clearCollection('post')` left a collection read as `'Post'` cached.
 - `getSeeds` and `getSeed` with `include: 'data+changelog'` read the properties once and build the data from the changelog's read: three indexer requests (seeds, versions, properties) before related seeds, not four. `getSeed` with a changelog also no longer reads the seed and its versions a second time.
 - `decodeContenthash` throws a `TypeError` for a contenthash whose codec is cut off mid-varint (`0xe3`), as its JSDoc says. It threw the `RangeError` from `multiformats`.
+
+### Commits
+
+#### Fixes
+
+- EAS schema names, one property read, contenthash varint, viem optional peer (4c9371bb)
 
 ## 0.8.2 (2026-11-09)
 

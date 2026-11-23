@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - Depends on `drizzle-orm` `^0.45.4` (was `^0.44.3`). Versions before 0.45.2 wrote names passed to `sql.identifier()` and `sql.as()` into SQL unescaped (CWE-89). An app that also imports `drizzle-orm` should move to 0.45 so both use one copy.
 
