@@ -21,7 +21,14 @@ const { useItemPublishStatus } = await import('./useItemPublishStatus')
 const { PublishManager } = await import('../services/publishManager')
 const { subscribe } = await import('../services/publishManager/actors/subscribe')
 const { publishMachine } = await import('../services/publish')
-const { publishLockName, releasePublishLock, setPublishLockManagerForTests, tryHoldPublishLock, waitForPublishLock } = await import(
+const {
+  emitPublishLockHolderChange,
+  publishLockName,
+  releasePublishLock,
+  setPublishLockManagerForTests,
+  tryHoldPublishLock,
+  waitForPublishLock,
+} = await import(
   '../services/publishManager/publishLocks'
 )
 const { fakeLockManager } = await import('../../test-utils/fakeLockManager')
@@ -175,8 +182,10 @@ describe('useItemPublishStatus across tabs', () => {
     const { seen, unmount } = await watch(seedLocalId)
     await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy === 'other-tab', 'the lock holder to be read'))
 
-    // This tab queued for the lock; the tab holding it closes.
-    const granted = waitForPublishLock(seedLocalId, new AbortController().signal)
+    // This tab queued for the lock; the tab holding it closes, and the takeover keeps the lock.
+    const granted = waitForPublishLock(seedLocalId, new AbortController().signal, async () =>
+      emitPublishLockHolderChange(seedLocalId),
+    )
     await act(async () => {
       otherTab.release(publishLockName(seedLocalId))
       await granted

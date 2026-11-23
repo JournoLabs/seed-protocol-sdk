@@ -29,7 +29,9 @@ import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
 import {
   emitPublishLockHolderChange,
+  isDecidingPublishLock,
   isHoldingPublishLock,
+  publishLockDecided,
   publishLockHolder,
   releasePublishLock,
   tryHoldPublishLock,
@@ -370,10 +372,17 @@ export const PublishManager = {
     options?: import('../../config').CreatePublishOptions
   ): Promise<import('xstate').ActorRef<any, any> | undefined> => {
     const { seedLocalId } = item
-    const heldBefore = isHoldingPublishLock(seedLocalId)
-    if (!(await tryHoldPublishLock(seedLocalId))) {
-      console.warn(`[createPublish] "${seedLocalId}" is already publishing in another tab; skipping.`)
-      return undefined
+    // A takeover or a stop deciding on this tab's lock goes first: its outcome is what this
+    // Publish finds (a run, or no lock).
+    let heldBefore: boolean
+    for (;;) {
+      await publishLockDecided(seedLocalId)
+      heldBefore = isHoldingPublishLock(seedLocalId)
+      if (!(await tryHoldPublishLock(seedLocalId))) {
+        console.warn(`[createPublish] "${seedLocalId}" is already publishing in another tab; skipping.`)
+        return undefined
+      }
+      if (!isDecidingPublishLock(seedLocalId)) break
     }
     // A run restore brings back isn't in the map until restore ends; a parked one is replaced.
     if (publishManagerStarted && publishManager.getSnapshot().value !== 'active') await PublishManager.ready()

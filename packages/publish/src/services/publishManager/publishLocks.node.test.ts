@@ -108,7 +108,7 @@ describe('publish locks', () => {
     expect(await publishLockHolder('seed-busy')).toBe('none')
   }, TEST_TIMEOUT_MS)
 
-  test('onPublishLockHolderChange names the seed when this tab takes, is granted or releases its lock', async () => {
+  test('onPublishLockHolderChange names the seed when this tab takes or releases its lock', async () => {
     const { locks, otherTab } = fakeLockManager()
     setPublishLockManagerForTests(locks)
     const changed: string[] = []
@@ -123,14 +123,17 @@ describe('publish locks', () => {
     const waited = waitForPublishLock('seed-granted', new AbortController().signal)
     otherTab.release(publishLockName('seed-granted'))
     await waited
+    // A lock waited for is reported by the waiter once it keeps it (takeover.ts), not on the grant.
+    expect(changed).toEqual(['seed-taken', 'seed-taken'])
+    releasePublishLock('seed-granted')
     expect(changed).toEqual(['seed-taken', 'seed-taken', 'seed-granted'])
 
     unsubscribe()
-    releasePublishLock('seed-granted')
+    await tryHoldPublishLock('seed-after')
     expect(changed).toHaveLength(3)
   }, TEST_TIMEOUT_MS)
 
-  test("restoreFromDb skips a publish another tab is running and resumes the rest", async () => {
+  test("restoreFromDb skips a publish another tab runs, or one whose lock this tab holds, and resumes the rest", async () => {
     const { locks, otherTab } = fakeLockManager()
     setPublishLockManagerForTests(locks)
     otherTab.hold(publishLockName('seed-elsewhere'))
@@ -142,7 +145,9 @@ describe('publish locks', () => {
       updatedAt: 1,
       persistedSnapshot: JSON.stringify({ status: 'active', value: 'failure', children: {}, context: { item: { seedLocalId } } }),
     })
-    const rows = [row('seed-elsewhere'), row('seed-here')]
+    // This tab already holds seed-held-here: a run started since restore read its context owns it.
+    await tryHoldPublishLock('seed-held-here')
+    const rows = [row('seed-elsewhere'), row('seed-here'), row('seed-held-here')]
     BaseDb.isAppDbReady = () => true
     BaseDb.getAppDb = () => ({ select: () => ({ from: () => ({ where: async () => rows }) }) }) as never
 

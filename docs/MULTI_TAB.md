@@ -36,6 +36,10 @@ reaches attestation there uses that tab's wallet, so a wallet that asks to confi
 asks in that tab, which may be in the background. When a publish ends normally, each queued tab is
 granted the lock in turn, finds no in-progress row, and lets it go. With `multiTab: 'off'` there is no
 message channel, so a tab only takes over the publishes it found at load.
+`PublishManager.stopAll()` (called on wallet disconnect and by `endPublishSession`) also lets this
+tab's locks go and leaves the rows `in_progress`, so another open tab takes those publishes over too.
+A publish stopped with `stopPublish` is marked `interrupted` before its lock goes, so no tab resumes
+it.
 
 The holder can change without the row changing. `onPublishLockHolderChange(listener)` calls back with
 a seed whose holder may have changed, so the listener can read `publishLockHolder` again: when this

@@ -7,6 +7,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bu
 const realSdk = await import('@seedprotocol/sdk')
 const realSavePublish = await import('./actors/savePublish')
 const interrupted: string[] = []
+/** Holds `markInProgressPublishInterrupted` and every row read until opened. */
+let markGate: Promise<void> = Promise.resolve()
+let readGate: Promise<void> = Promise.resolve()
+const gate = () => {
+  let open = () => {}
+  const closed = new Promise<void>((resolve) => (open = resolve))
+  return { closed, open }
+}
 /** What this tab told other tabs, and its listener for what they tell it (the tab channel). */
 const announced: string[] = []
 let lockTakenElsewhere: (seedLocalId: string) => void = () => {}
@@ -21,7 +29,10 @@ mock.module('@seedprotocol/sdk', () => ({
 }))
 mock.module('./actors/savePublish', () => ({
   ...realSavePublish,
-  markInProgressPublishInterrupted: async (seedLocalId: string) => void interrupted.push(seedLocalId),
+  markInProgressPublishInterrupted: async (seedLocalId: string) => {
+    await markGate
+    interrupted.push(seedLocalId)
+  },
 }))
 
 const { BaseDb } = realSdk
@@ -47,7 +58,7 @@ const db = () => {
   const chain: Record<string, unknown> = {}
   for (const method of ['select', 'from', 'where', 'orderBy', 'limit']) chain[method] = () => chain
   chain.then = (onFulfilled?: (r: unknown[]) => unknown, onRejected?: (e: unknown) => unknown) =>
-    Promise.resolve(rows).then(onFulfilled, onRejected)
+    readGate.then(() => rows).then(onFulfilled, onRejected)
   return chain
 }
 
@@ -62,6 +73,15 @@ const savedRow = (seedLocalId: string, value: string, status = 'in_progress'): R
     context: { item: { seedLocalId, modelName: 'Post' }, address: '0x0000000000000000000000000000000000000001' },
   }),
 })
+
+/** An item no cache holds: createPublish takes no hold on it. */
+const stubItem = (seedLocalId: string) =>
+  ({
+    seedLocalId,
+    modelName: 'Post',
+    schemaUid: '0xschema',
+    getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+  }) as unknown as import('@seedprotocol/sdk').Item<Record<string, unknown>>
 
 const fake = fakeLockManager()
 const runHere = (seedLocalId: string) => PublishManager.getService().getSnapshot().context.publishProcesses.get(seedLocalId)
@@ -139,18 +159,89 @@ describe('taking over a publish left by a closed tab', () => {
   }, TEST_TIMEOUT_MS)
 
   test('a tab that starts a publish tells the other tabs, so they can take it over', async () => {
-    const item = {
-      seedLocalId: 'seed-started-here',
-      modelName: 'Post',
-      schemaUid: '0xschema',
-      // An item no cache holds: createPublish takes no hold on it.
-      getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
-    } as unknown as import('@seedprotocol/sdk').Item<Record<string, unknown>>
+    const item = stubItem('seed-started-here')
     const signer = ethers.Wallet.createRandom()
     const run = await PublishManager.createPublish(item, signer.address, fromEthersWallet(signer))
     expect(run).toBeDefined()
     expect(announced).toContain('seed-started-here')
     PublishManager.stopPublish('seed-started-here')
+  }, TEST_TIMEOUT_MS)
+
+  test('stopping a publish lets its lock go only once its row says interrupted', async () => {
+    const mark = gate()
+    markGate = mark.closed
+    try {
+      const signer = ethers.Wallet.createRandom()
+      const run = await PublishManager.createPublish(stubItem('seed-stopped-here'), signer.address, fromEthersWallet(signer))
+      expect(run).toBeDefined()
+      PublishManager.stopPublish('seed-stopped-here')
+      // A tab queued for the lock must not read the row as still in progress.
+      expect(await publishLockHolder('seed-stopped-here')).toBe('here')
+      mark.open()
+      await waitUntilOrThrow(async () => (await publishLockHolder('seed-stopped-here')) === 'none', 'the lock to be let go')
+      expect(interrupted).toContain('seed-stopped-here')
+    } finally {
+      markGate = Promise.resolve()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('a Publish in this tab while a takeover decides waits for it, and keeps the lock for its run', async () => {
+    const read = gate()
+    rows = [savedRow('seed-raced', 'success', 'completed')]
+    fake.otherTab.hold(publishLockName('seed-raced'))
+    watchForTakeover('seed-raced')
+    readGate = read.closed
+    try {
+      // The other tab's publish ends; this tab is granted the lock and reads the row.
+      fake.otherTab.release(publishLockName('seed-raced'))
+      const signer = ethers.Wallet.createRandom()
+      const started = PublishManager.createPublish(stubItem('seed-raced'), signer.address, fromEthersWallet(signer))
+      read.open()
+      const run = await started
+      expect(run).toBeDefined()
+      expect(runHere('seed-raced')).toBe(run)
+      expect(await publishLockHolder('seed-raced')).toBe('here')
+      expect(announced).toContain('seed-raced')
+      PublishManager.stopPublish('seed-raced')
+    } finally {
+      readGate = Promise.resolve()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('a granted lock reports a holder change only when the takeover keeps it', async () => {
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+    rows = [savedRow('seed-ended', 'success', 'completed')]
+    fake.otherTab.hold(publishLockName('seed-ended'))
+    watchForTakeover('seed-ended')
+    fake.otherTab.release(publishLockName('seed-ended'))
+    await waitUntilOrThrow(() => changed.length > 0, 'the lock to be let go')
+    expect(await publishLockHolder('seed-ended')).toBe('none')
+    // Released, never kept: one change (the release), no flash of 'here' before it.
+    expect(changed).toEqual(['seed-ended'])
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
+  test('stopAll while a takeover reads the row: nothing resumes, and the lock stays let go', async () => {
+    const read = gate()
+    rows = [savedRow('seed-stopped-mid-takeover', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(publishLockName('seed-stopped-mid-takeover'))
+    watchForTakeover('seed-stopped-mid-takeover')
+    readGate = read.closed
+    try {
+      fake.otherTab.release(publishLockName('seed-stopped-mid-takeover'))
+      await waitUntilOrThrow(
+        async () => (await publishLockHolder('seed-stopped-mid-takeover')) === 'here',
+        'the lock to be granted',
+      )
+      PublishManager.stopAll()
+      read.open()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(runHere('seed-stopped-mid-takeover')).toBeUndefined()
+      expect(await publishLockHolder('seed-stopped-mid-takeover')).toBe('none')
+    } finally {
+      readGate = Promise.resolve()
+    }
   }, TEST_TIMEOUT_MS)
 
   test('stopAll stops waiting: a later release resumes nothing', async () => {

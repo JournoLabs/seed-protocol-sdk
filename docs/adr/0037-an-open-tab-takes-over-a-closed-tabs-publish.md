@@ -40,6 +40,11 @@ A publish taken over that reaches attestation uses the taking tab's wallet (`get
 a restore at load does. A wallet that asks the author to confirm each transaction asks in that tab,
 which may be in the background. If a host needs control over this, add an option then.
 
+`stopAll` (wallet disconnect, `endPublishSession`) lets the tab's locks go and leaves its rows
+`in_progress`, so another open tab takes those publishes over while the first tab is still open.
+`stopPublish` marks the row `interrupted` before it lets the lock go, and a Publish in the same tab
+waits while a stop or a takeover decides on the seed's lock.
+
 With `multiTab: 'off'` there is no channel, so a tab takes over only publishes it found at load.
 Without Web Locks (Bun, old browsers) every tab runs its own publishes and nothing is taken over.
 

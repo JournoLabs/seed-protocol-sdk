@@ -1,7 +1,7 @@
 import { BaseDb, publishProcesses } from '@seedprotocol/sdk'
 import { EventObject, fromCallback } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { tryHoldPublishLock } from '../publishLocks'
+import { isHoldingPublishLock, tryHoldPublishLock } from '../publishLocks'
 import { readPublishRow, startRestoredRun } from './restoreRun'
 import debug from 'debug'
 
@@ -99,6 +99,9 @@ async function restorePublishes(context: RestoreFromDbInput['context'], dbReady:
     if (!read) continue
     // Started in this tab while the database was late: that run owns the row.
     if (context.publishProcesses.has(read.seedLocalId)) continue
+    // This tab already holds the lock: a run started since (a takeover, or a Publish while a late
+    // restore waited for the database) owns it. `context` can be older than that run.
+    if (isHoldingPublishLock(read.seedLocalId)) continue
     // Another open tab is already running this publish; it keeps it, and this tab takes it over if
     // that tab closes. Checked first: a publish another tab is uploading looks unrestorable here,
     // and must not be marked interrupted.

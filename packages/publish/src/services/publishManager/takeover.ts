@@ -1,6 +1,11 @@
 import debug from 'debug'
 import { latestPublishRow } from './latestPublishRow'
-import { isHoldingPublishLock, releasePublishLock, waitForPublishLock } from './publishLocks'
+import {
+  emitPublishLockHolderChange,
+  isHoldingPublishLock,
+  releasePublishLock,
+  waitForPublishLock,
+} from './publishLocks'
 import { readPublishRow, startRestoredRun, type RestoredRun } from './actors/restoreRun'
 
 const logger = debug('seedProtocol:PublishManager:takeover')
@@ -51,22 +56,38 @@ export function watchForTakeover(seedLocalId: string): void {
 }
 
 async function takeOver(seedLocalId: string, signal: AbortSignal, manager: TakeoverTarget): Promise<void> {
-  if (!(await waitForPublishLock(seedLocalId, signal))) return
-  await manager.ready()
-  if (signal.aborted || manager.hasRun(seedLocalId)) {
-    if (!manager.hasRun(seedLocalId)) releasePublishLock(seedLocalId)
-    return
+  await waitForPublishLock(seedLocalId, signal, () => decide(seedLocalId, signal, manager))
+}
+
+/**
+ * Runs once this tab is granted the lock, while `createPublish` waits. Each await can end with the
+ * lock gone (stopAll) or a run started (a restore that ran late): checked after each one.
+ */
+async function decide(seedLocalId: string, signal: AbortSignal, manager: TakeoverTarget): Promise<void> {
+  /** Lets the lock go unless a run of the seed now uses it; true when the takeover should stop. */
+  const stop = () => {
+    if (manager.hasRun(seedLocalId)) return true
+    if (signal.aborted || !isHoldingPublishLock(seedLocalId)) {
+      releasePublishLock(seedLocalId)
+      return true
+    }
+    return false
   }
+  await manager.ready()
+  if (stop()) return
   const row = await latestPublishRow(seedLocalId)
+  if (stop()) return
   const read = row?.status === 'in_progress' ? readPublishRow({ ...row, seedLocalId }) : undefined
   if (!read || read === 'unreadable') {
     releasePublishLock(seedLocalId)
     return
   }
+  // Starts the run with no await before it; one that can't resume is marked and its lock let go.
   const run = await startRestoredRun(read, { ...row!, seedLocalId })
   if (!run) return
   logger(`took over the publish of ${seedLocalId} from a closed tab`)
   manager.takenOver(seedLocalId, run)
+  emitPublishLockHolderChange(seedLocalId)
   manager.announce(seedLocalId)
 }
 
