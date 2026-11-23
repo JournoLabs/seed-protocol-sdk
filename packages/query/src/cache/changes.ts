@@ -1,4 +1,4 @@
-import type { SeedDependencies } from '../assembleSeeds.js'
+import type { HalfDependency, SeedDependencies } from '../assembleSeeds.js'
 import type { QueryDataSource } from '../source/types.js'
 import type { AttestationChange } from '../types.js'
 import type { ChangeCheck } from './types.js'
@@ -30,10 +30,32 @@ export function checkWindowAged(check: ChangeCheck, startedAt: number): boolean 
 
 const changeKey = (change: AttestationChange): string => `${change.id}:${change.revocationTime}`
 
+/** Whether `change` is a pair half `halves` covers: of one of its schemas, by or addressed to one of its addresses. */
+function matchesHalves(change: AttestationChange, halves: HalfDependency | undefined): boolean {
+  if (!halves || !change.schemaId) return false
+  if (!halves.schemaIds.includes(change.schemaId.toLowerCase())) return false
+  return (
+    (!!change.attester && halves.addresses.includes(change.attester.toLowerCase())) ||
+    (!!change.recipient && halves.addresses.includes(change.recipient.toLowerCase()))
+  )
+}
+
+/** The `halves` filter covering every dependency's, or undefined when none has one. */
+function mergeHalves(dependencies: Iterable<SeedDependencies>): HalfDependency | undefined {
+  const schemaIds = new Set<string>()
+  const addresses = new Set<string>()
+  for (const deps of dependencies) {
+    for (const uid of deps.halves?.schemaIds ?? []) schemaIds.add(uid.toLowerCase())
+    for (const address of deps.halves?.addresses ?? []) addresses.add(address.toLowerCase())
+  }
+  if (schemaIds.size === 0 || addresses.size === 0) return undefined
+  return { schemaIds: [...schemaIds], addresses: [...addresses] }
+}
+
 /**
  * Which of the cached seeds changed since `check.checkedAt`: a new or revoked Version of a seed
- * it depends on, a new or revoked property on one of their head Versions, or one of those seeds
- * revoked. Returns null when the data source can't list changes (treat everything as changed).
+ * it depends on, a new or revoked property on one of their head Versions, one of those seeds
+ * revoked, or a new or revoked pair half its `halves` dependency covers. Returns null when the data source can't list changes (treat everything as changed).
  */
 export async function findChangedSeeds(
   dataSource: QueryDataSource,
@@ -57,9 +79,11 @@ export async function findChangedSeeds(
     for (const uid of deps.ids) index(seedUidsById, uid, seedUid)
   }
 
+  const halves = mergeHalves(dependenciesBySeedUid.values())
   const changes = await dataSource.listChangesSince({
     refUIDs: [...seedUidsByRef.keys()],
     ids: [...seedUidsById.keys()],
+    ...(halves && { halves }),
     since: check.checkedAt,
   })
 
@@ -69,6 +93,10 @@ export async function findChangedSeeds(
     if (seen.has(changeKey(change))) continue
     for (const seedUid of seedUidsByRef.get(change.refUID) ?? []) changed.add(seedUid)
     for (const seedUid of seedUidsById.get(change.id) ?? []) changed.add(seedUid)
+    if (!halves || !matchesHalves(change, halves)) continue
+    for (const [seedUid, deps] of dependenciesBySeedUid) {
+      if (matchesHalves(change, deps.halves)) changed.add(seedUid)
+    }
   }
   return { changed, seenChangeKeys: changes.map(changeKey) }
 }
@@ -98,9 +126,11 @@ export async function findChangedItems(
     for (const uid of check.dependencies.ids) ids.add(uid)
     since = Math.min(since, check.checkedAt)
   }
+  const halves = mergeHalves([...checks.values()].map((check) => check.dependencies))
   const changes = await dataSource.listChangesSince({
     refUIDs: [...refUIDs],
     ids: [...ids],
+    ...(halves && { halves }),
     since,
   })
 
@@ -111,7 +141,7 @@ export async function findChangedItems(
     const keys: string[] = []
     for (const change of changes) {
       if (change.timeCreated <= check.checkedAt && change.revocationTime <= check.checkedAt) continue
-      if (!refs.has(change.refUID) && !own.has(change.id)) continue
+      if (!refs.has(change.refUID) && !own.has(change.id) && !matchesHalves(change, check.dependencies.halves)) continue
       keys.push(changeKey(change))
       if (!seen.has(changeKey(change))) changed.add(seedUid)
     }

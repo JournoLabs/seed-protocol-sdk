@@ -1,3 +1,5 @@
+import type { PairHalfAttestation } from '@seedprotocol/eas'
+import type { HalfDependency } from '../assembleSeeds.js'
 import type { AttestationChange, AttestationLike } from '../types.js'
 
 /** Filters on a schema listing, normalized by the query layer (see QueryBySchemaOptions). */
@@ -51,14 +53,27 @@ export type QueryDataSource = {
 
   /**
    * Optional: attestations created or revoked after `since` (unix seconds) that reference one of
-   * `refUIDs` or are one of `ids`. The query cache uses it to tell which cached seeds changed;
-   * without it, a cache hit re-assembles everything.
+   * `refUIDs`, are one of `ids`, or, with `halves`, are of one of its schemas and by or addressed
+   * to one of its addresses (returned with `schemaId`, `attester` and `recipient` set). The query
+   * cache uses it to tell which cached seeds and pair answers changed; without it, a cache hit
+   * re-assembles everything.
    */
   listChangesSince?(opts: {
     refUIDs: string[]
     ids: string[]
+    halves?: HalfDependency
     since: number
   }): Promise<AttestationChange[]>
+
+  /**
+   * Optional: pair halves (Inclusion, Staff) of `schemaUids` by one of `attesters` or addressed to
+   * one of `recipients`, revoked ones included. Pair reads need it; only the remote source has it.
+   */
+  listPairHalves?(opts: {
+    schemaUids: string[]
+    attesters?: string[]
+    recipients?: string[]
+  }): Promise<PairHalfAttestation[]>
 
   /**
    * Optional: read html/image bodies from local files instead of Arweave gateway.

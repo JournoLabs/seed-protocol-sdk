@@ -193,4 +193,10 @@ export type AttestationChange = {
   timeCreated: number
   /** Unix seconds; 0 when not revoked. */
   revocationTime: number
+  /** Lowercase. Set on changes found by a `halves` filter, and by sources that list them. */
+  schemaId?: string
+  /** Lowercase. */
+  attester?: string
+  /** Lowercase. */
+  recipient?: string
 }

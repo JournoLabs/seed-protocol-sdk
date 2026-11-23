@@ -33,7 +33,7 @@ once if it becomes leader, and forwards address changes to the leader. An explic
 `seed:migrate` (migrations and their data backfills, each migration in one transaction),
 `seed:init` (config, schema processing, model stubs), `seed:eas-sync`, `seed:publish:<seedLocalId>`
 (held by the tab running that publish; restore skips rows another tab holds, and since
-[ADR 0037](0037-an-open-tab-takes-over-a-closed-tabs-publish.md) queues to take them over),
+[ADR 0038](0038-an-open-tab-takes-over-a-closed-tabs-publish.md) queues to take them over),
 `seed:item-storage-migration`, `seed:opfs-write:<path>` (download workers) and
 `seed:item-storage:<file path>` (every writer of a draft's ItemStorage file). The ItemStorage file
 lock is always innermost: it may be taken inside the migration or publish locks, never the

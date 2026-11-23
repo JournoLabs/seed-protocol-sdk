@@ -11,7 +11,7 @@ import { readPublishRow, startRestoredRun, type RestoredRun } from './actors/res
 const logger = debug('seedProtocol:PublishManager:takeover')
 
 /**
- * Taking over a publish left running by a closed tab (ADR 0037). For each in-progress publish
+ * Taking over a publish left running by a closed tab (ADR 0038). For each in-progress publish
  * another tab runs, this tab queues for the seed's publish lock. The browser frees the lock when
  * that tab closes and grants it to the first tab in the queue, which resumes the publish from its
  * saved row, as a reload would. When the publish ended normally instead, each queued tab is granted

@@ -52,6 +52,17 @@ export type CachedItemData = ChangeCheck & {
   optionsKey: string
 }
 
+/**
+ * A cached pair read answer (see pairs.ts) for one seed: kept in memory only, and checked for
+ * changes like an item before reuse.
+ */
+export type CachedPairData<T = unknown> = ChangeCheck & {
+  answer: T
+  dependencies: SeedDependencies
+  /** Unix seconds when the answer was read; the TTL counts from here. */
+  lastUpdated: number
+}
+
 export type QueryCacheConfig = {
   ttl: number
   cacheDir: string

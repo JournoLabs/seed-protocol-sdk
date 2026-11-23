@@ -215,8 +215,37 @@ export const GET_ATTESTATION_CHANGES = graphql(/* GraphQL */ `
       refUID
       timeCreated
       revocationTime
+      schemaId
+      attester
+      recipient
     }
   }
 `) as TypedDocumentNode<{
-  changes: Array<Pick<Attestation, 'id' | 'refUID' | 'timeCreated' | 'revocationTime'>>
+  changes: Array<
+    Pick<Attestation, 'id' | 'refUID' | 'timeCreated' | 'revocationTime' | 'schemaId' | 'attester' | 'recipient'>
+  >
+}>
+
+/** Halves of a pair schema (Inclusion, Staff), revoked ones included: see getPairHalvesFromEas. */
+export const GET_PAIR_HALVES = graphql(/* GraphQL */ `
+  query GetPairHalves($where: AttestationWhereInput!) {
+    halves: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {
+      id
+      schemaId
+      attester
+      recipient
+      refUID
+      decodedDataJson
+      timeCreated
+      revoked
+      revocationTime
+    }
+  }
+`) as TypedDocumentNode<{
+  halves: Array<
+    Pick<
+      Attestation,
+      'id' | 'schemaId' | 'attester' | 'recipient' | 'refUID' | 'decodedDataJson' | 'timeCreated' | 'revoked' | 'revocationTime'
+    >
+  >
 }>

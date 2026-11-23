@@ -27,7 +27,7 @@ from `@seedprotocol/publish` reads the lock to say which tab runs one: `'here'`,
 publishes.
 
 When a tab closes partway through a publish, an open tab takes it over
-([ADR 0037](adr/0037-an-open-tab-takes-over-a-closed-tabs-publish.md)). Each tab queues a request for
+([ADR 0038](adr/0038-an-open-tab-takes-over-a-closed-tabs-publish.md)). Each tab queues a request for
 the lock of every in-progress publish another tab runs: the ones it finds when it restores at load,
 and the ones it hears about from the `publish-lock-taken` message a tab posts when it starts or takes
 over a publish. The browser frees the lock when the tab holding it closes and grants it to the first

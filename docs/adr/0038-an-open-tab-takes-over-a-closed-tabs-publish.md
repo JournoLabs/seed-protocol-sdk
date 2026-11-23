@@ -1,4 +1,4 @@
-# 0037. An open tab takes over a closed tab's publish
+# 0038. An open tab takes over a closed tab's publish
 
 - **Status:** Accepted
 - **Date:** 2026-11-23
