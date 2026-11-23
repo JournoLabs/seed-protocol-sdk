@@ -133,7 +133,7 @@ const posts = await getSeeds(postUids, {
 
 `versionUid` names one of the seed's live versions by its attester; it returns null (or no map entry) when the seed has no such version. A `patch` publish adds property attestations to the seed's current version instead of making a new one, so a version uid alone shows later patches to that version. `asOf` (unix seconds) leaves out attestations made after it, so the read shows the version as it was then; with `asOf` alone, the seed's newest version created by then is read. Relations, storage and attester filtering work as for the latest version, and related seeds are assembled at their latest version. With `include: 'data+changelog'`, `data` is the pinned version and the changelog still covers every version. See [ADR 0011](../../docs/adr/0011-reading-a-seed-at-a-version.md).
 
-## Publications (`getInclusions`, `getStaff`)
+## Publications (`getInclusions`, `getStaff`, `pendingFor`)
 
 Which posts are in a publication, and who is on its staff, are attestation pairs: each side attests its own half, and the pair counts only while both agree ([docs/PUBLISHING.md](../../docs/PUBLISHING.md#inclusion-and-staff-halves) covers the schemas and the write helpers). These reads apply the pair rules, so every Seed client lists the same posts and staff.
 
@@ -160,6 +160,17 @@ An Inclusion of post S in publication P is live when, with A the newest author h
 `pin` is `{ versionUid: O.version, asOf: O.timeCreated }`, the post as it was when the owner pinned it (ADR 0011). Staff for identity I in P is live when the newest owner half and the newest person half (by I's seed attester) are both unrevoked and the person half's `refUID` is the owner half. "Newest" means the latest `timeCreated`, then the greater uid.
 
 Only halves by those two attesters count. A half by anyone else is ignored even when its `refUID` points at a real half, and a pair whose two seeds share an attester is skipped: a publication's own posts and identities need no pair, and the app merges them in. A revoked or missing seed has no pairs. Halves are found by schema and by attester or `recipient`, so a half whose `recipient` isn't the other side's seed attester is not seen; the write helpers in `@seedprotocol/publish` always set it. Results are keyed by the uids as given, newest pin (or newest agreement, for Staff) first; a value that isn't a 32-byte uid gets an empty list.
+
+### Waiting halves (`pendingFor`)
+
+```ts
+await pendingFor({ publicationUids: [publicationUid] }) // offers to the publication
+await pendingFor({ attester }) // offers and asks waiting on this attester's answer
+// PendingHalf[]: { kind, half, uid, schemaUid, attester, recipient, timeCreated, publicationUid,
+//   postUid and versionUid (Inclusion) or identityUid (Staff) }
+```
+
+A first half has a zero `refUID`: an author half offering a post, or an owner half asking a post's author or a person. It waits until a half of the same schema by the other side's seed attester references it. That answer counts whether or not it was later revoked, so a half doesn't wait again after a Remove or a Leave; a new offer or ask after that is a new first half. Revoked halves, halves not by their own side's seed attester, halves whose `recipient` isn't the other side's seed attester, same-attester pairs and halves naming a revoked or missing seed are left out. With both filters, a half must match both. Newest first. A call with neither filter throws a `TypeError`; an attester that isn't an address, or no valid publication uid, returns `[]`.
 
 The reads always go to EAS (there is no local source for halves). Each one is a request for the seeds, one for the halves, one for the other side's seeds and, for Inclusions, one for the posts' Versions. With the cache on, an answer is cached per uid in memory and checked before reuse: a new or revoked half by or addressed to the seed's attester, a new or revoked Version of a listed post, or a listed seed revoked, reads it again. Pass `{ cache: false }` to skip the cache. See [ADR 0037](../../docs/adr/0037-pair-rules-live-in-query.md).
 
@@ -244,7 +255,7 @@ Behavior:
 - **Read-only results** — records from a cached read are the cache's own objects, shared with every later caller, so `SeedRecord` is typed read-only (`data: SeedData`, `changelog: readonly ChangelogEntry[]`). Outside `NODE_ENV=production`, records are also deep-frozen as they enter the memory cache (stored, or loaded from disk), so a write throws a `TypeError` instead of silently changing what later callers see and leaving the ETag stale. Production skips the freeze. Copy before changing anything, nested values included (copy-on-write, as feed's `applyFeedDefaultsDeep` does). `queryBySchema`'s `items` array is the caller's own. Set `freezeRecords` on the cache config to override.
 - **`cache: false`** — skip all cache reads/writes for that call.
 - **`skip > 0`** — no collection cache; still write-through items when cache is enabled.
-- **Pair reads** — `getInclusions`, `inclusionsForPosts`, `getStaff` and `mastheadsForIdentity` answers are cached in memory only, per uid, and checked like items; the change check also asks for Inclusion and Staff halves by or addressed to the seed's attester, since a new offer references nothing cached.
+- **Pair reads** — `getInclusions`, `inclusionsForPosts`, `getStaff`, `mastheadsForIdentity` and `pendingFor` answers are cached in memory only, per uid (per filter for `pendingFor`), and checked like items; the change check also asks for Inclusion and Staff halves by or addressed to the seed's attester, since a new offer references nothing cached.
 - **Local source** — no query CacheManager (SQLite is authoritative).
 - Refresh lock — concurrent remote `queryBySchema` calls for the same schema, options and `limit` share one in-flight refresh.
 

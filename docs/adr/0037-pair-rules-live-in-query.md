@@ -34,6 +34,11 @@ seeds' attesters, skips pairs whose seeds share an attester, and then checks:
 Every half's `recipient` is the other side's seed attester. Reads find halves by schema and by
 attester or recipient; `recipient` is only an index and attesters are always checked.
 
+`pendingFor` lists first halves (zero `refUID`) still waiting on the other side. A half is
+answered once a half of the same schema by the other side's seed attester references it, whether
+or not that answer was later revoked, so a Remove or a Leave doesn't put the old offer or ask back
+in front of anyone; a new request after that is a new first half.
+
 The cache's change check also asks for attestations of the pair schemas by, or addressed to, the
 seed's attester, so a cached answer sees a new or revoked half on either side.
 

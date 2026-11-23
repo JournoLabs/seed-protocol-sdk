@@ -450,7 +450,7 @@ The attest helpers read the seeds, the Version and the referenced half from the 
 
 A missing schema throws `PairSchemaNotRegisteredError`. Each helper resolves to `{ uid, schemaUid, recipient, refUid }`.
 
-To read which pairs are live, use `getInclusions`, `inclusionsForPosts`, `getStaff` and `mastheadsForIdentity` from `@seedprotocol/query` ([its README](../packages/query/README.md#publications-getinclusions-getstaff)), which apply the pair rules.
+To read which pairs are live, use `getInclusions`, `inclusionsForPosts`, `getStaff` and `mastheadsForIdentity` from `@seedprotocol/query`, which apply the pair rules; `pendingFor` lists the offers and asks still waiting on an answer ([its README](../packages/query/README.md#publications-getinclusions-getstaff-pendingfor)).
 
 ## Revoking (Unpublishing)
 

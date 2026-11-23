@@ -379,3 +379,155 @@ export async function mastheadsForIdentity(identityUid: string, options?: PairRe
   const pairs = await pairsFor('staff', 'other', [identityUid], options)
   return [...(pairs.get(identityUid) ?? [])].sort(byAgreed).map((pair) => pair.publicationUid)
 }
+
+/** Fields every waiting half has (see {@link pendingFor}). Addresses and uids are lowercase. */
+type PendingHalfBase = {
+  uid: string
+  schemaUid: string
+  attester: string
+  /** The other side's seed attester: whose answer the half waits on. */
+  recipient: string
+  timeCreated: number
+  publicationUid: string
+}
+
+/**
+ * A first half no one has answered yet. `half` is the side that sent it, as in the
+ * `@seedprotocol/publish` attest helpers: an author half is an offer of a post, an owner half an
+ * ask (of a post's author, or of a person to join the staff).
+ */
+export type PendingHalf =
+  | (PendingHalfBase & { kind: 'inclusion'; half: 'author'; postUid: string })
+  | (PendingHalfBase & { kind: 'inclusion'; half: 'owner'; postUid: string; versionUid: string })
+  | (PendingHalfBase & { kind: 'staff'; half: 'owner'; identityUid: string })
+
+/** What {@link pendingFor} looks for. At least one is required; with both, a half must match both. */
+export type PendingForFilter = {
+  /** Offers to these publications. */
+  publicationUids?: readonly string[]
+  /** Halves waiting on this attester's answer. */
+  attester?: string
+}
+
+const ADDRESS = /^0x[0-9a-f]{40}$/
+
+const toPending = (kind: PairKind, half: Half, side: 'author' | 'owner'): PendingHalf => {
+  const base: PendingHalfBase = {
+    uid: half.id,
+    schemaUid: half.schemaId,
+    attester: half.attester,
+    recipient: half.recipient,
+    timeCreated: half.timeCreated,
+    publicationUid: half.publication,
+  }
+  if (kind === 'staff') return { ...base, kind, half: 'owner', identityUid: half.other }
+  if (side === 'author') return { ...base, kind, half: 'author', postUid: half.other }
+  return { ...base, kind, half: 'owner', postUid: half.other, versionUid: half.version ?? ZERO }
+}
+
+/** The waiting halves for `recipients` (lowercase), and what the answer depends on. */
+async function readPending(
+  source: QueryDataSource,
+  recipients: string[],
+  publications: Set<string> | null,
+): Promise<{ pending: PendingHalf[]; dependencies: SeedDependencies }> {
+  if (!source.listPairHalves) throw new Error('This query source cannot list pair halves.')
+  const schemaUids = [INCLUSION_SCHEMA_UID, STAFF_SCHEMA_UID]
+  const dependencies: SeedDependencies = {
+    refUIDs: [],
+    ids: publications ? [...publications] : [],
+    // A new first half is addressed to one of `recipients`, and its answer is by one of them.
+    ...(recipients.length > 0 && { halves: { schemaIds: schemaUids, addresses: recipients } }),
+  }
+  if (recipients.length === 0) return { pending: [], dependencies }
+
+  const raw = await source.listPairHalves({ schemaUids, attesters: recipients, recipients })
+  const halves: { kind: PairKind; half: Half }[] = []
+  for (const half of raw) {
+    const kind: PairKind = half.schemaId === STAFF_SCHEMA_UID ? 'staff' : 'inclusion'
+    const decoded = decodeHalf(kind, half)
+    if (decoded) halves.push({ kind, half: decoded })
+  }
+
+  const wanted = new Set(recipients)
+  const firsts = halves.filter(
+    ({ half }) =>
+      half.refUID === ZERO &&
+      !isRevoked(half) &&
+      wanted.has(half.recipient) &&
+      (!publications || publications.has(half.publication)),
+  )
+  const seeds = [...new Set(firsts.flatMap(({ half }) => [half.publication, half.other]))]
+  const attesters = await seedAttesters(source, seeds)
+  dependencies.ids = [...new Set([...dependencies.ids, ...seeds])]
+
+  // Answered: any half of the same schema by the recipient references it, revoked or not.
+  const answered = new Set(
+    halves.filter(({ half }) => half.refUID !== ZERO && wanted.has(half.attester)).map(({ half }) => `${half.schemaId}:${half.attester}:${half.refUID}`),
+  )
+
+  const pending: PendingHalf[] = []
+  for (const { kind, half } of firsts) {
+    const ownerAttester = attesters.get(half.publication)
+    const otherAttester = attesters.get(half.other)
+    if (!ownerAttester || !otherAttester || ownerAttester === otherAttester) continue
+    // Staff is ask-only: a person half always answers an owner half.
+    const side = half.attester === ownerAttester ? 'owner' : half.attester === otherAttester && kind === 'inclusion' ? 'author' : null
+    if (!side) continue
+    if (half.recipient !== (side === 'owner' ? otherAttester : ownerAttester)) continue
+    if (answered.has(`${half.schemaId}:${half.recipient}:${half.id}`)) continue
+    pending.push(toPending(kind, half, side))
+  }
+  pending.sort((a, b) => b.timeCreated - a.timeCreated || (a.uid < b.uid ? 1 : -1))
+  return { pending, dependencies }
+}
+
+/**
+ * Inclusion and Staff first halves no one has answered: offers to `publicationUids`, and offers or
+ * asks waiting on `attester`. A first half has a zero `refUID`; it is answered once a half of the
+ * same schema by the other side's seed attester references it, revoked or not, so a half never
+ * waits again after a Remove or a Leave (a new offer or ask after that is a new first half). A
+ * revoked half, one not by its own side's seed attester, one whose `recipient` isn't the other
+ * side's seed attester, a same-attester pair, and a half naming a revoked or missing seed are left
+ * out. Newest first.
+ */
+export async function pendingFor(filter: PendingForFilter, options?: PairReadOptions): Promise<PendingHalf[]> {
+  if (filter.attester === undefined && filter.publicationUids === undefined) {
+    throw new TypeError('pendingFor needs an attester or publicationUids.')
+  }
+  const attester = filter.attester?.trim().toLowerCase()
+  if (attester !== undefined && !ADDRESS.test(attester)) return []
+  const publications = filter.publicationUids
+    ? new Set(filter.publicationUids.map((uid) => uid.trim().toLowerCase()).filter((uid) => BYTES32.test(uid)))
+    : null
+  if (publications?.size === 0) return []
+
+  await initializeQueryPlatform({ source: 'remote' })
+  const source = getRemoteQueryDataSource()
+  const cache = getQueryCacheManager()
+  const useCache = options?.cache !== false && cache.enabled
+  const key = `pending:${attester ?? ''}:${publications ? [...publications].sort().join(',') : ''}`
+
+  if (useCache) {
+    const cached = cache.getPairAnswer<PendingHalf[]>(key)
+    if (cached) {
+      const startedAt = nowSeconds()
+      const found = await findChangedItems(source, new Map([[key, cached]]))
+      if (found && !found.changed.has(key)) {
+        if (checkWindowAged(cached, startedAt)) {
+          cache.setPairAnswer(key, { ...cached, checkedAt: checkedAtFor(startedAt), seenChangeKeys: found.seenChangeKeys.get(key) ?? [] })
+        }
+        return cached.answer
+      }
+      cache.clearPairAnswer(key)
+    }
+  }
+
+  const startedAt = nowSeconds()
+  const recipients = attester ? [attester] : [...new Set((await seedAttesters(source, [...publications!])).values())]
+  const { pending, dependencies } = await readPending(source, recipients, publications)
+  if (useCache) {
+    cache.setPairAnswer(key, { answer: pending, dependencies, checkedAt: checkedAtFor(startedAt), seenChangeKeys: [], lastUpdated: startedAt })
+  }
+  return pending
+}

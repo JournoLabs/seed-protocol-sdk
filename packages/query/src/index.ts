@@ -18,8 +18,8 @@ export {
   queryBySchemaForMonth,
 } from './api.js'
 export type { GetSeedAttestationsOptions } from './api.js'
-export { getInclusions, inclusionsForPosts, getStaff, mastheadsForIdentity } from './pairs.js'
-export type { Inclusion, PostInclusion, PairReadOptions } from './pairs.js'
+export { getInclusions, inclusionsForPosts, getStaff, mastheadsForIdentity, pendingFor } from './pairs.js'
+export type { Inclusion, PostInclusion, PairReadOptions, PendingHalf, PendingForFilter } from './pairs.js'
 
 export {
   registerLocalQuerySource,

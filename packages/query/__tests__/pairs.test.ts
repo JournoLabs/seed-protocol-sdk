@@ -16,6 +16,7 @@ import {
   getStaff,
   inclusionsForPosts,
   mastheadsForIdentity,
+  pendingFor,
   resetQueryCacheManager,
 } from '../src/index'
 
@@ -435,5 +436,173 @@ describe('pair read cache', () => {
     staffHalf({ by: PERSON, to: OWNER, p: P, i: I, ref: O, t: NOW })
     expect((await getStaff([P])).get(P)).toEqual([I])
     expect(await mastheadsForIdentity(I)).toEqual([P])
+  })
+})
+
+describe('pendingFor', () => {
+  const uids = (rows: { uid: string }[]) => rows.map((row) => row.uid)
+
+  it('lists offers to a publication, and asks waiting on an attester', async () => {
+    const { P, S, V1 } = publicationAndPost()
+    const I = seed(PERSON)
+    const offer = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+    const ask = inclusionHalf({ by: OWNER, to: AUTHOR, p: P, s: S, version: V1, t: T0 + 400 })
+    const staffAsk = staffHalf({ by: OWNER, to: PERSON, p: P, i: I, t: T0 + 500 })
+
+    expect(await pendingFor({ publicationUids: [P] })).toEqual([
+      {
+        kind: 'inclusion',
+        half: 'author',
+        uid: offer,
+        schemaUid: INCLUSION_SCHEMA_UID,
+        attester: AUTHOR,
+        recipient: OWNER,
+        timeCreated: T0 + 300,
+        publicationUid: P,
+        postUid: S,
+      },
+    ])
+    expect(await pendingFor({ attester: AUTHOR })).toEqual([
+      {
+        kind: 'inclusion',
+        half: 'owner',
+        uid: ask,
+        schemaUid: INCLUSION_SCHEMA_UID,
+        attester: OWNER,
+        recipient: AUTHOR,
+        timeCreated: T0 + 400,
+        publicationUid: P,
+        postUid: S,
+        versionUid: V1,
+      },
+    ])
+    expect(await pendingFor({ attester: PERSON.toUpperCase().replace('0X', '0x') })).toEqual([
+      {
+        kind: 'staff',
+        half: 'owner',
+        uid: staffAsk,
+        schemaUid: STAFF_SCHEMA_UID,
+        attester: OWNER,
+        recipient: PERSON,
+        timeCreated: T0 + 500,
+        publicationUid: P,
+        identityUid: I,
+      },
+    ])
+  })
+
+  it('drops a half once the other side answers it, and doesn’t bring it back after a Remove', async () => {
+    const { P, S, V1 } = publicationAndPost()
+    const offer = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+    const accept = inclusionHalf({ by: OWNER, to: AUTHOR, p: P, s: S, version: V1, ref: offer, t: T0 + 400 })
+    expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+    // The owner's answer references the offer, so it isn't waiting on the author either.
+    expect(await pendingFor({ attester: AUTHOR })).toEqual([])
+
+    revoke(accept, T0 + 500)
+    expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+
+    const again = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 600 })
+    expect(uids(await pendingFor({ publicationUids: [P] }))).toEqual([again])
+  })
+
+  it('drops a Staff ask once the person agrees, even after they leave', async () => {
+    const P = seed(OWNER)
+    const I = seed(PERSON)
+    const ask = staffHalf({ by: OWNER, to: PERSON, p: P, i: I, t: T0 + 300 })
+    expect(uids(await pendingFor({ attester: PERSON }))).toEqual([ask])
+
+    const agree = staffHalf({ by: PERSON, to: OWNER, p: P, i: I, ref: ask, t: T0 + 400 })
+    revoke(agree, T0 + 500)
+    expect(await pendingFor({ attester: PERSON })).toEqual([])
+  })
+
+  it('ignores answers by anyone but the other side’s attester', async () => {
+    const { P, S } = publicationAndPost()
+    const offer = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+    inclusionHalf({ by: STRANGER, to: AUTHOR, p: P, s: S, ref: offer, t: T0 + 400 })
+    expect(uids(await pendingFor({ publicationUids: [P] }))).toEqual([offer])
+  })
+
+  it('leaves out withdrawn halves, halves not by their seed’s attester, and answers with no ask', async () => {
+    const { P, S } = publicationAndPost()
+    const I = seed(PERSON)
+    const withdrawn = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+    revoke(withdrawn, T0 + 400)
+    // A stranger offering someone else's post.
+    inclusionHalf({ by: STRANGER, to: OWNER, p: P, s: S, t: T0 + 500 })
+    // A person half that answers nothing is not a request.
+    staffHalf({ by: PERSON, to: OWNER, p: P, i: I, t: T0 + 600 })
+    expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+    expect(await pendingFor({ attester: OWNER })).toEqual([])
+  })
+
+  it('leaves out same-attester pairs and halves naming a revoked seed', async () => {
+    const P = seed(OWNER)
+    const own = seed(OWNER)
+    inclusionHalf({ by: OWNER, to: OWNER, p: P, s: own, t: T0 + 300 })
+    const S = seed(AUTHOR)
+    inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 400 })
+    revoke(S, T0 + 500)
+    expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+  })
+
+  it('narrows to the publications given', async () => {
+    const { P, S, V1 } = publicationAndPost()
+    const P2 = seed(OWNER)
+    const toP = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+    const toP2 = inclusionHalf({ by: AUTHOR, to: OWNER, p: P2, s: S, t: T0 + 400 })
+    expect(uids(await pendingFor({ publicationUids: [P] }))).toEqual([toP])
+    expect(uids(await pendingFor({ attester: OWNER }))).toEqual([toP2, toP])
+
+    // With both: asks from P waiting on AUTHOR, not from elsewhere.
+    const fromP = inclusionHalf({ by: OWNER, to: AUTHOR, p: P, s: S, version: V1, t: T0 + 500 })
+    inclusionHalf({ by: OWNER, to: AUTHOR, p: P2, s: S, version: V1, t: T0 + 600 })
+    expect(uids(await pendingFor({ attester: AUTHOR, publicationUids: [P] }))).toEqual([fromP])
+  })
+
+  it('needs an attester or publications', async () => {
+    await expect(pendingFor({})).rejects.toThrow(TypeError)
+    expect(await pendingFor({ attester: 'nope' })).toEqual([])
+    expect(await pendingFor({ publicationUids: ['nope'] })).toEqual([])
+    expect(requests).toEqual([])
+  })
+
+  describe('with the cache', () => {
+    beforeEach(() => {
+      process.env.CACHE_ENABLED = 'true'
+      process.env.CACHE_TTL = '3600'
+      resetQueryCacheManager()
+    })
+
+    it('reuses an unchanged answer, and sees a new offer and its answer', async () => {
+      const { P, S, V1 } = publicationAndPost()
+      expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+
+      requests = []
+      expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+      expect(requests.length).toBeGreaterThan(0)
+      expect(requests.every((name) => name === 'GetAttestationChanges')).toBe(true)
+
+      const offer = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: NOW })
+      expect(uids(await pendingFor({ publicationUids: [P] }))).toEqual([offer])
+
+      inclusionHalf({ by: OWNER, to: AUTHOR, p: P, s: S, version: V1, ref: offer, t: NOW })
+      expect(await pendingFor({ publicationUids: [P] })).toEqual([])
+    })
+
+    it('sees a pending half withdrawn and its post revoked', async () => {
+      const { P, S } = publicationAndPost()
+      const offer = inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S, t: T0 + 300 })
+      expect(uids(await pendingFor({ attester: OWNER }))).toEqual([offer])
+      revoke(offer, NOW)
+      expect(await pendingFor({ attester: OWNER })).toEqual([])
+
+      const S2 = seed(AUTHOR)
+      inclusionHalf({ by: AUTHOR, to: OWNER, p: P, s: S2, t: NOW })
+      expect(await pendingFor({ attester: OWNER })).toHaveLength(1)
+      revoke(S2, NOW)
+      expect(await pendingFor({ attester: OWNER })).toEqual([])
+    })
   })
 })
