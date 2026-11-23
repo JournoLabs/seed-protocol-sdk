@@ -2,10 +2,16 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - New `INCLUSION_SCHEMA_DEF`, `INCLUSION_SCHEMA_UID` and `INCLUSION_SCHEMA_NAME` (`seedprotocol.inclusion`, `bytes32 publication,bytes32 post,bytes32 version`), and `STAFF_SCHEMA_DEF`, `STAFF_SCHEMA_UID` and `STAFF_SCHEMA_NAME` (`seedprotocol.staff`, `bytes32 publication,bytes32 identity`): the two halves of an Inclusion of a post in a publication, and of Staff naming an identity in one. Revocable, zero resolver; the UIDs are the same on every chain.
 - **Breaking:** `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
+
+### Commits
+
+#### Fixes
+
+- query: EAS schema names, one property read, contenthash varint, viem optional peer (4c9371bb)
 
 ## 0.8.2 (2026-11-09)
 

@@ -1,5 +1,9 @@
 # @seedprotocol/next
 
+## 0.8.3 (2026-11-23)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.8.2 (2026-11-09)
 
 No user-facing changes; released at the same version as the other packages.

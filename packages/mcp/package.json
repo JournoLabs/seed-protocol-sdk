@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/mcp",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "MCP server that lets LLM agents read published Seed Protocol content from EAS attestations and Arweave, with each item's attester and attestation UIDs",
   "keywords": [
     "seed-protocol",

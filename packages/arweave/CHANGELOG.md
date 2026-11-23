@@ -2,10 +2,16 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - The across-gateways reads try the host from before the read-gateway probe last: the one `setHost` configured, else the default `arweave.net`. Without `setHost`, a probe that moved the host past a failing `arweave.net` (to `zigza.xyz`, say) made the probe's pick the host tried last, and `arweave.net` wasn't tried.
 - `getTransactionData`'s and `readArweaveRawAcrossGateways`'s JSDoc say what `decode: false` skips on each: the preferred gateways and the read transform on `getTransactionData`, only the transform on the across-gateways reads.
+
+### Commits
+
+#### Fixes
+
+- mapping, sdk: batch 17 Phase 5 (5df16a02)
 
 ## 0.8.2 (2026-11-09)
 

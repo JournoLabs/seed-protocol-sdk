@@ -2,7 +2,10 @@
   "mcpServers": {
     "seed-protocol": {
       "command": "npx",
-      "args": ["-y", "@seedprotocol/mcp@0.8.2"],
+      "args": [
+        "-y",
+        "@seedprotocol/mcp@0.8.3"
+      ],
       "env": {
         "SEED_MCP_ATTESTERS": "${user_config.attesters}",
         "EAS_CHAIN_ID": "${user_config.chain_id}"

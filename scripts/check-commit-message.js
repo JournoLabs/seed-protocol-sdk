@@ -4,7 +4,7 @@
  *
  * Passes when the message has `#N` (`Refs #N` for work toward an issue, `Completes #N` on the
  * commit that finishes it) or a `Refs: none` line for internal work. Merge, fixup!/squash!/amend!
- * and chore(release) commits are skipped. Closing keywords (Fixes #N and the like) pass with a
+ * and release commits (`chore: release X.Y.Z` from scripts/release.js) are skipped. Closing keywords (Fixes #N and the like) pass with a
  * warning: GitHub closes the issue on push, but issues close at release
  * (scripts/reconcile-issues.js does that).
  *
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 export const BOARD = { owner: 'JournoLabs', number: 5, id: 'PVT_kwDOC2xOfc4BhlA7' }
 export const REPO = 'JournoLabs/seed-protocol-sdk'
 
-const SKIP_SUBJECT = /^(Merge |fixup! |squash! |amend! |chore\(release\))/
+const SKIP_SUBJECT = /^(Merge |fixup! |squash! |amend! |chore\(release\)|chore: release \d)/
 const REF = /#(\d+)\b/g
 const REFS_NONE = /^refs:\s*none\s*$/im
 const CLOSING = /\b(fix(?:es|ed)?|close[sd]?|resolve[sd]?)\b:?\s+#(\d+)/gi
