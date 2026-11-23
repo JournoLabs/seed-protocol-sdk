@@ -85,6 +85,13 @@ describe('license offers', () => {
     expect(await getLicenseOffersFromEas({ versionUids: ['0x01'], attester: ATTESTER })).toEqual([])
   })
 
+  it('splits a long Version list over several requests', async () => {
+    const wheres = fakeEas([])
+    const versionUids = Array.from({ length: 900 }, (_, i) => '0x' + i.toString(16).padStart(64, '0'))
+    await getLicenseOffersFromEas({ versionUids, attester: ATTESTER })
+    expect(wheres.map((w) => w.refUID.in.length)).toEqual([400, 400, 100])
+  })
+
   it('makes no request without Versions', async () => {
     const wheres = fakeEas([])
     expect(await getLicenseOffersFromEas({ versionUids: [], attester: ATTESTER })).toEqual([])

@@ -23,6 +23,9 @@ export type LicenseOffer = {
   legalTxId?: string
 }
 
+/** Version uids per request, as getAttestationChangesSince splits them. */
+const VERSION_UIDS_PER_REQUEST = 400
+
 type DecodedField = { name?: string; value?: { value?: unknown } }
 
 function decodeOffer(attestation: Attestation): LicenseOffer | undefined {
@@ -60,14 +63,19 @@ export async function getLicenseOffersFromEas({
   versionUids: readonly string[]
   attester: string
 }): Promise<LicenseOffer[]> {
-  if (versionUids.length === 0) return []
-  const { itemProperties } = (await BaseEasClient.getEasClient().request(GET_PROPERTIES, {
-    where: {
-      refUID: { in: [...new Set(versionUids.map(indexerUid))].sort() },
-      schemaId: { equals: LICENSE_OFFER_SCHEMA_UID },
-    },
-  })) as { itemProperties: Attestation[] }
-  return itemProperties
+  const unique = [...new Set(versionUids.map(indexerUid))].sort()
+  const chunks: string[][] = []
+  for (let i = 0; i < unique.length; i += VERSION_UIDS_PER_REQUEST) chunks.push(unique.slice(i, i + VERSION_UIDS_PER_REQUEST))
+  const responses = await Promise.all(
+    chunks.map(
+      (chunk) =>
+        BaseEasClient.getEasClient().request(GET_PROPERTIES, {
+          where: { refUID: { in: chunk }, schemaId: { equals: LICENSE_OFFER_SCHEMA_UID } },
+        }) as Promise<{ itemProperties: Attestation[] }>,
+    ),
+  )
+  return responses
+    .flatMap((r) => r.itemProperties)
     .filter((a) => a.attester.toLowerCase() === attester.toLowerCase())
     .map(decodeOffer)
     .filter((offer): offer is LicenseOffer => !!offer)

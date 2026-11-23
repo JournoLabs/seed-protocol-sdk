@@ -150,6 +150,13 @@ describe('getLicense', () => {
     expect(await getLicense({ seedUid: SEED, versionUid: V2 })).toBeNull()
   })
 
+  it('is null for a pinned Version revoked by asOf', async () => {
+    fakeEas.versions = [attestation(V1, SEED, 110, { revoked: true, revocationTime: 200 })]
+    fakeEas.offers = [offer('o1', V1, 110, CC_BY)]
+    expect((await getLicense({ seedUid: SEED, versionUid: V1, asOf: 150 }))?.offerUid).toBe('o1')
+    expect(await getLicense({ seedUid: SEED, versionUid: V1, asOf: 250 })).toBeNull()
+  })
+
   it('names the license by its SPDX id when the catalog does not know the terms', async () => {
     fakeEas.offers = [offer('o1', V1, 110, uid('cd'), { spdx: 'MIT', legalTxId: 'tx' })]
     expect(await getLicense({ seedUid: SEED })).toMatchObject({

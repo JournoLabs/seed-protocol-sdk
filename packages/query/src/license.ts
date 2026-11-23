@@ -102,7 +102,7 @@ async function readSeedVersions(seedUid: string): Promise<{ seed: Attestation; v
  * reads as reserved rights from its revocation time.
  *
  * Null when no offer was in force, or when EAS has no such Seed, no Version of it by `asOf`, or no
- * Version `versionUid` from the Seed's attester. Reads EAS on every call and keeps no cache, so a
+ * Version `versionUid` from the Seed's attester live at `asOf`. Reads EAS on every call and keeps no cache, so a
  * result is never reused after an offer changes. The EAS indexer lists attestations a little late,
  * so an offer made seconds earlier can be missing.
  * @throws RangeError when `asOf` isn't a finite number
@@ -115,7 +115,7 @@ export async function getLicense(options: GetLicenseOptions): Promise<License | 
   const { seed, versions } = read
   const time = asOf ?? Number.POSITIVE_INFINITY
   const version = versionUid
-    ? versions.find((v) => sameAddress(v.id, versionUid.trim()) && v.timeCreated <= time)
+    ? versions.find((v) => sameAddress(v.id, versionUid.trim()) && v.timeCreated <= time && !revokedBy(v, time))
     : versions.filter((v) => v.timeCreated <= time && !revokedBy(v, time)).at(-1)
   if (!version) return null
 
