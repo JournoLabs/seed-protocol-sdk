@@ -17,4 +17,11 @@ describe('@seedprotocol/publish entry', () => {
     const entry = await import('./index')
     expect(await entry.publishLockHolder('seed-not-publishing')).toBeOneOf(['here', 'none'])
   })
+
+  test('exports onPublishLockHolderChange, so a tab hears when to read publishLockHolder again', async () => {
+    const entry = await import('./index')
+    const unsubscribe = entry.onPublishLockHolderChange(() => {})
+    expect(typeof unsubscribe).toBe('function')
+    unsubscribe()
+  })
 })

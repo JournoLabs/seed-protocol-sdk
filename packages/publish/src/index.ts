@@ -204,6 +204,7 @@ export { publishMachine } from './services/publish'
 export { PublishManager, type PublishBlocker } from './services/publishManager'
 export type { AttestationSettleResult } from './services/publishManager/settleAttestationAttempt'
 export {
+  onPublishLockHolderChange,
   publishLockHolder,
   type PublishLockHolder,
 } from './services/publishManager/publishLocks'

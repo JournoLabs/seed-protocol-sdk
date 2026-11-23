@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- A publish whose tab closes partway is taken over by an open tab of the app, which resumes it as a reload would (ADR 0037). Each tab queues for the publish lock of every in-progress publish another tab runs, found at restore or announced by the tab that started it, and the first in the queue gets it when that tab closes. A publish that reaches attestation there uses that tab's wallet, so a wallet that asks to confirm each transaction asks in that tab. With `multiTab: 'off'` a tab takes over only publishes it found at load.
+- New `onPublishLockHolderChange(listener)`: calls back with a seed whose publish lock holder may have changed, so the listener can read `publishLockHolder` again. It fires when this tab takes or lets go of a lock, when a lock it queued for is granted, and when another tab announces it took one. `useItemPublishStatus` re-reads `heldBy` on it; `heldBy` was read again only when the row or this tab's run changed.
+
 ## 0.8.3 (2026-11-23)
 
 - New Inclusion and Staff half helpers (see docs/PUBLISHING.md): `ensureInclusionSchema`, `ensureStaffSchema`, `attestInclusionHalf`, `attestStaffHalf`, `revokeInclusionHalf`, `revokeStaffHalf`, `encodeInclusionData`, `encodeStaffData`, and `PairSchemaNotRegisteredError` (code `PAIR_SCHEMA_NOT_REGISTERED`). A half's `recipient` is the other side's seed attester and its `refUID` the half it answers. The attest helpers read the seeds, the pinned Version and the referenced half from the chain and refuse before sending when the wallet isn't the half's attester, both seeds share an attester, the Version isn't a live Version of the post by its attester, or the referenced half doesn't match.

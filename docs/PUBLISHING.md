@@ -290,6 +290,9 @@ or `failed`, and `onRestoreStatus(listener)` calls back when it changes. `dbNotR
 when the database arrives. `failed` holds `error` and isn't tried again until the next load.
 `unreadableSeedLocalIds` lists saved publishes that couldn't be parsed; their rows stay `in_progress`.
 
+A publish whose tab closes doesn't wait for a reload: an open tab of the app takes it over and
+resumes it the same way, with that tab's wallet. See [Multiple tabs](MULTI_TAB.md).
+
 ## Arweave upload tags
 
 Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **after** `Content-SHA-256` and `Content-Type`.

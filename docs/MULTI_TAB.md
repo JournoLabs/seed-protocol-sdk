@@ -22,18 +22,25 @@ restores in-progress publishes, it skips any whose lock another tab holds, and
 
 Every tab sees the same `in_progress` rows in `publish_processes`. `publishLockHolder(seedLocalId)`
 from `@seedprotocol/publish` reads the lock to say which tab runs one: `'here'`, `'other-tab'` or
-`'none'`. `'none'` on an `in_progress` row means the tab running it closed. No open tab picks it up;
-the next tab to load restores it. The answer can change without the row changing, when the running
-tab closes, so re-reading only on row changes misses that. Without Web Locks (Bun, old browsers)
-every tab runs its own publishes, and the answer is `'here'`. Node has Web Locks for one process, so
-there it answers as in a browser, for that process's publishes.
+`'none'`. Without Web Locks (Bun, old browsers) every tab runs its own publishes, and the answer is
+`'here'`. Node has Web Locks for one process, so there it answers as in a browser, for that process's
+publishes.
 
-`PublishManager.publishBlocker(seedLocalId)` tells another tab's publish apart by the state that tab
-last saved on the row: `'parked_in_other_tab'` when it waits after a failed attestation (ADR 0036),
-which is retried in that tab, and `'running_in_other_tab'` otherwise, including before its first save.
-`useItemPublishStatus` returns `heldBy`, the lock holder, and when it is `'other-tab'`, `publishValue`
-is that tab's saved state, so a publish parked there reads as waiting for a retry. The hook reads
-`heldBy` again when the row changes, not when the lock does.
+When a tab closes partway through a publish, an open tab takes it over
+([ADR 0037](adr/0037-an-open-tab-takes-over-a-closed-tabs-publish.md)). Each tab queues a request for
+the lock of every in-progress publish another tab runs: the ones it finds when it restores at load,
+and the ones it hears about from the `publish-lock-taken` message a tab posts when it starts or takes
+over a publish. The browser frees the lock when the tab holding it closes and grants it to the first
+tab in the queue, which resumes the publish from its saved row as a reload would. A publish that
+reaches attestation there uses that tab's wallet, so a wallet that asks to confirm each transaction
+asks in that tab, which may be in the background. When a publish ends normally, each queued tab is
+granted the lock in turn, finds no in-progress row, and lets it go. With `multiTab: 'off'` there is no
+message channel, so a tab only takes over the publishes it found at load.
+
+The holder can change without the row changing. `onPublishLockHolderChange(listener)` calls back with
+a seed whose holder may have changed, so the listener can read `publishLockHolder` again: when this
+tab takes or lets go of a lock, when a lock it queued for is granted, and when another tab says it
+took one. `useItemPublishStatus` re-reads `heldBy` on it.
 
 That lock names one seed, and an attestation transaction can cover several. The open rows in
 `publish_attempts` cover the rest: they are in the shared database, and the check and the insert are
