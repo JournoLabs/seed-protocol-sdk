@@ -5,7 +5,11 @@ import { eq, desc } from 'drizzle-orm'
 import { usePublishProcess } from './usePublishProcess'
 import { useArweaveL1Finalize } from './useArweaveL1Finalize'
 import { describePublishRun, getPublishMachineValueForUi } from '~/helpers/publishDisplayHelpers'
-import { publishLockHolder, type PublishLockHolder } from '~/services/publishManager/publishLocks'
+import {
+  onPublishLockHolderChange,
+  publishLockHolder,
+  type PublishLockHolder,
+} from '~/services/publishManager/publishLocks'
 
 export type PublishProcessStatus = 'in_progress' | 'completed' | 'failed' | 'interrupted'
 
@@ -41,8 +45,8 @@ export interface PublishProcessRecord {
  * `'other-tab'` or `'none'`, and `undefined` until it is first read. When another tab holds it and
  * the row is `in_progress`, `publishValue` is the state that tab last saved, so a publish parked in
  * another tab reads `awaitingRetry` here too; it is retried in that tab. `heldBy` is read again when
- * the row or this tab's run changes, not when the lock changes: after the holding tab closes it
- * stays `'other-tab'` until the row next changes.
+ * the row or this tab's run changes, and on `onPublishLockHolderChange` for the seed: when a tab
+ * takes the lock, including this one taking over from a tab that closed.
  */
 export function useItemPublishStatus(seedLocalId: string | undefined) {
   const { publishProcess, value } = usePublishProcess(seedLocalId ?? '')
@@ -70,6 +74,13 @@ export function useItemPublishStatus(seedLocalId: string | undefined) {
   const recordUpdatedAt = record?.updatedAt
   // A new seed starts unknown; a row change keeps the last answer until the new one arrives.
   useEffect(() => setHeldBy(undefined), [seedLocalId])
+  const [lockChanges, setLockChanges] = useState(0)
+  useEffect(() => {
+    if (!seedLocalId) return
+    return onPublishLockHolderChange((changed) => {
+      if (changed === seedLocalId) setLockChanges((n) => n + 1)
+    })
+  }, [seedLocalId])
   useEffect(() => {
     if (!seedLocalId) return
     let current = true
@@ -82,7 +93,7 @@ export function useItemPublishStatus(seedLocalId: string | undefined) {
     return () => {
       current = false
     }
-  }, [seedLocalId, publishProcess, recordStatus, recordUpdatedAt])
+  }, [seedLocalId, publishProcess, recordStatus, recordUpdatedAt, lockChanges])
 
   const publishValue =
     value ?? (heldBy === 'other-tab' && record?.status === 'in_progress' ? getPublishMachineValueForUi(record) : undefined)

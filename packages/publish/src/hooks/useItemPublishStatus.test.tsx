@@ -21,7 +21,7 @@ const { useItemPublishStatus } = await import('./useItemPublishStatus')
 const { PublishManager } = await import('../services/publishManager')
 const { subscribe } = await import('../services/publishManager/actors/subscribe')
 const { publishMachine } = await import('../services/publish')
-const { publishLockName, setPublishLockManagerForTests, tryHoldPublishLock } = await import(
+const { publishLockName, releasePublishLock, setPublishLockManagerForTests, tryHoldPublishLock, waitForPublishLock } = await import(
   '../services/publishManager/publishLocks'
 )
 const { fakeLockManager } = await import('../../test-utils/fakeLockManager')
@@ -164,6 +164,25 @@ describe('useItemPublishStatus across tabs', () => {
     const { seen, unmount } = await watch(seedLocalId)
     await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy !== undefined, 'the lock holder to be read'))
     expect(seen.at(-1)).toEqual({ value: 'attestationFailureRecoverable', heldBy: 'other-tab', isActive: true })
+    await unmount()
+  }, TEST_TIMEOUT_MS)
+
+  test('heldBy follows the lock to this tab when it takes over, with no row change', async () => {
+    await setUp()
+    const seedLocalId = 'seed-taken-over'
+    otherTab.hold(publishLockName(seedLocalId))
+    liveRows = [rowIn('attestationFailureRecoverable')]
+    const { seen, unmount } = await watch(seedLocalId)
+    await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy === 'other-tab', 'the lock holder to be read'))
+
+    // This tab queued for the lock; the tab holding it closes.
+    const granted = waitForPublishLock(seedLocalId, new AbortController().signal)
+    await act(async () => {
+      otherTab.release(publishLockName(seedLocalId))
+      await granted
+    })
+    await act(() => waitUntilOrThrow(() => seen.at(-1)?.heldBy === 'here', 'heldBy to follow the lock here'))
+    releasePublishLock(seedLocalId)
     await unmount()
   }, TEST_TIMEOUT_MS)
 
