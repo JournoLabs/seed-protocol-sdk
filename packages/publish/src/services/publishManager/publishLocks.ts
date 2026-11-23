@@ -29,18 +29,48 @@ export function publishLockName(seedLocalId: string): string {
   return `seed:publish:${seedLocalId}`
 }
 
+/** Called with a seed whose lock this tab took, was granted or let go of. */
+type HolderChangeListener = (seedLocalId: string) => void
+const holderChangeListeners = new Set<HolderChangeListener>()
+
 /**
- * Takes the seed's publish lock if no other tab holds it. Resolves true when this tab holds it
- * (including already), false when another tab is running that publish.
+ * Calls `listener` with a seed whose publish lock holder may have changed, so it can read
+ * `publishLockHolder` again. A tab can't watch other tabs' locks, so this fires when this tab takes
+ * or lets go of a lock, when a lock it was waiting for is granted (the tab holding it let go), and
+ * when another tab says it took one (`emitPublishLockHolderChange`). Returns the unsubscribe
+ * function.
  */
-export async function tryHoldPublishLock(seedLocalId: string): Promise<boolean> {
-  if (held.has(seedLocalId)) return true
+export function onPublishLockHolderChange(listener: HolderChangeListener): () => void {
+  holderChangeListeners.add(listener)
+  return () => {
+    holderChangeListeners.delete(listener)
+  }
+}
+
+export function emitPublishLockHolderChange(seedLocalId: string): void {
+  for (const listener of [...holderChangeListeners]) {
+    try {
+      listener(seedLocalId)
+    } catch (error) {
+      logger('publish lock holder listener threw', error)
+    }
+  }
+}
+
+/**
+ * Requests the seed's lock and, once granted, holds it until `releasePublishLock`. Resolves true
+ * when held, false when `ifAvailable` found it held elsewhere or `signal` aborted the wait.
+ */
+function holdPublishLock(
+  seedLocalId: string,
+  options: { ifAvailable: true } | { signal: AbortSignal },
+): Promise<boolean> {
   const locks = getLockManager()
-  if (!locks) return true
+  if (!locks) return Promise.resolve(true)
 
   return new Promise<boolean>((resolve, reject) => {
     locks
-      .request(publishLockName(seedLocalId), { mode: 'exclusive', ifAvailable: true }, (lock) => {
+      .request(publishLockName(seedLocalId), { mode: 'exclusive', ...options }, (lock) => {
         if (!lock) {
           resolve(false)
           return undefined
@@ -51,8 +81,10 @@ export async function tryHoldPublishLock(seedLocalId: string): Promise<boolean> 
             held.delete(seedLocalId)
             releasing.add(seedLocalId)
             release()
+            emitPublishLockHolderChange(seedLocalId)
           })
           resolve(true)
+          emitPublishLockHolderChange(seedLocalId)
         })
       })
       .then(
@@ -61,11 +93,34 @@ export async function tryHoldPublishLock(seedLocalId: string): Promise<boolean> 
         },
         (error) => {
           releasing.delete(seedLocalId)
+          if ('signal' in options && options.signal.aborted) {
+            resolve(false)
+            return
+          }
           logger(`publish lock request for ${seedLocalId} failed`, error)
           reject(error)
         },
       )
   })
+}
+
+/**
+ * Takes the seed's publish lock if no other tab holds it. Resolves true when this tab holds it
+ * (including already), false when another tab is running that publish.
+ */
+export async function tryHoldPublishLock(seedLocalId: string): Promise<boolean> {
+  if (held.has(seedLocalId)) return true
+  return holdPublishLock(seedLocalId, { ifAvailable: true })
+}
+
+/**
+ * Waits for the seed's publish lock, queued behind the tab holding it, and holds it once that tab
+ * lets go (when it closes, or its publish ends). Resolves false if `signal` aborts first.
+ */
+export async function waitForPublishLock(seedLocalId: string, signal: AbortSignal): Promise<boolean> {
+  if (held.has(seedLocalId)) return true
+  if (signal.aborted) return false
+  return holdPublishLock(seedLocalId, { signal })
 }
 
 export function releasePublishLock(seedLocalId: string): void {
