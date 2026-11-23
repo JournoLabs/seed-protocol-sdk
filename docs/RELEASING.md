@@ -219,7 +219,7 @@ Done by a maintainer with publish rights and 2FA.
    Node line use `npm install -g npm@11`:
 
    ```bash
-   for p in archive eas arweave vite next query rdf sdk feed feed-hyper gateway-hyper react publish mapping; do
+   for p in archive eas arweave vite next encryption licensing query rdf sdk feed feed-hyper gateway-hyper react publish mapping ipfs mcp; do
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env release --allow-publish -y
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env preview --allow-publish -y
      npm trust github "@seedprotocol/$p" --file cleanup-dist-tags.yml --repo JournoLabs/seed-protocol-sdk --env cleanup --allow-stage-publish -y

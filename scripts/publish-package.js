@@ -7,8 +7,8 @@
  *   node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] all
  *   node scripts/publish-package.js [-f] [-y]          # same as "all" (used by bun run publish:all)
  *
- * Packages: archive, eas, arweave, vite, query, sdk, rdf, ipfs, feed, feed-hyper, gateway-hyper, react, publish, mapping,
- *   and by hand only: encryption, licensing, mcp
+ * Packages: archive, eas, arweave, vite, next, encryption, licensing, query, sdk, rdf, ipfs, feed, feed-hyper,
+ *   gateway-hyper, react, publish, mapping, mcp
  *
  * Single-package mode:
  * - If publishing anything except 'sdk' / lean packages, checks that @seedprotocol/sdk@<version> is published
