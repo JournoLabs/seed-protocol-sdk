@@ -28,6 +28,10 @@ tab closes, so re-reading only on row changes misses that. Without Web Locks (Bu
 every tab runs its own publishes, and the answer is `'here'`. Node has Web Locks for one process, so
 there it answers as in a browser, for that process's publishes.
 
+`PublishManager.publishBlocker(seedLocalId)` tells another tab's publish apart by the state that tab
+last saved on the row: `'parked_in_other_tab'` when it waits after a failed attestation (ADR 0036),
+which is retried in that tab, and `'running_in_other_tab'` otherwise, including before its first save.
+
 That lock names one seed, and an attestation transaction can cover several. The open rows in
 `publish_attempts` cover the rest: they are in the shared database, and the check and the insert are
 one transaction, so a tab publishing a related item alone fails with `AttestationAttemptOpenError`

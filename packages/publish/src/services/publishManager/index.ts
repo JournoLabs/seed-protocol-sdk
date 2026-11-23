@@ -3,7 +3,9 @@ import { BaseDb, findOpenPublishAttempts, Item, updatePublishAttempt } from '@se
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
-import { isParkedRun } from './parkedRun'
+import { isParkedRun, isParkedValue } from './parkedRun'
+import { latestPublishRow } from './latestPublishRow'
+import { getPublishMachineValueForUi } from '~/helpers/publishDisplayHelpers'
 import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
@@ -18,7 +20,7 @@ import { queueCreatePublish } from './actions/queueCreatePublish'
 import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
-import { isHoldingPublishLock, releasePublishLock, tryHoldPublishLock } from './publishLocks'
+import { isHoldingPublishLock, publishLockHolder, releasePublishLock, tryHoldPublishLock } from './publishLocks'
 import { settleAttestationAttempt, type AttestationSettleResult } from './settleAttestationAttempt'
 import debug from 'debug'
 
@@ -38,8 +40,17 @@ export type ReplaceParked = {
  * What stands in the way of a new publish of a seed. `attempt_open`: an attestation attempt for it
  * is open, whatever the run's state. `parked`: this tab's run waits after a failed attestation and
  * a new publish replaces it. `running`: this tab's run is in any other state.
+ * `parked_in_other_tab`: another tab of the origin holds the seed's publish and its saved state is
+ * one of those waiting states; it is retried in that tab. `running_in_other_tab`: another tab holds
+ * it in any other state, or before its first save.
  */
-export type PublishBlocker = 'none' | 'running' | 'parked' | 'attempt_open'
+export type PublishBlocker =
+  | 'none'
+  | 'running'
+  | 'parked'
+  | 'attempt_open'
+  | 'parked_in_other_tab'
+  | 'running_in_other_tab'
 
 export interface PublishManagerMachineContext {
   publishProcesses: Map<string, import('xstate').ActorRef<any, any>>
@@ -285,15 +296,19 @@ export const PublishManager = {
     return () => sub.unsubscribe()
   },
   /**
-   * What stands in the way of publishing the seed now ({@link PublishBlocker}). Another tab's
-   * publish isn't seen here: {@link PublishManager.createPublish} finds it by its lock.
+   * What stands in the way of publishing the seed now ({@link PublishBlocker}). A publish in
+   * another tab is found by its lock, and told parked or running by the state its tab last saved.
    */
   publishBlocker: async (seedLocalId: string): Promise<PublishBlocker> => {
     // With no database yet there are no attempts to read; the send's claim checks again.
     if (BaseDb.isAppDbReady() && (await findOpenPublishAttempts([seedLocalId])).length > 0) return 'attempt_open'
     const run = publishManager.getSnapshot().context.publishProcesses.get(seedLocalId)
-    if (!run) return 'none'
-    return isParkedRun(run) ? 'parked' : 'running'
+    if (run) return isParkedRun(run) ? 'parked' : 'running'
+    if ((await publishLockHolder(seedLocalId)) !== 'other-tab') return 'none'
+    const row = await latestPublishRow(seedLocalId)
+    return row?.status === 'in_progress' && isParkedValue(getPublishMachineValueForUi(row))
+      ? 'parked_in_other_tab'
+      : 'running_in_other_tab'
   },
   /**
    * Spawn a publish. Resolves with the child actor once it exists.

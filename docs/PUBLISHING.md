@@ -278,7 +278,8 @@ state, Publishing again starts nothing: `startPublish` and `ensureWalletThenPubl
 `{ outcome: 'attempt_open' }`, `item.publish` rejects naming `retryAttestations`, and
 `PublishManager.createPublish` resolves `undefined`. Settle the attempt with `retryAttestations`,
 `settleAttestationAttempt` or `resolveAttestationAttempt` first. `PublishManager.publishBlocker(seedLocalId)`
-says which applies: `'none'`, `'running'`, `'parked'` or `'attempt_open'`. A publish in any other
+says which applies: `'none'`, `'running'`, `'parked'`, `'attempt_open'`, or, for a publish another tab
+holds, `'parked_in_other_tab'` or `'running_in_other_tab'`. A publish in any other
 state still gives `already_publishing`, as does one another tab runs.
 
 Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
