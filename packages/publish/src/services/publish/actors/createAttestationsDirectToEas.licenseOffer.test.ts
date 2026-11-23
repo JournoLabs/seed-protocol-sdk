@@ -46,8 +46,6 @@ type FakeTx =
   | { kind: 'multi'; schemas: string[]; refUIDs: string[] }
 const sentTxs = new Map<string, FakeTx>()
 const receiptMs = new Map<string, number>()
-/** 1-based number of the transaction that fails, if any. */
-let failTxNumber: number | null = null
 
 const updateVersionUid = mock(async (_: unknown) => {})
 const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
@@ -122,7 +120,6 @@ mock.module('../../../helpers/resolvePublishWallet', () => ({
     txSender: {
       address: PUBLISHER,
       sendTransaction: async (tx: FakeTx) => {
-        if (failTxNumber === sentTxs.size + 1) throw new Error('user rejected the transaction')
         const hash = `0xtx${sentTxs.size + 1}`
         sentTxs.set(hash, tx)
         receiptMs.set(hash, 1_700_000_000_000 + sentTxs.size * 1000)

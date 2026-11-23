@@ -108,10 +108,6 @@ export function licenseOfferAttestation(
   }
 }
 
-/** Whether a `listOfAttestations` entry is a license offer rather than a property. */
-export const isLicenseOfferAttestation = (att: unknown): boolean =>
-  !!att && typeof att === 'object' && (att as { _licenseOffer?: unknown })._licenseOffer === true
-
 /**
  * Registers the license offer schema and names it, once per chain, if it's missing. Any wallet can
  * register it (ADR 0035), but a session key can't call SchemaRegistry.

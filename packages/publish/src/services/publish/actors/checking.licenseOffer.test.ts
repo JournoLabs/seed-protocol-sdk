@@ -9,7 +9,6 @@ import { InvalidLicenseOfferError, LicenseOfferSchemaNotRegisteredError } from '
  * upload or schema registration.
  */
 const ADDRESS = '0x' + 'e'.repeat(40)
-const MIB = 2 ** 20
 const harness = { uploadSizes: [] as number[] }
 const schemaRegistrations: string[] = []
 let offerSchemaRegistered = false

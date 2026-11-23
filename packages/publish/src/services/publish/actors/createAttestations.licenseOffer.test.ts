@@ -66,7 +66,7 @@ const recordPublishRequests = mock(async (records: Array<{ version?: unknown; pr
     if (properties) await applyPropertyAttestationUidsFromPublish(properties)
   }
 })
-let openAttempts: Array<Record<string, unknown>> = []
+const openAttempts: Array<Record<string, unknown>> = []
 const sendTransaction = mock(async () => ({ transactionHash: '0x01' }))
 const relatedImage = {
   seedLocalId: 'imageLocal2',
@@ -146,11 +146,7 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 }))
 
 const { createAttestations } = await import('./createAttestations')
-const { createActor, fromPromise, toPromise, waitFor } = await import('xstate')
-const { publishMachine } = await import('../index')
-const { AttestationOutcomeUnknownError } = await import('../../../errors')
-const { publishNonceKey } = await import('../../../helpers/pinnedNonce')
-const { parkInterruptedAttestation } = await import('../../publishManager/actors/restorableSnapshot')
+const { createActor, toPromise } = await import('xstate')
 
 const attestation = (schema: string, name: string) => ({
   schema,
