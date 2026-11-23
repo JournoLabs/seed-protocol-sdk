@@ -1,6 +1,7 @@
 export * from './api.js'
 export * from './archiveAnchor.js'
 export * from './encryptionKey.js'
+export * from './licenseOffer.js'
 export * from './chains.js'
 export * from './constants.js'
 export * from './easEndpoint.js'

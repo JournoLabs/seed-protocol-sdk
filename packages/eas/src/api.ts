@@ -8,7 +8,7 @@ import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
 import { getEasEndpoint } from './easEndpoint.js'
 import { timedFetchQuery } from './easTiming.js'
-import { ARCHIVE_ANCHOR_SCHEMA_UID, VERSION_SCHEMA_UID } from './constants.js'
+import { ARCHIVE_ANCHOR_SCHEMA_UID, LICENSE_OFFER_SCHEMA_UID, VERSION_SCHEMA_UID } from './constants.js'
 import {
   GET_PROPERTIES,
   GET_SCHEMAS,
@@ -52,10 +52,16 @@ export const getItemVersionsFromEas = async ({
   return itemVersions
 }
 
-/** A bag anchor refers to a Version without being one of its properties or a change to them. */
-const notArchiveAnchor = { schemaId: { notIn: [ARCHIVE_ANCHOR_SCHEMA_UID] } }
+/**
+ * Bag anchors (ADR 0029) and license offers (ADR 0037) refer to a Version without being one of its
+ * properties or a change to them.
+ */
+const notVersionSidecar = { schemaId: { notIn: [ARCHIVE_ANCHOR_SCHEMA_UID, LICENSE_OFFER_SCHEMA_UID] } }
 
-/** Property attestations of the given Versions: everything that refers to them except bag anchors. */
+/**
+ * Property attestations of the given Versions: everything that refers to them except bag anchors
+ * and license offers.
+ */
 export const getItemPropertiesFromEas = async ({
   versionUids,
   excludeRevoked = true,
@@ -66,7 +72,7 @@ export const getItemPropertiesFromEas = async ({
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const onVersions = { refUID: { in: versionUids }, ...notArchiveAnchor }
+  const onVersions = { refUID: { in: versionUids }, ...notVersionSidecar }
   const where = excludeRevoked ? withExcludeRevokedFilter(onVersions) : onVersions
 
   const { itemProperties } = (await timedFetchQuery(queryClient, {
@@ -366,7 +372,7 @@ export const getAttestationChangesSince = async ({
       timedFetchQuery(queryClient, {
         queryKey: [`getAttestationChangesSince`, filter, since],
         queryFn: async () =>
-          easClient.request(GET_ATTESTATION_CHANGES, { where: { AND: [filter, changedSince, notArchiveAnchor] } }),
+          easClient.request(GET_ATTESTATION_CHANGES, { where: { AND: [filter, changedSince, notVersionSidecar] } }),
       }) as Promise<{ changes: AttestationChange[] }>,
     ),
   )

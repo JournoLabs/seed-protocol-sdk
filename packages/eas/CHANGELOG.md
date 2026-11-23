@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- License offers (ADR 0037): `LICENSE_OFFER_SCHEMA_DEF`, `LICENSE_OFFER_SCHEMA_UID`, `LICENSE_OFFER_SCHEMA_NAME` and `getLicenseOffersFromEas({ versionUids, attester })`. `getItemPropertiesFromEas` and `getAttestationChangesSince` leave offers out, as they leave out bag anchors.
 - **Breaking:** `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
 
 ## 0.8.2 (2026-11-09)

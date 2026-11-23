@@ -3,6 +3,7 @@ import { keccak256Hex } from '../src/keccak.js'
 import {
   ARCHIVE_ANCHOR_SCHEMA_DEF,
   ARCHIVE_ANCHOR_SCHEMA_UID,
+  LICENSE_OFFER_SCHEMA_UID,
   VERSION_SCHEMA_DEF,
   VERSION_SCHEMA_UID,
 } from '../src/constants.js'
@@ -35,7 +36,8 @@ const version = att(versionUid, seedUid, VERSION_SCHEMA_UID, 2)
 const sidecar = att(sidecarUid, seedUid, sidecarSchema, 3)
 const properties = [att('mine', versionUid, titleSchema, 4), att('on-sidecar', sidecarUid, titleSchema, 5)]
 const anchor = att('anchor', versionUid, ARCHIVE_ANCHOR_SCHEMA_UID, 6)
-const all = [seed, version, sidecar, ...properties, anchor]
+const offer = att('offer', versionUid, LICENSE_OFFER_SCHEMA_UID, 7)
+const all = [seed, version, sidecar, ...properties, anchor, offer]
 
 /** Evaluates the where shapes these helpers send; unknown keys fail. */
 const matches = (a: Record<string, any>, where: Record<string, any>): boolean =>
@@ -93,7 +95,7 @@ describe('version schema filter', () => {
     expect(canonical.map((p) => p.id)).toEqual(['mine'])
   })
 
-  it('leaves bag anchors out of property reads', async () => {
+  it('leaves bag anchors and license offers out of property reads', async () => {
     await configure()
     const { getCanonicalItemPropertiesFromEas, getItemPropertiesFromEas } = await import('../src/api.js')
     for (const excludeRevoked of [true, false]) {

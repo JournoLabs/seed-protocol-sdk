@@ -50,3 +50,19 @@ export const ENCRYPTION_KEY_SCHEMA_UID =
 
 /** Schema #1 display name for {@link ENCRYPTION_KEY_SCHEMA_DEF}. */
 export const ENCRYPTION_KEY_SCHEMA_NAME = 'seedprotocol.encryptionKey'
+
+/**
+ * Schema of a license offer (ADR 0037): refUID is a Version of the Seed, attested by the Seed's
+ * attester. `terms_hash` is `termsHash` from `@seedprotocol/licensing`, `legal_tx` the Arweave
+ * transaction of the legal text or zero. The fields after `legal_tx` are for paid offers and are
+ * zero until those are defined. Revocable, zero resolver, like {@link VERSION_SCHEMA_DEF}.
+ */
+export const LICENSE_OFFER_SCHEMA_DEF =
+  'bytes32 terms_hash,string spdx,bytes32 legal_tx,uint256 price,address currency,address payee,uint64 duration,uint64 max_grants,bytes32 access_policy,address gate_hook'
+
+/** UID of {@link LICENSE_OFFER_SCHEMA_DEF}, the same on every chain. */
+export const LICENSE_OFFER_SCHEMA_UID =
+  '0xb3b8472515f084c19f9ba31508034a1fc9870d240ca7a24a63171eefb25a3dce'
+
+/** Schema #1 display name for {@link LICENSE_OFFER_SCHEMA_DEF}. */
+export const LICENSE_OFFER_SCHEMA_NAME = 'seedprotocol.licenseOffer'
