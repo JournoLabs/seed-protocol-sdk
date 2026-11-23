@@ -74,6 +74,7 @@ function App() {
 // const result = await ensureWalletThenPublish(item)  // signs data items with the wallet
 // if (result.outcome === 'started') watch(result.publish)   // the publish actor
 // if (result.outcome === 'already_publishing') ...          // this item is publishing already
+// if (result.outcome === 'parked_in_other_tab') ...         // it waits for a retry in another tab
 // if (result.outcome === 'attempt_open') ...                // an attestation of it may still land
 ```
 

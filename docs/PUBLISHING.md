@@ -280,7 +280,9 @@ state, Publishing again starts nothing: `startPublish` and `ensureWalletThenPubl
 `settleAttestationAttempt` or `resolveAttestationAttempt` first. `PublishManager.publishBlocker(seedLocalId)`
 says which applies: `'none'`, `'running'`, `'parked'`, `'attempt_open'`, or, for a publish another tab
 holds, `'parked_in_other_tab'` or `'running_in_other_tab'`. A publish in any other
-state still gives `already_publishing`, as does one another tab runs.
+state still gives `already_publishing`, as does one another tab runs. A publish another tab holds
+parked after a failed attestation gives `{ outcome: 'parked_in_other_tab' }` and `item.publish` rejects
+saying so; retry it in that tab.
 
 Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
 retry. `PublishManager.getRestoreStatus()` returns `outcome`, one of `pending`, `restored`, `dbNotReady`

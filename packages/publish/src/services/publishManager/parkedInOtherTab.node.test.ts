@@ -16,6 +16,7 @@ const { createActor } = await import('xstate')
 const { setConfigRef } = await import('../../config')
 const { publishMachine } = await import('../publish')
 const { PublishManager } = await import('./index')
+const { startPublish } = await import('../../helpers/ensureWalletThenPublish')
 const { publishLockName, setPublishLockManagerForTests } = await import('./publishLocks')
 const { TEST_TIMEOUT_MS } = await import('../../../test-utils/waitUntil')
 
@@ -152,5 +153,30 @@ describe('publishBlocker with another tab', () => {
     PublishManager.getService().getSnapshot().context.publishProcesses.set(seedLocalId, run)
     BaseDb.getAppDb = (() => dbWith([rowIn('attestationFailureRecoverable')])) as unknown as typeof BaseDb.getAppDb
     expect(await PublishManager.publishBlocker(seedLocalId)).toBe('parked')
+  }, TEST_TIMEOUT_MS)
+})
+
+describe('startPublish with another tab', () => {
+  const itemFor = (seedLocalId: string) =>
+    ({
+      seedLocalId,
+      modelName: 'Post',
+      schemaUid: '0xschema',
+      // An item no cache holds: createPublish takes no hold on it.
+      getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+    }) as unknown as import('@seedprotocol/sdk').Item<Record<string, unknown>>
+
+  test('startPublish with another tab parked returns parked_in_other_tab', async () => {
+    useFakeLocks()
+    const seedLocalId = seedInOtherTab([rowIn('attestationFailureRecoverable')])
+    const result = await startPublish(itemFor(seedLocalId), ADDRESS)
+    expect(result).toEqual({ outcome: 'parked_in_other_tab' })
+    expect(PublishManager.getService().getSnapshot().context.publishProcesses.has(seedLocalId)).toBe(false)
+  }, TEST_TIMEOUT_MS)
+
+  test('startPublish with another tab running returns already_publishing', async () => {
+    useFakeLocks()
+    const seedLocalId = seedInOtherTab([rowIn('creatingAttestations')])
+    expect(await startPublish(itemFor(seedLocalId), ADDRESS)).toEqual({ outcome: 'already_publishing' })
   }, TEST_TIMEOUT_MS)
 })
