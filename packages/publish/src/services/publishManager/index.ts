@@ -1,4 +1,4 @@
-import { ActorRefFrom, createActor, setup } from 'xstate'
+import { ActorRefFrom, assign, createActor, setup } from 'xstate'
 import { BaseDb, findOpenPublishAttempts, Item, updatePublishAttempt } from '@seedprotocol/sdk'
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
@@ -21,6 +21,8 @@ import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
 import { isHoldingPublishLock, publishLockHolder, releasePublishLock, tryHoldPublishLock } from './publishLocks'
+import { setTakeoverTarget, stopWatchingForTakeovers, watchForTakeover } from './takeover'
+import type { RestoredRun } from './actors/restoreRun'
 import { settleAttestationAttempt, type AttestationSettleResult } from './settleAttestationAttempt'
 import debug from 'debug'
 
@@ -63,7 +65,8 @@ export interface PublishManagerMachineContext {
 }
 
 type PublishManagerEvent =
-  | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions']; status: PublishRestoreStatus }
+  | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions']; status: PublishRestoreStatus; heldElsewhere?: string[] }
+  | ({ type: 'PUBLISH_TAKEN_OVER'; seedLocalId: string } & RestoredRun)
   | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown; options?: import('../../config').CreatePublishOptions; createToken?: number; replaceParked?: ReplaceParked }
   | { type: 'ADD_SUBSCRIPTION'; seedLocalId: string; newSubscription?: import('xstate').ActorRef<any, any> }
   | { type: 'REQUEST_SAVE_PUBLISH'; seedLocalId: string; publishProcess?: unknown; triggerPublishDone?: boolean }
@@ -87,6 +90,17 @@ export const publishManagerMachine = setup({
   },
   actions: {
     assignRestoreFromDb,
+    watchHeldElsewhere: ({ event }: { event: PublishManagerEvent }) => {
+      if (event.type !== 'RESTORE_FROM_DB_DONE') return
+      for (const seedLocalId of event.heldElsewhere ?? []) watchForTakeover(seedLocalId)
+    },
+    assignTakenOver: assign(({ context, event }: { context: PublishManagerMachineContext; event: PublishManagerEvent }) => {
+      if (event.type !== 'PUBLISH_TAKEN_OVER') return {}
+      return {
+        publishProcesses: new Map(context.publishProcesses).set(event.seedLocalId, event.publishProcess),
+        subscriptions: new Map(context.subscriptions).set(event.seedLocalId, event.subscription),
+      }
+    }),
     createPublish,
     queueCreatePublish,
     drainPendingCreates,
@@ -114,7 +128,7 @@ export const publishManagerMachine = setup({
       on: {
         RESTORE_FROM_DB_DONE: {
           target: 'active',
-          actions: ['assignRestoreFromDb'],
+          actions: ['assignRestoreFromDb', 'watchHeldElsewhere'],
         },
         CREATE_PUBLISH: {
           actions: ['queueCreatePublish'],
@@ -133,7 +147,10 @@ export const publishManagerMachine = setup({
       },
       on: {
         RESTORE_FROM_DB_DONE: {
-          actions: ['assignRestoreFromDb'],
+          actions: ['assignRestoreFromDb', 'watchHeldElsewhere'],
+        },
+        PUBLISH_TAKEN_OVER: {
+          actions: ['assignTakenOver'],
         },
         CREATE_PUBLISH: {
           actions: ['createPublish'],
@@ -241,6 +258,13 @@ setPublishManagerRef({
   },
 })
 
+setTakeoverTarget({
+  ready: () => PublishManager.ready(),
+  hasRun,
+  takenOver: (seedLocalId, run) => publishManager.send({ type: 'PUBLISH_TAKEN_OVER', seedLocalId, ...run }),
+  announce: () => {},
+})
+
 const subscription = publishManager.subscribe((snapshot) => {
   logger('PublishManager snapshot:', snapshot)
 })
@@ -254,6 +278,7 @@ if (typeof document !== 'undefined') {
 
   window.addEventListener('beforeunload', () => {
     subscription.unsubscribe()
+    stopWatchingForTakeovers()
     publishManager.stop()
   })
 }
