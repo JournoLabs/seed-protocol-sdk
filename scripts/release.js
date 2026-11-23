@@ -311,7 +311,13 @@ async function main() {
   if (changelogs.length > 0) git(['add', '--', ...changelogs])
   console.log(`\nChangelogs: ${changelogs.length > 0 ? changelogs.join(', ') : 'none changed'}`)
 
-  git(['commit', '--quiet', '-am', `chore: release ${target}`])
+  try {
+    git(['commit', '--quiet', '-am', `chore: release ${target}`])
+  } catch (error) {
+    // The tree was clean before the version sync, so this drops only the release's own edits.
+    git(['reset', '--hard', '--quiet', head])
+    throw new Error(`Release commit failed; reverted the version sync and changelogs. ${error.message}`)
+  }
   git(['tag', '-a', tag, '-m', `Release ${target}`])
   try {
     // Both or neither, so the tag never points at a commit main doesn't have.
