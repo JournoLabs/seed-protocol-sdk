@@ -33,6 +33,7 @@ import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import { normalizePublishRequest } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
+import { licenseOfferAttestation } from '../../licenseOffer'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:services:publish:actors')
@@ -453,7 +454,11 @@ async function nextPart(
     ) => ReturnType<typeof item.getPublishPayload>
   )(uploads, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
   const reqs = Array.isArray(requestData) ? requestData : [requestData]
-  const units = publishUnits(reqs.map((req: any) => normalizePublishRequest(req)))
+  const normalized = reqs.map((req: any) => normalizePublishRequest(req))
+  // The offer goes with the root's properties (ADR 0037); a zero refUID is the root's Version.
+  const root = context.licenseOffer ? normalized.find((r: any) => r?.localId === item.seedLocalId) : undefined
+  if (root) root.listOfAttestations.push(licenseOfferAttestation(context.licenseOffer!))
+  const units = publishUnits(normalized)
   if (units.length === 0) {
     // Every rebuilt payload holds at least the root until its part records.
     throw new Error('The publish payload is empty; nothing was sent.')
@@ -539,11 +544,13 @@ async function finishAttested(
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))
     }
+    const licenseOfferUid = attributed.find((a) => a.licenseOfferUid)?.licenseOfferUid
     const publishedBatch = rootForBatch?.seedUid
       ? collectPublishedBatch({
           seedUid: String(rootForBatch.seedUid),
           versionUid: rootForBatch.versionUid ? String(rootForBatch.versionUid) : undefined,
           extraUids: batchExtraUids,
+          licenseOfferUid,
         })
       : null
 

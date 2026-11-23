@@ -296,6 +296,7 @@ async function executeCreateAttestationsDirectToEas(
     }
 
     let lastAttestationMs = Date.now()
+    let licenseOfferUid: string | undefined
     const batchExtraUids: string[] = []
     /** Seed attestations this publish created, by request localId, with their attestation time. */
     const createdSeeds = new Map<string, { seedUid: string; attestationMs: number }>()
@@ -433,6 +434,14 @@ async function executeCreateAttestationsDirectToEas(
         })),
       }))
 
+      // The offer goes with the root's properties, on its Version (ADR 0037).
+      const withOffer = !!context.licenseOffer && request.localId === item.seedLocalId
+      if (withOffer) {
+        const { licenseOfferAttestation } = await import('../../licenseOffer')
+        const { _licenseOffer: _, ...offer } = licenseOfferAttestation(context.licenseOffer!, newVersionUid as `0x${string}`)
+        multiRequests.push(offer)
+      }
+
       if (multiRequests.length > 0) {
         const multiTx = prepareEasMultiAttest(multiRequests)
         // Relation and list values are recorded as the seed uids they attested (resolvedUids: the
@@ -448,10 +457,12 @@ async function executeCreateAttestationsDirectToEas(
               ...(_metadataLocalId !== undefined ? { _metadataLocalId } : {}),
               ...(_attestedValue !== undefined ? { _attestedValue } : {}),
             })),
+            ...(withOffer ? { licenseOffer: true } : {}),
           },
           multiTx,
         )
         lastAttestationMs = recorded.attestationMs
+        if (recorded.licenseOfferUid) licenseOfferUid = recorded.licenseOfferUid
         logger('created property attestations for request', i)
         batchExtraUids.push(...recorded.uids)
       }
@@ -504,6 +515,7 @@ async function executeCreateAttestationsDirectToEas(
           seedUid: String(rootReq.seedUid),
           versionUid: rootReq.versionUid ? String(rootReq.versionUid) : undefined,
           extraUids: batchExtraUids,
+          licenseOfferUid,
         })
       : null
 

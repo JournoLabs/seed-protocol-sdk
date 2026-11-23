@@ -1,4 +1,5 @@
 import { recordPublishRequests } from '@seedprotocol/sdk'
+import { LICENSE_OFFER_SCHEMA_UID } from '@seedprotocol/eas'
 import { getPublishConfig } from '~/config'
 import { getAttestedUidsFromReceipt, ZERO_BYTES32 } from '~/helpers/easDirect'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
@@ -17,6 +18,8 @@ export type DirectAttestationTarget = {
   properties?: Array<{ _propertyName?: string; _metadataLocalId?: string; _attestedValue?: string }>
   /** Seed uids so far, by local id, for relation and list values. */
   resolvedSeedUids?: Record<string, string>
+  /** The transaction also attests a license offer (ADR 0037), after the properties. */
+  licenseOffer?: boolean
 }
 
 type ReceiptLike = Parameters<typeof attestationMsFromReceipt>[0] &
@@ -35,11 +38,16 @@ export async function recordDirectAttestation(params: {
   attester: string
   publisher: string
   attemptId: string
-}): Promise<{ uids: string[]; attestationMs: number }> {
+}): Promise<{ uids: string[]; attestationMs: number; licenseOfferUid?: string }> {
   const { step, target, receipt, attester, publisher, attemptId } = params
-  const attested = getAttestedUidsFromReceipt(receipt, getPublishConfig().easContractAddress, attester)
+  const all = getAttestedUidsFromReceipt(receipt, getPublishConfig().easContractAddress, attester)
+  const isOffer = (a: { schemaUid: string }) =>
+    !!target.licenseOffer && a.schemaUid.toLowerCase() === LICENSE_OFFER_SCHEMA_UID.toLowerCase()
+  const licenseOfferUid = all.find(isOffer)?.uid
+  // The offer is not a property: the rest are matched to the properties.
+  const attested = all.filter((a) => !isOffer(a))
   const attestationMs = await attestationMsFromReceipt(receipt)
-  const uids = attested.map((a) => a.uid)
+  const uids = all.map((a) => a.uid)
   const first = uids[0]
   if (step !== 'properties' && (!first || first === ZERO_BYTES32)) {
     throw new Error(`Failed to get ${step === 'seed' ? 'Seed' : 'Version'} UID from attestation receipt`)
@@ -81,5 +89,5 @@ export async function recordDirectAttestation(params: {
     ],
     { attemptId },
   )
-  return { uids, attestationMs }
+  return { uids, attestationMs, ...(licenseOfferUid ? { licenseOfferUid } : {}) }
 }

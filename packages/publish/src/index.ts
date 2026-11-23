@@ -64,6 +64,8 @@ export {
   type PublishNonceKeyErrorCode,
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
+  InvalidLicenseOfferError,
+  LicenseOfferSchemaNotRegisteredError,
   EncryptionKeySchemaNotRegisteredError,
   type ArchiveAnchorResume,
   EasSchemasNotRegisteredError,
@@ -315,3 +317,4 @@ export {
 } from './services/publishedBy/public'
 export * from './services/archiveAnchor/public'
 export * from './services/encryptionKey/public'
+export * from './services/licenseOffer/public'

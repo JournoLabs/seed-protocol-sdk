@@ -395,6 +395,23 @@ export class ArchiveAnchorSchemaNotRegisteredError extends Error {
   }
 }
 
+export class LicenseOfferSchemaNotRegisteredError extends Error {
+  readonly code = 'LICENSE_OFFER_SCHEMA_NOT_REGISTERED'
+  constructor() {
+    super('The license offer schema is not registered on this chain. Call ensureLicenseOfferSchema once with any wallet that isn\'t a session key.')
+    this.name = 'LicenseOfferSchemaNotRegisteredError'
+  }
+}
+
+/** A `licenseOffer` publish option that can't be attested. Nothing was uploaded or sent. */
+export class InvalidLicenseOfferError extends Error {
+  readonly code = 'INVALID_LICENSE_OFFER'
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidLicenseOfferError'
+  }
+}
+
 export class EncryptionKeySchemaNotRegisteredError extends Error {
   readonly code = 'ENCRYPTION_KEY_SCHEMA_NOT_REGISTERED'
   constructor() {

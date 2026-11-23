@@ -32,6 +32,8 @@ export type PublishedBatchResult = {
   seedUid: `0x${string}`
   versionUid?: `0x${string}`
   attestationUids: `0x${string}`[]
+  /** The license offer sent with the publish (`CreatePublishOptions.licenseOffer`), also in `attestationUids`. */
+  licenseOfferUid?: `0x${string}`
 }
 
 export type OnPublishedCallback = (

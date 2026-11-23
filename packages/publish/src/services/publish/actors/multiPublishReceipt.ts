@@ -21,6 +21,8 @@ export type MultiPublishRequestLike = {
     _propertyName?: string
     _metadataLocalId?: string
     _attestedValue?: string
+    /** A license offer (ADR 0037), not a property. */
+    _licenseOffer?: boolean
   }>
 }
 
@@ -41,6 +43,8 @@ export type RequestAttestations = {
   /** Version attestation created for the request (only when it had no version uid). */
   versionUid?: string
   propertyPairs: AttributedPropertyPair[]
+  /** The license offer this request carried, kept out of {@link propertyPairs}. */
+  licenseOfferUid?: string
 }
 
 const isZero = (uid: string | undefined): boolean =>
@@ -50,7 +54,13 @@ const sameSchema = (a: string | undefined, b: string | undefined): boolean =>
   !!a && !!b && toHex32Normalized(a) === toHex32Normalized(b)
 
 /** Property attestations EAS creates for one request: one per data entry of each list entry. */
-type PropertySlot = { schema?: string; propertyName?: string; metadataLocalId?: string; value?: string }
+type PropertySlot = {
+  schema?: string
+  propertyName?: string
+  metadataLocalId?: string
+  value?: string
+  licenseOffer?: boolean
+}
 
 function expandPropertySlots(req: MultiPublishRequestLike): PropertySlot[] {
   const out: PropertySlot[] = []
@@ -63,7 +73,8 @@ function expandPropertySlots(req: MultiPublishRequestLike): PropertySlot[] {
         ? att._metadataLocalId
         : undefined
     const value = typeof att?._attestedValue === 'string' ? att._attestedValue : undefined
-    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName, metadataLocalId, value })
+    const licenseOffer = att?._licenseOffer === true
+    for (let k = 0; k < count; k++) out.push({ schema: att?.schema, propertyName, metadataLocalId, value, licenseOffer })
   }
   return out
 }
@@ -109,6 +120,10 @@ export function attributeMultiPublishReceipt(params: {
     for (const slot of expandPropertySlots(req)) {
       const attestationUid = take(slot.schema)
       if (!attestationUid || !slot.schema) continue
+      if (slot.licenseOffer) {
+        out[i]!.licenseOfferUid = attestationUid
+        continue
+      }
       out[i]!.propertyPairs.push({
         schemaUid: slot.schema,
         attestationUid,

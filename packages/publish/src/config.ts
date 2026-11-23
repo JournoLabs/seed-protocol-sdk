@@ -339,6 +339,13 @@ export interface CreatePublishOptions {
    * so it sends its next part under the next part's key.
    */
   nonceKey?: string
+  /**
+   * A license offer to attest with this publish (ADR 0037): the offer refers to the root item's
+   * Version and goes in the same transaction as the root's property attestations. The license
+   * offer schema must be registered on the chain (`ensureLicenseOfferSchema`); without it, or with
+   * an invalid offer, the publish fails before anything is uploaded.
+   */
+  licenseOffer?: import('./services/licenseOffer').LicenseOfferInput
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */

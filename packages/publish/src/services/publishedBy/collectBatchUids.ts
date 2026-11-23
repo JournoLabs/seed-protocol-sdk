@@ -16,6 +16,8 @@ export function collectPublishedBatch(params: {
   seedUid: string
   versionUid?: string | null
   extraUids?: readonly (string | undefined | null)[]
+  /** Added to the uids too. */
+  licenseOfferUid?: string
 }): PublishedBatchResult | null {
   const seedUid = normalizeBytes32Hex(params.seedUid) as `0x${string}`
   if (!isValidEasAttestationUid(seedUid)) return null
@@ -26,6 +28,9 @@ export function collectPublishedBatch(params: {
   for (const u of params.extraUids ?? []) {
     pushUid(attestationUids, u)
   }
+  const offerUid: string[] = []
+  pushUid(offerUid, params.licenseOfferUid)
+  attestationUids.push(...offerUid)
 
   // Dedupe preserving order
   const seen = new Set<string>()
@@ -47,6 +52,7 @@ export function collectPublishedBatch(params: {
     seedUid,
     versionUid,
     attestationUids: unique,
+    ...(offerUid[0] ? { licenseOfferUid: offerUid[0] as `0x${string}` } : {}),
   }
 }
 

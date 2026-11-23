@@ -16,12 +16,14 @@ import {
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
-import { ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
+import { LicenseOfferSchemaNotRegisteredError, ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
 import { estimateUpload } from '../../publishCost/uploadEstimate'
 import { PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
 import { expectedPartCount } from '~/helpers/publishParts'
 import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { normalizePublishRequest } from './publishRequestNormalize'
+import { LICENSE_OFFER_SCHEMA_UID, licenseOfferAttestation, parseLicenseOffer } from '../../licenseOffer'
+import { getSchemaRecord } from '~/helpers/schemaRegistry'
 
 const activePublishProcesses = new Set<string>()
 
@@ -162,6 +164,15 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           sendBack({ type: 'checkingFailed', error: new PublishWalletMissingError() })
           return
         }
+        // ADR 0037: an offer that can't be attested fails the publish before anything is uploaded
+        // or any model schema is registered.
+        const licenseOffer = context.licenseOffer !== undefined ? parseLicenseOffer(context.licenseOffer) : undefined
+        if (licenseOffer && !(await getSchemaRecord(LICENSE_OFFER_SCHEMA_UID as `0x${string}`))) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'checkingFailed', error: new LicenseOfferSchemaNotRegisteredError() })
+          return
+        }
+
         await ensureEasSchemasForItem(item, publishWallet, {
           managedAddress: typeof address === 'string' ? address : undefined,
         })
@@ -202,6 +213,8 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           // parts. The send cuts each part again, with the gas estimate.
           if (attestationStrategy === 'multiPublish') {
             const requests = validation.payload.map((request) => normalizePublishRequest(request))
+            const root = licenseOffer ? requests.find((r) => r?.localId === item.seedLocalId) : undefined
+            if (root) root.listOfAttestations.push(licenseOfferAttestation(licenseOffer!))
             expectedPublishTransactions = expectedPartCount(requests, address.trim())
           }
           return true

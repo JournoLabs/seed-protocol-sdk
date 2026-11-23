@@ -141,6 +141,7 @@ export const createPublish = enqueueActions(({ context: managerContext, event, e
         },
         confirmUpload: options?.confirmUpload === true,
         ...(nonceKey !== undefined && { nonceKey }),
+        ...(options?.licenseOffer !== undefined && { licenseOffer: options.licenseOffer }),
         ...(parked && replaceParked && { reusableUploads: replaceParked.reuseUploads }),
         ...(nonceKeyPartsInherited > 0 && { nonceKeyPartsInherited }),
       },
