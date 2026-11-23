@@ -50,6 +50,24 @@ describe('getAttestationChangesSince', () => {
     expect(changes).toHaveLength(1)
   })
 
+  it('finds pair halves by attester or recipient, and returns addresses lowercase', async () => {
+    const owner = '0x' + 'ab'.repeat(20)
+    respond = () => [
+      { id: uid(5), refUID: uid(0), timeCreated: 600, revocationTime: 0, schemaId: uid(9), attester: owner.toUpperCase().replace('0X', '0x'), recipient: owner },
+    ]
+    const changes = await getAttestationChangesSince({
+      refUIDs: [],
+      ids: [],
+      halves: { schemaIds: [uid(9)], addresses: [owner] },
+      since: 500,
+    })
+    const filter = wheres[0].AND[0]
+    expect(filter.schemaId).toEqual({ in: [uid(9)] })
+    expect(filter.OR.map((o: any) => Object.keys(o)[0])).toEqual(['attester', 'recipient'])
+    expect(filter.OR[0].attester.in[0].toLowerCase()).toBe(owner)
+    expect(changes[0]!.attester).toBe(owner)
+  })
+
   it('makes no request when there is nothing to check', async () => {
     expect(await getAttestationChangesSince({ refUIDs: [], ids: [], since: 0 })).toEqual([])
     expect(wheres).toHaveLength(0)

@@ -450,6 +450,8 @@ The attest helpers read the seeds, the Version and the referenced half from the 
 
 A missing schema throws `PairSchemaNotRegisteredError`. Each helper resolves to `{ uid, schemaUid, recipient, refUid }`.
 
+To read which pairs are live, use `getInclusions`, `inclusionsForPosts`, `getStaff` and `mastheadsForIdentity` from `@seedprotocol/query` ([its README](../packages/query/README.md#publications-getinclusions-getstaff)), which apply the pair rules.
+
 ## Revoking (Unpublishing)
 
 To revoke attestations and remove an item from feeds and discovery, call `item.unpublish()`. Revocation is permanent; see [ATTESTATION_REVOCATION.md](./ATTESTATION_REVOCATION.md) for permanence, UX guidance, and republishing.

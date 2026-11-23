@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New pair reads: `getInclusions(publicationUids)`, `inclusionsForPosts(postUids)`, `getStaff(publicationUids)` and `mastheadsForIdentity(identityUid)`, with types `Inclusion`, `PostInclusion` and `PairReadOptions`. They list the posts live in a publication and the identities on its staff by the Inclusion and Staff pair rules (ADR 0037): both halves by the right seed attesters, the newest of each unrevoked and linked, and for an Inclusion a live pinned Version of the post by its attester. Each Inclusion carries a `pin` to pass to `getSeeds(uids, { pins })`. Halves by anyone else and pairs whose seeds share an attester are ignored.
+- The cache's change check can also ask for attestations of given schemas by, or addressed to, given addresses (`SeedDependencies.halves`, `QueryDataSource.listChangesSince({ halves })`), so a cached pair answer sees a new offer, whose `refUID` is zero, and a revoked half on either side. `AttestationChange` has optional `schemaId`, `attester` and `recipient`. `QueryDataSource` has an optional `listPairHalves`, which the remote source implements.
+
 ## 0.8.3 (2026-11-23)
 
 - **Breaking:** `viem` is an optional peer dependency, used only by `@seedprotocol/query/ens`. Apps that read ENS add `viem@^2` themselves; `archive`, `rdf` and other installs of query no longer pull it in. Without it, `@seedprotocol/query/ens` still imports and `decodeContenthash` and `parseSeedPublicationRecord` work, while `getEnsContenthash`, `getSeedPublication` and `getEnsNames` reject with the new `EnsViemMissingError` (code `ENS_VIEM_MISSING`).

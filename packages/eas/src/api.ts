@@ -327,24 +327,40 @@ export type AttestationChange = {
   timeCreated: number
   /** Unix seconds; 0 when not revoked. */
   revocationTime: number
+  schemaId?: string
+  attester?: string
+  recipient?: string
+}
+
+/**
+ * Attestations of one of `schemaIds` by, or addressed to, one of `addresses` (attester or
+ * recipient). Pair halves (Inclusion, Staff) name their seeds only in their data, so a new offer
+ * (refUID zero) can't be found by `refUID` or `id`; its attester and recipient can.
+ */
+type AttestationChangeHalves = {
+  schemaIds: string[]
+  addresses: string[]
 }
 
 /** UIDs per `in` filter, so a request body stays a few dozen KB. */
 const CHANGES_UIDS_PER_REQUEST = 400
 
 /**
- * Attestations created or revoked after `since` (unix seconds) that either reference one of
- * `refUIDs` (new or revoked Versions of a Seed, properties of a Version) or are one of `ids`
- * (a revoked Seed). Revoked ones are included: a revocation is a change. Large lists are split
- * over several requests, run concurrently.
+ * Attestations created or revoked after `since` (unix seconds) that reference one of `refUIDs`
+ * (new or revoked Versions of a Seed, properties of a Version), are one of `ids` (a revoked Seed),
+ * or, with `halves`, are of one of its schemas and by or addressed to one of its addresses.
+ * Revoked ones are included: a revocation is a change. Large lists are split over several
+ * requests, run concurrently. Addresses come back lowercase.
  */
 export const getAttestationChangesSince = async ({
   refUIDs,
   ids,
+  halves,
   since,
 }: {
   refUIDs: string[]
   ids: string[]
+  halves?: AttestationChangeHalves
   since: number
 }): Promise<AttestationChange[]> => {
   const changedSince = { OR: [{ timeCreated: { gt: since } }, { revocationTime: { gt: since } }] }
@@ -357,6 +373,17 @@ export const getAttestationChangesSince = async ({
   }
   pushChunks('refUID', refUIDs)
   pushChunks('id', ids)
+  const halfSchemas = [...new Set((halves?.schemaIds ?? []).map((uid) => uid.toLowerCase()))].sort()
+  const halfAddresses = checksumAddresses(halves?.addresses ?? []).sort()
+  if (halfSchemas.length > 0) {
+    for (let i = 0; i < halfAddresses.length; i += CHANGES_UIDS_PER_REQUEST) {
+      const chunk = halfAddresses.slice(i, i + CHANGES_UIDS_PER_REQUEST)
+      filters.push({
+        schemaId: { in: halfSchemas },
+        OR: [{ attester: { in: chunk } }, { recipient: { in: chunk } }],
+      })
+    }
+  }
   if (filters.length === 0) return []
 
   const queryClient = BaseQueryClient.getQueryClient()
@@ -373,7 +400,14 @@ export const getAttestationChangesSince = async ({
 
   const byId = new Map<string, AttestationChange>()
   for (const { changes } of responses) {
-    for (const change of changes ?? []) byId.set(change.id, change)
+    for (const change of changes ?? []) {
+      byId.set(change.id, {
+        ...change,
+        ...(change.attester && { attester: change.attester.toLowerCase() }),
+        ...(change.recipient && { recipient: change.recipient.toLowerCase() }),
+        ...(change.schemaId && { schemaId: change.schemaId.toLowerCase() }),
+      })
+    }
   }
   return [...byId.values()]
 }
