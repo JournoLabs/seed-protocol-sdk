@@ -7,9 +7,17 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bu
 const realSdk = await import('@seedprotocol/sdk')
 const realSavePublish = await import('./actors/savePublish')
 const interrupted: string[] = []
+/** What this tab told other tabs, and its listener for what they tell it (the tab channel). */
+const announced: string[] = []
+let lockTakenElsewhere: (seedLocalId: string) => void = () => {}
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   findOpenPublishAttempts: async () => [],
+  announcePublishLockTaken: (seedLocalId: string) => void announced.push(seedLocalId),
+  onPublishLockTaken: (listener: (seedLocalId: string) => void) => {
+    lockTakenElsewhere = listener
+    return () => {}
+  },
 }))
 mock.module('./actors/savePublish', () => ({
   ...realSavePublish,
@@ -20,7 +28,11 @@ const { BaseDb } = realSdk
 const { setConfigRef } = await import('../../config')
 const { PublishManager } = await import('./index')
 const { watchForTakeover } = await import('./takeover')
-const { publishLockHolder, publishLockName, setPublishLockManagerForTests } = await import('./publishLocks')
+const { ethers } = await import('ethers')
+const { fromEthersWallet } = await import('../../helpers/seedSigner')
+const { onPublishLockHolderChange, publishLockHolder, publishLockName, setPublishLockManagerForTests } = await import(
+  './publishLocks'
+)
 const { TEST_TIMEOUT_MS, waitUntilOrThrow } = await import('../../../test-utils/waitUntil')
 const { fakeLockManager } = await import('../../../test-utils/fakeLockManager')
 
@@ -88,6 +100,20 @@ describe('taking over a publish left by a closed tab', () => {
     await waitUntilOrThrow(() => runHere('seed-held-at-load') !== undefined, 'the publish to resume here')
     expect(valueOf('seed-held-at-load')).toBe('attestationFailureRecoverable')
     expect(await publishLockHolder('seed-held-at-load')).toBe('here')
+    expect(announced).toContain('seed-held-at-load')
+  }, TEST_TIMEOUT_MS)
+
+  test('a publish another tab started after this one loaded resumes here once that tab closes', async () => {
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+    rows = [savedRow('seed-started-later', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(publishLockName('seed-started-later'))
+    lockTakenElsewhere('seed-started-later')
+    expect(changed).toEqual(['seed-started-later'])
+
+    fake.otherTab.release(publishLockName('seed-started-later'))
+    await waitUntilOrThrow(() => runHere('seed-started-later') !== undefined, 'the publish to resume here')
+    unsubscribe()
   }, TEST_TIMEOUT_MS)
 
   test('a publish that finished before the lock came free is not resumed, and the lock is let go', async () => {
@@ -110,6 +136,21 @@ describe('taking over a publish left by a closed tab', () => {
     await waitUntilOrThrow(() => interrupted.includes('seed-mid-upload'), 'the publish to be marked interrupted')
     await waitUntilOrThrow(async () => (await publishLockHolder('seed-mid-upload')) === 'none', 'the lock to be let go')
     expect(runHere('seed-mid-upload')).toBeUndefined()
+  }, TEST_TIMEOUT_MS)
+
+  test('a tab that starts a publish tells the other tabs, so they can take it over', async () => {
+    const item = {
+      seedLocalId: 'seed-started-here',
+      modelName: 'Post',
+      schemaUid: '0xschema',
+      // An item no cache holds: createPublish takes no hold on it.
+      getService: () => ({ getSnapshot: () => ({ status: 'stopped' }) }),
+    } as unknown as import('@seedprotocol/sdk').Item<Record<string, unknown>>
+    const signer = ethers.Wallet.createRandom()
+    const run = await PublishManager.createPublish(item, signer.address, fromEthersWallet(signer))
+    expect(run).toBeDefined()
+    expect(announced).toContain('seed-started-here')
+    PublishManager.stopPublish('seed-started-here')
   }, TEST_TIMEOUT_MS)
 
   test('stopAll stops waiting: a later release resumes nothing', async () => {

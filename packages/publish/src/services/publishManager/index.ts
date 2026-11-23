@@ -1,5 +1,12 @@
 import { ActorRefFrom, assign, createActor, setup } from 'xstate'
-import { BaseDb, findOpenPublishAttempts, Item, updatePublishAttempt } from '@seedprotocol/sdk'
+import {
+  announcePublishLockTaken,
+  BaseDb,
+  findOpenPublishAttempts,
+  Item,
+  onPublishLockTaken,
+  updatePublishAttempt,
+} from '@seedprotocol/sdk'
 import { publishMachine } from '../publish'
 import { assignRestoreFromDb } from './actions/assignRestoreFromDb'
 import { createPublish } from './actions/createPublish'
@@ -20,7 +27,13 @@ import { queueCreatePublish } from './actions/queueCreatePublish'
 import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
-import { isHoldingPublishLock, publishLockHolder, releasePublishLock, tryHoldPublishLock } from './publishLocks'
+import {
+  emitPublishLockHolderChange,
+  isHoldingPublishLock,
+  publishLockHolder,
+  releasePublishLock,
+  tryHoldPublishLock,
+} from './publishLocks'
 import { setTakeoverTarget, stopWatchingForTakeovers, watchForTakeover } from './takeover'
 import type { RestoredRun } from './actors/restoreRun'
 import { settleAttestationAttempt, type AttestationSettleResult } from './settleAttestationAttempt'
@@ -262,7 +275,14 @@ setTakeoverTarget({
   ready: () => PublishManager.ready(),
   hasRun,
   takenOver: (seedLocalId, run) => publishManager.send({ type: 'PUBLISH_TAKEN_OVER', seedLocalId, ...run }),
-  announce: () => {},
+  announce: announcePublishLockTaken,
+})
+
+// Another tab took a seed's publish lock: its holder changed, and this tab queues to take the
+// publish over should that tab close.
+onPublishLockTaken((seedLocalId) => {
+  emitPublishLockHolderChange(seedLocalId)
+  watchForTakeover(seedLocalId)
 })
 
 const subscription = publishManager.subscribe((snapshot) => {
@@ -368,6 +388,8 @@ export const PublishManager = {
           })
     // Nothing spawned (e.g. no address): don't keep a lock this call took.
     if (!publishProcess && !heldBefore) releasePublishLock(seedLocalId)
+    // Other tabs queue to take it over should this tab close.
+    if (publishProcess && !heldBefore) announcePublishLockTaken(seedLocalId)
     return publishProcess
   },
   retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').PublishWallet) =>

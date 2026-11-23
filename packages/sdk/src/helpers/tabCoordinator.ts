@@ -29,6 +29,8 @@ export type TabMessage =
   | { type: 'outbox-settled'; opIds: string[] }
   /** `client.resetLocalData()` in another tab: stop the client so the database can be deleted. */
   | { type: 'close-db' }
+  /** Another tab took a seed's publish lock (helpers/publishLockMessages.ts). */
+  | { type: 'publish-lock-taken'; seedLocalId: string }
 
 /** A message as sent: `from` is the sending tab's TAB_ID, so a tab can drop its own messages. */
 type SentTabMessage = TabMessage & { from?: string }
