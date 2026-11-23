@@ -33,6 +33,8 @@ export type { QueryDataSource, ResolvedQuerySource, SeedListFilter } from './sou
 export type { SeedAttestations, SeedPropertyAttestation, SeedVersionAttestation } from './seedAttestations.js'
 export { readSeedAtTime } from './seedAtTime.js'
 export type { SeedAtTime } from './seedAtTime.js'
+export { getLicense, getLicenseHistory } from './license.js'
+export type { GetLicenseOptions, License } from './license.js'
 
 export {
   buildFlatSnapshotFromProperties,

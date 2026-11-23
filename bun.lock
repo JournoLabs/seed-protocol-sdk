@@ -356,6 +356,7 @@
         "@noble/hashes": "^1.8.0",
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
+        "@seedprotocol/licensing": "workspace:*",
         "multiformats": "^13.4.2",
         "pluralize": "^8.0.0",
       },

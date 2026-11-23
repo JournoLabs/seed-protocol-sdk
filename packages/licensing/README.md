@@ -47,6 +47,37 @@ catalog.byTermsHash(hash)   // { module, terms } for a hash read from an offer
 catalog.bySpdx('CC0-1.0')
 ```
 
+## Offering a license onchain
+
+A publisher offers a license by attesting a `licenseOffer` with a publish. The offer refers to the
+item's Version and goes in the same transaction as its properties:
+
+```ts
+import { ensureLicenseOfferSchema } from '@seedprotocol/publish'
+
+await ensureLicenseOfferSchema(wallet) // once per chain, from any wallet that isn't a session key
+const module = catalog.bySpdx('CC-BY-4.0')!
+await item.publish({ licenseOffer: { termsHash: termsHash(module.toTerms()), spdx: module.spdx } })
+```
+
+`getLicense` in `@seedprotocol/query` reads the license in force:
+
+```ts
+import { getLicense, getLicenseHistory } from '@seedprotocol/query'
+
+await getLicense({ seedUid })                     // the newest Version, now
+await getLicense({ seedUid, versionUid, asOf })   // a pinned Version at a time
+// → { spdx, iri, termsHash, offerUid, legalTxId, sentence, revoked, since } | null
+await getLicenseHistory(seedUid)                  // every change, oldest first
+```
+
+An offer governs content attested at or after it, never content published before it. A Version
+read at a time is licensed by the newest offer attested at or before the newest attestation that
+read shows, so an offer made without a publish governs nothing until the next one. A revoked offer
+reads as All rights reserved from its revocation time. Only offers from the Seed's attester count.
+`offerInForce` and `licenseHistory` apply the same rule to offers you have already read.
+[ADR 0037](../../docs/adr/0037-license-offers-in-force-by-content-time.md) records the rule.
+
 ## SPDX and URLs
 
 `parseSpdx(expression)` parses SPDX license expressions against the SPDX License List 3.29.0

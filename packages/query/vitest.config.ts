@@ -12,6 +12,8 @@ export default defineConfig({
       { find: /^@seedprotocol\/eas\/node$/, replacement: src('eas/src/node/index.ts') },
       { find: /^@seedprotocol\/arweave$/, replacement: src('arweave/src/index.ts') },
       { find: /^@seedprotocol\/arweave\/node$/, replacement: src('arweave/src/node/index.ts') },
+      { find: /^@seedprotocol\/licensing$/, replacement: src('licensing/src/index.ts') },
+      { find: /^@seedprotocol\/licensing\/catalog\/cc$/, replacement: src('licensing/src/catalog/cc/index.ts') },
       // @seedprotocol/eas's codegen imports these types as values (see packages/eas/vitest.config.ts)
       { find: '@graphql-typed-document-node/core', replacement: src('eas/src/shims/typed-document-node.js') },
     ],
