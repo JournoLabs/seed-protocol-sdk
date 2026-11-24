@@ -6,6 +6,7 @@ import {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findRecordedPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
   type PublishAttemptStatus,
@@ -133,5 +134,24 @@ testDescribe('publish attempts', () => {
     expect(await countRecordedPublishParts([runA])).toBe(2)
     expect(await countRecordedPublishParts([runA, runB])).toBe(3)
     expect(await countRecordedPublishParts([])).toBe(0)
+  })
+
+  it('findRecordedPublishAttempts lists the recorded attempts of the run, any step', async () => {
+    const run = generateId()
+    const recorded = async (seeds: string[], runId: string, step: string) => {
+      const row = { ...attempt(seeds, runId), step }
+      await claimPublishAttempt(row)
+      await updatePublishAttempt(row.id, { status: 'recorded' })
+      return row.id
+    }
+    const seedStep = await recorded([seedA], run, 'seed')
+    const properties = await recorded([seedB], run, 'properties')
+    await recorded([generateId()], generateId(), 'properties')
+    const open = attempt([generateId()], run)
+    await claimPublishAttempt(open)
+    const reverted = attempt([generateId()], run)
+    await claimPublishAttempt(reverted)
+    await updatePublishAttempt(reverted.id, { status: 'reverted' })
+    expect((await findRecordedPublishAttempts(run)).map((a) => a.id).sort()).toEqual([seedStep, properties].sort())
   })
 })

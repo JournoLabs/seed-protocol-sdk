@@ -67,6 +67,7 @@ const recordPublishRequests = mock(async (records: Array<{ version?: unknown; pr
   }
 })
 const openAttempts: Array<Record<string, unknown>> = []
+const recordedAttempts: Array<Record<string, unknown>> = []
 const sendTransaction = mock(async () => ({ transactionHash: '0x01' }))
 const relatedImage = {
   seedLocalId: 'imageLocal2',
@@ -92,6 +93,7 @@ mock.module('@seedprotocol/sdk', () => ({
     return undefined
   },
   findOpenPublishAttempts: async () => openAttempts,
+  findRecordedPublishAttempts: async (runId: string) => recordedAttempts.filter((a) => a.publishRunId === runId),
   updatePublishAttempt: async () => {},
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
@@ -301,6 +303,60 @@ describe('createAttestations: a license offer', () => {
     const result = await toPromise(restored)
 
     expect(sendTransaction).not.toHaveBeenCalled()
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test('is not sent again when the run restarts after its part with the offer was recorded', async () => {
+    // The run's multiPublish with the offer landed and was recorded; the run's saved state wasn't.
+    claimed.length = 0
+    const offerRequests = requests()
+    offerRequests[1]!.listOfAttestations.push({ ...attestation(LICENSE_OFFER_SCHEMA_UID, ''), _licenseOffer: true } as any)
+    recordedAttempts.push({
+      id: 'attempt1',
+      publishRunId: 'run1',
+      txHash: '0x01',
+      step: 'multiPublish',
+      attester: PUBLISHER,
+      status: 'recorded',
+      requests: JSON.stringify(offerRequests),
+    })
+    const item = {
+      seedLocalId: 'postLocal02',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      // Every seed, Version and property is recorded.
+      getPublishPayload: async () =>
+        requests().map((r, i) => ({
+          ...r,
+          seedUid: [IMAGE_SEED, POST_SEED][i]!,
+          versionUid: [IMAGE_VERSION, POST_VERSION][i]!,
+          listOfAttestations: [],
+        })),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const actor = createActor(createAttestations, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item,
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+          publishRunId: 'run1',
+          licenseOffer: { termsHash: TERMS, spdx: 'CC-BY-4.0' },
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    const result = await toPromise(actor)
+    recordedAttempts.length = 0
+
+    const schemasSent = claimed.flatMap((c) =>
+      (JSON.parse((c as { requests: string }).requests) as any[]).flatMap((r) => r.listOfAttestations.map((a: any) => a.schema)),
+    )
+    expect(schemasSent).not.toContain(LICENSE_OFFER_SCHEMA_UID)
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
   })
 })

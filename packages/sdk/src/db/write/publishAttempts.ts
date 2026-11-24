@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { publishAttempts, type PublishAttemptType } from '@/seedSchema'
 
@@ -58,6 +58,17 @@ export async function countRecordedPublishParts(publishRunIds: string[]): Promis
       ),
     )
   return rows.length
+}
+
+/** The attempts run `publishRunId` recorded, any step, oldest first. */
+export async function findRecordedPublishAttempts(publishRunId: string): Promise<PublishAttemptType[]> {
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('findRecordedPublishAttempts: the database is not ready')
+  return db
+    .select()
+    .from(publishAttempts)
+    .where(and(eq(publishAttempts.publishRunId, publishRunId), eq(publishAttempts.status, 'recorded')))
+    .orderBy(asc(publishAttempts.createdAt))
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import { LICENSE_OFFER_SCHEMA_UID } from '@seedprotocol/eas'
 
@@ -45,6 +45,8 @@ type FakeTx =
   | { kind: 'attest'; schema: string; refUID: string }
   | { kind: 'multi'; schemas: string[]; refUIDs: string[] }
 const sentTxs = new Map<string, FakeTx>()
+/** Transactions an earlier, crashed start of the run sent. */
+const landedTxs = new Map<string, FakeTx>()
 const receiptMs = new Map<string, number>()
 
 const updateVersionUid = mock(async (_: unknown) => {})
@@ -61,6 +63,7 @@ const itemFind = mock(async (q: { seedLocalId?: string }) =>
 let recordFailure: Error | undefined
 /** Attempts left open by a run that crashed after its transaction was sent. */
 const openAttempts: Array<Record<string, unknown>> = []
+const recordedAttempts: Array<Record<string, unknown>> = []
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
@@ -69,6 +72,7 @@ mock.module('@seedprotocol/sdk', () => ({
   // The real one writes them in one transaction; here it hands each to its mock
   claimPublishAttempt: async () => undefined,
   findOpenPublishAttempts: async () => [...openAttempts],
+  findRecordedPublishAttempts: async (runId: string) => recordedAttempts.filter((a) => a.publishRunId === runId),
   updatePublishAttempt: async () => {},
   recordPublishRequests: async (
     records: Array<{ version?: unknown; properties?: unknown }>,
@@ -81,7 +85,7 @@ mock.module('@seedprotocol/sdk', () => ({
     }
     // Recording ends the attempt.
     const i = openAttempts.findIndex((a) => a.id === opts?.attemptId)
-    if (i >= 0) openAttempts.splice(i, 1)
+    if (i >= 0) recordedAttempts.push({ ...openAttempts.splice(i, 1)[0]!, status: 'recorded' })
   },
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
@@ -97,7 +101,7 @@ mock.module('../../../helpers/easDirect', () => ({
       refUIDs: reqs.flatMap((r) => r.data.map((d) => d.refUID)),
     }) as unknown,
   getAttestedUidsFromReceipt: (receipt: { hash: string }) => {
-    const tx = sentTxs.get(receipt.hash)
+    const tx = sentTxs.get(receipt.hash) ?? landedTxs.get(receipt.hash)
     if (!tx) return []
     if (tx.kind === 'attest') {
       return [{ schemaUid: tx.schema, uid: (SEED_BY_SCHEMA[tx.schema] ?? VERSION_BY_SEED[tx.refUID])! }]
@@ -243,46 +247,73 @@ describe('createAttestationsDirectToEas: a license offer', () => {
   })
 })
 
-describe('createAttestationsDirectToEas: a license offer after a crash', () => {
-  test("is reported from the run's landed transaction that reconcile recorded, and not sent again", async () => {
-    // The run sent the post's property transaction with the offer, then crashed before recording it.
-    sentTxs.clear()
-    sentTxs.set('0xlanded', {
-      kind: 'multi',
-      schemas: [SCHEMA_POST_TITLE, LICENSE_OFFER_SCHEMA_UID],
-      refUIDs: [POST_VERSION, POST_VERSION],
-    })
-    openAttempts.push({
-      id: 'attempt1',
-      publishRunId: 'run1',
-      txHash: '0xlanded',
-      step: 'properties',
-      attester: PUBLISHER,
-      status: 'sent',
-      requests: JSON.stringify([
-        { localId: 'postLocalD1', versionUid: POST_VERSION, properties: [{ _propertyName: 'title' }], licenseOffer: true },
-      ]),
-    })
+/** The run sent the post's property transaction with the offer, then crashed. */
+const landedOffer = (status: 'sent' | 'recorded', publishRunId = 'run1') => {
+  landedTxs.set('0xlanded', {
+    kind: 'multi',
+    schemas: [SCHEMA_POST_TITLE, LICENSE_OFFER_SCHEMA_UID],
+    refUIDs: [POST_VERSION, POST_VERSION],
+  })
+  const attempt = {
+    id: 'attempt1',
+    publishRunId,
+    txHash: '0xlanded',
+    step: 'properties',
+    attester: PUBLISHER,
+    status,
+    requests: JSON.stringify([
+      { localId: 'postLocalD1', versionUid: POST_VERSION, properties: [{ _propertyName: 'title' }], licenseOffer: true },
+    ]),
+  }
+  if (status === 'sent') openAttempts.push(attempt)
+  else recordedAttempts.push(attempt)
+}
 
+/** The restored run's payload: every seed, Version and property is recorded. */
+const allRecorded = async () =>
+  requests().map((r, i) => ({
+    ...r,
+    seedUid: [IMAGE_SEED, POST_SEED][i]!,
+    versionUid: [IMAGE_VERSION, POST_VERSION][i]!,
+    listOfAttestations: [],
+  }))
+
+describe('createAttestationsDirectToEas: a license offer after a crash', () => {
+  beforeEach(() => {
+    openAttempts.length = 0
+    recordedAttempts.length = 0
+    landedTxs.clear()
+  })
+
+  test("is reported from the run's landed transaction that reconcile recorded, and not sent again", async () => {
+    landedOffer('sent')
     const reconciled = await settleOpenAttempts({ seedLocalId: 'postLocalD1', publishRunId: 'run1', publisher: PUBLISHER })
     expect(reconciled.outcome).toBe('send')
     expect(openAttempts).toHaveLength(0)
 
-    // The restored run's payload: every seed, Version and property is recorded.
-    const result = await run(
-      async () =>
-        requests().map((r, i) => ({
-          ...r,
-          seedUid: [IMAGE_SEED, POST_SEED][i]!,
-          versionUid: [IMAGE_VERSION, POST_VERSION][i]!,
-          listOfAttestations: [],
-        })),
-      // As the machine assigns the reconcile result.
-      { publishRunId: 'run1', attestedLicenseOfferUid: (reconciled as { licenseOfferUid?: string }).licenseOfferUid },
-    )
+    const result = await run(allRecorded, { publishRunId: 'run1' })
 
     expect(multis()).toEqual([])
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
     expect(result.publishedBatch?.attestationUids).toContain(OFFER)
+  })
+
+  test('is not sent again when the run restarts from state saved before reconcile recorded it', async () => {
+    // Reconcile recorded the attempt, and the run's saved state was never updated after that.
+    landedOffer('recorded')
+
+    const result = await run(allRecorded, { publishRunId: 'run1' })
+
+    expect(multis()).toEqual([])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test("is sent when only another run's offer is recorded", async () => {
+    landedOffer('recorded', 'run0')
+
+    const result = await run(allRecorded, { publishRunId: 'run1' })
+
+    expect(multis().map((tx) => tx.schemas)).toEqual([[LICENSE_OFFER_SCHEMA_UID]])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
   })
 })

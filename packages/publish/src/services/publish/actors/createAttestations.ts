@@ -4,6 +4,7 @@ import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import { findOpenPublishAttempts, type IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
+import { recordedLicenseOfferUid } from './recordedLicenseOffer'
 import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
@@ -326,7 +327,11 @@ async function executeCreateAttestations(
     }
     // Read from the recorded attempts, so a reload between parts goes on from the right key (ADR 0036).
     const partsBefore = await partsSentUnderNonceKey(context)
-    const finish = () => finishAttested(context, item, parts)
+    // An offer this run attested before a crash is reported and not sent again.
+    const recordedOffer = context.licenseOffer
+      ? await recordedLicenseOfferUid(context.publishRunId, item.seedLocalId)
+      : undefined
+    const finish = () => finishAttested(context, item, parts, recordedOffer)
 
     // A part landed and recording it failed: repeat the record from its receipt. A retry that
     // reached the send would attest it a second time.
@@ -376,7 +381,7 @@ async function executeCreateAttestations(
     for (;;) {
       const { part, isWhole } = resumedPart
         ? { part: resumedPart, isWhole: false }
-        : await nextPart(item, uploadDataWithTxIds, context, estimateMultiPublish)
+        : await nextPart(item, uploadDataWithTxIds, context, estimateMultiPublish, !recordedOffer)
       resumedPart = undefined
       const serialized = JSON.stringify(part, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
       if (serialized === lastSent) {
@@ -444,6 +449,7 @@ async function nextPart(
   uploads: Array<PublishUpload & { txId: string }>,
   context: PublishMachineContext,
   estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<PublishGasEstimate>,
+  withOffer: boolean,
 ): Promise<{ part: MultiPublishRequest[]; isWhole: boolean }> {
   // The contract creates every seed of a part before it attests any property, so a relation
   // back to an item in the same part is filled now rather than left for a later publish.
@@ -456,7 +462,7 @@ async function nextPart(
   const reqs = Array.isArray(requestData) ? requestData : [requestData]
   const normalized = reqs.map((req: any) => normalizePublishRequest(req))
   // The offer goes with the root's properties (ADR 0039); a zero refUID is the root's Version.
-  const root = context.licenseOffer ? normalized.find((r: any) => r?.localId === item.seedLocalId) : undefined
+  const root = context.licenseOffer && withOffer ? normalized.find((r: any) => r?.localId === item.seedLocalId) : undefined
   if (root) root.listOfAttestations.push(licenseOfferAttestation(context.licenseOffer!))
   const units = publishUnits(normalized)
   if (units.length === 0) {
@@ -511,6 +517,7 @@ async function finishAttested(
   context: PublishMachineContext,
   item: IItem<any>,
   parts: RecordedPart[],
+  recordedOffer?: string,
 ): Promise<CreateAttestationsResult> {
     const address = context.address as string
     const effectiveRequests = parts.flatMap((p) => p.requests)
@@ -544,7 +551,7 @@ async function finishAttested(
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))
     }
-    const licenseOfferUid = attributed.find((a) => a.licenseOfferUid)?.licenseOfferUid
+    const licenseOfferUid = attributed.find((a) => a.licenseOfferUid)?.licenseOfferUid ?? recordedOffer
     const publishedBatch = rootForBatch?.seedUid
       ? collectPublishedBatch({
           seedUid: String(rootForBatch.seedUid),

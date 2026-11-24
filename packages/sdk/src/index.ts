@@ -29,6 +29,7 @@ export {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findRecordedPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
   type PublishAttemptStatus,

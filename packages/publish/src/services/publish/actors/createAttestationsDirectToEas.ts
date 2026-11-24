@@ -13,6 +13,7 @@ import {
   type DirectAttestationTarget,
 } from './recordDirectAttestation'
 import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
+import { recordedLicenseOfferUid } from './recordedLicenseOffer'
 import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import { waitForItem } from './utils'
 import { verifyAttestations } from '../helpers/verifyAttestations'
@@ -296,8 +297,10 @@ async function executeCreateAttestationsDirectToEas(
     }
 
     let lastAttestationMs = Date.now()
-    // An offer this run attested before a crash, recorded by reconcile, is reported and not sent again.
-    let licenseOfferUid: string | undefined = context.attestedLicenseOfferUid
+    // An offer this run attested before a crash is reported and not sent again.
+    let licenseOfferUid = context.licenseOffer
+      ? await recordedLicenseOfferUid(context.publishRunId, item.seedLocalId)
+      : undefined
     const batchExtraUids: string[] = []
     /** Seed attestations this publish created, by request localId, with their attestation time. */
     const createdSeeds = new Map<string, { seedUid: string; attestationMs: number }>()
