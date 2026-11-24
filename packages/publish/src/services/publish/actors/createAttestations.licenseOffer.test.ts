@@ -257,4 +257,50 @@ describe('createAttestations: a license offer', () => {
     expect(requestsSent[1].listOfAttestations).toHaveLength(1)
     expect(result.publishedBatch?.licenseOfferUid).toBeUndefined()
   })
+
+  test("is reported when a restored run records its own landed multiPublish", async () => {
+    // A run sends the offer, then crashes before recording; reconcile hands the restored run the attempt.
+    claimed.length = 0
+    const post = () => ({
+      seedLocalId: 'postLocal02',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    })
+    const context = {
+      address: PUBLISHER,
+      account: {},
+      arweaveTransactions: [],
+      publishUploads: [],
+      publishMode: 'patch',
+      licenseOffer: { termsHash: TERMS, spdx: 'CC-BY-4.0' },
+    }
+    const first = createActor(createAttestations, { input: { context: { ...context, item: post() } as any, event: {} } })
+    first.start()
+    await toPromise(first)
+    const stored = (claimed[0] as { requests: string }).requests
+
+    sendTransaction.mockClear()
+    const restored = createActor(createAttestations, {
+      input: {
+        context: {
+          ...context,
+          item: post(),
+          unrecordedAttestation: {
+            attemptId: 'attempt1',
+            transactionHash: '0x01',
+            requests: JSON.parse(stored),
+            attester: PUBLISHER,
+          },
+        } as any,
+        event: {},
+      },
+    })
+    restored.start()
+    const result = await toPromise(restored)
+
+    expect(sendTransaction).not.toHaveBeenCalled()
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
 })

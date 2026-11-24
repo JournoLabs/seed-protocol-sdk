@@ -132,6 +132,10 @@ export const publishMachine = setup({
     assignResumeAttemptId : assign({
       resumeAttemptId : ( { event, }, ) =>
         ((event as unknown as { output: Extract<ReconcileResult, { outcome: 'send' }> }).output).resumeAttemptId,
+      // A later retry's reconcile no longer sees the recorded attempt, so an earlier uid is kept.
+      attestedLicenseOfferUid : ( { context, event, }, ) =>
+        ((event as unknown as { output: Extract<ReconcileResult, { outcome: 'send' }> }).output).licenseOfferUid ??
+        context.attestedLicenseOfferUid,
     },),
     assignAccountFromRetry : assign({
       wallet : ( { event, }, ) => {

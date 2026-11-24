@@ -296,7 +296,8 @@ async function executeCreateAttestationsDirectToEas(
     }
 
     let lastAttestationMs = Date.now()
-    let licenseOfferUid: string | undefined
+    // An offer this run attested before a crash, recorded by reconcile, is reported and not sent again.
+    let licenseOfferUid: string | undefined = context.attestedLicenseOfferUid
     const batchExtraUids: string[] = []
     /** Seed attestations this publish created, by request localId, with their attestation time. */
     const createdSeeds = new Map<string, { seedUid: string; attestationMs: number }>()
@@ -435,7 +436,7 @@ async function executeCreateAttestationsDirectToEas(
       }))
 
       // The offer goes with the root's properties, on its Version (ADR 0039).
-      const withOffer = !!context.licenseOffer && request.localId === item.seedLocalId
+      const withOffer = !!context.licenseOffer && !licenseOfferUid && request.localId === item.seedLocalId
       if (withOffer) {
         const { licenseOfferAttestation } = await import('../../licenseOffer')
         const { _licenseOffer: _, ...offer } = licenseOfferAttestation(context.licenseOffer!, newVersionUid as `0x${string}`)

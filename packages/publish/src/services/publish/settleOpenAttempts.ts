@@ -15,8 +15,12 @@ import { recordMultiPublishReceipt, recordRelatedSeedUid } from './actors/record
 const logger = debug('seedProtocol:services:publish:settleOpenAttempts')
 
 export type ReconcileResult =
-  /** No earlier attempt can have landed: go on to the send, under this attempt's key if given. */
-  | { outcome: 'send'; resumeAttemptId?: string }
+  /**
+   * No earlier attempt can have landed: go on to the send, under this attempt's key if given.
+   * `licenseOfferUid` is the root's license offer that this run's direct EAS transaction attested,
+   * recorded here, so the send doesn't attest it again.
+   */
+  | { outcome: 'send'; resumeAttemptId?: string; licenseOfferUid?: string }
   /** This run's transaction landed: record it, and send nothing. */
   | { outcome: 'record'; unrecorded: UnrecordedAttestation }
   /** An earlier attempt may have landed and nothing here can tell. */
@@ -43,9 +47,15 @@ export async function settleOpenAttempts({
   publishRunId: string | undefined
   publisher: string
 }): Promise<ReconcileResult> {
+  let licenseOfferUid: string | undefined
+  const send = (resumeAttemptId?: string): ReconcileResult => ({
+    outcome: 'send',
+    ...(resumeAttemptId ? { resumeAttemptId } : {}),
+    ...(licenseOfferUid ? { licenseOfferUid } : {}),
+  })
   for (;;) {
     const [attempt] = await findOpenPublishAttempts([seedLocalId])
-    if (!attempt) return { outcome: 'send' }
+    if (!attempt) return send()
     const unknown = (reason: AttestationUnknownReason, cause?: unknown): ReconcileResult => ({
       outcome: 'unknown',
       error: new AttestationOutcomeUnknownError(seedLocalId, attempt, reason, cause),
@@ -63,7 +73,7 @@ export async function settleOpenAttempts({
         if ((await readNonceSequence(pin.entryPoint, pin.sender, pin.key)) === 0n) {
           // Not landed. Only this run has the same requests to send under the same key.
           if (!ownRun) return unknown('pinnedNotLanded')
-          return { outcome: 'send', resumeAttemptId: attempt.id }
+          return send(attempt.id)
         }
         const userOp = await findPinnedUserOp({ ...pin, fromBlock: BigInt(attempt.fromBlock) })
         if (!userOp) return unknown('chainUnreadable')
@@ -93,7 +103,7 @@ export async function settleOpenAttempts({
     if (attempt.step !== 'multiPublish') {
       const [target] = JSON.parse(attempt.requests) as DirectAttestationTarget[]
       const step = attempt.step as DirectAttestationStep
-      const { uids, attestationMs } = await recordDirectAttestation({
+      const recorded = await recordDirectAttestation({
         step,
         target: target!,
         receipt,
@@ -101,6 +111,11 @@ export async function settleOpenAttempts({
         publisher,
         attemptId: attempt.id,
       })
+      const { uids, attestationMs } = recorded
+      // Only this run's offer: another run's is its own publish's.
+      if (ownRun && target!.localId === seedLocalId && recorded.licenseOfferUid) {
+        licenseOfferUid = recorded.licenseOfferUid
+      }
       if (step === 'seed') {
         await recordRelatedSeedUid({
           seedLocalId: target!.localId,

@@ -59,6 +59,8 @@ const itemFind = mock(async (q: { seedLocalId?: string }) =>
 )
 
 let recordFailure: Error | undefined
+/** Attempts left open by a run that crashed after its transaction was sent. */
+const openAttempts: Array<Record<string, unknown>> = []
 
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
@@ -66,14 +68,20 @@ mock.module('@seedprotocol/sdk', () => ({
   applyPropertyAttestationUidsFromPublish,
   // The real one writes them in one transaction; here it hands each to its mock
   claimPublishAttempt: async () => undefined,
-  findOpenPublishAttempts: async () => [],
+  findOpenPublishAttempts: async () => [...openAttempts],
   updatePublishAttempt: async () => {},
-  recordPublishRequests: async (records: Array<{ version?: unknown; properties?: unknown }>) => {
+  recordPublishRequests: async (
+    records: Array<{ version?: unknown; properties?: unknown }>,
+    opts?: { attemptId?: string },
+  ) => {
     if (recordFailure) throw recordFailure
     for (const { version, properties } of records) {
       if (version) await updateVersionUid(version)
       if (properties) await applyPropertyAttestationUidsFromPublish(properties)
     }
+    // Recording ends the attempt.
+    const i = openAttempts.findIndex((a) => a.id === opts?.attemptId)
+    if (i >= 0) openAttempts.splice(i, 1)
   },
   Item: { find: itemFind },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
@@ -133,6 +141,7 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 }))
 
 const { createAttestationsDirectToEas } = await import('./createAttestationsDirectToEas')
+const { settleOpenAttempts } = await import('../settleOpenAttempts')
 const { createActor, toPromise } = await import('xstate')
 
 const attestation = (schema: string, name: string) => ({
@@ -175,7 +184,7 @@ const requests = () => [
 
 const TERMS = `0x${'ab'.repeat(32)}`
 
-const run = async (getPublishPayload: () => Promise<unknown>) => {
+const run = async (getPublishPayload: () => Promise<unknown>, extraContext: Record<string, unknown> = {}) => {
   sentTxs.clear()
   applyPropertyAttestationUidsFromPublish.mockClear()
   const item = {
@@ -195,6 +204,7 @@ const run = async (getPublishPayload: () => Promise<unknown>) => {
         publishUploads: [],
         publishMode: 'patch',
         licenseOffer: { termsHash: TERMS, spdx: 'CC-BY-4.0' },
+        ...extraContext,
       } as any,
       event: {},
     },
@@ -230,5 +240,49 @@ describe('createAttestationsDirectToEas: a license offer', () => {
     })
     expect(multis().at(-1)!.schemas).toEqual([LICENSE_OFFER_SCHEMA_UID])
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+})
+
+describe('createAttestationsDirectToEas: a license offer after a crash', () => {
+  test("is reported from the run's landed transaction that reconcile recorded, and not sent again", async () => {
+    // The run sent the post's property transaction with the offer, then crashed before recording it.
+    sentTxs.clear()
+    sentTxs.set('0xlanded', {
+      kind: 'multi',
+      schemas: [SCHEMA_POST_TITLE, LICENSE_OFFER_SCHEMA_UID],
+      refUIDs: [POST_VERSION, POST_VERSION],
+    })
+    openAttempts.push({
+      id: 'attempt1',
+      publishRunId: 'run1',
+      txHash: '0xlanded',
+      step: 'properties',
+      attester: PUBLISHER,
+      status: 'sent',
+      requests: JSON.stringify([
+        { localId: 'postLocalD1', versionUid: POST_VERSION, properties: [{ _propertyName: 'title' }], licenseOffer: true },
+      ]),
+    })
+
+    const reconciled = await settleOpenAttempts({ seedLocalId: 'postLocalD1', publishRunId: 'run1', publisher: PUBLISHER })
+    expect(reconciled.outcome).toBe('send')
+    expect(openAttempts).toHaveLength(0)
+
+    // The restored run's payload: every seed, Version and property is recorded.
+    const result = await run(
+      async () =>
+        requests().map((r, i) => ({
+          ...r,
+          seedUid: [IMAGE_SEED, POST_SEED][i]!,
+          versionUid: [IMAGE_VERSION, POST_VERSION][i]!,
+          listOfAttestations: [],
+        })),
+      // As the machine assigns the reconcile result.
+      { publishRunId: 'run1', attestedLicenseOfferUid: (reconciled as { licenseOfferUid?: string }).licenseOfferUid },
+    )
+
+    expect(multis()).toEqual([])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+    expect(result.publishedBatch?.attestationUids).toContain(OFFER)
   })
 })

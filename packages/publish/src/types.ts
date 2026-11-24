@@ -153,6 +153,8 @@ export interface PublishMachineContext {
   giveUpFrom?: 'attestationFailureRecoverable' | 'attestationFailureRecoverableDirectToEas' | 'attestationOutcomeUnknown'
   /** CreatePublishOptions.licenseOffer: an offer attested with the root's Version (ADR 0039). */
   licenseOffer?: import('./services/licenseOffer').LicenseOfferInput
+  /** The license offer this run already attested, recorded by reconcile; the direct EAS send skips it. */
+  attestedLicenseOfferUid?: string
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown
