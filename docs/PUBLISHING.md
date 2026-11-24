@@ -278,14 +278,20 @@ state, Publishing again starts nothing: `startPublish` and `ensureWalletThenPubl
 `{ outcome: 'attempt_open' }`, `item.publish` rejects naming `retryAttestations`, and
 `PublishManager.createPublish` resolves `undefined`. Settle the attempt with `retryAttestations`,
 `settleAttestationAttempt` or `resolveAttestationAttempt` first. `PublishManager.publishBlocker(seedLocalId)`
-says which applies: `'none'`, `'running'`, `'parked'` or `'attempt_open'`. A publish in any other
-state still gives `already_publishing`, as does one another tab runs.
+says which applies: `'none'`, `'running'`, `'parked'`, `'attempt_open'`, or, for a publish another tab
+holds, `'parked_in_other_tab'` or `'running_in_other_tab'`. A publish in any other
+state still gives `already_publishing`, as does one another tab runs. A publish another tab holds
+parked after a failed attestation gives `{ outcome: 'parked_in_other_tab' }` and `item.publish` rejects
+saying so; retry it in that tab.
 
 Restoring in-progress publishes is reported, since a publish that wasn't restored has no process to
 retry. `PublishManager.getRestoreStatus()` returns `outcome`, one of `pending`, `restored`, `dbNotReady`
 or `failed`, and `onRestoreStatus(listener)` calls back when it changes. `dbNotReady` restores by itself
 when the database arrives. `failed` holds `error` and isn't tried again until the next load.
 `unreadableSeedLocalIds` lists saved publishes that couldn't be parsed; their rows stay `in_progress`.
+
+A publish whose tab closes doesn't wait for a reload: an open tab of the app takes it over and
+resumes it the same way, with that tab's wallet. See [Multiple tabs](MULTI_TAB.md).
 
 ## Arweave upload tags
 
@@ -415,6 +421,39 @@ initPublish({
 - `decodePublishedByData(decodedDataJson)` / `verifyPublishedByBatch({ attestationUids, batchHash })`
 
 Allowlist clients: filter non-revoked PublishedBy rows by the known tool attester, then treat only the listed UIDs (or a matching `batchHash`) as tool-endorsed — later author patches outside that batch are not covered.
+
+## Inclusion and Staff halves
+
+An Inclusion puts a post in a publication; Staff names an identity in a publication. Both need the two sides to agree, so each side attests its own half under the same schema, and either side ends the pair by revoking its half. Which half a record is follows from its attester.
+
+| Schema | Definition | Half | Attested by | `refUID` |
+|--------|------------|------|-------------|----------|
+| `seedprotocol.inclusion` | `bytes32 publication,bytes32 post,bytes32 version` | author | the post seed's attester; `version` is zero | the owner half it answers, or zero (an offer) |
+| | | owner | the publication seed's attester; `version` is the Version of the post it pins | the author half it answers or updates, or zero (an ask) |
+| `seedprotocol.staff` | `bytes32 publication,bytes32 identity` | owner | the publication seed's attester | zero (an ask) |
+| | | person | the identity seed's attester | the owner half it answers |
+
+Both are revocable with the zero resolver; `INCLUSION_SCHEMA_UID` and `STAFF_SCHEMA_UID` in `@seedprotocol/eas` are the same on every chain. Every half's `recipient` is the attester of the other side's seed, so a party's waiting halves can be found by recipient.
+
+### APIs (`@seedprotocol/publish`)
+
+- `ensureInclusionSchema(wallet)` / `ensureStaffSchema(wallet)`: register and name the schema once per chain, from any wallet that isn't a session key.
+- `attestInclusionHalf({ wallet, half: 'author', publicationUid, postUid, refUid? })`
+- `attestInclusionHalf({ wallet, half: 'owner', publicationUid, postUid, versionUid, refUid? })`
+- `attestStaffHalf({ wallet, half: 'owner', publicationUid, identityUid })`
+- `attestStaffHalf({ wallet, half: 'person', publicationUid, identityUid, refUid })`
+- `revokeInclusionHalf({ wallet, uid })` / `revokeStaffHalf({ wallet, uid })`: only the half's attester can revoke it.
+
+The attest helpers read the seeds, the Version and the referenced half from the chain, and refuse before sending when:
+
+- the wallet doesn't send as the half's attester (an automation session key never does: send a ManagedAccount's half from the account itself);
+- both seeds have the same attester;
+- `versionUid` isn't a live Version of the post by the post seed's attester;
+- `refUid` isn't a live half of the same schema by the other side's attester, naming the same seeds.
+
+A missing schema throws `PairSchemaNotRegisteredError`. Each helper resolves to `{ uid, schemaUid, recipient, refUid }`.
+
+To read which pairs are live, use `getInclusions`, `inclusionsForPosts`, `getStaff` and `mastheadsForIdentity` from `@seedprotocol/query`, which apply the pair rules; `pendingFor` lists the offers and asks still waiting on an answer ([its README](../packages/query/README.md#publications-getinclusions-getstaff-pendingfor)).
 
 ## Revoking (Unpublishing)
 

@@ -5,44 +5,17 @@ import { setConfigRef } from '../../config'
 import { restoreFromDb } from './actors/restoreFromDb'
 import {
   isHoldingPublishLock,
+  onPublishLockHolderChange,
   publishLockHolder,
   publishLockName,
   releasePublishLock,
   releaseAllPublishLocks,
   setPublishLockManagerForTests,
   tryHoldPublishLock,
+  waitForPublishLock,
 } from './publishLocks'
 import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../test-utils/waitUntil'
-
-/**
- * Stand-in for the origin-wide Web Locks manager (Bun has none). `otherTab` holds names the way
- * another open tab would.
- */
-function fakeLockManager() {
-  const heldNames = new Set<string>()
-  const otherTab = {
-    hold: (name: string) => heldNames.add(name),
-    release: (name: string) => heldNames.delete(name),
-  }
-  const locks = {
-    async request(name: string, options: LockOptions, callback: (lock: Lock | null) => unknown) {
-      if (heldNames.has(name)) {
-        if (options.ifAvailable) return callback(null)
-        throw new Error('fake lock manager only supports ifAvailable for held names')
-      }
-      heldNames.add(name)
-      try {
-        return await callback({ name, mode: 'exclusive' } as Lock)
-      } finally {
-        heldNames.delete(name)
-      }
-    },
-    async query(): Promise<LockManagerSnapshot> {
-      return { held: [...heldNames].map((name) => ({ name, mode: 'exclusive' })), pending: [] }
-    },
-  } as unknown as Pick<LockManager, 'request' | 'query'>
-  return { locks, otherTab, heldNames }
-}
+import { fakeLockManager } from '../../../test-utils/fakeLockManager'
 
 const origReady = BaseDb.isAppDbReady.bind(BaseDb)
 const origGet = BaseDb.getAppDb.bind(BaseDb)
@@ -106,7 +79,61 @@ describe('publish locks', () => {
     expect(await publishLockHolder('seed-anywhere')).toBe('here')
   }, TEST_TIMEOUT_MS)
 
-  test("restoreFromDb skips a publish another tab is running and resumes the rest", async () => {
+  test('waitForPublishLock holds the lock once the tab holding it lets go', async () => {
+    const { locks, otherTab } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+    otherTab.hold(publishLockName('seed-closing'))
+
+    const waited = waitForPublishLock('seed-closing', new AbortController().signal)
+    expect(await publishLockHolder('seed-closing')).toBe('other-tab')
+
+    otherTab.release(publishLockName('seed-closing'))
+    expect(await waited).toBe(true)
+    expect(await publishLockHolder('seed-closing')).toBe('here')
+    releasePublishLock('seed-closing')
+  }, TEST_TIMEOUT_MS)
+
+  test('waitForPublishLock resolves false when aborted, and leaves nothing waiting', async () => {
+    const { locks, otherTab } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+    otherTab.hold(publishLockName('seed-busy'))
+
+    const abort = new AbortController()
+    const waited = waitForPublishLock('seed-busy', abort.signal)
+    abort.abort()
+    expect(await waited).toBe(false)
+    expect((await locks.query()).pending).toEqual([])
+
+    otherTab.release(publishLockName('seed-busy'))
+    expect(await publishLockHolder('seed-busy')).toBe('none')
+  }, TEST_TIMEOUT_MS)
+
+  test('onPublishLockHolderChange names the seed when this tab takes or releases its lock', async () => {
+    const { locks, otherTab } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+
+    await tryHoldPublishLock('seed-taken')
+    expect(changed).toEqual(['seed-taken'])
+    releasePublishLock('seed-taken')
+    expect(changed).toEqual(['seed-taken', 'seed-taken'])
+
+    otherTab.hold(publishLockName('seed-granted'))
+    const waited = waitForPublishLock('seed-granted', new AbortController().signal)
+    otherTab.release(publishLockName('seed-granted'))
+    await waited
+    // A lock waited for is reported by the waiter once it keeps it (takeover.ts), not on the grant.
+    expect(changed).toEqual(['seed-taken', 'seed-taken'])
+    releasePublishLock('seed-granted')
+    expect(changed).toEqual(['seed-taken', 'seed-taken', 'seed-granted'])
+
+    unsubscribe()
+    await tryHoldPublishLock('seed-after')
+    expect(changed).toHaveLength(3)
+  }, TEST_TIMEOUT_MS)
+
+  test("restoreFromDb skips a publish another tab runs, or one whose lock this tab holds, and resumes the rest", async () => {
     const { locks, otherTab } = fakeLockManager()
     setPublishLockManagerForTests(locks)
     otherTab.hold(publishLockName('seed-elsewhere'))
@@ -118,7 +145,9 @@ describe('publish locks', () => {
       updatedAt: 1,
       persistedSnapshot: JSON.stringify({ status: 'active', value: 'failure', children: {}, context: { item: { seedLocalId } } }),
     })
-    const rows = [row('seed-elsewhere'), row('seed-here')]
+    // This tab already holds seed-held-here: a run started since restore read its context owns it.
+    await tryHoldPublishLock('seed-held-here')
+    const rows = [row('seed-elsewhere'), row('seed-here'), row('seed-held-here')]
     BaseDb.isAppDbReady = () => true
     BaseDb.getAppDb = () => ({ select: () => ({ from: () => ({ where: async () => rows }) }) }) as never
 

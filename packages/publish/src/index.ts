@@ -65,6 +65,7 @@ export {
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
   EncryptionKeySchemaNotRegisteredError,
+  PairSchemaNotRegisteredError,
   type ArchiveAnchorResume,
   EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
@@ -203,6 +204,7 @@ export { publishMachine } from './services/publish'
 export { PublishManager, type PublishBlocker } from './services/publishManager'
 export type { AttestationSettleResult } from './services/publishManager/settleAttestationAttempt'
 export {
+  onPublishLockHolderChange,
   publishLockHolder,
   type PublishLockHolder,
 } from './services/publishManager/publishLocks'
@@ -315,3 +317,4 @@ export {
 } from './services/publishedBy/public'
 export * from './services/archiveAnchor/public'
 export * from './services/encryptionKey/public'
+export * from './services/pairs/public'

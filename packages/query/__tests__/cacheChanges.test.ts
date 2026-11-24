@@ -117,6 +117,46 @@ describe('findChangedItems', () => {
   })
 })
 
+describe('pair half dependencies', () => {
+  const SCHEMA = '0xinclusion'
+  const pairDeps = new Map([
+    ['0xP', { refUIDs: [], ids: ['0xP'], halves: { schemaIds: [SCHEMA], addresses: ['0xowner'] } }],
+    ['0xA', deps.get('0xA')!],
+  ])
+  const half = (fields: Partial<AttestationChange>): AttestationChange => ({
+    ...change('0xhalf', '0x0'),
+    schemaId: SCHEMA,
+    ...fields,
+  })
+
+  it('asks for halves by or addressed to the dependency addresses', async () => {
+    const source = sourceWithChanges([])
+    await findChangedSeeds(source, pairDeps, { checkedAt: 500, seenChangeKeys: [] })
+    expect(source.listChangesSince.mock.calls[0]![0].halves).toEqual({ schemaIds: [SCHEMA], addresses: ['0xowner'] })
+  })
+
+  it('sees a new half by its attester or its recipient, but not one of another schema', async () => {
+    for (const fields of [{ attester: '0xOWNER' }, { recipient: '0xowner' }]) {
+      const found = await findChangedSeeds(sourceWithChanges([half(fields)]), pairDeps, { checkedAt: 500, seenChangeKeys: [] })
+      expect([...found!.changed]).toEqual(['0xP'])
+    }
+    const other = await findChangedSeeds(
+      sourceWithChanges([half({ attester: '0xowner', schemaId: '0xstaff' })]),
+      pairDeps,
+      { checkedAt: 500, seenChangeKeys: [] },
+    )
+    expect(other!.changed.size).toBe(0)
+  })
+
+  it('sees a revoked half for an item', async () => {
+    const found = await findChangedItems(
+      sourceWithChanges([half({ recipient: '0xowner', revocationTime: 1200 })]),
+      new Map([['0xP', { dependencies: pairDeps.get('0xP')!, checkedAt: 1100, seenChangeKeys: [] }]]),
+    )
+    expect([...found!.changed]).toEqual(['0xP'])
+  })
+})
+
 describe('change check window', () => {
   it('overlaps the previous check and ages after twice the overlap', () => {
     expect(checkedAtFor(10_000)).toBe(10_000 - CHANGE_CHECK_OVERLAP_SECONDS)

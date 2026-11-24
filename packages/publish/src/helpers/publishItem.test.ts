@@ -166,6 +166,13 @@ describe('publishItem', () => {
     await expect(publishItem(item)).rejects.toThrow('already publishing in this tab or another')
   })
 
+  test('parked_in_other_tab throws a message sending the author to the other tab to retry', async () => {
+    ensureResult = { outcome: 'parked_in_other_tab' }
+    await expect(publishItem(item)).rejects.toThrow(
+      'Publish of seed-1 did not start: it is parked after a failed attestation in another tab of this app. Retry it there.',
+    )
+  })
+
   test('attempt_open throws a message naming retryAttestations', async () => {
     ensureResult = { outcome: 'attempt_open' }
     await expect(publishItem(item)).rejects.toThrow("PublishManager.retryAttestations('seed-1')")

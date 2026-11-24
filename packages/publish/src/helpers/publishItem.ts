@@ -120,7 +120,8 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
  * Rejects when no wallet or address is available, when the smart account still needs
  * deploying, when the seed is already publishing (in this tab or another), when an attestation
  * attempt for it is open, or when the publish fails. A publish of the seed parked after a failed
- * attestation is replaced, reusing its uploads.
+ * attestation in this tab is replaced, reusing its uploads; one parked in another tab rejects, and is
+ * retried there.
  */
 export async function publishItem(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
   // Held until the publish settles: an item the caller looked up without a hold would otherwise
@@ -142,6 +143,10 @@ async function runPublishItem(item: IItem<any>, options?: ItemPublishOptions): P
       break
     case 'already_publishing':
       throw new Error(`Publish of ${item.seedLocalId} did not start: it is already publishing in this tab or another.`)
+    case 'parked_in_other_tab':
+      throw new Error(
+        `Publish of ${item.seedLocalId} did not start: it is parked after a failed attestation in another tab of this app. Retry it there.`,
+      )
     case 'attempt_open':
       throw new Error(
         `Publish of ${item.seedLocalId} did not start: an attestation transaction for it is still open and may land. ` +

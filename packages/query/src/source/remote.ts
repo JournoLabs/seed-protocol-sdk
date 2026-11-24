@@ -4,6 +4,7 @@ import {
   getAttestationChangesSince,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
+  getPairHalvesFromEas,
   EasClient,
   easName,
   withExcludeRevokedFilter,
@@ -107,6 +108,10 @@ export function createRemoteQueryDataSource(): QueryDataSource {
 
     async listChangesSince(opts) {
       return getAttestationChangesSince(opts)
+    },
+
+    async listPairHalves(opts) {
+      return getPairHalvesFromEas(opts)
     },
   }
 }

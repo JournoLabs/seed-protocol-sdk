@@ -570,12 +570,20 @@ export async function rehydrateUnreadStorage<R extends SeedRecord>(
 /**
  * What an assembled record was built from, so a cache can tell when it changed: an attestation
  * created or revoked later that references one of `refUIDs` (a new or revoked Version of the seed
- * or of a seed it relates to, a property of one of their head Versions) or is one of `ids` (the
- * seed or a related seed, revoked).
+ * or of a seed it relates to, a property of one of their head Versions), is one of `ids` (the
+ * seed or a related seed, revoked), or, with `halves`, is a pair half of one of its schemas by or
+ * addressed to one of its addresses (a pair read's answer, see pairs.ts).
  */
 export type SeedDependencies = {
   refUIDs: string[]
   ids: string[]
+  halves?: HalfDependency
+}
+
+/** Pair halves an answer depends on: of one of `schemaIds`, attester or recipient in `addresses` (lowercase). */
+export type HalfDependency = {
+  schemaIds: string[]
+  addresses: string[]
 }
 
 function dependenciesOf(
