@@ -68,6 +68,8 @@ const recordPublishRequests = mock(async (records: Array<{ version?: unknown; pr
 })
 const openAttempts: Array<Record<string, unknown>> = []
 const recordedAttempts: Array<Record<string, unknown>> = []
+/** License offers as EAS holds them, by uid. */
+const offersOnChain = new Map<string, { attester: string; revocationTime: bigint; data: string }>()
 const sendTransaction = mock(async () => ({ transactionHash: '0x01' }))
 const relatedImage = {
   seedLocalId: 'imageLocal2',
@@ -93,7 +95,8 @@ mock.module('@seedprotocol/sdk', () => ({
     return undefined
   },
   findOpenPublishAttempts: async () => openAttempts,
-  findRecordedPublishAttempts: async (runId: string) => recordedAttempts.filter((a) => a.publishRunId === runId),
+  findRecordedPublishAttempts: async (seedLocalIds: string[]) =>
+    recordedAttempts.filter((a) => (JSON.parse(a.seedLocalIds as string) as string[]).some((id) => seedLocalIds.includes(id))),
   updatePublishAttempt: async () => {},
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
@@ -110,7 +113,13 @@ mock.module('../../../helpers/chainClient', () => ({
   getPublishBlockNumber: async () => 100n,
   isContractDeployed: async () => true,
   waitForPublishReceipt: async () => RECEIPT,
-  getPublishPublicClient: () => ({ readContract: async () => 0n }),
+  getPublishPublicClient: () => ({
+    readContract: async ({ functionName, args }: { functionName: string; args: [string] }) => {
+      if (functionName !== 'getAttestation') return 0n
+      const onChain = offersOnChain.get(args[0])
+      return onChain ? { uid: args[0], ...onChain } : { uid: ZERO, attester: zeroAddress, revocationTime: 0n, data: '0x' }
+    },
+  }),
 }))
 mock.module('../helpers/receiptAttestationMs', () => ({
   attestationMsFromReceipt: async () => 1_700_000_000_000,
@@ -148,6 +157,7 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 }))
 
 const { createAttestations } = await import('./createAttestations')
+const { encodeLicenseOfferData } = await import('../../licenseOffer')
 const { createActor, toPromise } = await import('xstate')
 
 const attestation = (schema: string, name: string) => ({
@@ -306,25 +316,34 @@ describe('createAttestations: a license offer', () => {
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
   })
 
-  test('is not sent again when the run restarts after its part with the offer was recorded', async () => {
-    // The run's multiPublish with the offer landed and was recorded; the run's saved state wasn't.
-    claimed.length = 0
+  /** A run's multiPublish with an offer of `terms` landed and was recorded; the run's saved state wasn't. */
+  const recordedOffer = (publishRunId: string, terms = TERMS) => {
     const offerRequests = requests()
     offerRequests[1]!.listOfAttestations.push({ ...attestation(LICENSE_OFFER_SCHEMA_UID, ''), _licenseOffer: true } as any)
     recordedAttempts.push({
-      id: 'attempt1',
-      publishRunId: 'run1',
+      id: `attempt-${publishRunId}`,
+      publishRunId,
+      seedLocalIds: JSON.stringify(['imageLocal2', 'postLocal02']),
       txHash: '0x01',
       step: 'multiPublish',
       attester: PUBLISHER,
       status: 'recorded',
       requests: JSON.stringify(offerRequests),
     })
+    offersOnChain.set(OFFER, {
+      attester: PUBLISHER,
+      revocationTime: 0n,
+      data: encodeLicenseOfferData({ termsHash: terms, spdx: 'CC-BY-4.0' }),
+    })
+  }
+
+  /** A run whose payload has every seed, Version and property recorded. */
+  const runAllRecorded = async (publishRunId: string) => {
+    claimed.length = 0
     const item = {
       seedLocalId: 'postLocal02',
       seedUid: undefined as string | undefined,
       getPublishUploads: async () => [],
-      // Every seed, Version and property is recorded.
       getPublishPayload: async () =>
         requests().map((r, i) => ({
           ...r,
@@ -343,7 +362,7 @@ describe('createAttestations: a license offer', () => {
           arweaveTransactions: [],
           publishUploads: [],
           publishMode: 'patch',
-          publishRunId: 'run1',
+          publishRunId,
           licenseOffer: { termsHash: TERMS, spdx: 'CC-BY-4.0' },
         } as any,
         event: {},
@@ -352,11 +371,30 @@ describe('createAttestations: a license offer', () => {
     actor.start()
     const result = await toPromise(actor)
     recordedAttempts.length = 0
-
+    offersOnChain.clear()
     const schemasSent = claimed.flatMap((c) =>
       (JSON.parse((c as { requests: string }).requests) as any[]).flatMap((r) => r.listOfAttestations.map((a: any) => a.schema)),
     )
+    return { result, schemasSent }
+  }
+
+  test('is not sent again when the run restarts after its part with the offer was recorded', async () => {
+    recordedOffer('run1')
+    const { result, schemasSent } = await runAllRecorded('run1')
     expect(schemasSent).not.toContain(LICENSE_OFFER_SCHEMA_UID)
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test("is not sent again when another run's offer with the same terms is the Seed's newest", async () => {
+    recordedOffer('run0')
+    const { result, schemasSent } = await runAllRecorded('run1')
+    expect(schemasSent).not.toContain(LICENSE_OFFER_SCHEMA_UID)
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test("is sent when another run's offer has other terms", async () => {
+    recordedOffer('run0', `0x${'cd'.repeat(32)}`)
+    const { schemasSent } = await runAllRecorded('run1')
+    expect(schemasSent).toContain(LICENSE_OFFER_SCHEMA_UID)
   })
 })

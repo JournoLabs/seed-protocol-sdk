@@ -45,9 +45,14 @@ type FakeTx =
   | { kind: 'attest'; schema: string; refUID: string }
   | { kind: 'multi'; schemas: string[]; refUIDs: string[] }
 const sentTxs = new Map<string, FakeTx>()
-/** Transactions an earlier, crashed start of the run sent. */
+/** Transactions an earlier, crashed start of a run sent. */
 const landedTxs = new Map<string, FakeTx>()
+/** The offer uid each landed transaction attested, when not OFFER. */
+const offerUidByTx = new Map<string, string>()
 const receiptMs = new Map<string, number>()
+/** License offers as EAS holds them, by uid. */
+const offersOnChain = new Map<string, { attester: string; revocationTime: bigint; data: string }>()
+const ZERO_ADDRESS = `0x${'0'.repeat(40)}`
 
 const updateVersionUid = mock(async (_: unknown) => {})
 const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
@@ -72,7 +77,8 @@ mock.module('@seedprotocol/sdk', () => ({
   // The real one writes them in one transaction; here it hands each to its mock
   claimPublishAttempt: async () => undefined,
   findOpenPublishAttempts: async () => [...openAttempts],
-  findRecordedPublishAttempts: async (runId: string) => recordedAttempts.filter((a) => a.publishRunId === runId),
+  findRecordedPublishAttempts: async (seedLocalIds: string[]) =>
+    recordedAttempts.filter((a) => (JSON.parse(a.seedLocalIds as string) as string[]).some((id) => seedLocalIds.includes(id))),
   updatePublishAttempt: async () => {},
   recordPublishRequests: async (
     records: Array<{ version?: unknown; properties?: unknown }>,
@@ -106,7 +112,11 @@ mock.module('../../../helpers/easDirect', () => ({
     if (tx.kind === 'attest') {
       return [{ schemaUid: tx.schema, uid: (SEED_BY_SCHEMA[tx.schema] ?? VERSION_BY_SEED[tx.refUID])! }]
     }
-    return tx.schemas.map((schemaUid) => ({ schemaUid, uid: PROPERTY_BY_SCHEMA[schemaUid]! }))
+    const offerUid = offerUidByTx.get(receipt.hash)
+    return tx.schemas.map((schemaUid) => ({
+      schemaUid,
+      uid: schemaUid === LICENSE_OFFER_SCHEMA_UID && offerUid ? offerUid : PROPERTY_BY_SCHEMA[schemaUid]!,
+    }))
   },
 }))
 mock.module('../../../config', () => ({
@@ -117,6 +127,13 @@ mock.module('../../../helpers/chainClient', () => ({
   ...realChainClient,
   getPublishBlockNumber: async () => 100n,
   waitForPublishReceipt: async (hash: string) => ({ hash }),
+  getPublishPublicClient: () => ({
+    readContract: async ({ functionName, args }: { functionName: string; args: [string] }) => {
+      if (functionName !== 'getAttestation') throw new Error(`unexpected read ${functionName}`)
+      const onChain = offersOnChain.get(args[0])
+      return onChain ? { uid: args[0], ...onChain } : { uid: ZERO, attester: ZERO_ADDRESS, revocationTime: 0n, data: '0x' }
+    },
+  }),
 }))
 mock.module('../helpers/receiptAttestationMs', () => ({
   attestationMsFromReceipt: async (receipt: { hash: string }) => receiptMs.get(receipt.hash) ?? 0,
@@ -145,6 +162,7 @@ mock.module('../../arweaveL1Finalize/enqueue', () => ({
 }))
 
 const { createAttestationsDirectToEas } = await import('./createAttestationsDirectToEas')
+const { encodeLicenseOfferData } = await import('../../licenseOffer')
 const { settleOpenAttempts } = await import('../settleOpenAttempts')
 const { createActor, toPromise } = await import('xstate')
 
@@ -247,19 +265,27 @@ describe('createAttestationsDirectToEas: a license offer', () => {
   })
 })
 
-/** The run sent the post's property transaction with the offer, then crashed. */
-const landedOffer = (status: 'sent' | 'recorded', publishRunId = 'run1') => {
-  landedTxs.set('0xlanded', {
+/** A run sent the post's property transaction with an offer, then crashed. */
+const landedOffer = (
+  status: 'sent' | 'recorded',
+  publishRunId = 'run1',
+  { terms = TERMS, uid = OFFER, attester = PUBLISHER, revocationTime = 0n }: { terms?: string; uid?: string; attester?: string; revocationTime?: bigint } = {},
+) => {
+  const hash = `0xlanded-${uid}`
+  landedTxs.set(hash, {
     kind: 'multi',
     schemas: [SCHEMA_POST_TITLE, LICENSE_OFFER_SCHEMA_UID],
     refUIDs: [POST_VERSION, POST_VERSION],
   })
+  offerUidByTx.set(hash, uid)
+  offersOnChain.set(uid, { attester, revocationTime, data: encodeLicenseOfferData({ termsHash: terms, spdx: 'CC-BY-4.0' }) })
   const attempt = {
-    id: 'attempt1',
+    id: `attempt-${uid}`,
     publishRunId,
-    txHash: '0xlanded',
+    seedLocalIds: JSON.stringify(['postLocalD1']),
+    txHash: hash,
     step: 'properties',
-    attester: PUBLISHER,
+    attester,
     status,
     requests: JSON.stringify([
       { localId: 'postLocalD1', versionUid: POST_VERSION, properties: [{ _propertyName: 'title' }], licenseOffer: true },
@@ -283,6 +309,8 @@ describe('createAttestationsDirectToEas: a license offer after a crash', () => {
     openAttempts.length = 0
     recordedAttempts.length = 0
     landedTxs.clear()
+    offerUidByTx.clear()
+    offersOnChain.clear()
   })
 
   test("is reported from the run's landed transaction that reconcile recorded, and not sent again", async () => {
@@ -308,8 +336,37 @@ describe('createAttestationsDirectToEas: a license offer after a crash', () => {
     expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
   })
 
-  test("is sent when only another run's offer is recorded", async () => {
-    landedOffer('recorded', 'run0')
+  test("is not sent again when another run's offer with the same terms is the Seed's newest", async () => {
+    // A run that crashed and was replaced, not restored, attested it.
+    landedOffer('recorded', 'run0', { uid: h('d') })
+
+    const result = await run(allRecorded, { publishRunId: 'run1' })
+
+    expect(multis()).toEqual([])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(h('d'))
+  })
+
+  test('is sent when the newest offer has other terms, though an older one has the same', async () => {
+    landedOffer('recorded', 'run0', { uid: h('d') })
+    landedOffer('recorded', 'run2', { uid: h('e'), terms: `0x${'cd'.repeat(32)}` })
+
+    const result = await run(allRecorded, { publishRunId: 'run1' })
+
+    expect(multis().map((tx) => tx.schemas)).toEqual([[LICENSE_OFFER_SCHEMA_UID]])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test('is sent when the same-terms offer was revoked', async () => {
+    landedOffer('recorded', 'run0', { uid: h('d'), revocationTime: 1_700_000_100n })
+
+    const result = await run(allRecorded, { publishRunId: 'run1' })
+
+    expect(multis().map((tx) => tx.schemas)).toEqual([[LICENSE_OFFER_SCHEMA_UID]])
+    expect(result.publishedBatch?.licenseOfferUid).toBe(OFFER)
+  })
+
+  test('is sent when only another attester made the same-terms offer', async () => {
+    landedOffer('recorded', 'run0', { uid: h('d'), attester: `0x${'ef'.repeat(20)}` })
 
     const result = await run(allRecorded, { publishRunId: 'run1' })
 

@@ -63,7 +63,11 @@ anchors (ADR 0029), so an offer changes no synced row, no Query record and no ba
 **Publishing.** `createPublish(item, address, wallet, { licenseOffer })` sends the offer with the
 publish: through `multiPublish` as one more entry of the root request with a zero `refUID`; through
 direct EAS in the transaction holding the root's property attestations, with the Version as `refUID`.
-On a publish split across transactions (ADR 0036) the offer goes in the part that holds the root.
+On a publish split across transactions (ADR 0036) the offer goes in the part that holds the root. A publish
+sends no offer when the newest one its attester made on the Seed, as the device's recorded publish
+attempts and EAS show it, has the same encoded data and isn't revoked; it reports that offer's uid.
+This covers a run that crashed and was replaced, or settled without a run, after its offer landed.
+An offer with other terms is always sent.
 
 **Reading.** `getLicense({ seedUid, versionUid?, asOf? })` and `getLicenseHistory(seedUid)` in
 `@seedprotocol/query` apply the rule. They read EAS on every call and keep no cache.

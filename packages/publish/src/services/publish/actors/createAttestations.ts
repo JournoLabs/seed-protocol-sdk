@@ -327,10 +327,13 @@ async function executeCreateAttestations(
     }
     // Read from the recorded attempts, so a reload between parts goes on from the right key (ADR 0036).
     const partsBefore = await partsSentUnderNonceKey(context)
-    // An offer this run attested before a crash is reported and not sent again.
-    const recordedOffer = context.licenseOffer
-      ? await recordedLicenseOfferUid(context.publishRunId, item.seedLocalId)
-      : undefined
+    // The Seed's newest offer from `attester`, when it has the same terms, is reported and not sent again.
+    let recordedOffer: string | undefined
+    const findRecordedOffer = async (attester: string) => {
+      if (context.licenseOffer) {
+        recordedOffer = await recordedLicenseOfferUid({ seedLocalId: item.seedLocalId, offer: context.licenseOffer, attester })
+      }
+    }
     const finish = () => finishAttested(context, item, parts, recordedOffer)
 
     // A part landed and recording it failed: repeat the record from its receipt. A retry that
@@ -339,7 +342,10 @@ async function executeCreateAttestations(
     if (unrecorded) {
       const receipt = await waitForPublishReceipt(unrecorded.transactionHash)
       parts.push(await recordPart(context, item, receipt, unrecorded))
-      if (heldRoot(unrecorded.requests, item.seedLocalId)) return finish()
+      if (heldRoot(unrecorded.requests, item.seedLocalId)) {
+        await findRecordedOffer(unrecorded.attester)
+        return finish()
+      }
     }
 
     const txCount = arweaveTransactions.length
@@ -372,6 +378,7 @@ async function executeCreateAttestations(
       wallet: context.wallet,
       account: context.account,
     })
+    await findRecordedOffer(attesterAddress)
 
     let resumeAttemptId = context.resumeAttemptId
     // A resumed attempt goes again with the requests it stored: sendAttested sends under its key

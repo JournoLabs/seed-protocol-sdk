@@ -297,9 +297,9 @@ async function executeCreateAttestationsDirectToEas(
     }
 
     let lastAttestationMs = Date.now()
-    // An offer this run attested before a crash is reported and not sent again.
+    // The Seed's newest offer, when it has the same terms, is reported and not sent again.
     let licenseOfferUid = context.licenseOffer
-      ? await recordedLicenseOfferUid(context.publishRunId, item.seedLocalId)
+      ? await recordedLicenseOfferUid({ seedLocalId: item.seedLocalId, offer: context.licenseOffer, attester: txSender.address })
       : undefined
     const batchExtraUids: string[] = []
     /** Seed attestations this publish created, by request localId, with their attestation time. */

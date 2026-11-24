@@ -136,22 +136,20 @@ testDescribe('publish attempts', () => {
     expect(await countRecordedPublishParts([])).toBe(0)
   })
 
-  it('findRecordedPublishAttempts lists the recorded attempts of the run, any step', async () => {
-    const run = generateId()
-    const recorded = async (seeds: string[], runId: string, step: string) => {
-      const row = { ...attempt(seeds, runId), step }
+  it('findRecordedPublishAttempts lists the recorded attempts covering the seeds, any run, any step', async () => {
+    const recorded = async (seeds: string[], step: string) => {
+      const row = { ...attempt(seeds, generateId()), step }
       await claimPublishAttempt(row)
       await updatePublishAttempt(row.id, { status: 'recorded' })
       return row.id
     }
-    const seedStep = await recorded([seedA], run, 'seed')
-    const properties = await recorded([seedB], run, 'properties')
-    await recorded([generateId()], generateId(), 'properties')
-    const open = attempt([generateId()], run)
+    const seed = generateId()
+    const seedStep = await recorded([seed], 'seed')
+    const properties = await recorded([generateId(), seed], 'properties')
+    await recorded([generateId()], 'properties')
+    const open = attempt([seed])
     await claimPublishAttempt(open)
-    const reverted = attempt([generateId()], run)
-    await claimPublishAttempt(reverted)
-    await updatePublishAttempt(reverted.id, { status: 'reverted' })
-    expect((await findRecordedPublishAttempts(run)).map((a) => a.id).sort()).toEqual([seedStep, properties].sort())
+    await updatePublishAttempt(open.id, { status: 'sent' })
+    expect((await findRecordedPublishAttempts([seed])).map((a) => a.id).sort()).toEqual([seedStep, properties].sort())
   })
 })

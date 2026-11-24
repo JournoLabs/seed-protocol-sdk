@@ -60,15 +60,17 @@ export async function countRecordedPublishParts(publishRunIds: string[]): Promis
   return rows.length
 }
 
-/** The attempts run `publishRunId` recorded, any step, oldest first. */
-export async function findRecordedPublishAttempts(publishRunId: string): Promise<PublishAttemptType[]> {
+/** Recorded attempts covering any of `seedLocalIds`, from any run, any step, oldest first. */
+export async function findRecordedPublishAttempts(seedLocalIds: string[]): Promise<PublishAttemptType[]> {
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('findRecordedPublishAttempts: the database is not ready')
-  return db
+  const recorded: PublishAttemptType[] = await db
     .select()
     .from(publishAttempts)
-    .where(and(eq(publishAttempts.publishRunId, publishRunId), eq(publishAttempts.status, 'recorded')))
+    .where(eq(publishAttempts.status, 'recorded'))
     .orderBy(asc(publishAttempts.createdAt))
+  const seeds = new Set(seedLocalIds)
+  return recorded.filter((row) => overlaps(row, seeds))
 }
 
 /**
