@@ -434,7 +434,7 @@ async function executeCreateAttestationsDirectToEas(
         })),
       }))
 
-      // The offer goes with the root's properties, on its Version (ADR 0037).
+      // The offer goes with the root's properties, on its Version (ADR 0039).
       const withOffer = !!context.licenseOffer && request.localId === item.seedLocalId
       if (withOffer) {
         const { licenseOfferAttestation } = await import('../../licenseOffer')

@@ -5,7 +5,7 @@ import { LICENSE_OFFER_SCHEMA_DEF, LICENSE_OFFER_SCHEMA_UID } from '@seedprotoco
 import { SchemaEncoder } from '@ethereum-attestation-service/eas-sdk'
 
 /**
- * createAttestations with a license offer (ADR 0037): the offer goes in the root request of the
+ * createAttestations with a license offer (ADR 0039): the offer goes in the root request of the
  * multiPublish with a zero refUID, and its uid is reported apart from the property uids.
  */
 

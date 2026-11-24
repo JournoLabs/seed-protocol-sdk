@@ -15,7 +15,7 @@ import { isPublishWallet, isSeedTxSender, type PublishWallet, type SeedTxSender 
 export { LICENSE_OFFER_SCHEMA_DEF, LICENSE_OFFER_SCHEMA_NAME, LICENSE_OFFER_SCHEMA_UID }
 
 /**
- * A license offer sent with a publish (ADR 0037). Take `termsHash` and `spdx` from a
+ * A license offer sent with a publish (ADR 0039). Take `termsHash` and `spdx` from a
  * `@seedprotocol/licensing` catalog module: `termsHash(module.toTerms())` and `module.spdx`.
  */
 export type LicenseOfferInput = {

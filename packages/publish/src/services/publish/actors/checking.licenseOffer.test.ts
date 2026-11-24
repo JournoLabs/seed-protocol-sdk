@@ -5,7 +5,7 @@ import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUn
 import { InvalidLicenseOfferError, LicenseOfferSchemaNotRegisteredError } from '../../../errors'
 
 /**
- * checking refuses a publish with a license offer that can't be attested (ADR 0037) before any
+ * checking refuses a publish with a license offer that can't be attested (ADR 0039) before any
  * upload or schema registration.
  */
 const ADDRESS = '0x' + 'e'.repeat(40)

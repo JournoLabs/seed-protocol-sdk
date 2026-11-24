@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.8.3 (2026-11-23)
+
+No user-facing changes; released at the same version as the other packages.
+
 ## 0.8.2 (2026-11-09)
 
 - **Breaking:** `exportArchive`, `verifyArchiveAgainstChain`, `ArchiveExportError` and their types are exported from `@seedprotocol/archive/seed`, not the main entry (ADR 0031). The main entry no longer imports `@seedprotocol/sdk`, so `createBag`, `validateBag`, `verifyArchive`, `readBagInfo`, the path manifest functions, `parseArchiveDocument`, `dublinCoreXml` and `premisXml` load without it again, as in 0.8.0. In 0.8.1 `import '@seedprotocol/archive'` failed with `ERR_MODULE_NOT_FOUND` when the SDK wasn't installed. Change `import { exportArchive } from '@seedprotocol/archive'` to `'@seedprotocol/archive/seed'`.

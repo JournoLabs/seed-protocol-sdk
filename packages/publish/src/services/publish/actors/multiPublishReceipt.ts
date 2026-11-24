@@ -21,7 +21,7 @@ export type MultiPublishRequestLike = {
     _propertyName?: string
     _metadataLocalId?: string
     _attestedValue?: string
-    /** A license offer (ADR 0037), not a property. */
+    /** A license offer (ADR 0039), not a property. */
     _licenseOffer?: boolean
   }>
 }

@@ -17,7 +17,7 @@ import { getPublishThirdwebChain } from './thirdwebChain'
 import { getPublishChainName } from './chainConfig'
 
 export type EnsureSmartWalletResult =
-  | Extract<import('./ensureWalletThenPublish').EnsureWalletThenPublishResult, { outcome: 'started' | 'already_publishing' | 'attempt_open' }>
+  | Extract<import('./ensureWalletThenPublish').EnsureWalletThenPublishResult, { outcome: 'started' | 'already_publishing' | 'parked_in_other_tab' | 'attempt_open' }>
   | { outcome: 'no_address' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }

@@ -4,8 +4,20 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- License offers (ADR 0037): `LICENSE_OFFER_SCHEMA_DEF`, `LICENSE_OFFER_SCHEMA_UID`, `LICENSE_OFFER_SCHEMA_NAME` and `getLicenseOffersFromEas({ versionUids, attester })`. `getItemPropertiesFromEas` and `getAttestationChangesSince` leave offers out, as they leave out bag anchors.
+- License offers (ADR 0039): `LICENSE_OFFER_SCHEMA_DEF`, `LICENSE_OFFER_SCHEMA_UID`, `LICENSE_OFFER_SCHEMA_NAME` and `getLicenseOffersFromEas({ versionUids, attester })`. `getItemPropertiesFromEas` and `getAttestationChangesSince` leave offers out, as they leave out bag anchors.
+- New `getPairHalvesFromEas({ schemaUids, attesters?, recipients? })`: Inclusion or Staff halves by one of `attesters` or addressed to one of `recipients`, revoked ones included, as `PairHalfAttestation` with lowercase addresses. New `decodeInclusionHalf` and `decodeStaffHalf`, which return null for data that isn't the schema's.
+- `getAttestationChangesSince` takes `halves: { schemaIds, addresses }` and then also returns attestations of those schemas by or addressed to those addresses. Every change now carries `schemaId`, `attester` and `recipient`, addresses lowercase.
+
+## 0.8.3 (2026-11-23)
+
+- New `INCLUSION_SCHEMA_DEF`, `INCLUSION_SCHEMA_UID` and `INCLUSION_SCHEMA_NAME` (`seedprotocol.inclusion`, `bytes32 publication,bytes32 post,bytes32 version`), and `STAFF_SCHEMA_DEF`, `STAFF_SCHEMA_UID` and `STAFF_SCHEMA_NAME` (`seedprotocol.staff`, `bytes32 publication,bytes32 identity`): the two halves of an Inclusion of a post in a publication, and of Staff naming an identity in one. Revocable, zero resolver; the UIDs are the same on every chain.
 - **Breaking:** `getSeedsBySchemaName` sets each seed's `schema.schemaNames` to the model's EAS name (`easName`), as a read by uid does. It attached the name as passed, so `getSeedsBySchemaName('Post')` gave `'Post'`.
+
+### Commits
+
+#### Fixes
+
+- query: EAS schema names, one property read, contenthash varint, viem optional peer (4c9371bb)
 
 ## 0.8.2 (2026-11-09)
 

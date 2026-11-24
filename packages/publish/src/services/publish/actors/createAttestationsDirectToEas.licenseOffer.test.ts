@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import { LICENSE_OFFER_SCHEMA_UID } from '@seedprotocol/eas'
 
 /**
- * createAttestationsDirectToEas with a license offer (ADR 0037): the offer goes in the root's
+ * createAttestationsDirectToEas with a license offer (ADR 0039): the offer goes in the root's
  * property transaction with the root's Version as refUID, and its uid is not recorded as a property.
  */
 

@@ -1,4 +1,4 @@
-# 0037. A license offer is an attestation on a Version, in force by content time
+# 0039. A license offer is an attestation on a Version, in force by content time
 
 - **Status:** Accepted
 - **Date:** 2026-11-23

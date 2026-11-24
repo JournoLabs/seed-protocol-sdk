@@ -219,7 +219,7 @@ Done by a maintainer with publish rights and 2FA.
    Node line use `npm install -g npm@11`:
 
    ```bash
-   for p in archive eas arweave vite next query rdf sdk feed feed-hyper gateway-hyper react publish mapping; do
+   for p in archive eas arweave vite next encryption licensing query rdf sdk feed feed-hyper gateway-hyper react publish mapping ipfs mcp; do
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env release --allow-publish -y
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env preview --allow-publish -y
      npm trust github "@seedprotocol/$p" --file cleanup-dist-tags.yml --repo JournoLabs/seed-protocol-sdk --env cleanup --allow-stage-publish -y
@@ -242,8 +242,10 @@ Done by a maintainer with publish rights and 2FA.
 
 Trusted publishing can't create a package on npm, so CI can't publish a package's first
 version (npm answers the PUT with a 404). A new package goes in `AWAITING_FIRST_PUBLISH` in
-`scripts/release-channel.js`, which keeps it out of CI publishes, dist-tag moves and changelog
-sections. To bring it in, a maintainer with publish rights and 2FA:
+`scripts/release-channel.js`, which keeps it out of CI publishes and dist-tag moves. Its version
+is synced and `bun run release` still moves its Unreleased notes into the release section, so it
+is published by hand at the released version. To bring it in, a maintainer with publish rights
+and 2FA:
 
 1. Publishes it once by hand: `node scripts/publish-package.js [--tag <tag>] <name>`.
 2. Runs the three `npm trust github` commands above for it and turns on "Allow npm dist-tag"

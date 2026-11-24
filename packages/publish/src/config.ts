@@ -340,7 +340,7 @@ export interface CreatePublishOptions {
    */
   nonceKey?: string
   /**
-   * A license offer to attest with this publish (ADR 0037): the offer refers to the root item's
+   * A license offer to attest with this publish (ADR 0039): the offer refers to the root item's
    * Version and goes in the same transaction as the root's property attestations. The license
    * offer schema must be registered on the chain (`ensureLicenseOfferSchema`); without it, or with
    * an invalid offer, the publish fails before anything is uploaded.

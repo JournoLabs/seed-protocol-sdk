@@ -22,6 +22,8 @@ export const PUBLISH_ORDER = [
   'arweave',
   'vite',
   'next',
+  'encryption',
+  'licensing',
   'query',
   'rdf',
   'sdk',
@@ -32,15 +34,17 @@ export const PUBLISH_ORDER = [
   'react',
   'publish',
   'mapping',
+  'ipfs',
+  'mcp',
 ]
 
 /**
  * Packages that have never been on npm. CI publishes with trusted publishing, which can't create
- * a package, so these stay out of PUBLISH_ORDER (publish, dist-tags, changelogs) until a
+ * a package, so these stay out of PUBLISH_ORDER (publish, dist-tags) until a
  * maintainer publishes them once by hand with `scripts/publish-package.js <name>` and adds their
  * trusted publishers (docs/RELEASING.md). Then move each one into PUBLISH_ORDER.
  */
-export const AWAITING_FIRST_PUBLISH = ['encryption', 'ipfs', 'licensing', 'mcp']
+export const AWAITING_FIRST_PUBLISH = []
 
 /** Packages publish under this tag first; the real tag moves once all are published. */
 export const STAGING_TAG_PREFIX = 'ci-'

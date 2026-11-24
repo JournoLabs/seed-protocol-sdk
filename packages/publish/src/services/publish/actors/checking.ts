@@ -164,7 +164,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           sendBack({ type: 'checkingFailed', error: new PublishWalletMissingError() })
           return
         }
-        // ADR 0037: an offer that can't be attested fails the publish before anything is uploaded
+        // ADR 0039: an offer that can't be attested fails the publish before anything is uploaded
         // or any model schema is registered.
         const licenseOffer = context.licenseOffer !== undefined ? parseLicenseOffer(context.licenseOffer) : undefined
         if (licenseOffer && !(await getSchemaRecord(LICENSE_OFFER_SCHEMA_UID as `0x${string}`))) {

@@ -3,6 +3,7 @@ import { enqueueActions } from 'xstate'
 import debug from 'debug'
 import { stopScopedOrStandaloneChild } from './stopScopedOrStandaloneChild'
 import { releaseAllPublishLocks } from '../publishLocks'
+import { stopWatchingForTakeovers } from '../takeover'
 
 const logger = debug('seedProtocol:PublishManager:index')
 
@@ -18,6 +19,7 @@ export const stopAll = enqueueActions(({ context, enqueue, self }) => {
 
   // Stopped here, but rows stay in_progress: the next tab to restore may resume them.
   releaseAllPublishLocks()
+  stopWatchingForTakeovers()
 
   enqueue.assign({
     publishProcesses: new Map(),

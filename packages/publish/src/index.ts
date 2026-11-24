@@ -67,6 +67,7 @@ export {
   InvalidLicenseOfferError,
   LicenseOfferSchemaNotRegisteredError,
   EncryptionKeySchemaNotRegisteredError,
+  PairSchemaNotRegisteredError,
   type ArchiveAnchorResume,
   EasSchemasNotRegisteredError,
   PublishTransactionRevertedError,
@@ -205,6 +206,7 @@ export { publishMachine } from './services/publish'
 export { PublishManager, type PublishBlocker } from './services/publishManager'
 export type { AttestationSettleResult } from './services/publishManager/settleAttestationAttempt'
 export {
+  onPublishLockHolderChange,
   publishLockHolder,
   type PublishLockHolder,
 } from './services/publishManager/publishLocks'
@@ -318,3 +320,4 @@ export {
 export * from './services/archiveAnchor/public'
 export * from './services/encryptionKey/public'
 export * from './services/licenseOffer/public'
+export * from './services/pairs/public'

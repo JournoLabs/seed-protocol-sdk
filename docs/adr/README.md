@@ -46,7 +46,9 @@ Public docs in `docs/` describe how things work for users and contributors.
 | [0034](0034-license-terms-and-terms-hash.md) | License terms are a closed ODRL profile identified by termsHash | Accepted |
 | [0035](0035-any-wallet-registers-schemas.md) | Any wallet registers schemas; readers identify them by UID | Accepted |
 | [0036](0036-a-publish-splits-across-transactions.md) | A publish too large for one transaction goes out in several, and a new publish replaces a parked one | Accepted |
-| [0037](0037-license-offers-in-force-by-content-time.md) | A license offer is an attestation on a Version, in force by content time | Accepted |
+| [0037](0037-pair-rules-live-in-query.md) | Attestation pair rules live in Query | Accepted |
+| [0038](0038-an-open-tab-takes-over-a-closed-tabs-publish.md) | An open tab takes over a closed tab's publish | Accepted |
+| [0039](0039-license-offers-in-force-by-content-time.md) | A license offer is an attestation on a Version, in force by content time | Accepted |
 
 ## Writing one
 

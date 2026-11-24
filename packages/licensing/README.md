@@ -76,7 +76,7 @@ read at a time is licensed by the newest offer attested at or before the newest 
 read shows, so an offer made without a publish governs nothing until the next one. A revoked offer
 reads as All rights reserved from its revocation time. Only offers from the Seed's attester count.
 `offerInForce` and `licenseHistory` apply the same rule to offers you have already read.
-[ADR 0037](../../docs/adr/0037-license-offers-in-force-by-content-time.md) records the rule.
+[ADR 0039](../../docs/adr/0039-license-offers-in-force-by-content-time.md) records the rule.
 
 ## SPDX and URLs
 

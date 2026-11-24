@@ -420,6 +420,17 @@ export class EncryptionKeySchemaNotRegisteredError extends Error {
   }
 }
 
+/** The Inclusion or Staff schema isn't registered on the publish chain. */
+export class PairSchemaNotRegisteredError extends Error {
+  readonly code = 'PAIR_SCHEMA_NOT_REGISTERED'
+  constructor(readonly schemaName: string) {
+    super(
+      `The ${schemaName} schema is not registered on this chain. Call ensureInclusionSchema or ensureStaffSchema once with any wallet that isn't a session key.`,
+    )
+    this.name = 'PairSchemaNotRegisteredError'
+  }
+}
+
 /** What an interrupted `anchorArchive` already uploaded. Plain data, so a job can store it. */
 export type ArchiveAnchorResume = {
   /** The bag these uploads belong to. A retry that builds another bag ignores them. */

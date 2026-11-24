@@ -6,7 +6,7 @@ import { indexerUid } from './indexerUid.js'
 import { GET_PROPERTIES } from './queries.js'
 import type { Attestation } from './graphql/gql/graphql.js'
 
-/** A license offer as EAS reports it (ADR 0037). Fields for paid offers are not read yet. */
+/** A license offer as EAS reports it (ADR 0039). Fields for paid offers are not read yet. */
 export type LicenseOffer = {
   uid: string
   attester: string

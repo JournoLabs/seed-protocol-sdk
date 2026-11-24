@@ -18,7 +18,7 @@ import { creativeCommons } from '@seedprotocol/licensing/catalog/cc'
 import { initializeQueryPlatform } from './bootstrap.js'
 import { revokedBy } from './seedAtTime.js'
 
-/** A license in force on a Seed (ADR 0037). */
+/** A license in force on a Seed (ADR 0039). */
 export type License = {
   /** The SPDX id: the catalog module's, else the one the offer carries. */
   spdx: string
@@ -96,7 +96,7 @@ async function readSeedVersions(seedUid: string): Promise<{ seed: Attestation; v
 }
 
 /**
- * The license in force for a pin `(versionUid, asOf)`, by ADR 0037's rule: the newest offer from
+ * The license in force for a pin `(versionUid, asOf)`, by ADR 0039's rule: the newest offer from
  * the Seed's attester, on any of its Versions, attested at or before the newest attestation the
  * pin shows (the Version's own and each property's current one as of `asOf`). A revoked offer
  * reads as reserved rights from its revocation time.
@@ -131,7 +131,7 @@ export async function getLicense(options: GetLicenseOptions): Promise<License | 
 }
 
 /**
- * Every change of the license offered on a Seed, oldest first, by ADR 0037's rule. Each entry took
+ * Every change of the license offered on a Seed, oldest first, by ADR 0039's rule. Each entry took
  * effect for content attested from its `since`. Empty when EAS has no such Seed or it has no offer.
  * Reads EAS on every call.
  */

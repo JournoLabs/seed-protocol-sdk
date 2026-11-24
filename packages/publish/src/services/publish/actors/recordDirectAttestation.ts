@@ -18,7 +18,7 @@ export type DirectAttestationTarget = {
   properties?: Array<{ _propertyName?: string; _metadataLocalId?: string; _attestedValue?: string }>
   /** Seed uids so far, by local id, for relation and list values. */
   resolvedSeedUids?: Record<string, string>
-  /** The transaction also attests a license offer (ADR 0037), after the properties. */
+  /** The transaction also attests a license offer (ADR 0039), after the properties. */
   licenseOffer?: boolean
 }
 

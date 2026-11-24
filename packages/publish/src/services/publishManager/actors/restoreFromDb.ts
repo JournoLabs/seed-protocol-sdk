@@ -1,11 +1,8 @@
 import { BaseDb, publishProcesses } from '@seedprotocol/sdk'
-import { createActor, EventObject, fromCallback } from 'xstate'
+import { EventObject, fromCallback } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { publishMachine } from '../../publish'
-import { subscribe } from './subscribe'
-import { releasePublishLock, tryHoldPublishLock } from '../publishLocks'
-import { markInProgressPublishInterrupted } from './savePublish'
-import { isRestorableSnapshot, parkInterruptedAttestation, type PersistedSnapshot } from './restorableSnapshot'
+import { isHoldingPublishLock, tryHoldPublishLock } from '../publishLocks'
+import { readPublishRow, startRestoredRun } from './restoreRun'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:services:PublishManager:actors:restoreFromDb')
@@ -37,54 +34,6 @@ async function waitForDb(maxWaitMs: number, pollMs: number, stopped?: () => bool
   return false
 }
 
-/**
- * XState `persistContext` serializes actor refs as `{ xstate$$type: 1, id }`. `restoreSnapshot` swaps those
- * for live child actors; if the id is not in `snapshot.children`, `context.item` becomes `undefined` and
- * restored publishes throw on resume (e.g. createAttestations). Real item data is always a plain object.
- */
-function isPersistedActorRef(value: unknown): value is { xstate$$type: number; id: string } {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    'xstate$$type' in value &&
-    (value as { xstate$$type: number }).xstate$$type === 1 &&
-    typeof (value as { id?: unknown }).id === 'string'
-  )
-}
-
-function patchPublishContextItemForRestore(
-  parsed: PersistedSnapshot,
-  seedLocalId: string,
-  record: { modelName?: string | null; schemaId?: string | null },
-) {
-  parsed.context = parsed.context ?? {}
-  const raw = parsed.context.item
-  if (isPersistedActorRef(raw)) {
-    parsed.context.item = {
-      seedLocalId,
-      modelName: parsed.context.modelName ?? record.modelName ?? '',
-      schemaId: parsed.context.schemaId ?? record.schemaId ?? undefined,
-    }
-    return
-  }
-  parsed.context.item = {
-    ...(typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {}),
-    seedLocalId,
-    modelName:
-      (raw as { modelName?: string } | undefined)?.modelName ??
-      parsed.context.modelName ??
-      record.modelName ??
-      '',
-    schemaId:
-      (raw as { schemaId?: string } | undefined)?.schemaId ??
-      parsed.context.schemaId ??
-      record.schemaId ??
-      undefined,
-  }
-}
-
 export interface RestoreFromDbInput {
   context: {
     publishProcesses: Map<string, unknown>
@@ -105,6 +54,8 @@ export type PublishRestoreStatus = {
 }
 
 type RestoreResult = {
+  /** Seeds whose in-progress publish another tab runs: this tab takes each over if that tab closes. */
+  heldElsewhere?: string[]
   publishProcesses: Map<string, import('xstate').ActorRef<any, any>>
   subscriptions: Map<string, import('xstate').ActorRef<any, EventObject>>
   status: PublishRestoreStatus
@@ -138,55 +89,38 @@ async function restorePublishes(context: RestoreFromDbInput['context'], dbReady:
   }
 
   const unreadableSeedLocalIds: string[] = []
+  const heldElsewhere: string[] = []
   for (const publishProcessRecord of bySeed.values()) {
-    let parsed: PersistedSnapshot
-    try {
-      parsed = JSON.parse(publishProcessRecord.persistedSnapshot) as PersistedSnapshot
-    } catch {
+    const read = readPublishRow(publishProcessRecord)
+    if (read === 'unreadable') {
       unreadableSeedLocalIds.push(publishProcessRecord.seedLocalId)
       continue
     }
-    if (parsed.status === 'done') continue
-    const seedLocalId = parsed.context?.item?.seedLocalId ?? publishProcessRecord.seedLocalId
-    if (!seedLocalId) continue
+    if (!read) continue
     // Started in this tab while the database was late: that run owns the row.
-    if (context.publishProcesses.has(seedLocalId)) continue
-    // Another open tab is already running this publish; it keeps it. Checked first: a publish
-    // another tab is uploading looks unrestorable here, and must not be marked interrupted.
-    if (!(await tryHoldPublishLock(seedLocalId))) continue
-    if (!isRestorableSnapshot(parsed)) {
-      // Can't resume: mark it interrupted so it doesn't stay in progress, and can be published again.
-      await markInProgressPublishInterrupted(seedLocalId).catch(() => {})
-      releasePublishLock(seedLocalId)
+    if (context.publishProcesses.has(read.seedLocalId)) continue
+    // This tab already holds the lock: a run started since (a takeover, or a Publish while a late
+    // restore waited for the database) owns it. `context` can be older than that run.
+    if (isHoldingPublishLock(read.seedLocalId)) continue
+    // Another open tab is already running this publish; it keeps it, and this tab takes it over if
+    // that tab closes. Checked first: a publish another tab is uploading looks unrestorable here,
+    // and must not be marked interrupted.
+    if (!(await tryHoldPublishLock(read.seedLocalId))) {
+      heldElsewhere.push(read.seedLocalId)
       continue
     }
-
-    // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
-    patchPublishContextItemForRestore(parsed, seedLocalId, publishProcessRecord)
-    const reconcile = parkInterruptedAttestation(parsed)
-
-    const publishProcess = createActor(publishMachine as unknown as import('xstate').AnyActorLogic, {
-      snapshot: parsed as any,
-      input: undefined,
-    })
-
-    const subscription = createActor(subscribe, {
-      input: {
-        publishProcess,
-        seedLocalId,
-      },
-    })
-    newPublishProcesses.set(seedLocalId, publishProcess)
-    newSubscriptions.set(seedLocalId, subscription)
-
-    publishProcess.start()
-    subscription.start()
-    if (reconcile) publishProcess.send({ type: 'retry' })
+    const run = await startRestoredRun(read, publishProcessRecord)
+    if (!run) continue
+    newPublishProcesses.set(read.seedLocalId, run.publishProcess)
+    newSubscriptions.set(read.seedLocalId, run.subscription)
   }
-  return result({
-    outcome: 'restored',
-    ...(unreadableSeedLocalIds.length > 0 ? { unreadableSeedLocalIds } : {}),
-  })
+  return {
+    ...result({
+      outcome: 'restored',
+      ...(unreadableSeedLocalIds.length > 0 ? { unreadableSeedLocalIds } : {}),
+    }),
+    heldElsewhere,
+  }
 }
 
 function reportRestore(

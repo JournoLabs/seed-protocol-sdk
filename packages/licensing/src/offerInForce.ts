@@ -1,5 +1,5 @@
 /**
- * A license offer as a reader sees it onchain (ADR 0037), without the chain: the caller has already
+ * A license offer as a reader sees it onchain (ADR 0039), without the chain: the caller has already
  * kept only offers on the Seed's Versions from the Seed's attester.
  */
 export type LicenseOfferRecord = {

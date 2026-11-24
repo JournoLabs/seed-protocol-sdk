@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.8.3 (2026-11-23)
 
 - `createEnvelopeDecryptor(identities)` returns the decryptor for the SDK's `setEnvelopeDecryptor`: it opens an envelope wrapped to any of the identities' recipient keys and returns null when none is a recipient.
 - `createPrivateUploadEncryptor({ recipients, bind, padding })` returns the `encryptPrivateUpload` for `@seedprotocol/publish`: each upload becomes its own envelope with a fresh file key and envelope id, wrapped to every recipient, its real content type inside and a `Seed-Encryption: seed-private/v1` tag outside. It needs only public keys.

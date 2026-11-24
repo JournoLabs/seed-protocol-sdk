@@ -17,6 +17,8 @@ export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undef
  * {@link publishItem} (or `item.publish()`) to wait for that. A run of the seed in this tab parked
  * after a failed attestation is replaced by it, reusing its uploads (ADR 0036).
  * `already_publishing`: that seed is publishing in this tab or another, so nothing started.
+ * `parked_in_other_tab`: another tab of the app holds the seed's publish, waiting after a failed
+ * attestation (ADR 0036), so nothing started; it is retried in that tab.
  * `attempt_open`: an attestation attempt for the seed is open and may still land, so nothing
  * started; settle it with `retryAttestations`, `settleAttestationAttempt` or
  * `resolveAttestationAttempt` first.
@@ -29,6 +31,7 @@ export type EnsureWalletThenPublishResult =
       started: PublishStarted
     }
   | { outcome: 'already_publishing' }
+  | { outcome: 'parked_in_other_tab' }
   | { outcome: 'attempt_open' }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
@@ -41,9 +44,12 @@ export async function startPublish(
 ): Promise<
   | { outcome: 'started'; publish: import('xstate').ActorRef<any, any>; started: PublishStarted }
   | { outcome: 'already_publishing' }
+  | { outcome: 'parked_in_other_tab' }
   | { outcome: 'attempt_open' }
 > {
-  if ((await PublishManager.publishBlocker(args[0].seedLocalId)) === 'attempt_open') return { outcome: 'attempt_open' }
+  const blocker = await PublishManager.publishBlocker(args[0].seedLocalId)
+  if (blocker === 'attempt_open') return { outcome: 'attempt_open' }
+  if (blocker === 'parked_in_other_tab') return { outcome: 'parked_in_other_tab' }
   const publish = await PublishManager.createPublish(...args)
   if (!publish) return { outcome: 'already_publishing' }
   return { outcome: 'started', publish, started: Promise.resolve(publish) }

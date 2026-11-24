@@ -4,6 +4,10 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- New `announcePublishLockTaken(seedLocalId)` and `onPublishLockTaken(listener)`: tell the other tabs of the database that this tab took a seed's publish lock, and hear when another tab did. `@seedprotocol/publish` uses them to take over publishes left by closed tabs. Nothing is sent or heard without tab coordination (`multiTab: 'off'`, Node).
+
+## 0.8.3 (2026-11-23)
+
 - Depends on `drizzle-orm` `^0.45.4` (was `^0.44.3`). Versions before 0.45.2 wrote names passed to `sql.identifier()` and `sql.as()` into SQL unescaped (CWE-89). An app that also imports `drizzle-orm` should move to 0.45 so both use one copy.
 - `resolveMediaRef` resolves a transaction this device holds only as an unopened `seed-private/v1` envelope to `{ status: 'unresolved', reason: 'encrypted' }`. It returned a gateway link, which served the ciphertext. `useResolvedMediaRef` reports `unresolved` for it.
 - **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
@@ -12,6 +16,16 @@ All notable changes to this package are documented in this file.
 - `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
 - New `countRecordedPublishParts(publishRunIds)` counts the recorded `multiPublish` attempts of those publish runs: the parts of a split publish already on chain (ADR 0036).
 - `PrivateUploadNotEncryptedError`'s message says to pass `encryptPrivateUpload` to `initPublish`, built with `createPrivateUploadEncryptor` from `@seedprotocol/encryption`, which is now on npm.
+
+### Commits
+
+#### Fixes
+
+- resolveMediaRef returns unresolved for an unopened envelope (51d6a708)
+- mapping, arweave: batch 17 Phase 5 (5df16a02)
+- publish: count a split publish's parts from its recorded attempts (cd62989d)
+- query: EAS schema names, one property read, contenthash varint, viem optional peer (4c9371bb)
+- publish: refuse a publish too large for one transaction before uploading; export resumesOnNextLoad (8308dcfc)
 
 ## 0.8.2 (2026-11-09)
 

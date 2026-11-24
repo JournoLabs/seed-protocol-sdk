@@ -455,7 +455,7 @@ async function nextPart(
   )(uploads, { publishMode: context.publishMode ?? 'patch', backReferences: 'link' })
   const reqs = Array.isArray(requestData) ? requestData : [requestData]
   const normalized = reqs.map((req: any) => normalizePublishRequest(req))
-  // The offer goes with the root's properties (ADR 0037); a zero refUID is the root's Version.
+  // The offer goes with the root's properties (ADR 0039); a zero refUID is the root's Version.
   const root = context.licenseOffer ? normalized.find((r: any) => r?.localId === item.seedLocalId) : undefined
   if (root) root.listOfAttestations.push(licenseOfferAttestation(context.licenseOffer!))
   const units = publishUnits(normalized)

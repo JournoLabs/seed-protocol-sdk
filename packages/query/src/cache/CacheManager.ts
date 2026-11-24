@@ -4,6 +4,7 @@ import { MemoryCache } from './MemoryCache.js'
 import type {
   CachedCollectionData,
   CachedItemData,
+  CachedPairData,
   PersistentCache,
   QueryCacheConfig,
   QueryCacheStats,
@@ -64,6 +65,8 @@ export class CacheManager {
    * In memory only: the window is for a warm process serving many reads.
    */
   private collectionChecks = new Map<string, { at: number; etag: string; listed: number }>()
+  /** Pair read answers by key (see pairs.ts). In memory only. */
+  private pairAnswers = new Map<string, CachedPairData>()
   private stats: QueryCacheStats = {
     hits: 0,
     misses: 0,
@@ -257,7 +260,34 @@ export class CacheManager {
     await this.persistent?.clearCollection(schemaName)
   }
 
+  /** The cached pair read answer under `key`, unless the cache is off or the answer is older than the TTL. */
+  getPairAnswer<T>(key: string): CachedPairData<T> | null {
+    if (!this.config.enabled) return null
+    const cached = this.pairAnswers.get(key)
+    if (!cached) {
+      this.stats.misses++
+      return null
+    }
+    if (Math.floor(Date.now() / 1000) - cached.lastUpdated > this.config.ttl) {
+      this.pairAnswers.delete(key)
+      this.stats.misses++
+      return null
+    }
+    this.stats.hits++
+    return cached as CachedPairData<T>
+  }
+
+  setPairAnswer<T>(key: string, data: CachedPairData<T>): void {
+    if (!this.config.enabled) return
+    this.pairAnswers.set(key, data)
+  }
+
+  clearPairAnswer(key: string): void {
+    this.pairAnswers.delete(key)
+  }
+
   async clearAll(): Promise<void> {
+    this.pairAnswers.clear()
     this.collectionChecks.clear()
     this.memoryCache.clearAll()
     await this.persistent?.clearAll()

@@ -151,7 +151,7 @@ export interface PublishMachineContext {
   resumeAttemptId?: string
   /** The waiting state a `giveUp` left, to go back to while an attempt is open. */
   giveUpFrom?: 'attestationFailureRecoverable' | 'attestationFailureRecoverableDirectToEas' | 'attestationOutcomeUnknown'
-  /** CreatePublishOptions.licenseOffer: an offer attested with the root's Version (ADR 0037). */
+  /** CreatePublishOptions.licenseOffer: an offer attested with the root's Version (ADR 0039). */
   licenseOffer?: import('./services/licenseOffer').LicenseOfferInput
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null

@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/encryption",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Encryption for Seed Protocol private Versions: the seed-private/v1 envelope format and entitlement adapters",
   "keywords": [
     "seed-protocol",

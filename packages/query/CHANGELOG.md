@@ -4,11 +4,23 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
-- `getLicense({ seedUid, versionUid?, asOf?, catalog? })` and `getLicenseHistory(seedUid)`: the license offered on a Seed for a pinned Version and time, and every change of it, by the rule in ADR 0037. They read EAS on every call. Query now depends on `@seedprotocol/licensing`.
+- `getLicense({ seedUid, versionUid?, asOf?, catalog? })` and `getLicenseHistory(seedUid)`: the license offered on a Seed for a pinned Version and time, and every change of it, by the rule in ADR 0039. They read EAS on every call. Query now depends on `@seedprotocol/licensing`.
+- New pair reads: `getInclusions(publicationUids)`, `inclusionsForPosts(postUids)`, `getStaff(publicationUids)` and `mastheadsForIdentity(identityUid)`, with types `Inclusion`, `PostInclusion` and `PairReadOptions`. They list the posts live in a publication and the identities on its staff by the Inclusion and Staff pair rules (ADR 0037): both halves by the right seed attesters, the newest of each unrevoked and linked, and for an Inclusion a live pinned Version of the post by its attester. Each Inclusion carries a `pin` to pass to `getSeeds(uids, { pins })`. Halves by anyone else and pairs whose seeds share an attester are ignored.
+- New `pendingFor({ publicationUids?, attester? })`, with types `PendingHalf` and `PendingForFilter`: the Inclusion and Staff first halves no one has answered, meaning offers to the given publications and offers or asks waiting on the given attester. A half counts as answered once a half of the same schema by the other side's seed attester references it, revoked or not, so it doesn't wait again after a Remove or a Leave. Each row has `kind`, `half` (`'author'` for an offer, `'owner'` for an ask), the uid, schema, attester, recipient, `timeCreated` and the seeds it names. Answers are cached and checked like the other pair reads.
+- The cache's change check can also ask for attestations of given schemas by, or addressed to, given addresses (`SeedDependencies.halves`, `QueryDataSource.listChangesSince({ halves })`), so a cached pair answer sees a new offer, whose `refUID` is zero, and a revoked half on either side. `AttestationChange` has optional `schemaId`, `attester` and `recipient`. `QueryDataSource` has an optional `listPairHalves`, which the remote source implements.
+
+## 0.8.3 (2026-11-23)
+
 - **Breaking:** `viem` is an optional peer dependency, used only by `@seedprotocol/query/ens`. Apps that read ENS add `viem@^2` themselves; `archive`, `rdf` and other installs of query no longer pull it in. Without it, `@seedprotocol/query/ens` still imports and `decodeContenthash` and `parseSeedPublicationRecord` work, while `getEnsContenthash`, `getSeedPublication` and `getEnsNames` reject with the new `EnsViemMissingError` (code `ENS_VIEM_MISSING`).
 - **Breaking:** `queryBySchema` and `queryBySchemaForMonth` give every record the model's EAS name (`easName`), as `getSeed` and `getSeeds` do, whatever form the name was passed in. `queryBySchema('Post')` returned records with `schemaName: 'Post'`, and a later `getSeed` of one of them returned `'Post'` from the item cache where a fresh read returned `'post'`. Collections are cached under the EAS name too, so `queryBySchema('Post')` and `queryBySchema('post')` share one, and `CacheManager.clearCollection` and `getCollection` take the name in any form. `clearCollection('post')` left a collection read as `'Post'` cached.
 - `getSeeds` and `getSeed` with `include: 'data+changelog'` read the properties once and build the data from the changelog's read: three indexer requests (seeds, versions, properties) before related seeds, not four. `getSeed` with a changelog also no longer reads the seed and its versions a second time.
 - `decodeContenthash` throws a `TypeError` for a contenthash whose codec is cut off mid-varint (`0xe3`), as its JSDoc says. It threw the `RangeError` from `multiformats`.
+
+### Commits
+
+#### Fixes
+
+- EAS schema names, one property read, contenthash varint, viem optional peer (4c9371bb)
 
 ## 0.8.2 (2026-11-09)
 
