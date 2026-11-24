@@ -44,7 +44,7 @@
     },
     "packages/archive": {
       "name": "@seedprotocol/archive",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
         "@seedprotocol/arweave": "workspace:*",
@@ -71,7 +71,7 @@
     },
     "packages/arweave": {
       "name": "@seedprotocol/arweave",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@graphql-typed-document-node/core": "^3.2.0",
         "arweave": "^1.15.5",
@@ -93,7 +93,7 @@
     },
     "packages/bundler-core": {
       "name": "@seedprotocol/bundler-core",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "devDependencies": {
         "rimraf": "^6.0.1",
         "typescript": "~5.9.3",
@@ -102,7 +102,7 @@
     },
     "packages/eas": {
       "name": "@seedprotocol/eas",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@graphql-typed-document-node/core": "^3.2.0",
         "@noble/hashes": "^1.8.0",
@@ -125,7 +125,7 @@
     },
     "packages/encryption": {
       "name": "@seedprotocol/encryption",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@noble/curves": "^2.4.0",
         "@noble/post-quantum": "^0.7.1",
@@ -144,7 +144,7 @@
     },
     "packages/feed": {
       "name": "@seedprotocol/feed",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
@@ -166,7 +166,7 @@
     },
     "packages/feed-hyper": {
       "name": "@seedprotocol/feed-hyper",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "bin": {
         "seed-feed": "./dist/bin.js",
       },
@@ -191,7 +191,7 @@
     },
     "packages/gateway-hyper": {
       "name": "@seedprotocol/gateway-hyper",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "bin": {
         "seed-gateway": "./dist/bin.js",
       },
@@ -210,7 +210,7 @@
     },
     "packages/ipfs": {
       "name": "@seedprotocol/ipfs",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "devDependencies": {
         "@seedprotocol/publish": "workspace:*",
         "@seedprotocol/sdk": "workspace:*",
@@ -226,7 +226,7 @@
     },
     "packages/licensing": {
       "name": "@seedprotocol/licensing",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
       },
@@ -241,7 +241,7 @@
     },
     "packages/mapping": {
       "name": "@seedprotocol/mapping",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "rss-parser": "^3.13.0",
       },
@@ -266,7 +266,7 @@
     },
     "packages/mcp": {
       "name": "@seedprotocol/mcp",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "bin": {
         "seed-mcp": "./dist/bin.js",
       },
@@ -286,7 +286,7 @@
     },
     "packages/next": {
       "name": "@seedprotocol/next",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "devDependencies": {
         "@seedprotocol/bundler-core": "workspace:*",
         "@seedprotocol/react": "workspace:*",
@@ -306,7 +306,7 @@
     },
     "packages/publish": {
       "name": "@seedprotocol/publish",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
         "@noble/curves": "^2.4.0",
@@ -351,7 +351,7 @@
     },
     "packages/query": {
       "name": "@seedprotocol/query",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@noble/hashes": "^1.8.0",
         "@seedprotocol/arweave": "workspace:*",
@@ -378,7 +378,7 @@
     },
     "packages/rdf": {
       "name": "@seedprotocol/rdf",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "bin": {
         "seed-rdf": "./dist/bin.js",
       },
@@ -403,7 +403,7 @@
     },
     "packages/react": {
       "name": "@seedprotocol/react",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "debug": "^4.4.1",
         "drizzle-orm": "^0.45.4",
@@ -433,7 +433,7 @@
     },
     "packages/sdk": {
       "name": "@seedprotocol/sdk",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
         "@libsql/client": "^0.15.15",
@@ -483,7 +483,7 @@
     },
     "packages/vite": {
       "name": "@seedprotocol/vite",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "dependencies": {
         "@rollup/pluginutils": "^5.1.0",
         "vite-plugin-node-polyfills": "^0.27.0",
