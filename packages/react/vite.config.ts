@@ -27,6 +27,7 @@ export default defineConfig({
         id.startsWith('@tanstack/') ||
         (!id.startsWith('.') && !id.startsWith('/') && !id.startsWith('\0')),
       output: {
+        keepNames: true,
         // Every export is browser-only (hooks, providers, OPFS components). The directive
         // lets React Server Components frameworks (Next.js App Router) import SeedProvider
         // from a server component such as app/layout.tsx without a client wrapper file.

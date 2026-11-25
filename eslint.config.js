@@ -45,5 +45,23 @@ export default tseslint.config(
             'react-hooks/exhaustive-deps': 'warn',
         },
     },
+    {
+        // A built package's class names are minified (and a consumer's bundler renames them again),
+        // so an error's `name` compared with `SomeClass.name` stops matching there. Compare with a string
+        // literal. Batch 18 item 1.
+        files: ['packages/*/src/**/*.{ts,tsx}'],
+        ignores: ['packages/*/src/**/*.test.{ts,tsx}'],
+        rules: {
+            'no-restricted-syntax': [
+                'error',
+                {
+                    selector:
+                        "BinaryExpression[operator=/^[!=]==?$/] > MemberExpression[property.name='name'][object.type='Identifier'][object.name=/^[A-Z]/]",
+                    message:
+                        "Don't compare with `SomeClass.name`: a minified build renames classes. Compare with the string literal.",
+                },
+            ],
+        },
+    },
     configPrettier,
 )

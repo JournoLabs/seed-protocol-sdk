@@ -21,6 +21,8 @@ export default defineConfig({
     },
     target: 'esnext',
     rollupOptions: {
+      // Keep class and function names in the built output: a log line or a `.name` read shows the real name.
+      output: { keepNames: true },
       external: (id) =>
         id === 'react' ||
         id === 'react-dom' ||

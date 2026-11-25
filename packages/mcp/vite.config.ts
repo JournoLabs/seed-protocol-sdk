@@ -12,6 +12,7 @@ export default defineConfig({
     rollupOptions: {
       external: (id) => !id.startsWith('.') && !id.startsWith('/') && !id.startsWith('\0'),
       output: {
+        keepNames: true,
         banner: (chunk) => (chunk.name === 'bin' ? '#!/usr/bin/env node' : ''),
       },
     },
