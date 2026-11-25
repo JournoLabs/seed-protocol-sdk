@@ -18,7 +18,7 @@ import {
   resolveEasChainDeployment,
   type EasChainDeployment,
 } from '@seedprotocol/eas'
-import { MANAGED_ACCOUNT_FACTORY_ADDRESSES } from './helpers/constants'
+import { MANAGED_ACCOUNT_FACTORY_ADDRESSES, SEED_DELEGATE_ADDRESSES } from './helpers/constants'
 import { ethers } from 'ethers'
 import { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 import { getPublishWallet } from './helpers/publishWalletRegistry'
@@ -101,6 +101,12 @@ export interface PublishConfig {
    * Built in for Optimism Sepolia; required on other chains when those flows are enabled.
    */
   managedAccountFactoryAddress?: string
+  /**
+   * Seed EIP-7702 delegate on {@link chain} (ADR 0040). With `accountMode: 'eip7702'`, EOAs delegate
+   * to it and publish with `multiPublish` as themselves. Defaults to the known deployment for
+   * `chain.id`; without one, EOAs delegate to `Simple7702Account` and attest through EAS directly.
+   */
+  seedDelegateAddress?: string
   /**
    * JSON-RPC URL for the publish chain. Required when `thirdwebClientId` is unset.
    * Prefer a public chain RPC from Node. A domain-locked client id in the default
@@ -452,6 +458,8 @@ export interface ResolvedPublishConfig extends PublishConfig {
    * Use {@link requireManagedAccountFactoryAddress} where a factory is mandatory.
    */
   thirdwebAccountFactoryAddress: string | undefined
+  /** Seed EIP-7702 delegate on the publish chain, or undefined when none is known. */
+  seedDelegateAddress: `0x${string}` | undefined
   /** `''` when unset (user-paid storage). */
   uploadApiBaseUrl: string
   /** Resolved verification origin (defaults to uploadApiBaseUrl). */
@@ -524,6 +532,8 @@ export function getPublishConfig(): ResolvedPublishConfig {
     ...config,
     thirdwebAccountFactoryAddress:
       config.managedAccountFactoryAddress ?? MANAGED_ACCOUNT_FACTORY_ADDRESSES[chain.id],
+    seedDelegateAddress:
+      (config.seedDelegateAddress as `0x${string}` | undefined) ?? SEED_DELEGATE_ADDRESSES[chain.id],
     easContractAddress: easChain.easContractAddress,
     schemaRegistryAddress: easChain.schemaRegistryAddress,
     easChain,

@@ -10,6 +10,7 @@ import {
   type PublishConfig,
 } from './config'
 import { getPublishThirdwebChain } from './helpers/thirdwebChain'
+import { SEED_DELEGATE_ADDRESSES } from './helpers/constants'
 import { encodeEasMultiRevoke, encodeRegisterSchema } from './helpers/contracts'
 import { getPublishChainName } from './helpers/chainConfig'
 
@@ -70,6 +71,29 @@ describe('publish chain resolution', () => {
     expect(cfg.easContractAddress).toBe('0x00000000000000000000000000000000000000ea')
     expect(cfg.schemaRegistryAddress).toBe(OP_REGISTRY)
     expect(requireManagedAccountFactoryAddress()).toBe(factory)
+  })
+
+  test('seedDelegateAddress from the chain table', () => {
+    const delegate = '0x00000000000000000000000000000000000000de'
+    setCfg({ chain: baseSepolia })
+    expect(getPublishConfig().seedDelegateAddress).toBeUndefined()
+    SEED_DELEGATE_ADDRESSES[baseSepolia.id] = delegate
+    try {
+      expect(getPublishConfig().seedDelegateAddress).toBe(delegate)
+    } finally {
+      delete SEED_DELEGATE_ADDRESSES[baseSepolia.id]
+    }
+  })
+
+  test('an explicit seedDelegateAddress wins', () => {
+    const explicit = '0x00000000000000000000000000000000000000df'
+    SEED_DELEGATE_ADDRESSES[baseSepolia.id] = '0x00000000000000000000000000000000000000de'
+    try {
+      setCfg({ chain: baseSepolia, seedDelegateAddress: explicit })
+      expect(getPublishConfig().seedDelegateAddress).toBe(explicit)
+    } finally {
+      delete SEED_DELEGATE_ADDRESSES[baseSepolia.id]
+    }
   })
 
   test('unknown chain requires EAS addresses', () => {

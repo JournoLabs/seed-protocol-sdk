@@ -18,7 +18,7 @@ const SIMPLE_7702_ACCOUNT = '0xe6cae83bde06e4c305530e199d7217f42808555b'
 const PAYMASTER = `0x${'9'.repeat(40)}`
 const HASH = `0x${'c'.repeat(64)}`
 
-type Op = Record<string, string>
+type Op = Record<string, string> & { eip7702Auth?: { address: string; nonce: string } }
 let sent: Op[] = []
 let paymasterCalls = 0
 let behaviour: {
@@ -45,7 +45,9 @@ const chainAndBundler = Bun.serve({
         return ok([entryPoint08Address])
       case 'eth_getCode':
         // Delegated (to Simple7702Account unless a test says otherwise), so sends carry no authorization.
-        return ok(`0xef0100${behaviour.delegate.slice(2)}`)
+        return ok(behaviour.delegate ? `0xef0100${behaviour.delegate.slice(2)}` : '0x')
+      case 'eth_getTransactionCount':
+        return ok('0x3')
       case 'eth_getBlockByNumber':
         return ok({ number: '0x10', baseFeePerGas: '0x1', timestamp: '0x1', transactions: [] })
       case 'eth_maxPriorityFeePerGas':
@@ -376,5 +378,32 @@ describe('createPermissionlessTxSender when the sponsor declines', () => {
     expect(asked).toBe(0)
     expect(paymasterCalls).toBe(0)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe('createPermissionlessTxSender with the Seed delegate', () => {
+  const seedDelegate = `0x${'5e'.repeat(20)}` as const
+
+  test('authorizes the Seed delegate', async () => {
+    behaviour.delegate = ''
+    const sender = await createPermissionlessTxSender({ signer, bundlerUrl, paymasterUrl, delegate: seedDelegate })
+    await sender.sendTransaction(tx)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.eip7702Auth?.address.toLowerCase()).toBe(seedDelegate)
+    expect(sent[0]!.eip7702Auth?.nonce).toBe('0x3')
+  })
+
+  test('moves an EOA off Simple7702Account', async () => {
+    behaviour.delegate = SIMPLE_7702_ACCOUNT
+    const sender = await createPermissionlessTxSender({ signer, bundlerUrl, paymasterUrl, delegate: seedDelegate })
+    await sender.sendTransaction(tx)
+    expect(sent[0]!.eip7702Auth?.address.toLowerCase()).toBe(seedDelegate)
+  })
+
+  test('sends without an authorization once on the Seed delegate', async () => {
+    behaviour.delegate = seedDelegate
+    const sender = await createPermissionlessTxSender({ signer, bundlerUrl, paymasterUrl, delegate: seedDelegate })
+    await sender.sendTransaction(tx)
+    expect(sent[0]!.eip7702Auth).toBeUndefined()
   })
 })

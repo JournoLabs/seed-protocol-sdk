@@ -59,3 +59,4 @@ Public docs in `docs/` describe how things work for users and contributors.
 4. Don't rewrite accepted ADRs. To change a decision, write a new ADR and mark the old
    one **Superseded by NNNN**.
 5. Add a row to the index above.
+| [0040](0040-eoas-publish-through-a-seed-eip7702-delegate.md) | EOAs publish with multiPublish through a Seed EIP-7702 delegate | Proposed |

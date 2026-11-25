@@ -18,6 +18,7 @@ import {
   PublishGasError,
 } from '../../errors'
 import { delegationTarget } from '../chainClient'
+import { SIMPLE_7702_ACCOUNT_ADDRESS } from '../constants'
 import type { SelfPayRequest } from '../../payment'
 import { pinnedNonce } from '../pinnedNonce'
 import { classifySponsorFailure, isInsufficientPrefund } from './sponsorDecline'
@@ -36,6 +37,11 @@ export type CreatePermissionlessTxSenderOptions = {
    * paid by the account. Without it, a decline throws `PublishGasError` `SPONSOR_DECLINED`.
    */
   onSponsorDeclined?: (request: SelfPayRequest) => Promise<boolean>
+  /**
+   * The Seed delegate (ADR 0040) the EOA delegates to. EOAs on `Simple7702Account` move to it on
+   * their next send. Without it, the EOA delegates to `Simple7702Account`.
+   */
+  delegate?: Address
 }
 
 export function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
@@ -148,6 +154,7 @@ export async function createPermissionlessTxSender(
       address: entryPoint08Address,
       version: '0.8',
     },
+    ...(options.delegate && { accountLogicAddress: options.delegate }),
   })
 
   const clientFor = (withPaymaster: boolean) =>
@@ -226,7 +233,7 @@ export async function createPermissionlessTxSender(
         chainId: chain.id,
         // viem's isDeployed() treats any code as this account's, which a wallet-delegated EOA isn't.
         currentDelegate: async () => delegationTarget(await publicClient.getCode({ address })),
-        movableFrom: [],
+        movableFrom: options.delegate ? [SIMPLE_7702_ACCOUNT_ADDRESS] : [],
         getNonce: () => publicClient.getTransactionCount({ address }),
       })
       // Read once: viem draws a new nonce key on each send that has none, and a self-paid resend
