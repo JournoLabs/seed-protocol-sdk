@@ -94,7 +94,7 @@ describe('the cc catalog', () => {
 describe('createLicenseCatalog', () => {
   it('rejects two modules with the same terms hash', () => {
     const first = creativeCommons[1]!
-    const twin = { ...first, id: 'twin@1.0.0', spdx: 'LicenseRef-Twin', toTerms: () => ({ ...first.toTerms(), spdx: first.spdx }) }
+    const twin = { ...first, id: 'twin@1.0.0' as const, spdx: 'LicenseRef-Twin', toTerms: () => ({ ...first.toTerms(), spdx: first.spdx }) }
     expect(() => createLicenseCatalog([first, twin])).toThrow(/duplicate.*terms hash/i)
   })
 
