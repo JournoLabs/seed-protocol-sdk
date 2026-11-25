@@ -4,6 +4,7 @@ import { subscribe } from './subscribe'
 import { releasePublishLock } from '../publishLocks'
 import { markInProgressPublishInterrupted } from './savePublish'
 import { isRestorableSnapshot, parkInterruptedAttestation, type PersistedSnapshot } from './restorableSnapshot'
+import { stopWaitingForWallet, waitForWallet, walletPublishesAs } from '../walletWait'
 
 // Kept apart from restoreFromDb so tests that replace that actor still restore runs (takeover.ts).
 
@@ -87,7 +88,9 @@ export type RestoredRun = {
 /**
  * Starts the saved run of a seed whose publish lock this tab holds. A run that can't resume is
  * marked interrupted, so it doesn't stay in progress and can be published again, and its lock is
- * let go; that gives `undefined`.
+ * let go; that gives `undefined`. So does a run this tab's publish wallet doesn't publish as
+ * (walletWait.ts): its row stays in progress, its lock is let go, and the tab checks it again when
+ * its wallet changes.
  */
 export async function startRestoredRun(
   { parsed, seedLocalId }: ReadPublishRow,
@@ -98,6 +101,13 @@ export async function startRestoredRun(
     releasePublishLock(seedLocalId)
     return undefined
   }
+  // Noted before the lock goes: a listener told of the release may switch the wallet at once.
+  if (!walletPublishesAs(parsed.context?.address)) {
+    waitForWallet(seedLocalId, parsed.context?.address)
+    releasePublishLock(seedLocalId)
+    return undefined
+  }
+  stopWaitingForWallet(seedLocalId)
 
   // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
   patchPublishContextItemForRestore(parsed, seedLocalId, record)

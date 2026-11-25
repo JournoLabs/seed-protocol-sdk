@@ -8,6 +8,8 @@ export interface PersistedSnapshot {
   children?: Record<string, unknown>
   context?: {
     item?: { seedLocalId?: string; modelName?: string; schemaId?: string }
+    /** The address the publish runs as: it attests as this account. */
+    address?: string
     modelName?: string
     schemaId?: string
     bundlerUploadNotNeeded?: boolean

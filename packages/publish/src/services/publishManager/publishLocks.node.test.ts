@@ -183,6 +183,56 @@ describe('publish locks', () => {
     actor.stop()
   }, TEST_TIMEOUT_MS)
 
+  test('restoreFromDb leaves a publish that runs as an address when this tab has no publish wallet', async () => {
+    const { locks } = fakeLockManager()
+    setPublishLockManagerForTests(locks)
+    const address = '0x00000000000000000000000000000000000000aa'
+    const rows = [
+      {
+        seedLocalId: 'seed-needs-wallet',
+        status: 'in_progress',
+        updatedAt: 1,
+        persistedSnapshot: JSON.stringify({
+          status: 'active',
+          value: 'failure',
+          children: {},
+          context: { item: { seedLocalId: 'seed-needs-wallet' }, address },
+        }),
+      },
+    ]
+    BaseDb.isAppDbReady = () => true
+    BaseDb.getAppDb = () => ({ select: () => ({ from: () => ({ where: async () => rows }) }) }) as never
+
+    let restored: Map<string, { stop: () => void }> | undefined
+    const machine = setup({ actors: { restoreFromDb } }).createMachine({
+      initial: 'restoring',
+      states: {
+        restoring: {
+          invoke: {
+            src: 'restoreFromDb',
+            input: () => ({ context: { publishProcesses: new Map(), subscriptions: new Map() } }),
+          },
+          on: {
+            RESTORE_FROM_DB_DONE: {
+              target: 'done',
+              actions: ({ event }) => {
+                restored = (event as unknown as { publishProcesses: typeof restored }).publishProcesses
+              },
+            },
+          },
+        },
+        done: {},
+      },
+    })
+    const actor = createActor(machine)
+    actor.start()
+    await waitUntilOrThrow(() => restored !== undefined, 'restoreFromDb to send RESTORE_FROM_DB_DONE')
+
+    expect([...restored!.keys()]).toEqual([])
+    expect(await publishLockHolder('seed-needs-wallet')).toBe('none')
+    actor.stop()
+  }, TEST_TIMEOUT_MS)
+
   test("restoreFromDb doesn't mark interrupted an upload another tab is running", async () => {
     const { locks, otherTab } = fakeLockManager()
     setPublishLockManagerForTests(locks)

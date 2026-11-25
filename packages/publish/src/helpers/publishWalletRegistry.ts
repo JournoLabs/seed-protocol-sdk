@@ -55,6 +55,44 @@ export function dataItemSignerForPublish(
 
 let session: PublishWalletSession | null = null
 
+/**
+ * The address a publish from `wallet` runs as: what `ensureWalletThenPublish` passes to
+ * `createPublish`. Lowercase; undefined without a wallet.
+ */
+export function publishAddressOf(wallet: PublishWalletSession | null | undefined): string | undefined {
+  const address = wallet?.publisherAddress ?? wallet?.txSender.address ?? wallet?.signer.address
+  return address?.trim() ? address.trim().toLowerCase() : undefined
+}
+
+const publishAddressListeners = new Set<() => void>()
+let lastPublishAddress: string | undefined
+
+/**
+ * Calls `listener` when the address the registered wallet publishes as ({@link publishAddressOf})
+ * changes, including to none. Registering the same address again doesn't call it. Internal: the
+ * publish manager re-checks publishes waiting for a wallet on it. Returns the unsubscribe function.
+ */
+export function onPublishAddressChange(listener: () => void): () => void {
+  publishAddressListeners.add(listener)
+  return () => {
+    publishAddressListeners.delete(listener)
+  }
+}
+
+function setSession(next: PublishWalletSession | null): void {
+  session = next
+  const address = publishAddressOf(next)
+  if (address === lastPublishAddress) return
+  lastPublishAddress = address
+  for (const listener of [...publishAddressListeners]) {
+    try {
+      listener()
+    } catch (err) {
+      console.warn('[publishWalletRegistry] Publish address listener threw:', err)
+    }
+  }
+}
+
 function waitUntilSeedInitialized(): Promise<void> {
   if (seedClient.isInitialized()) return Promise.resolve()
   return new Promise((resolve) => {
@@ -69,7 +107,7 @@ function waitUntilSeedInitialized(): Promise<void> {
 export async function setPublishWallet(
   next: PublishWalletSession | null,
 ): Promise<void> {
-  session = next
+  setSession(next)
   if (!next) return
   await waitUntilSeedInitialized()
   const owned = new Set<string>()
@@ -102,7 +140,7 @@ export function getPublishWallet(): PublishWalletSession | null {
  * and claims them; drafts stamped with the old wallet are read-only until it reconnects.
  */
 export async function clearPublishWallet(): Promise<void> {
-  session = null
+  setSession(null)
   if (!seedClient.isInitialized()) return
   try {
     const { watched } = await seedClient.getAddresses()
