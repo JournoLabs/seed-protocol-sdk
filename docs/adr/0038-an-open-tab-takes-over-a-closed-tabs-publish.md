@@ -70,11 +70,12 @@ on another account, or with its in-app session ended, would attest under the wro
 a reload with another account.
 
 A tab now resumes a row, at a takeover or at load, only when its publish wallet publishes as that
-address: the wallet's `publisherAddress`, else its sender's address, else its signer's, compared
-without letter case. This is the address `ensureWalletThenPublish` would publish as. Otherwise the
+address: the row's `context.address` is the wallet's `publisherAddress`, its sender's or signer's
+address, or one of its `ownedAddresses`, compared without letter case. The owned addresses count
+because some routes publish as a smart account derived from the registered account. Otherwise the
 tab leaves the row `in_progress`, lets the lock go (Web Locks hand it to the next queued tab), and
-notes the seed with the address it waits for. When the address the registered wallet publishes as
-changes to that one, the tab queues for the lock again and decides afresh on the grant, so a tab that
+notes the seed with the address it waits for. When the registered wallet changes to one that
+publishes as that address, the tab queues for the lock again and decides afresh on the grant, so a tab that
 later connects the right account takes the publish over, and a reload resumes its publishes once its
 wallet reconnects. A row with no address resumes as before: no wallet can attest it. A row that can't
 resume (mid bundler upload) is still marked `interrupted` whatever the wallet, since that is the same
@@ -82,15 +83,21 @@ in every tab.
 
 `stopAll` drops a tab's waits for other tabs' locks, and hosts call it when the account changes, just
 before registering the new account. So the publishes it stops, and the waits it drops, are noted
-too, and the next change of the wallet's address queues the tab again. Each still resumes only with
-the matching wallet.
+too, and the next change of the wallet's addresses queues the tab again. Each still resumes only with
+the matching wallet. Registering a wallet with the same addresses is no change, so publishes stopped
+that way wait for a different wallet or a reload.
 
-The interleavings this covers: the wallet is read with no await between the check and starting the
-run, so a change during the row read counts; the seed is noted before the lock goes, so a listener
+The check covers the decision to resume, not the run after it. The wallet is read with no await
+between the check and starting the run, so a change during the row read counts; the seed is noted before the lock goes, so a listener
 told of the release can switch the wallet and queue at once; and a wait marks itself granted when the
 lock comes, so a queue request made while the released takeover is still settling isn't dropped.
 
 Consequences: `'none'` on an `in_progress` row now also means no open tab holds the right wallet, and
 it lasts until one does; a host can read the row's `context.address` to say which account to
-connect. A page reloaded before its wallet reconnects shows `'none'` until it does. A host that
-restored at load and passed a wallet only to `retryAttestations` must register the wallet instead.
+connect. A page reloaded before its wallet reconnects shows `'none'` until it does. A host that passes
+a wallet only to `createPublish` or `retryAttestations` must register it, or its rows never resume.
+
+Not covered: a run resumed here, like any run, picks the registered wallet again when it attests (a
+retry with no account, and a restored run whose saved wallet didn't survive the row). A host that
+registers another account without calling `stopAll` can still attest a running publish under it.
+Closing that means checking the wallet against `context.address` at the send.

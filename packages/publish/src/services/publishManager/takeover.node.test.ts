@@ -361,6 +361,20 @@ describe("the taking tab's wallet", () => {
     expect(announced).toContain('seed-right-wallet')
   }, TEST_TIMEOUT_MS)
 
+  test('a wallet that owns the address the publish runs as takes it', async () => {
+    // A smart account publishing for its admin EOA lists both: the publish ran as one of them.
+    void setPublishWallet({
+      signer: { address: OTHER_ACCOUNT },
+      txSender: { address: OTHER_ACCOUNT },
+      publisherAddress: OTHER_ACCOUNT,
+      ownedAddresses: [PUBLISHER],
+    } as unknown as import('../../helpers/publishWalletRegistry').PublishWalletSession)
+    rows = [savedRow('seed-owned-address', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-owned-address')
+
+    await waitUntilOrThrow(() => runHere('seed-owned-address') !== undefined, 'the publish to resume here')
+  }, TEST_TIMEOUT_MS)
+
   test('switching this tab to the right wallet later takes the publish; another wallet does not', async () => {
     useWallet(OTHER_ACCOUNT)
     const { changed, unsubscribe } = holderChanges()

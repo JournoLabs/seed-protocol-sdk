@@ -56,21 +56,26 @@ export function dataItemSignerForPublish(
 let session: PublishWalletSession | null = null
 
 /**
- * The address a publish from `wallet` runs as: what `ensureWalletThenPublish` passes to
- * `createPublish`. Lowercase; undefined without a wallet.
+ * Every address a publish resumed with `wallet` may run as: its `publisherAddress`, its sender's and
+ * signer's, and its `ownedAddresses` (a smart account and its admin). Lowercase.
  */
-export function publishAddressOf(wallet: PublishWalletSession | null | undefined): string | undefined {
-  const address = wallet?.publisherAddress ?? wallet?.txSender.address ?? wallet?.signer.address
-  return address?.trim() ? address.trim().toLowerCase() : undefined
+export function publishAddressesOf(wallet: PublishWalletSession | null | undefined): Set<string> {
+  const addresses = new Set<string>()
+  if (!wallet) return addresses
+  for (const a of [wallet.publisherAddress, wallet.txSender.address, wallet.signer.address, ...(wallet.ownedAddresses ?? [])]) {
+    if (a?.trim()) addresses.add(a.trim().toLowerCase())
+  }
+  return addresses
 }
 
 const publishAddressListeners = new Set<() => void>()
-let lastPublishAddress: string | undefined
+let lastPublishAddresses = ''
 
 /**
- * Calls `listener` when the address the registered wallet publishes as ({@link publishAddressOf})
- * changes, including to none. Registering the same address again doesn't call it. Internal: the
- * publish manager re-checks publishes waiting for a wallet on it. Returns the unsubscribe function.
+ * Calls `listener` when the addresses the registered wallet may publish as ({@link publishAddressesOf})
+ * change, including to none. Registering a wallet with the same addresses again doesn't call it.
+ * Internal: the publish manager re-checks publishes waiting for a wallet on it. Returns the
+ * unsubscribe function.
  */
 export function onPublishAddressChange(listener: () => void): () => void {
   publishAddressListeners.add(listener)
@@ -81,9 +86,9 @@ export function onPublishAddressChange(listener: () => void): () => void {
 
 function setSession(next: PublishWalletSession | null): void {
   session = next
-  const address = publishAddressOf(next)
-  if (address === lastPublishAddress) return
-  lastPublishAddress = address
+  const key = [...publishAddressesOf(next)].sort().join(',')
+  if (key === lastPublishAddresses) return
+  lastPublishAddresses = key
   for (const listener of [...publishAddressListeners]) {
     try {
       listener()

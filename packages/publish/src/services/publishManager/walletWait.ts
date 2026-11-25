@@ -1,4 +1,4 @@
-import { getPublishWallet, onPublishAddressChange, publishAddressOf } from '~/helpers/publishWalletRegistry'
+import { getPublishWallet, onPublishAddressChange, publishAddressesOf } from '~/helpers/publishWalletRegistry'
 
 /**
  * Publishes this tab doesn't run because its publish wallet doesn't publish as their address, or it
@@ -21,12 +21,13 @@ export function setWalletRequeue(next: (seedLocalId: string) => void): void {
 }
 
 /**
- * Whether this tab's publish wallet publishes as `address`, the address a saved publish runs as.
- * A publish saved with no address can't attest whichever wallet resumes it, so it passes.
+ * Whether this tab's publish wallet may publish as `address`, the address a saved publish runs as:
+ * one of {@link publishAddressesOf}. A publish saved with no address can't attest whichever wallet
+ * resumes it, so it passes.
  */
 export function walletPublishesAs(address: unknown): boolean {
   if (typeof address !== 'string' || !address.trim()) return true
-  return publishAddressOf(getPublishWallet()) === address.trim().toLowerCase()
+  return publishAddressesOf(getPublishWallet()).has(address.trim().toLowerCase())
 }
 
 /** Re-checks the seed's publish once this tab's wallet publishes as `address` (any wallet if unset). */
@@ -46,9 +47,9 @@ export function stopWaitingForWallet(seedLocalId: string): void {
 }
 
 onPublishAddressChange(() => {
-  const address = publishAddressOf(getPublishWallet())
-  if (!address) return
+  const addresses = publishAddressesOf(getPublishWallet())
+  if (addresses.size === 0) return
   for (const [seedLocalId, waitsFor] of [...waitingForWallet]) {
-    if (waitsFor === undefined || waitsFor === address) requeue(seedLocalId)
+    if (waitsFor === undefined || addresses.has(waitsFor)) requeue(seedLocalId)
   }
 })
