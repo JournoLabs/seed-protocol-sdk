@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCli } from '../src/cli'
+import { defaultCacheDir, parseCli } from '../src/cli'
 
 const A = '0xABCDEF0123456789abcdef0123456789abcdef01'
 const B = '0x' + '2'.repeat(40)
@@ -56,5 +56,16 @@ describe('parseCli', () => {
     expect(parseCli(['--port', '8080'], {})).toEqual({ kind: 'error', message: '--port needs --http' })
     expect(parseCli(['--http', '--port', '70000'], {}).kind).toBe('error')
     expect(parseCli(['--http', '--allowed-origin', 'https://a.example/app'], {}).kind).toBe('error')
+  })
+})
+
+describe('defaultCacheDir', () => {
+  it('uses the OS user cache folder', () => {
+    expect(defaultCacheDir({}, 'darwin', '/Users/ada')).toBe('/Users/ada/Library/Caches/seed-mcp')
+    expect(defaultCacheDir({}, 'linux', '/home/ada')).toBe('/home/ada/.cache/seed-mcp')
+    expect(defaultCacheDir({ XDG_CACHE_HOME: '/var/xdg' }, 'linux', '/home/ada')).toBe('/var/xdg/seed-mcp')
+    expect(defaultCacheDir({ LOCALAPPDATA: 'C:\\Users\\ada\\AppData\\Local' }, 'win32', 'C:\\Users\\ada')).toBe(
+      'C:\\Users\\ada\\AppData\\Local\\seed-mcp',
+    )
   })
 })

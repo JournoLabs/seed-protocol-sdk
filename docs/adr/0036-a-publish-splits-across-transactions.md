@@ -47,7 +47,7 @@ designed for here.
 
 A publish through the Seed contract whose graph doesn't fit in one transaction is sent as several
 `multiPublish` transactions, in one run. There is no option to turn it on or off. `PUBLISH_TOO_LARGE`
-remains for a graph whose first unit (below) doesn't fit on its own. Direct EAS is unchanged: it
+remains for a graph with any unit (below) that doesn't fit on its own. Direct EAS is unchanged: it
 already sends one transaction per Seed.
 
 ### Units and parts
@@ -82,8 +82,8 @@ headroom, and shortened one unit at a time, by bisection, until the estimate is 
 `min(maxPublishGas, block gas limit)`. When the RPC estimate can't be made, the part is sent with
 `publishGasLimit`'s fallback gas, as a single transaction is today.
 
-`checking` keeps its check before uploads, now on the first unit: a graph refuses there only when
-its first unit alone is over the local estimate or the calldata limit. `checking` also reports how
+`checking` keeps its check before uploads, now on every unit: a graph refuses there when any unit
+alone is over the local estimate or the calldata limit. `checking` also reports how
 many parts the local estimate expects, so a host can say so before the author pays for uploads. That
 count is a lower bound; the RPC estimates can raise it.
 
@@ -110,10 +110,22 @@ seeds' co-publish rows as it records. `onPublished` fires once, after the root's
 host's key and *k*. `findPublishByNonceKey` reads parts 1, 2, … until a key with sequence 0 and
 reports every part it finds.
 
-How many parts went out under the key is read from the run's recorded `publish_attempts` rows
-(`countRecordedPublishParts`, by `publishRunId`), not from its saved state. The snapshot is saved
-when the machine moves on, so a tab that reloads between parts would restore a count that misses the
-last part and send under its spent key.
+How many parts went out under the key is read from the recorded `publish_attempts` rows whose
+`nonce_key` is `publishNonceKey(key, 1)`, `(key, 2)` and so on, whichever run sent them
+(`findPublishAttemptsByNonceKey`), not from a run's saved state. The snapshot is saved when the
+machine moves on, so a tab that reloads between parts would restore a count that misses the last
+part and send under its spent key. A part under the key that was sent and not settled (`sending`,
+`sent` or `landed`, so `landed` blocks too) stops the try with `AttestationOutcomeUnknownError` until
+reconcile settles it, since it may have landed. `checking` sends the publish to `attestationOutcomeUnknown`
+for it, not to `failure`. Once the recorded parts include the one that held the item's own request,
+the key has finished a publish of that item: a new publish under it is refused with `NONCE_KEY_SPENT`
+and needs a new key; only another item's rows under the key are ignored.
+
+A split publish under a host key finishes only from the database that started it. When part *k*'s
+key is spent and no row of this database explains it, `NONCE_KEY_SPENT` says the publish is partly
+on chain and points to `findPublishByNonceKey`'s `parts`. Recovering the parts from the chain on
+another database isn't done: the rebuilt payload would re-attest part 1's content whenever the
+local rows don't hold its uids.
 
 ### A new publish replaces a parked run and reuses its uploads
 
@@ -123,9 +135,8 @@ new one. The parked run's row is marked `interrupted`, as `stopPublish` does. Th
 parked run's uploads: an upload is reused when its `itemPropertyLocalId` and content hash match an
 upload the new run needs, and the blob store still reports it stored. Anything else uploads again,
 so an edit to a file property after the failure isn't attested with the old file. The new run also
-takes the parked run's `nonceKey`, unless the host passes its own, and with it the number of parts
-the parked run, and any run it replaced, sent under that key, read from their recorded attempts. Its
-next part sends under the next part's key. A different key, or none, starts at part 1, so
+takes the parked run's `nonceKey`, unless the host passes its own. The parts sent under that key are
+read from the recorded attempts, so its next part sends under the next part's key. A different key, or none, starts at part 1, so
 `findPublishByNonceKey` finds the new key's parts from its first.
 
 `createPublish` checks again that the run is parked when it replaces it: a retry that started in

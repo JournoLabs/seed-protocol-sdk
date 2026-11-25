@@ -105,7 +105,7 @@ function ipfsWriter(options: IpfsStoreOptions) {
     if (missing.length > 0) throw notStoredError(missing)
   }
 
-  return { dags, sendDag, send, unstoredCids, notStoredError, assertCidsStored }
+  return { dags, sendDag, send, isStored, unstoredCids, notStoredError, assertCidsStored }
 }
 
 const isPendingDag = (item: unknown): item is PendingDag => (item as PendingDag | undefined)?.kind === 'ipfs'
@@ -122,6 +122,7 @@ export function ipfsBlobStore(options: IpfsStoreOptions): BlobStore {
   const writer = ipfsWriter(options)
   return {
     id: 'ipfs',
+    usesUploadApi: false,
     async prepare(uploads): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       return { ids: dags.map((d) => `ipfs://${d.root}`), pending: dags.map((dag): PendingDag => ({ kind: 'ipfs', dag })) }
@@ -210,6 +211,7 @@ export function ipfsMirror(store: BlobStore, options: IpfsMirrorOptions): BlobSt
 
   return {
     id: `${store.id}+ipfs`,
+    usesUploadApi: store.usesUploadApi !== false,
     async prepare(uploads, ctx: BlobStoreContext): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       const tagged = uploads.map((upload, i) => ({
@@ -233,6 +235,36 @@ export function ipfsMirror(store: BlobStore, options: IpfsMirrorOptions): BlobSt
       await Promise.all(
         batches.flatMap((b) => [b.inner?.length ? store.send(b.inner, ctx) : undefined, sendIpfs(b.ipfs)]),
       )
+    },
+    async reusable(id, upload) {
+      // The CID comes from the local bytes: after a reload `cidById` knows nothing of this id.
+      let dag: UnixFsDag
+      try {
+        dag = (await writer.dags([upload]))[0]!
+      } catch {
+        // Bytes gone or changed since the id was prepared: prepare the upload again.
+        return false
+      }
+      try {
+        if (store.reusable) {
+          if (!(await store.reusable(id, upload))) return false
+        } else {
+          await store.assertStored([id])
+        }
+      } catch {
+        return false
+      }
+      if (!(await writer.isStored(dag.root))) {
+        try {
+          await writer.sendDag(dag)
+          await writer.assertCidsStored([dag.root])
+          report({ id, cid: dag.root, ok: true })
+        } catch (error) {
+          report({ id, cid: dag.root, ok: false, error })
+          if (required) throw error
+        }
+      }
+      return true
     },
     async assertStored(ids) {
       const waiting = ids.flatMap((id) => {

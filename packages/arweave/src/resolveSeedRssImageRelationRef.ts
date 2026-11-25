@@ -1,6 +1,9 @@
-import { getPublicArweaveRawUrl } from './gateway/publicUrl.js'
+import { hasUriScheme, publicStorageUrl, type PublicStorageUrlOptions } from './gateway/storageUrl.js'
 import { isEasAttestationExplorerUrl } from './easAttestationUrl.js'
 import { classifyMediaRef } from './mediaRef.js'
+
+/** Options for resolving a relation value: where `ipfs://` ids are read from. */
+export type ResolveSeedRssImageRelationOptions = PublicStorageUrlOptions
 
 export type SeedRssImageRelationRef = {
   storageTransactionId?: string
@@ -49,23 +52,26 @@ function readObjectStringField(obj: Record<string, unknown>, ...keys: string[]):
 }
 
 /** RSS readers are outside Seed, so the public gateway's URL, never a local read host (ADR 0025). */
-function tryGatewayUrlForTxId(txId: string): string | undefined {
+function tryGatewayUrlForTxId(txId: string, options?: ResolveSeedRssImageRelationOptions): string | undefined {
   const trimmed = txId.trim()
   if (!trimmed || trimmed.startsWith('0x')) return undefined
   try {
-    return getPublicArweaveRawUrl(trimmed)
+    return publicStorageUrl(trimmed, options)
   } catch {
     return undefined
   }
 }
 
-function resolveMediaUrlFromParts(parts: {
-  storageTransactionId?: string
-  arweaveUrl?: string
-}): string | undefined {
+function resolveMediaUrlFromParts(
+  parts: {
+    storageTransactionId?: string
+    arweaveUrl?: string
+  },
+  options?: ResolveSeedRssImageRelationOptions,
+): string | undefined {
   const txId = parts.storageTransactionId?.trim()
   if (txId) {
-    const fromTx = tryGatewayUrlForTxId(txId)
+    const fromTx = tryGatewayUrlForTxId(txId, options)
     if (fromTx) return fromTx
   }
 
@@ -77,7 +83,7 @@ function resolveMediaUrlFromParts(parts: {
   return undefined
 }
 
-function resolveFromString(value: string): SeedRssImageRelationRef | undefined {
+function resolveFromString(value: string, options?: ResolveSeedRssImageRelationOptions): SeedRssImageRelationRef | undefined {
   const trimmed = value.trim()
   if (!trimmed) return undefined
 
@@ -85,12 +91,18 @@ function resolveFromString(value: string): SeedRssImageRelationRef | undefined {
     return undefined
   }
 
+  // An id a blob store other than Arweave wrote (`ipfs://<cid>`): map it, or give no URL.
+  if (hasUriScheme(trimmed) && !/^(https?|blob|data):/i.test(trimmed)) {
+    const mediaUrl = tryGatewayUrlForTxId(trimmed, options)
+    return { storageTransactionId: trimmed, ...(mediaUrl ? { mediaUrl } : {}) }
+  }
+
   const classification = classifyMediaRef(trimmed)
   switch (classification.kind) {
     case 'url':
       return { mediaUrl: classification.href }
     case 'arweaveTxId': {
-      const mediaUrl = tryGatewayUrlForTxId(classification.txId)
+      const mediaUrl = tryGatewayUrlForTxId(classification.txId, options)
       return {
         storageTransactionId: classification.txId,
         ...(mediaUrl ? { mediaUrl } : {}),
@@ -99,7 +111,7 @@ function resolveFromString(value: string): SeedRssImageRelationRef | undefined {
     case 'seedUid':
       return { seedUid: classification.uid }
     default: {
-      const mediaUrl = tryGatewayUrlForTxId(trimmed)
+      const mediaUrl = tryGatewayUrlForTxId(trimmed, options)
       if (mediaUrl) {
         return {
           storageTransactionId: trimmed,
@@ -111,7 +123,10 @@ function resolveFromString(value: string): SeedRssImageRelationRef | undefined {
   }
 }
 
-function resolveFromObject(obj: Record<string, unknown>): SeedRssImageRelationRef | undefined {
+function resolveFromObject(
+  obj: Record<string, unknown>,
+  options?: ResolveSeedRssImageRelationOptions,
+): SeedRssImageRelationRef | undefined {
   const storageTransactionId = readObjectStringField(
     obj,
     'storageTransactionId',
@@ -122,7 +137,7 @@ function resolveFromObject(obj: Record<string, unknown>): SeedRssImageRelationRe
   const link = readObjectStringField(obj, 'link', 'Link')
 
   const mediaUrl =
-    resolveMediaUrlFromParts({ storageTransactionId, arweaveUrl }) ??
+    resolveMediaUrlFromParts({ storageTransactionId, arweaveUrl }, options) ??
     (link && !isEasAttestationExplorerUrl(link) ? link : undefined)
 
   if (!storageTransactionId && !arweaveUrl && !seedUid && !mediaUrl) {
@@ -142,16 +157,19 @@ function resolveFromObject(obj: Record<string, unknown>): SeedRssImageRelationRe
  * using field priority: storageTransactionId → arweaveUrl/gateway URL → seedUid.
  * EAS attestation explorer URLs are never returned as media.
  */
-export function resolveSeedRssImageRelationRef(value: unknown): SeedRssImageRelationRef | undefined {
+export function resolveSeedRssImageRelationRef(
+  value: unknown,
+  options?: ResolveSeedRssImageRelationOptions,
+): SeedRssImageRelationRef | undefined {
   if (value == null) return undefined
 
   if (typeof value === 'string') {
-    return resolveFromString(value)
+    return resolveFromString(value, options)
   }
 
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const resolved = resolveSeedRssImageRelationRef(entry)
+      const resolved = resolveSeedRssImageRelationRef(entry, options)
       if (resolved?.mediaUrl || resolved?.storageTransactionId || resolved?.seedUid) {
         return resolved
       }
@@ -160,7 +178,7 @@ export function resolveSeedRssImageRelationRef(value: unknown): SeedRssImageRela
   }
 
   if (typeof value === 'object') {
-    return resolveFromObject(value as Record<string, unknown>)
+    return resolveFromObject(value as Record<string, unknown>, options)
   }
 
   return undefined
@@ -172,10 +190,11 @@ export function resolveSeedRssImageRelationRef(value: unknown): SeedRssImageRela
 export function resolveSeedRssImageRelationFromItem(
   item: Record<string, unknown>,
   fieldKeys: readonly string[] = SEED_RSS_IMAGE_RELATION_FIELD_KEYS,
+  options?: ResolveSeedRssImageRelationOptions,
 ): SeedRssImageRelationRef | undefined {
   for (const key of fieldKeys) {
     if (!(key in item)) continue
-    const resolved = resolveSeedRssImageRelationRef(item[key])
+    const resolved = resolveSeedRssImageRelationRef(item[key], options)
     if (resolved) return resolved
   }
   return undefined

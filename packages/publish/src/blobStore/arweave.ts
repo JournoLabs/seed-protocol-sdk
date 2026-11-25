@@ -184,6 +184,7 @@ async function send(items: unknown[], ctx: BlobStoreContext): Promise<void> {
 /** Arweave through the upload API's bundler, or Turbo for user-paid storage. The default blob store. */
 export const arweaveBlobStore: BlobStore = {
   id: 'arweave',
+  usesUploadApi: true,
   prepare,
   send,
   assertStored: (ids) => verifyArweaveTransactionsExist(ids),

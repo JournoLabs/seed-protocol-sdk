@@ -28,17 +28,20 @@ const REPEATING_CODES = new Set<ManagedAccountPublishErrorCode>([
 export function isRepeatingAttestationError(err: unknown): boolean {
   return errorChain(err).some(
     (e) =>
-      (isNamed(e, PublishNonceKeyError) && (e as { code?: unknown }).code !== 'NONCE_KEY_UNUSED') ||
-      isNamed(e, PublishChainConfigError) ||
+      (isNamed(e, PublishNonceKeyError, 'PublishNonceKeyError') && (e as { code?: unknown }).code !== 'NONCE_KEY_UNUSED') ||
+      isNamed(e, PublishChainConfigError, 'PublishChainConfigError') ||
       (isManagedAccountPublishError(e) && REPEATING_CODES.has(e.code)),
   )
 }
 
 /**
- * An instance of `type`, or an object carrying its `name`: a publish restored from the database has
- * its error as the plain object the snapshot's JSON kept.
+ * An instance of `type`, or an object carrying the literal `name`: a publish restored from the
+ * database has its error as the plain object the snapshot's JSON kept. The name is a string
+ * literal, not `type.name`, because a bundler that minifies class names (this package's build
+ * before `keepNames`, and a consumer's own) makes `type.name` differ from the `name` the error
+ * was constructed with.
  */
-function isNamed(e: unknown, type: abstract new (...args: never[]) => Error): boolean {
+function isNamed(e: unknown, type: abstract new (...args: never[]) => Error, name: string): boolean {
   if (e instanceof type) return true
-  return typeof e === 'object' && e !== null && (e as { name?: unknown }).name === type.name
+  return typeof e === 'object' && e !== null && (e as { name?: unknown }).name === name
 }

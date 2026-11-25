@@ -79,4 +79,34 @@ describe('resolveSeedRssImageRelationFromItem', () => {
       seedUid: IMAGE_UID,
     })
   })
+
+  describe('with an ipfs:// storage id', () => {
+    const CID = 'bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+
+    it('maps the id to a path gateway URL, not to an Arweave /raw/ URL', () => {
+      const resolved = resolveSeedRssImageRelationRef(`ipfs://${CID}`)
+      expect(resolved).toEqual({ storageTransactionId: `ipfs://${CID}`, mediaUrl: `https://ipfs.io/ipfs/${CID}` })
+      expect(resolveSeedRssImageRelationRef({ storageTransactionId: `ipfs://${CID}` })?.mediaUrl).toBe(
+        `https://ipfs.io/ipfs/${CID}`,
+      )
+    })
+
+    it('uses the ipfsGateway option', () => {
+      const options = { ipfsGateway: 'https://gw.example.com/' }
+      expect(resolveSeedRssImageRelationRef(`ipfs://${CID}`, options)?.mediaUrl).toBe(
+        `https://gw.example.com/ipfs/${CID}`,
+      )
+      expect(
+        resolveSeedRssImageRelationRef([{ storage_transaction_id: `ipfs://${CID}` }], options)?.mediaUrl,
+      ).toBe(`https://gw.example.com/ipfs/${CID}`)
+      expect(
+        resolveSeedRssImageRelationFromItem({ image: { storageTransactionId: `ipfs://${CID}` } }, undefined, options)
+          ?.mediaUrl,
+      ).toBe(`https://gw.example.com/ipfs/${CID}`)
+    })
+
+    it('gives no URL for another scheme it cannot map', () => {
+      expect(resolveSeedRssImageRelationRef('foo://bar')?.mediaUrl).toBeUndefined()
+    })
+  })
 })

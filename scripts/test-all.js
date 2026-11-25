@@ -48,6 +48,7 @@ const STEPS = [
   'node scripts/check-archive-no-sdk.js',
   'node scripts/check-eas-sdk-node-import.js',
   'node scripts/check-dts-consumer.js',
+  'node scripts/check-released-changelogs.js',
   'bun run test:scripts',
 ]
 

@@ -1,0 +1,20 @@
+[
+  {
+    "package": "publish",
+    "version": "0.8.3",
+    "reason": "Lines for work that landed after the tag moved to Unreleased; duplicated multiPublish sentence removed; startPublish (not exported) replaced by the exported names",
+    "sha256": "e72abd80f0c5052f42de23524aa4f17c209ee73c30992ae7f00071542f8e5fb0"
+  },
+  {
+    "package": "sdk",
+    "version": "0.8.3",
+    "reason": "Flagged the ValidateItemForPublishResult union and the QueryDataSource EAS name as Breaking (batch 18 item 32)",
+    "sha256": "cba499961e2535744e20b5d7865e8c22eea40209765e19bcbaa6f80f07b8afd7"
+  },
+  {
+    "package": "query",
+    "version": "0.8.3",
+    "reason": "Flagged the QueryDataSource EAS name as Breaking (batch 18 item 32)",
+    "sha256": "6aa5f2dfa841ecd56e4471882ae25be3cb2cbec530bb80851bf3fc3787d9cb64"
+  }
+]

@@ -126,6 +126,27 @@ describe('a schema file without ids, as the tutorial writes it', () => {
     expect(err).toEqual(['[Seed Protocol] seed.schema.json leaves out ids; using the ones the SDK derives from the names'])
   })
 
+  it('says nothing about derived ids when none can be derived', async () => {
+    await write('seed.schema.json', { id: 'schema-1', models: { Post: { properties: { title: { type: 'Text' } } } } })
+    await write('seed.schema.context.jsonld', { schemaId: 'schema-1', terms: {} })
+    expect(await run('check')).toBe(0)
+    expect(err).toEqual([])
+  })
+
+  it('says the SDK may have stored other ids when every term is stale', async () => {
+    await write('seed.schema.json', tutorial)
+    await write('seed.schema.context.jsonld', { schemaId: '5945b0f13a', terms: { 'old-model': 'schema:BlogPosting', 'old-title': 'dcterms:title' } })
+    expect(await run('check')).toBe(1)
+    expect(err.join('\n')).toMatch(/derived from the names.*may have stored other ids.*put them in the schema file/s)
+  })
+
+  it('says nothing of the kind when only some terms are stale', async () => {
+    await write('seed.schema.json', tutorial)
+    await write('seed.schema.context.jsonld', { schemaId: '5945b0f13a', terms: { '313a8733b8': 'schema:BlogPosting', old: 'dcterms:title' } })
+    expect(await run('check')).toBe(1)
+    expect(err.join('\n')).not.toMatch(/may have stored/)
+  })
+
   it('exits 2 when there is no name to derive them from', async () => {
     await write('seed.schema.json', { models: tutorial.models })
     expect(await run('check')).toBe(2)

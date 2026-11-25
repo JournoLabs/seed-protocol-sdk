@@ -41,6 +41,11 @@
   "peerDependencies": {
     "@seedprotocol/publish": "workspace:*"
   },
+  "peerDependenciesMeta": {
+    "@seedprotocol/publish": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@seedprotocol/publish": "workspace:*",
     "@seedprotocol/sdk": "workspace:*",

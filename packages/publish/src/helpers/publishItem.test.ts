@@ -12,8 +12,15 @@ mock.module('./ensureWalletThenPublish', () => ({
   ensureWalletThenPublish: (...args: unknown[]) => ensureMock(...args),
 }))
 
+const realSdk = await import('@seedprotocol/sdk')
+let recordedParts = 0
+mock.module('@seedprotocol/sdk', () => ({
+  ...realSdk,
+  countRecordedPublishParts: async (_runIds: string[]) => recordedParts,
+}))
+
 const { publishItem, waitForPublishActor } = await import('./publishItem')
-const { Item } = await import('@seedprotocol/sdk')
+const { Item } = realSdk
 
 /** Stand-in publish actor: starts in `running`, moves on `finish` to the given state. */
 function fakePublishActor(endState: string, context: Record<string, unknown> = {}, final = true) {
@@ -26,6 +33,7 @@ function fakePublishActor(endState: string, context: Record<string, unknown> = {
       failure: { type: 'final' },
       stopping: { type: 'final' },
       attestationFailureRecoverable: final ? { type: 'final' } : {},
+      attestationOutcomeUnknown: {},
     },
   })
   const actor = createActor(machine)
@@ -109,6 +117,47 @@ describe('waitForPublishActor', () => {
     expect((error as Error).name).toBe('PublishRetractionError')
     expect((error as Error).message).toContain('Revoking the retracted properties of seed-1 failed: revoke reverted')
     actor.stop()
+  })
+
+  // Batch 18 item 4: the messages read as if nothing had been published
+  describe('a split publish that failed after some parts landed', () => {
+    const run = { publishRunId: 'run-1', expectedPublishTransactions: 3 }
+    const failWith = async (state: string, context: Record<string, unknown>) => {
+      const actor = fakePublishActor(state, { ...run, ...context }, false)
+      const done = waitForPublishActor(actor, 'seed-1')
+      actor.send({ type: 'finish' })
+      return ((await done.catch((e: unknown) => e)) as Error).message
+    }
+    afterEach(() => {
+      recordedParts = 0
+    })
+
+    test('says how many parts are on chain in a failure, a recoverable failure and an unknown outcome', async () => {
+      recordedParts = 2
+      expect(await failWith('failure', { error: new Error('gas'), errorStep: 'sendingAttestations' })).toContain(
+        'Publish of seed-1 failed at sendingAttestations: gas. 2 of 3 parts are on chain.',
+      )
+      expect(await failWith('attestationFailureRecoverable', { error: { message: 'nonce too low' } })).toContain(
+        '2 of 3 parts are on chain.',
+      )
+      expect(await failWith('attestationOutcomeUnknown', { error: { message: 'unknown' } })).toContain(
+        '2 of 3 parts are on chain.',
+      )
+    })
+
+    test('names no total when the run has no estimate', async () => {
+      recordedParts = 1
+      const message = await failWith('attestationFailureRecoverable', {
+        error: { message: 'boom' },
+        expectedPublishTransactions: undefined,
+      })
+      expect(message).toContain('1 part is on chain.')
+    })
+
+    test('adds nothing when no part is recorded', async () => {
+      recordedParts = 0
+      expect(await failWith('attestationFailureRecoverable', { error: { message: 'boom' } })).not.toContain('on chain')
+    })
   })
 
   test('rejects when the publish is stopped', async () => {

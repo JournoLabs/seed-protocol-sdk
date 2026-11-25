@@ -338,14 +338,14 @@ describe('estimateArchiveAnchorCost', () => {
 
   test('prices the files and the manifest as two bundles, each charged at least 256 KiB', async () => {
     const estimate = await estimateArchiveAnchorCost(REF, { rates } as never)
-    expect(estimate.arweave.chargedBytes).toBe(2 * MIN)
+    expect(estimate.arweave!.chargedBytes).toBe(2 * MIN)
   })
 
   test('sizes the tags tagPolicy puts on the uploads', async () => {
     extraBytes = 300 * 1024
     const discoverable = await estimateArchiveAnchorCost(REF, { rates } as never)
     const hashOnly = await estimateArchiveAnchorCost(REF, { rates, tagPolicy: 'hash-only' } as never)
-    expect(discoverable.arweave.chargedBytes).toBeGreaterThan(hashOnly.arweave.chargedBytes)
+    expect(discoverable.arweave!.chargedBytes).toBeGreaterThan(hashOnly.arweave!.chargedBytes)
   })
 
   // Batch 17 item 7a

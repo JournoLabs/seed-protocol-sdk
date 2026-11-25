@@ -85,9 +85,6 @@ export const createPublish = enqueueActions(({ context: managerContext, event, e
     })
   }
   const nonceKey = options?.nonceKey ?? (parked ? replaceParked?.nonceKey : undefined)
-  // Parts count against the key they went out under, so a different key, or none, starts at part 1.
-  const nonceKeyPartsInherited =
-    parked && nonceKey !== undefined && nonceKey === replaceParked?.nonceKey ? replaceParked.nonceKeyParts : 0
 
   enqueue.assign(({ context, spawn }) => {
     const { publishProcesses } = context
@@ -143,7 +140,6 @@ export const createPublish = enqueueActions(({ context: managerContext, event, e
         ...(nonceKey !== undefined && { nonceKey }),
         ...(options?.licenseOffer !== undefined && { licenseOffer: options.licenseOffer }),
         ...(parked && replaceParked && { reusableUploads: replaceParked.reuseUploads }),
-        ...(nonceKeyPartsInherited > 0 && { nonceKeyPartsInherited }),
       },
     })
 
