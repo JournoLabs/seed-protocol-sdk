@@ -1,4 +1,4 @@
-import { parseSpdx } from './spdx/parse'
+import { canonicalSpdx, parseSpdx } from './spdx/parse'
 import { ACTIONS, TERMS_PROFILE, USER_CLASSES, type SeedLicenseTerms } from './terms'
 
 export type TermsValidationError = { path: string; message: string }
@@ -20,7 +20,7 @@ const CONSTRAINT_OPERATORS: Record<string, readonly string[]> = {
 
 /**
  * Checks that a value is valid {@link SeedLicenseTerms}: the shape (no unknown keys, integers only),
- * parseable SPDX expressions, and no contradictions: the same action and target both permitted and
+ * SPDX expressions that parse and are written canonically, and no contradictions: the same action and target both permitted and
  * prohibited, share-alike without a derive permission, a transition with neither or both times.
  * An optional key whose value is `undefined` counts as absent. Never throws.
  */
@@ -61,7 +61,10 @@ export function validateTerms(terms: unknown): TermsValidationResult {
   function spdx(value: unknown, path: string) {
     if (!string(value, path)) return
     const parsed = parseSpdx(value)
-    if (!parsed.ok) err(path, `not an SPDX expression: ${parsed.error}`)
+    if (!parsed.ok) return err(path, `not an SPDX expression: ${parsed.error}`)
+    // The hash covers the string as written, so one spelling per expression keeps one hash per license.
+    const canonical = canonicalSpdx(value)
+    if (value !== canonical) err(path, `must be written canonically: "${canonical}"`)
   }
   function array(value: unknown, path: string, each: (item: unknown, path: string) => void) {
     if (!Array.isArray(value)) return err(path, 'must be an array')

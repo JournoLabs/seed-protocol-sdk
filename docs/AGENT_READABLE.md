@@ -115,7 +115,7 @@ including ones other wallets attested.
 import { exportSeeds, jsonLdScript, toJsonLd } from '@seedprotocol/rdf'
 
 const graph = await exportSeeds([seedUid], {
-  chainId: 10,
+  chainId: 11155420,
   contentUrl: (tx) => `https://arweave.net/${tx}`,
   lens: { schema, sidecar },
 })

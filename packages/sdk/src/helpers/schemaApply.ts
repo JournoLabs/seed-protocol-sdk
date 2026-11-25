@@ -19,6 +19,7 @@ import {
   ModelPropertyDataTypes,
   isKnownDataType,
   normalizePropertyRecordSchema,
+  privatePropertyProblem,
   validationRuleProblems,
 } from '@/helpers/property'
 import { refreshCachedProperties } from '@/helpers/cachedPropertyRefresh'
@@ -181,19 +182,6 @@ type SchemaFilePropertyFields = {
   private?: unknown
 }
 
-const UPLOADED_DATA_TYPES: string[] = [
-  ModelPropertyDataTypes.Html,
-  ModelPropertyDataTypes.Json,
-  ModelPropertyDataTypes.File,
-  ModelPropertyDataTypes.Image,
-]
-
-/** Whether a property's value is uploaded to Arweave, so its attestation holds only a pointer. */
-function isUploadedProperty(def: { dataType?: string; storageType?: string }): boolean {
-  if (UPLOADED_DATA_TYPES.includes(def.dataType ?? '')) return true
-  return def.dataType === ModelPropertyDataTypes.Text && def.storageType === 'ItemStorage'
-}
-
 /**
  * A schema file's property problems, as `Model.property: message` lines: unknown type names and
  * rules that don't apply to the type are errors; ignored rules (`custom`) are warnings.
@@ -225,13 +213,8 @@ function schemaFilePropertyProblems(file: Pick<SchemaFileFormat, 'models'>): {
         errors.push(`${at}: unknown refValueType "${rawRefValueType}". Expected one of: ${known}`)
         continue
       }
-      if (raw.private !== undefined && typeof raw.private !== 'boolean') {
-        errors.push(`${at}: private must be true or false`)
-      } else if (raw.private === true && !isUploadedProperty(def)) {
-        errors.push(
-          `${at}: only Html, Json, File, Image and ItemStorage Text properties can be private; this one would be attested as plaintext. Put the value in a private Json property instead.`,
-        )
-      }
+      const privateProblem = privatePropertyProblem({ ...def, private: raw.private })
+      if (privateProblem) errors.push(`${at}: ${privateProblem}`)
       for (const problem of validationRuleProblems(def.dataType, def.refValueType, def.validation)) {
         ;(problem.severity === 'error' ? errors : warnings).push(`${at}: ${problem.message}`)
       }

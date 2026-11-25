@@ -1,5 +1,6 @@
 import type { PublishConfig } from './config'
 import { sendsAsManagedAccount, type PublishWallet } from './helpers/seedSigner'
+import { sameUrl } from './helpers/adapters/sponsorDecline'
 
 /**
  * Who pays a publish's EVM gas: `'sponsored'` (a Thirdweb or ERC-4337 paymaster) or `'user'`
@@ -46,6 +47,35 @@ export interface PublishPaymentConfig {
   storage?: PublishStoragePayer
   /** With `storage: 'user'`: the provider users pay. Defaults to Turbo. */
   userStorage?: PublishUserStorageConfig
+  /**
+   * What the EIP-7702 sender does when the paymaster declines to sponsor a UserOp (a JSON-RPC
+   * error from `paymasterUrl`, or the bundler's `AA31`): `'fail'` (default) fails the send with
+   * `PublishGasError`, `'user'` resends it without a paymaster, paid from the user's ETH. An
+   * unreachable paymaster always fails. `'user'` needs a `paymasterUrl` separate from `bundlerUrl`.
+   */
+  whenSponsorDeclines?: 'user' | 'fail'
+  /**
+   * With `whenSponsorDeclines: 'user'`: asked before each self-paid send. Resolve `false` (or throw)
+   * to refuse, which fails the send with `PublishGasError` code `SELF_PAY_REFUSED`. Without it,
+   * self-pay goes ahead.
+   */
+  confirmSelfPay?: (request: SelfPayRequest) => Promise<boolean>
+  /**
+   * The sponsoring paymaster's address. When set with `whenSponsorDeclines: 'user'`, a publish
+   * reads its EntryPoint v0.8 deposit before uploading and asks `confirmSelfPay` up front when the
+   * deposit is under twice the publish's estimated gas cost.
+   */
+  sponsorPaymaster?: string
+}
+
+/** What `payment.confirmSelfPay` is asked about. */
+export type SelfPayRequest = {
+  /** The account that pays: the EOA sending through EIP-7702. */
+  address: string
+  /** `'declined'`: the paymaster refused. `'deposit_low'`: its deposit can't cover the publish. */
+  reason: 'declined' | 'deposit_low'
+  /** The publish's estimated gas cost, when known. */
+  estimatedCostWei?: bigint
 }
 
 /**
@@ -62,6 +92,8 @@ export interface ResolvedPublishPayment {
     payer: PublishGasPayer
     /** Who sponsors when `payer` is `'sponsored'`. */
     sponsor?: 'thirdweb' | 'paymaster'
+    /** `'user'` when a declined sponsorship falls back to user-paid gas (`payment.whenSponsorDeclines`). */
+    fallback?: 'user'
   }
   storage: {
     payer: PublishStoragePayer
@@ -130,7 +162,12 @@ export function resolvePublishPayment(
   } else if (sender === 'modular') {
     gas = resolveSponsorGas(config) ? { payer: 'sponsored', sponsor: 'thirdweb' } : { payer: 'user' }
   } else if (sender === 'eip7702') {
-    gas = config.payment?.gas === 'user' ? { payer: 'user' } : { payer: 'sponsored', sponsor: 'paymaster' }
+    if (config.payment?.gas === 'user') {
+      gas = { payer: 'user' }
+    } else {
+      gas = { payer: 'sponsored', sponsor: 'paymaster' }
+      if (config.payment?.whenSponsorDeclines === 'user') gas.fallback = 'user'
+    }
   } else {
     gas = { payer: 'user' }
   }
@@ -197,6 +234,25 @@ export function assertPublishPaymentConfig(config: PaymentInputs): void {
     if (sender === 'eip7702' && config.paymasterUrl) {
       throw new PublishPaymentConfigError(
         "payment.gas is 'user' but paymasterUrl is set; remove it so the EIP-7702 sender pays its own gas.",
+      )
+    }
+  }
+
+  if (payment.whenSponsorDeclines === 'user') {
+    if (sender !== 'eip7702') {
+      throw new PublishPaymentConfigError(
+        "payment.whenSponsorDeclines is 'user', but only the EIP-7702 sender (bundlerUrl) can fall back to user-paid gas.",
+      )
+    }
+    if (payment.gas === 'user') {
+      throw new PublishPaymentConfigError(
+        "payment.whenSponsorDeclines is 'user', but payment.gas is already 'user'; nothing is sponsored to fall back from.",
+      )
+    }
+    if (!config.paymasterUrl || (config.bundlerUrl && sameUrl(config.paymasterUrl, config.bundlerUrl))) {
+      throw new PublishPaymentConfigError(
+        "payment.whenSponsorDeclines is 'user' needs a paymasterUrl separate from bundlerUrl, so a decline " +
+          "can be told apart from a bundler error.",
       )
     }
   }

@@ -159,7 +159,11 @@ export function createSeedMcpServer(options: SeedMcpServerOptions = {}): McpServ
             ...(summary ? [`  summary: ${oneLine(summary)}`] : []),
           ].join('\n')
         })
-        const more = result.listed >= limit ? `\n\nMore may follow: call again with skip: ${skip + result.listed}.` : ''
+        const next = skip + result.listed
+        const more =
+          result.listed >= limit && (await queryBySchema(schema, { limit: 1, skip: next, attesters, source, relations: 'uids', hydrateStorage: false })).listed > 0
+            ? `\n\nMore may follow: call again with skip: ${next}.`
+            : ''
         return `${result.items.length} item(s) of schema "${schema}":\n\n${lines.join('\n')}${more}`
       }),
   )
