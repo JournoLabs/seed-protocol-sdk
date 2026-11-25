@@ -11,7 +11,13 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
-import { isManagedAccountPublishError, PublishGasError } from '../../errors'
+import {
+  Eip7702ModularAccountPublishError,
+  isEip7702ModularAccountPublishError,
+  isManagedAccountPublishError,
+  PublishGasError,
+} from '../../errors'
+import { delegationTarget } from '../chainClient'
 import type { SelfPayRequest } from '../../payment'
 import { pinnedNonce } from '../pinnedNonce'
 import { classifySponsorFailure, isInsufficientPrefund } from './sponsorDecline'
@@ -78,19 +84,34 @@ export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Pro
 }
 
 /**
- * The authorization a UserOp from an undelegated EOA must carry. viem's prepareUserOperation only
- * fills in a stub, which bundlers reject, so the caller has to sign the real one.
+ * The authorization a UserOp must carry to delegate the EOA to `delegate`: none when it already
+ * delegates there, a signed one when it delegates nowhere or to a delegate in `movableFrom`. viem's
+ * prepareUserOperation only fills in a stub, which bundlers reject, so the caller has to sign the
+ * real one. An EOA delegated to anything else (a wallet's own smart account) is never re-delegated.
+ * @throws Eip7702ModularAccountPublishError `EIP7702_DELEGATED_ELSEWHERE` for any other delegate
  * @internal Exported for unit tests.
  */
 export async function authorizationForUserOp(params: {
   signer: SeedSigner
   delegate: Address
   chainId: number
-  isDelegated: () => Promise<boolean>
+  /** The EOA's current delegate (from its code), or `undefined` when it has none. */
+  currentDelegate: () => Promise<Address | undefined>
+  /** Delegates this sender moves the EOA off. */
+  movableFrom: Address[]
   getNonce: () => Promise<number>
 }): Promise<SignedAuthorization | undefined> {
   const { signer, delegate, chainId } = params
-  if (await params.isDelegated()) return undefined
+  const current = (await params.currentDelegate())?.toLowerCase()
+  if (current === delegate.toLowerCase()) return undefined
+  if (current && !params.movableFrom.some((a) => a.toLowerCase() === current)) {
+    throw new Eip7702ModularAccountPublishError(
+      `${signer.address} is delegated (EIP-7702) to ${current}, not to the publish sender's account ${delegate}. ` +
+        "Publish won't replace another account's delegation: publish with that wallet's own sender, or use accountMode: 'eoa'.",
+      'EIP7702_DELEGATED_ELSEWHERE',
+      signer.address,
+    )
+  }
   if (typeof signer.signAuthorization !== 'function') {
     throw new Error(
       `@seedprotocol/publish: ${signer.address} hasn't delegated to an EIP-7702 account yet, and its signer has no signAuthorization to do so. Browser wallets don't expose it over EIP-1193: pass the wallet vendor's call as signAuthorization, or use accountMode: 'eoa'.`,
@@ -199,7 +220,9 @@ export async function createPermissionlessTxSender(
         signer,
         delegate: simpleAccount.authorization.address,
         chainId: chain.id,
-        isDelegated: () => simpleAccount.isDeployed(),
+        // viem's isDeployed() treats any code as this account's, which a wallet-delegated EOA isn't.
+        currentDelegate: async () => delegationTarget(await publicClient.getCode({ address })),
+        movableFrom: [],
         getNonce: () => publicClient.getTransactionCount({ address }),
       })
       // Read once: viem draws a new nonce key on each send that has none, and a self-paid resend
@@ -222,7 +245,7 @@ export async function createPermissionlessTxSender(
         const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })
         return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
       } catch (err) {
-        if (isManagedAccountPublishError(err) || err instanceof PublishGasError) throw err
+        if (isManagedAccountPublishError(err) || err instanceof PublishGasError || isEip7702ModularAccountPublishError(err)) throw err
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(
           `@seedprotocol/publish: permissionless/EIP-7702 send failed (${msg}). Ensure bundlerUrl/paymasterUrl support EntryPoint v0.8, or use accountMode: 'eoa' / Thirdweb adapter.`,

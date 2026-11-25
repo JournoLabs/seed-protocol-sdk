@@ -26,6 +26,8 @@ let behaviour: {
   sponsoredSend: 'ok' | 'AA31'
   selfPaidSend: 'ok' | 'AA21'
   receipt: 'ok' | 'error'
+  /** The EOA's current delegate. */
+  delegate: string
 }
 
 const rpcError = (id: number, message: string, code = -32500) =>
@@ -42,8 +44,8 @@ const chainAndBundler = Bun.serve({
       case 'eth_supportedEntryPoints':
         return ok([entryPoint08Address])
       case 'eth_getCode':
-        // Already delegated, so the sends carry no authorization.
-        return ok(`0xef0100${SIMPLE_7702_ACCOUNT.slice(2)}`)
+        // Delegated (to Simple7702Account unless a test says otherwise), so sends carry no authorization.
+        return ok(`0xef0100${behaviour.delegate.slice(2)}`)
       case 'eth_getBlockByNumber':
         return ok({ number: '0x10', baseFeePerGas: '0x1', timestamp: '0x1', transactions: [] })
       case 'eth_maxPriorityFeePerGas':
@@ -115,7 +117,7 @@ beforeAll(() => {
 beforeEach(() => {
   sent = []
   paymasterCalls = 0
-  behaviour = { paymaster: 'sponsor', sponsoredSend: 'ok', selfPaidSend: 'ok', receipt: 'ok' }
+  behaviour = { paymaster: 'sponsor', sponsoredSend: 'ok', selfPaidSend: 'ok', receipt: 'ok', delegate: SIMPLE_7702_ACCOUNT }
 })
 afterAll(() => {
   chainAndBundler.stop(true)
@@ -301,5 +303,35 @@ describe('createPermissionlessTxSender when the sponsor declines', () => {
     expect(String((err as Error).message)).toMatch(/receipt lookup failed/)
     expect(asked).toBe(0)
     expect(sent).toHaveLength(1)
+  })
+
+  test('an EOA delegated to a wallet vendor is refused, never re-delegated, even with self-pay on', async () => {
+    const vendor = `0x${'b'.repeat(40)}`
+    behaviour.delegate = vendor
+    behaviour.paymaster = 'decline'
+    let asked = 0
+    let authorizations = 0
+    const sender = await createPermissionlessTxSender({
+      signer: {
+        ...signer,
+        signAuthorization: async (args) => {
+          authorizations++
+          return signer.signAuthorization!(args)
+        },
+      },
+      bundlerUrl,
+      paymasterUrl,
+      onSponsorDeclined: async () => (asked++, true),
+    })
+    const err = await sender.sendTransaction(tx).then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+    expect(err).toMatchObject({ code: 'EIP7702_DELEGATED_ELSEWHERE' })
+    expect((err as Error).message).toContain(vendor)
+    expect(authorizations).toBe(0)
+    expect(asked).toBe(0)
+    expect(paymasterCalls).toBe(0)
+    expect(sent).toHaveLength(0)
   })
 })

@@ -280,6 +280,11 @@ export type Eip7702ModularAccountPublishErrorCode =
   | 'EIP7702_MODULAR_NOT_UPGRADED'
   | 'EIP7702_MODULAR_DEPLOY_FAILED'
   | 'EIP7702_MODULAR_NOT_CONFIRMED'
+  /**
+   * The EOA is delegated (EIP-7702) to an account other than the publish sender's, such as a
+   * wallet vendor's. Publish doesn't re-delegate it; the message names the current delegate.
+   */
+  | 'EIP7702_DELEGATED_ELSEWHERE'
 
 /**
  * Thrown when the in-app modular (EIP-7702) wallet is missing, not upgraded on-chain, or deploy/bootstrap failed.
@@ -308,6 +313,7 @@ const eip7702ModularCodes: Eip7702ModularAccountPublishErrorCode[] = [
   'EIP7702_MODULAR_NOT_UPGRADED',
   'EIP7702_MODULAR_DEPLOY_FAILED',
   'EIP7702_MODULAR_NOT_CONFIRMED',
+  'EIP7702_DELEGATED_ELSEWHERE',
 ]
 
 export function isEip7702ModularAccountPublishError(e: unknown): e is Eip7702ModularAccountPublishError {
