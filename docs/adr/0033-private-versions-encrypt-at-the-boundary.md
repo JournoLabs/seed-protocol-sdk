@@ -118,7 +118,8 @@ defined in code, and only on properties whose values are uploaded: Html, Json, F
 ItemStorage Text. Their attestations hold a pointer to the upload, so encrypting the upload is
 enough. Scalars and relations are attested as values, so schema files and `Model.create` refuse the
 flag on them, and a publish refuses to attest a private one that reached a row anyway; a value that
-must be private goes in a private Json property. A model's ItemStorage properties share one composite upload, so they are all private or
+must be private goes in a private Json property.
+A model's ItemStorage properties share one composite upload, so they are all private or
 all public. An image embedded in a private Html property is encrypted with it. Public properties of
 the same model are published as today.
 

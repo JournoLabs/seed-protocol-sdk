@@ -76,6 +76,26 @@ testDescribe('private on a code-defined model', () => {
     }
   }, 90000)
 
+  it('a private upload goes through the encryptor; public ones do not', async () => {
+    const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'SealedDoc', title: 'encrypted' } as any)
+    await waitForIdle(item, 'Item', 15000)
+    await waitForPropertyInstances(item)
+    await setFile(item, 'secret', new File([PDF], `secret-${generateId()}.pdf`))
+    await setFile(item, 'open', new File([PDF], `open-${generateId()}.pdf`))
+
+    const encrypted: string[] = []
+    const uploads = await getPublishUploadData(item as any, {
+      encryptUpload: async (upload: { itemPropertyName: string }) => {
+        encrypted.push(upload.itemPropertyName)
+        return { blob: new Blob(['seed-private/v1\nciphertext']), tags: [{ name: 'Seed-Encryption', value: 'seed-private/v1' }] }
+      },
+    })
+    expect(encrypted).toEqual(['secret'])
+    const byName = Object.fromEntries(uploads.map((u) => [u.itemPropertyName, u]))
+    expect(byName.secret?.tags).toContainEqual({ name: 'Seed-Encryption', value: 'seed-private/v1' })
+    expect(byName.open?.tags).not.toContainEqual({ name: 'Seed-Encryption', value: 'seed-private/v1' })
+  }, 90000)
+
   it.each([
     ['a Text', { dataType: 'Text', private: true }],
     ['a Number', { dataType: 'Number', private: true }],

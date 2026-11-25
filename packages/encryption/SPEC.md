@@ -6,7 +6,9 @@ follows [age](https://github.com/C2SP/C2SP/blob/main/age.md): a text header of r
 authenticated by an HMAC, then a STREAM payload of independently authenticated chunks. It differs
 from age in the key size, the cipher, the `bind` line and the content frame. ADR 0033 records why.
 
-Status: stable (ADR 0033, Accepted). Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity and
+Status: stable (ADR 0033 is Accepted).
+
+Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity and
 its key binding, and the keystore manifest with its `passkey-prf` and `eoa-signature` stanzas. Stanza types for readers'
 key grants and subscription epochs come with those features.
 
