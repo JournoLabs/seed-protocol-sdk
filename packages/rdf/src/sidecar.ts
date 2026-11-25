@@ -1,7 +1,7 @@
 import { easName, fuzzyNameKey } from '@seedprotocol/eas'
 import { XSD, iriScheme } from './iri.js'
 import { RELATION_TYPES, canonicalJson, expandTerm, prefixesOf, type RdfLens, type RdfSidecar } from './lens.js'
-import { withSchemaIds } from './schemaIds.js'
+import { derivesIds, sidecarSchemaMismatch, withSchemaIds } from './schemaIds.js'
 
 export type SidecarContextOptions = {
   /** Base of the protocol class for a model whose properties are mapped but which isn't. Default PROVISIONAL_BASE_IRI. */
@@ -69,6 +69,12 @@ export type SidecarReport = {
   readonly contextOutdated: boolean
   /** `schemaVersion` differs from the schema's `version`. */
   readonly versionOutdated: boolean
+  /**
+   * The schema file leaves out ids that were derived from its names, and every term in the sidecar
+   * is stale. The SDK keeps the ids a stored schema had, so it may hold other ids than the derived
+   * ones; the ids belong in the schema file.
+   */
+  readonly derivedIdsMismatch: boolean
 }
 
 /** A schema as the sidecar tools read it: the lens's, plus its version. */
@@ -81,10 +87,8 @@ function targets(schema: SidecarSchema): SchemaTarget[] {
   ])
 }
 
-function assertSameSchema({ schema, sidecar }: RdfLens): void {
-  if (!schema.id || schema.id !== sidecar.schemaId) {
-    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id or metadata.name'}`)
-  }
+function assertSameSchema({ schema, sidecar }: RdfLens, original: RdfLens['schema']): void {
+  if (!schema.id || schema.id !== sidecar.schemaId) throw sidecarSchemaMismatch(sidecar.schemaId, original, schema)
 }
 
 /** What's out of date in a sidecar against its schema. Throws when it was written for another schema. */
@@ -92,8 +96,9 @@ export function checkSidecar(
   lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar },
   options: SidecarContextOptions = {},
 ): SidecarReport {
-  lens = { ...lens, schema: withSchemaIds(lens.schema) }
-  assertSameSchema(lens)
+  const original = lens.schema
+  lens = { ...lens, schema: withSchemaIds(original) }
+  assertSameSchema(lens, original)
   const { schema, sidecar } = lens
   const all = targets(schema)
   const ids = new Set(all.flatMap((t) => (t.id ? [t.id] : [])))
@@ -105,6 +110,7 @@ export function checkSidecar(
     unmapped: all.filter((t) => !t.id || sidecar.terms[t.id] === undefined),
     contextOutdated: canonicalJson(sidecar['@context'] ?? {}) !== canonicalJson(sidecarContext(lens, options)),
     versionOutdated: schema.version !== undefined && sidecar.schemaVersion !== schema.version,
+    derivedIdsMismatch: derivesIds(original) && terms.length > 0 && terms.every(({ id }) => !ids.has(id)),
   }
 }
 
@@ -117,8 +123,9 @@ export function syncSidecar(
   lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar },
   options: SidecarContextOptions = {},
 ): RdfSidecar {
-  lens = { ...lens, schema: withSchemaIds(lens.schema) }
-  assertSameSchema(lens)
+  const original = lens.schema
+  lens = { ...lens, schema: withSchemaIds(original) }
+  assertSameSchema(lens, original)
   const { schema, sidecar } = lens
   const { schemaId, schemaVersion, terms, '@context': _context, ...rest } = sidecar
   return {
@@ -225,8 +232,9 @@ export type TermSuggestion = SchemaTarget & { readonly id: string; readonly term
  * terms use the prefixes in {@link SUGGESTED_PREFIXES}.
  */
 export function suggestTerms(lens: { readonly schema: SidecarSchema; readonly sidecar: RdfSidecar }): TermSuggestion[] {
-  lens = { ...lens, schema: withSchemaIds(lens.schema) }
-  assertSameSchema(lens)
+  const original = lens.schema
+  lens = { ...lens, schema: withSchemaIds(original) }
+  assertSameSchema(lens, original)
   const { schema, sidecar } = lens
   const suggestions: TermSuggestion[] = []
   for (const [model, { id, properties }] of Object.entries(schema.models)) {
