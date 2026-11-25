@@ -33,6 +33,7 @@ export {
   type PublishSenderKind,
   type ResolvedPublishPayment,
   type PublishUserStorageConfig,
+  type SelfPayRequest,
   DEFAULT_TURBO_UPLOAD_URL,
   DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'

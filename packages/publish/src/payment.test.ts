@@ -60,6 +60,16 @@ describe('resolvePublishPayment', () => {
   test("eip7702: payment.gas 'user' sends unsponsored", () => {
     expect(resolvePublishPayment({ bundlerUrl: 'https://b', payment: { gas: 'user' } }).gas.payer).toBe('user')
   })
+  test('reports a user fallback for a sponsored eip7702 sender', () => {
+    const config = { bundlerUrl: 'https://b', paymasterUrl: 'https://p', payment: { whenSponsorDeclines: 'user' as const } }
+    expect(resolvePublishPayment(config).gas).toEqual({ payer: 'sponsored', sponsor: 'paymaster', fallback: 'user' })
+  })
+  test('no fallback by default', () => {
+    const gas = resolvePublishPayment({ bundlerUrl: 'https://b', paymasterUrl: 'https://p', payment: {} }).gas
+    expect('fallback' in gas).toBe(false)
+    const failing = resolvePublishPayment({ bundlerUrl: 'https://b', paymasterUrl: 'https://p', payment: { whenSponsorDeclines: 'fail' } }).gas
+    expect('fallback' in failing).toBe(false)
+  })
   test('wallet: the user pays', () => {
     expect(resolvePublishPayment({}).gas.payer).toBe('user')
   })
@@ -120,6 +130,23 @@ describe('assertPublishPaymentConfig', () => {
   })
   test("userStorage needs storage 'user'", () => {
     rejects({ payment: { userStorage: { provider: 'turbo' } } }, "payment.storage is not 'user'")
+  })
+  test('rejects a fallback without a separate paymasterUrl', () => {
+    rejects({ bundlerUrl: 'https://b', payment: { whenSponsorDeclines: 'user' } }, 'paymasterUrl')
+    rejects({ bundlerUrl: 'https://b', paymasterUrl: 'https://b', payment: { whenSponsorDeclines: 'user' } }, 'paymasterUrl')
+  })
+  test("rejects a fallback when gas is 'user'", () => {
+    rejects({ bundlerUrl: 'https://b', payment: { gas: 'user', whenSponsorDeclines: 'user' } }, 'whenSponsorDeclines')
+  })
+  test('rejects a fallback on a non-eip7702 sender', () => {
+    rejects({ useModularExecutor: true, payment: { whenSponsorDeclines: 'user' } }, 'whenSponsorDeclines')
+    rejects({ payment: { whenSponsorDeclines: 'user' } }, 'whenSponsorDeclines')
+  })
+  test('a fallback with a separate paymasterUrl passes', () => {
+    expect(() =>
+      assertPublishPaymentConfig({ bundlerUrl: 'https://b', paymasterUrl: 'https://p', payment: { whenSponsorDeclines: 'user' } }),
+    ).not.toThrow()
+    expect(() => assertPublishPaymentConfig({ bundlerUrl: 'https://b', payment: { whenSponsorDeclines: 'fail' } })).not.toThrow()
   })
   test("storage 'user' passes", () => {
     expect(() => assertPublishPaymentConfig({ payment: { storage: 'user' } })).not.toThrow()
