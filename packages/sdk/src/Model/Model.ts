@@ -31,7 +31,7 @@ import {
   waitForEntityReady,
 } from '@/helpers/entity/entityLifecycle'
 import { assertModelNameCanPublish, assertPropertyNameCanPublish } from '@/helpers/metadataPropertyNames'
-import { normalizePropertyRecordSchema } from '@/helpers/property'
+import { normalizePropertyRecordSchema, privatePropertyProblem } from '@/helpers/property'
 import { loadModel } from './loadModel'
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
@@ -133,10 +133,15 @@ const TRACKED_PROPERTIES = [
   'schemaName',
 ] as const
 
-/** Throws when a new model, or a property passed to create it, has a name that can't publish. */
+/**
+ * Throws when a new model, or a property passed to create it, has a name that can't publish, or a
+ * `private` that publish couldn't honour (the same rule as a schema file's).
+ */
 function assertNewModelCanPublish(modelName: string, properties?: { [propertyName: string]: any }): void {
   assertModelNameCanPublish(modelName)
   for (const [name, definition] of Object.entries(properties ?? {})) {
+    const privateProblem = privatePropertyProblem(definition ?? {})
+    if (privateProblem) throw new Error(`${modelName}.${name}: ${privateProblem}`)
     assertPropertyNameCanPublish(name, {
       dataType: definition?.dataType,
       refValueType: definition?.refValueType,
