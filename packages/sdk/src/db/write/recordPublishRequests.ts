@@ -20,12 +20,13 @@ export type PublishRequestRecord = {
  * it behind. Writing the same records again changes nothing, so a publish can repeat this from its
  * receipt. Seed uids go last: updateSeedUid stamps them on the version and property rows.
  * `attemptId` ends that publish attempt in the same transaction, so it can't stay open after a
- * record, or close without one.
+ * record, or close without one. `attestationUids`, when given with it, are kept on the attempt
+ * row: the uids that transaction attested.
  * @throws when there is no database to record in
  */
 export async function recordPublishRequests(
   records: PublishRequestRecord[],
-  { attemptId }: { attemptId?: string } = {},
+  { attemptId, attestationUids }: { attemptId?: string; attestationUids?: string[] } = {},
 ): Promise<void> {
   const toWrite = records.filter((r) => r.seed || r.version || r.properties?.pairs.length)
   if (toWrite.length === 0 && !attemptId) return
@@ -38,6 +39,10 @@ export async function recordPublishRequests(
     for (const { seed } of toWrite) {
       if (seed) await updateSeedUid(seed, { db: tx })
     }
-    if (attemptId) await updatePublishAttempt(attemptId, { status: 'recorded' }, { db: tx })
+    if (attemptId) await updatePublishAttempt(
+        attemptId,
+        { status: 'recorded', ...(attestationUids && { attestationUids }) },
+        { db: tx },
+      )
   })
 }

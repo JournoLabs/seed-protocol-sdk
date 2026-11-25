@@ -718,6 +718,8 @@ CREATE INDEX \`publish_attempts_status_idx\` ON \`publish_attempts\` (\`status\`
 
 export const migrationSql_0032_add_publish_attempt_entry_point = `ALTER TABLE \`publish_attempts\` ADD \`entry_point\` text;`
 
+export const migrationSql_0033_publish_attempt_attestation_uids = `ALTER TABLE \`publish_attempts\` ADD \`attestation_uids\` text;`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -953,6 +955,13 @@ export const journalJson = `{
       "when": 1793445761265,
       "tag": "0032_add_publish_attempt_entry_point",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795610708628,
+      "tag": "0033_publish_attempt_attestation_uids",
+      "breakpoints": true
     }
   ]
 }`
@@ -962,8 +971,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "fe36f4c1-843f-4399-b985-c891e77d89d4",
-  "prevId": "5f8dcb6d-de44-4536-9489-fef3eb4bd2ef",
+  "id": "cee75afb-9b6f-467c-9282-378ad39152bc",
+  "prevId": "fe36f4c1-843f-4399-b985-c891e77d89d4",
   "tables": {
     "appState": {
       "name": "appState",
@@ -2164,6 +2173,13 @@ export const snapshotJson = `{
         },
         "tx_hash": {
           "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attestation_uids": {
+          "name": "attestation_uids",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

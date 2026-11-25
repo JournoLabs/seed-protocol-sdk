@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `publish_attempts` gains `attestation_uids` (migration 0033): `recordPublishRequests(records, { attemptId, attestationUids })` keeps the uids a part attested on its attempt row, and the new `findRecordedPublishParts(publishRunId)` lists a run's recorded `multiPublish` parts oldest first. Rows recorded before the migration have null there.
 - New `announcePublishLockTaken(seedLocalId)` and `onPublishLockTaken(listener)`: tell the other tabs of the database that this tab took a seed's publish lock, and hear when another tab did. `@seedprotocol/publish` uses them to take over publishes left by closed tabs. Nothing is sent or heard without tab coordination (`multiTab: 'off'`, Node).
 
 ## 0.8.3 (2026-11-23)
