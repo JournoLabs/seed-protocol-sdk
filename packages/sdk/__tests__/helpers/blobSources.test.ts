@@ -59,4 +59,56 @@ describe('blob sources', () => {
     vi.stubGlobal('fetch', async () => new Response(BODY, { status: 200 }))
     expect(await fetchBlobBytes(resolveBlobSource(KEY)!)).toBeUndefined()
   })
+
+  it('warn once, naming what each URL answered, when none serves the bytes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      setBlobSources([ipfs({ sha256: () => 'ab'.repeat(32) })])
+      let call = 0
+      vi.stubGlobal('fetch', async () => {
+        call++
+        if (call === 1) return new Response('nope', { status: 404 })
+        return new Response(BODY, { status: 200 })
+      })
+      expect(await fetchBlobBytes(resolveBlobSource(KEY)!)).toBeUndefined()
+      expect(warn).toHaveBeenCalledTimes(1)
+      const line = String(warn.mock.calls[0]![0])
+      expect(line).toContain(KEY)
+      expect(line).toContain('https://a.example.com/ipfs/' + KEY + ' 404')
+      expect(line).toContain('https://b.example.com/ipfs/' + KEY + ' hash mismatch')
+
+      // The same id again is not repeated.
+      await fetchBlobBytes(resolveBlobSource(KEY)!)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('name an empty body and a network error, and stay quiet when a URL serves the bytes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      setBlobSources([ipfs()])
+      let call = 0
+      vi.stubGlobal('fetch', async () => {
+        call++
+        if (call === 1) throw new Error('offline')
+        return new Response('', { status: 200 })
+      })
+      expect(await fetchBlobBytes(resolveBlobSource(KEY)!)).toBeUndefined()
+      const line = String(warn.mock.calls[0]![0])
+      expect(line).toContain('network error')
+      expect(line).toContain('empty body')
+
+      warn.mockClear()
+      setBlobSources([ipfs()])
+      vi.stubGlobal('fetch', async (url: string) =>
+        url.includes('a.example.com') ? new Response('', { status: 500 }) : new Response(BODY, { status: 200 }),
+      )
+      expect(await fetchBlobBytes(resolveBlobSource(KEY)!)).toBeDefined()
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
