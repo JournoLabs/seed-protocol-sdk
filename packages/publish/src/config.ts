@@ -9,6 +9,7 @@ import {
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
+import type { InAppWalletAuth } from 'thirdweb/wallets'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
 import { publishItem } from './helpers/publishItem'
 import {
@@ -56,7 +57,18 @@ export interface ThirdwebWalletOptions {
    * same either way.
    */
   modularWalletMode?: 'EIP7702' | 'EOA'
+  /**
+   * Sign-in options for both in-app wallets, in the order the connect modal shows them. Default
+   * `['farcaster', 'email', 'passkey', 'phone']`.
+   *
+   * An in-app wallet belongs to the login that created it. Removing an option stops new sign-ins
+   * with it and locks out returning users who never linked another login to their account.
+   */
+  authOptions?: InAppWalletAuth[]
 }
+
+/** The in-app wallets' sign-in options when {@link ThirdwebWalletOptions.authOptions} is unset. */
+const DEFAULT_IN_APP_AUTH_OPTIONS: readonly InAppWalletAuth[] = ['farcaster', 'email', 'passkey', 'phone']
 
 export interface PublishConfig {
   /**
@@ -470,6 +482,7 @@ export type ResolvedThirdwebWalletOptions = {
   bundlerUrl: string | undefined
   sponsorGas: boolean
   modularWalletMode: 'EIP7702' | 'EOA'
+  authOptions: InAppWalletAuth[]
 }
 
 /** Applies defaults to {@link PublishConfig.thirdweb}. */
@@ -481,6 +494,7 @@ export function resolveThirdwebWalletOptions(
     bundlerUrl: tw.bundlerUrl?.trim() || undefined,
     sponsorGas: resolveSponsorGas(config ?? {}),
     modularWalletMode: tw.modularWalletMode ?? 'EIP7702',
+    authOptions: [...(tw.authOptions ?? DEFAULT_IN_APP_AUTH_OPTIONS)],
   }
 }
 

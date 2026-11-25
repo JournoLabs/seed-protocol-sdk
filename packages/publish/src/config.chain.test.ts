@@ -125,12 +125,18 @@ describe('thirdweb chain and wallet options', () => {
       bundlerUrl: undefined,
       sponsorGas: true,
       modularWalletMode: 'EIP7702',
+      authOptions: ['farcaster', 'email', 'passkey', 'phone'],
     })
     expect(
       resolveThirdwebWalletOptions({
         thirdweb: { bundlerUrl: ' http://127.0.0.1:4337 ', sponsorGas: false, modularWalletMode: 'EOA' },
       }),
-    ).toEqual({ bundlerUrl: 'http://127.0.0.1:4337', sponsorGas: false, modularWalletMode: 'EOA' })
+    ).toEqual({
+      bundlerUrl: 'http://127.0.0.1:4337',
+      sponsorGas: false,
+      modularWalletMode: 'EOA',
+      authOptions: ['farcaster', 'email', 'passkey', 'phone'],
+    })
   })
 
   test('thirdweb.bundlerUrl does not switch accountMode (unlike bundlerUrl)', () => {
