@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://seedprotocol.io/odrl/seed-license/1/terms.schema.json",
   "title": "SeedLicenseTerms",
-  "description": "License terms under the profile https://seedprotocol.io/odrl/seed-license/1 (ADR 0034). validateTerms in @seedprotocol/licensing also rejects what this schema can't express: an spdx, shareAlike license or changeLicense that isn't a valid SPDX 3.29.0 expression; the same action and target both permitted and prohibited; a shareAlike duty with no derive permission.",
+  "description": "License terms under the profile https://seedprotocol.io/odrl/seed-license/1 (ADR 0034). validateTerms in @seedprotocol/licensing also rejects what this schema can't express: an spdx, shareAlike license or changeLicense that isn't a valid SPDX 3.29.0 expression, and an spdx, shareAlike license or changeLicense not written canonically (list case, single spaces, no redundant parentheses; see canonicalSpdx); the same action and target both permitted and prohibited; a shareAlike duty with no derive permission.",
   "type": "object",
   "additionalProperties": false,
   "required": ["profile", "spdx", "legal", "permissions", "prohibitions", "duties", "grant"],
@@ -33,13 +33,13 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["afterSeconds"],
-              "properties": { "afterSeconds": { "type": "integer", "minimum": 1 } }
+              "properties": { "afterSeconds": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 } }
             },
             {
               "type": "object",
               "additionalProperties": false,
               "required": ["at"],
-              "properties": { "at": { "type": "integer", "minimum": 0 } }
+              "properties": { "at": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 } }
             }
           ]
         },
@@ -66,7 +66,7 @@
         "revocableFor": { "enum": ["breach-only", "never"] },
         "warranty": { "enum": ["as-is", "ownership"] },
         "duration": {
-          "oneOf": [{ "const": "copyright-term" }, { "type": "integer", "minimum": 1 }]
+          "oneOf": [{ "const": "copyright-term" }, { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }]
         }
       }
     },
@@ -140,7 +140,7 @@
       "properties": {
         "name": { "enum": ["dateTime", "elapsedTime", "count"] },
         "operator": { "enum": ["gte", "lt", "lte"] },
-        "value": { "type": "integer", "minimum": 0 }
+        "value": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       },
       "allOf": [
         { "if": { "properties": { "name": { "const": "dateTime" } } }, "then": { "properties": { "operator": { "enum": ["gte", "lt"] } } } },

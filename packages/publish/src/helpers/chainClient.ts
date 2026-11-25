@@ -112,6 +112,12 @@ export function accountCodeKind(code: string | undefined | null): 'none' | 'eip7
   return 'contract'
 }
 
+/** The address an EIP-7702 delegated EOA's code points at, lower-cased; `undefined` for other code. */
+export function delegationTarget(code: string | undefined | null): Address | undefined {
+  if (accountCodeKind(code) !== 'eip7702-delegated') return undefined
+  return `0x${code!.slice(EIP7702_DELEGATION_PREFIX.length, EIP7702_DELEGATION_PREFIX.length + 40).toLowerCase()}` as Address
+}
+
 export async function getAccountCodeKind(address: string): Promise<ReturnType<typeof accountCodeKind>> {
   const code = await getPublishPublicClient().getBytecode({ address: address as Address })
   return accountCodeKind(code)

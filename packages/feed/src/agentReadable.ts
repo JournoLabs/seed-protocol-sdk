@@ -75,8 +75,9 @@ function itemTitle(record: SeedRecord): string {
 }
 
 function authorNames(data: Record<string, unknown>): string[] {
-  const authors = data.authors ?? data.Authors
-  if (!Array.isArray(authors)) return []
+  const found = data.authors ?? data.Authors ?? data.author ?? data.Author
+  if (found === undefined || found === null) return []
+  const authors: unknown[] = Array.isArray(found) ? found : [found]
   return authors.flatMap((author) => {
     if (typeof author === 'string') return author.trim() ? [author.trim()] : []
     if (author && typeof author === 'object') {
@@ -121,7 +122,7 @@ export function itemMarkdown(record: SeedRecord, options: ItemMarkdownOptions = 
     if (options.license.url) lines.push(`license_url: ${yamlString(options.license.url)}`)
     if (options.license.summary) lines.push(`license_summary: ${yamlString(options.license.summary)}`)
   }
-  lines.push('---', '', `# ${title}`, '')
+  lines.push('---', '', `# ${oneLine(title)}`, '')
 
   const content = pickFeedItemContent(data).trim()
   const body = content.includes('<') ? htmlToMarkdown(content) : content
@@ -156,12 +157,14 @@ export interface LlmsTxtInput {
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+/** Spaces and parentheses end or break a Markdown link destination, so they're percent-encoded. */
+const linkUrl = (url: string): string => url.replace(/[ ()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
 const linkText = (text: string): string => oneLine(text).replace(/[[\]]/g, (c) => `\\${c}`)
 
 function linkLines(links: readonly LlmsTxtLink[]): string[] {
   return links.map((link) => {
     const note = link.note ? oneLine(link.note) : ''
-    return `- [${linkText(link.title)}](${link.url})${note ? `: ${note}` : ''}`
+    return `- [${linkText(link.title)}](${linkUrl(link.url)})${note ? `: ${note}` : ''}`
   })
 }
 

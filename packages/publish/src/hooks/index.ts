@@ -22,3 +22,5 @@ export {
 export { getArweaveTransactionIds, getEasPayload, resumesOnNextLoad } from './publishProcessHelpers'
 export { usePublishCostEstimate } from './usePublishCostEstimate'
 export type { UsePublishCostEstimateResult } from './usePublishCostEstimate'
+export { useSponsorStatus } from './useSponsorStatus'
+export type { UseSponsorStatusResult } from './useSponsorStatus'

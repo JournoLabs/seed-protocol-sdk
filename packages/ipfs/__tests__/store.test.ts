@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { BlobStore } from '@seedprotocol/publish'
-import { computeCid, IPFS_CID_TAG, ipfsBlobStore, ipfsMirror, kuboRpcPinning, pinataPinning } from '../src'
+import { computeCid, IPFS_CID_TAG, ipfsBlobStore, ipfsMirror, kuboRpcPinning, pinataPinning, type PinResult } from '../src'
 import { sha256, toHex } from '../src/cid'
 import { lcgBytes, startMockIpfs, type MockIpfs } from './fixtures'
 
@@ -93,6 +93,7 @@ describe('ipfsMirror', () => {
     const seen = { uploads: [] as Upload[], sent: [] as unknown[][], checked: [] as string[][] }
     const store: BlobStore = {
       id: 'arweave',
+      usesUploadApi: true,
       prepare: async (uploads) => {
         seen.uploads.push(...uploads)
         return { ids: uploads.map((_, i) => `inner:${i}`), pending: uploads.map((u) => u.itemPropertyName) }
@@ -125,10 +126,228 @@ describe('ipfsMirror', () => {
     expect(seen.checked).toEqual([['inner:0']])
   })
 
+  it("passes the wrapped store's usesUploadApi through; an IPFS-only store doesn't use the upload API", () => {
+    const { store: inner } = recordingStore()
+    const pinning = kuboRpcPinning({ url: ipfs.url })
+    expect(ipfsMirror(inner, { pinning }).usesUploadApi).toBe(true)
+    expect(ipfsMirror({ ...inner, usesUploadApi: false }, { pinning }).usesUploadApi).toBe(false)
+    expect(ipfsBlobStore({ pinning }).usesUploadApi).toBe(false)
+  })
+
   it('fails the publish when the IPFS copy is not pinned', async () => {
     const { store: inner } = recordingStore()
     const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
     const prepared = await store.prepare([await upload('image', new Uint8Array([10]))], {})
     await expect(store.assertStored(prepared.ids)).rejects.toThrow('IPFS blobs not stored')
+  })
+
+  describe('reusable', () => {
+    /** The upload a replacing publish would read again, and the id the parked run attested for it. */
+    const parked = async (store: BlobStore, bytes: Uint8Array) => {
+      const u = await upload('image', bytes)
+      return { u, id: (await store.prepare([u], {})).ids[0]! }
+    }
+
+    it('pins an upload whose pin never landed, and reuses the id', async () => {
+      const { store: inner, seen } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const bytes = new Uint8Array([21, 22, 23])
+      // A restored publish: prepared in an earlier session, nothing sent to IPFS.
+      const { u, id } = await parked(store, bytes)
+      const fresh = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+
+      expect(await fresh.reusable!(id, u)).toBe(true)
+      expect([...ipfs.pinned]).toEqual([await computeCid(bytes)])
+      expect(seen.checked).toEqual([[id]])
+    })
+
+    it('reuses an upload that is already pinned without sending it again', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([31]))
+      expect(await store.reusable!(id, u)).toBe(true)
+      const imports = () => ipfs.requests.filter((r) => r.includes('dag/import')).length
+      const before = imports()
+      expect(await store.reusable!(id, u)).toBe(true)
+      expect(imports()).toBe(before)
+    })
+
+    it('is false when the local bytes are gone or changed, so the upload is prepared again', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([41]))
+      expect(await store.reusable!(id, { ...u, contentHash: '00'.repeat(32) })).toBe(false)
+      expect(ipfs.pinned.size).toBe(0)
+    })
+
+    it("is false when the wrapped store no longer holds the id", async () => {
+      const { store: inner } = recordingStore()
+      inner.assertStored = async () => {
+        throw new Error('not on Arweave')
+      }
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([51]))
+      expect(await store.reusable!(id, u)).toBe(false)
+    })
+
+    it('fails when a required re-pin fails, and reports it', async () => {
+      const { store: inner } = recordingStore()
+      const results: PinResult[] = []
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), onPinResult: (r) => results.push(r), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([61]))
+      ipfs.failNextPin = 'out of space'
+      await expect(store.reusable!(id, u)).rejects.toThrow('out of space')
+      expect(results).toEqual([{ id, cid: await computeCid(new Uint8Array([61])), ok: false, error: expect.anything() }])
+    })
+
+    it('reuses the id when a re-pin fails and the copy is not required, and reports it', async () => {
+      const { store: inner } = recordingStore()
+      const results: PinResult[] = []
+      const store = ipfsMirror(inner, {
+        pinning: kuboRpcPinning({ url: ipfs.url }),
+        required: false,
+        onPinResult: (r) => results.push(r),
+        ...fast,
+      })
+      const { u, id } = await parked(store, new Uint8Array([62]))
+      ipfs.failNextPin = 'out of space'
+      expect(await store.reusable!(id, u)).toBe(true)
+      expect(results).toEqual([
+        { id, cid: await computeCid(new Uint8Array([62])), ok: false, error: expect.objectContaining({ message: expect.stringContaining('out of space') }) },
+      ])
+    })
+
+    it('reports a re-pin that lands', async () => {
+      const { store: inner } = recordingStore()
+      const results: PinResult[] = []
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), onPinResult: (r) => results.push(r), ...fast })
+      const bytes = new Uint8Array([63])
+      const { u, id } = await parked(store, bytes)
+      expect(await store.reusable!(id, u)).toBe(true)
+      expect(results).toEqual([{ id, cid: await computeCid(bytes), ok: true }])
+    })
+  })
+
+  it('reports each id and CID once its pin is confirmed', async () => {
+    const { store: inner } = recordingStore()
+    const results: PinResult[] = []
+    const store = ipfsMirror(inner, {
+      pinning: kuboRpcPinning({ url: ipfs.url }),
+      onPinResult: (r) => results.push(r),
+      ...fast,
+    })
+    const bytes = new Uint8Array([11, 12])
+    const prepared = await store.prepare([await upload('image', bytes)], {})
+    await store.send(prepared.pending!, {})
+    expect(results).toEqual([])
+    await store.assertStored(prepared.ids)
+    expect(results).toEqual([{ id: 'inner:0', cid: await computeCid(bytes), ok: true }])
+  })
+
+  it('reports a failed pin before failing the publish when the copy is required', async () => {
+    const { store: inner } = recordingStore()
+    const results: PinResult[] = []
+    const store = ipfsMirror(inner, {
+      pinning: kuboRpcPinning({ url: ipfs.url }),
+      onPinResult: (r) => results.push(r),
+      ...fast,
+    })
+    const prepared = await store.prepare([await upload('image', new Uint8Array([13]))], {})
+    ipfs.failNextPin = 'out of space'
+    await expect(store.send(prepared.pending!, {})).rejects.toThrow('out of space')
+    expect(results).toMatchObject([{ id: 'inner:0', ok: false, error: expect.objectContaining({ message: expect.stringContaining('out of space') }) }])
+  })
+
+  it('checks a required copy again when the publish retries', async () => {
+    const { store: inner } = recordingStore()
+    const results: PinResult[] = []
+    const store = ipfsMirror(inner, {
+      pinning: kuboRpcPinning({ url: ipfs.url }),
+      onPinResult: (r) => results.push(r),
+      ...fast,
+    })
+    const prepared = await store.prepare([await upload('image', new Uint8Array([14]))], {})
+    await expect(store.assertStored(prepared.ids)).rejects.toThrow('IPFS blobs not stored')
+    await expect(store.assertStored(prepared.ids)).rejects.toThrow('IPFS blobs not stored')
+    expect(results.map((r) => r.ok)).toEqual([false, false])
+  })
+
+  describe('with required: false', () => {
+    it('publishes when a pin upload fails, and reports which ids pinned', async () => {
+      const { store: inner, seen } = recordingStore()
+      const results: PinResult[] = []
+      const store = ipfsMirror(inner, {
+        pinning: kuboRpcPinning({ url: ipfs.url }),
+        required: false,
+        onPinResult: (r) => results.push(r),
+        ...fast,
+      })
+      const first = new Uint8Array([20])
+      const second = new Uint8Array([21])
+      const prepared = await store.prepare([await upload('image', first), await upload('body', second)], {})
+      ipfs.failNextPin = 'out of space'
+      await store.send(prepared.pending!, {})
+      expect(seen.sent).toEqual([['image', 'body']])
+      await store.assertStored(prepared.ids)
+      expect(seen.checked).toEqual([['inner:0', 'inner:1']])
+      expect(results).toEqual([
+        { id: 'inner:0', cid: await computeCid(first), ok: false, error: expect.objectContaining({ message: expect.stringContaining('out of space') }) },
+        { id: 'inner:1', cid: await computeCid(second), ok: true },
+      ])
+    })
+
+    it('publishes when a pin is never confirmed, and reports it', async () => {
+      const { store: inner } = recordingStore()
+      const results: PinResult[] = []
+      const store = ipfsMirror(inner, {
+        pinning: kuboRpcPinning({ url: ipfs.url }),
+        required: false,
+        onPinResult: (r) => results.push(r),
+        ...fast,
+      })
+      const bytes = new Uint8Array([22])
+      const prepared = await store.prepare([await upload('image', bytes)], {})
+      await store.assertStored(prepared.ids)
+      expect(results).toEqual([
+        { id: 'inner:0', cid: await computeCid(bytes), ok: false, error: expect.objectContaining({ message: expect.stringContaining('IPFS blobs not stored') }) },
+      ])
+    })
+
+    it('publishes when the pinning endpoint is down', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: 'http://127.0.0.1:9' }), required: false, ...fast })
+      const prepared = await store.prepare([await upload('image', new Uint8Array([23]))], {})
+      await store.send(prepared.pending!, {})
+      await store.assertStored(prepared.ids)
+    })
+
+    it('still fails the publish when the wrapped store fails', async () => {
+      const { store: inner } = recordingStore()
+      inner.send = async () => {
+        throw new Error('arweave down')
+      }
+      inner.assertStored = async () => {
+        throw new Error('arweave not stored')
+      }
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), required: false, ...fast })
+      const prepared = await store.prepare([await upload('image', new Uint8Array([24]))], {})
+      await expect(store.send(prepared.pending!, {})).rejects.toThrow('arweave down')
+      await expect(store.assertStored(prepared.ids)).rejects.toThrow('arweave not stored')
+    })
+
+    it('a throwing onPinResult does not fail the publish', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, {
+        pinning: kuboRpcPinning({ url: ipfs.url }),
+        required: false,
+        onPinResult: () => {
+          throw new Error('app bug')
+        },
+        ...fast,
+      })
+      const prepared = await store.prepare([await upload('image', new Uint8Array([25]))], {})
+      await store.send(prepared.pending!, {})
+      await store.assertStored(prepared.ids)
+    })
   })
 })

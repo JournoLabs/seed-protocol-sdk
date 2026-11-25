@@ -73,13 +73,13 @@ describe('combinePublishCostEstimate', () => {
   test('prices EVM and Arweave into USD', () => {
     const estimate = combinePublishCostEstimate(work, rates)
     expect(estimate.work).toEqual(work)
-    expect(estimate.arweave.bytes).toBe(1_000_000)
-    expect(estimate.arweave.uploadCount).toBe(1)
-    expect(estimate.arweave.path).toBe('bundler')
-    expect(estimate.arweave.userPays).toBe(false)
+    expect(estimate.arweave!.bytes).toBe(1_000_000)
+    expect(estimate.arweave!.uploadCount).toBe(1)
+    expect(estimate.arweave!.path).toBe('bundler')
+    expect(estimate.arweave!.userPays).toBe(false)
     expect(estimate.evm.userPays).toBe(true)
-    expect(estimate.totalUsd).toBe(estimate.evm.usd + estimate.arweave.usd)
-    expect(estimate.arweave.usd).toBe(0.01)
+    expect(estimate.totalUsd).toBe(estimate.evm.usd + estimate.arweave!.usd)
+    expect(estimate.arweave!.usd).toBe(0.01)
   })
 })
 
@@ -152,8 +152,8 @@ describe('estimatePublishCost', () => {
       getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })
-    expect(estimate.arweave.userPays).toBe(true)
-    expect(estimate.arweave.path).toBe('bundler')
+    expect(estimate.arweave!.userPays).toBe(true)
+    expect(estimate.arweave!.path).toBe('bundler')
   })
 
   test('modular executor is sponsored by default (thirdweb.sponsorGas)', async () => {
@@ -183,7 +183,33 @@ describe('estimatePublishCost', () => {
       getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })
-    expect(estimate.arweave.path).toBe('bundler')
+    expect(estimate.arweave!.path).toBe('bundler')
+  })
+})
+
+describe('a blob store that does not use the upload API', () => {
+  test('prices gas only and reports storage as unpriced', async () => {
+    initPublish({
+      blobStore: { id: 'ipfs', usesUploadApi: false } as never,
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.arweave).toBeUndefined()
+    expect(estimate.storage).toEqual({ store: 'ipfs', priced: false })
+    expect(estimate.totalUsd).toBe(estimate.evm.usd)
+    const next = repricePublishCostEstimate(estimate, { ...rates, ethUsd: 4000 })
+    expect(next.arweave).toBeUndefined()
+    expect(next.totalUsd).toBe(next.evm.usd)
+  })
+
+  test('Arweave is priced as before', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.storage).toEqual({ store: 'arweave', priced: true })
+    expect(estimate.arweave).toBeDefined()
   })
 })
 
@@ -194,9 +220,9 @@ describe('Arweave charges per transaction', () => {
     expect(chargedUploadBytes(small)).toBe(ARWEAVE_MIN_CHARGED_BYTES)
     expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] })).toBe(signed(1_000_000))
     const estimate = combinePublishCostEstimate(small, rates)
-    expect(estimate.arweave.bytes).toBe(3_000)
-    expect(estimate.arweave.chargedBytes).toBe(ARWEAVE_MIN_CHARGED_BYTES)
-    expect(Number(estimate.arweave.ar)).toBeCloseTo((ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
+    expect(estimate.arweave!.bytes).toBe(3_000)
+    expect(estimate.arweave!.chargedBytes).toBe(ARWEAVE_MIN_CHARGED_BYTES)
+    expect(Number(estimate.arweave!.ar)).toBeCloseTo((ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
   })
 
   test('Turbo: data items of 100 KiB or less are free', () => {
@@ -235,9 +261,9 @@ describe('Arweave charges per transaction', () => {
     const upload = { ...work, uploadCount: 1, uploadBytes: 105_000, uploadSizes: [105_000] }
     const estimate = await estimatePublishCost(dummyItem(), { work: upload, rates })
     expect(requested).toEqual(['https://turbo.example.test/v1/info'])
-    expect(estimate.arweave.uploadTo).toBe('turbo')
-    expect(estimate.arweave.freeBytes).toBe(107_520)
-    expect(estimate.arweave.chargedBytes).toBe(0)
+    expect(estimate.arweave!.uploadTo).toBe('turbo')
+    expect(estimate.arweave!.freeBytes).toBe(107_520)
+    expect(estimate.arweave!.chargedBytes).toBe(0)
     // Cached: a second estimate doesn't ask again.
     await estimatePublishCost(dummyItem(), { work: upload, rates })
     expect(requested).toHaveLength(1)
@@ -252,8 +278,8 @@ describe('Arweave charges per transaction', () => {
     })
     const upload = { ...work, uploadCount: 1, uploadBytes: 105_000, uploadSizes: [105_000] }
     const estimate = await estimatePublishCost(dummyItem(), { work: upload, rates })
-    expect(estimate.arweave.freeBytes).toBe(TURBO_FREE_BYTES)
-    expect(estimate.arweave.chargedBytes).toBe(signed(105_000))
+    expect(estimate.arweave!.freeBytes).toBe(TURBO_FREE_BYTES)
+    expect(estimate.arweave!.chargedBytes).toBe(signed(105_000))
   })
 })
 
@@ -270,15 +296,15 @@ describe('repricePublishCostEstimate', () => {
     const pricier = { ...rates, arUsd: 20, gasPriceWei: 10_000_000_000n, winstonPerByte: 2000, fetchedAt: 2 }
     const next = repricePublishCostEstimate(first, pricier)
     expect(next.evm.userPays).toBe(false)
-    expect(next.arweave.userPays).toBe(true)
-    expect(next.arweave.uploadTo).toBe('turbo')
-    expect(next.arweave.freeBytes).toBe(107_520)
+    expect(next.arweave!.userPays).toBe(true)
+    expect(next.arweave!.uploadTo).toBe('turbo')
+    expect(next.arweave!.freeBytes).toBe(107_520)
     expect(next.evm.testnet).toBe(true)
     expect(next.evm.usd).toBe(0)
     expect(next.evm.gas).toBe(first.evm.gas)
     // Turbo's free first upload stays free: only the 1 MB one is charged, at the new rate.
-    expect(next.arweave.chargedBytes).toBe(first.arweave.chargedBytes)
-    expect(next.arweave.ar).toBe(((first.arweave.chargedBytes * 2000) / 1e12).toPrecision(6))
+    expect(next.arweave!.chargedBytes).toBe(first.arweave!.chargedBytes)
+    expect(next.arweave!.ar).toBe(((first.arweave!.chargedBytes * 2000) / 1e12).toPrecision(6))
     expect(next.prices.fetchedAt).toBe(2)
   })
 })

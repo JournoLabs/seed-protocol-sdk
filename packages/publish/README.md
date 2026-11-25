@@ -186,7 +186,8 @@ initPublish({
 ```
 
 `resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
-reports the same in `evm.userPays` / `arweave.userPays`.
+reports the same in `evm.userPays` / `arweave.userPays` (`arweave` is absent when the blob store
+doesn't use the upload API).
 
 #### Users pay for storage (Turbo)
 
@@ -363,6 +364,8 @@ With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 - **Managed wallet** (`getManagedAccountWallet`, EIP-4337): the user's **ManagedAccount** smart account, created by the ManagedAccount factory with the user's in-app EOA as admin. It is the attester, and it publishes.
 - **Modular wallet** (`getModularAccountWallet`): that same in-app EOA. It signs DataItems and sends the few **admin-only** transactions, such as `installSeedExecutor`. `thirdweb.modularWalletMode` picks EIP-7702 through Thirdweb (default; gas-sponsored unless `thirdweb.sponsorGas` is `false`) or a plain funded EOA (`'EOA'`); the address is the same either way.
+
+Both wallets offer the sign-in options in `thirdweb.authOptions` (thirdweb's `InAppWalletAuth[]`), in the order the connect modal shows them; the default is `['farcaster', 'email', 'passkey', 'phone']`. An in-app wallet belongs to the login that created it, so removing an option locks out returning users who signed in with it and never linked another login.
 
 **Publishing.** `createAttestations` sends interactive `multiPublish` as a **UserOp from the managed smart account**, calling the account itself (`execute(account, multiPublish)`). The Seed extension accepts that self-call; direct calls from session keys or other non-admins revert with `Unauthorized`. Before the first publish, `ensureModularPublishBootstrap`:
 

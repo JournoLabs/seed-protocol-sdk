@@ -133,6 +133,8 @@ export async function createModelProperties(
         // Rules defined in code; ModelProperty.create stores them in the row's definition.
         validation: propData.validation,
         htmlEmbeddedDataUriPolicy: propData.htmlEmbeddedDataUriPolicy,
+        private: propData.private,
+        description: propData.description,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
         _dbId:
           propertyRecord?.schemaFileId === propertyFileId

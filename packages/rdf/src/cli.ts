@@ -3,7 +3,7 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { DEFAULT_SCHEMA_FILE } from './defaults.js'
 import type { RdfSidecar } from './lens.js'
-import { needsIds, withSchemaIds } from './schemaIds.js'
+import { derivesIds, withSchemaIds } from './schemaIds.js'
 import { SUGGESTED_PREFIXES, checkSidecar, suggestTerms, syncSidecar, type SidecarSchema } from './sidecar.js'
 
 const USAGE = `Usage:
@@ -93,7 +93,7 @@ export async function runRdfCli(args: readonly string[], io: CliIo): Promise<num
     const read = await readJson<SidecarSchema>(schemaFile, 'schema')
     const schema = withSchemaIds(read)
     if (!schema.id) throw new UsageError(`The schema at ${schemaFile} has no id and no metadata.name to derive one from`)
-    if (needsIds(read)) io.err(`[Seed Protocol] ${path.basename(schemaFile)} leaves out ids; using the ones the SDK derives from the names`)
+    if (derivesIds(read)) io.err(`[Seed Protocol] ${path.basename(schemaFile)} leaves out ids; using the ones the SDK derives from the names`)
     const options = { base: values.base }
 
     if (command === 'suggest') {
@@ -127,10 +127,14 @@ export async function runRdfCli(args: readonly string[], io: CliIo): Promise<num
       return 0
     }
 
-    const report = checkSidecar({ schema, sidecar }, options)
+    // The file's own schema, so the report knows whether its ids were derived.
+    const report = checkSidecar({ schema: read, sidecar }, options)
     if (report.stale.length > 0) {
       io.err('Stale terms (no model or property in the schema has this id):')
       for (const { id, term } of report.stale) io.err(`  ${id}: ${term}`)
+      if (report.derivedIdsMismatch) {
+        io.err(`Every term is stale and the ids were derived from the names, so the SDK may have stored other ids for this schema; put them in the schema file.`)
+      }
     }
     if (report.invalid.length > 0) {
       io.err(`Terms that aren't an IRI or a name with a prefix in @context:`)

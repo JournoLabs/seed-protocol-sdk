@@ -329,13 +329,13 @@ export async function estimateArchiveAnchorCost(
     uploadSizes: [],
   }
   if (await existingAnchor(bag)) {
-    const base = await estimatePublishCost(item as never, { work, rates: options.rates })
+    const base = await estimatePublishCost(item as never, { work, rates: options.rates, arweaveStorage: true })
     const zero = (0).toPrecision(6)
     return {
       ...base,
       totalUsd: 0,
       evm: { ...base.evm, gas: 0n, eth: zero, usd: 0 },
-      arweave: { ...base.arweave, chargedBytes: 0, ar: zero, usd: 0 },
+      ...(base.arweave && { arweave: { ...base.arweave, chargedBytes: 0, ar: zero, usd: 0 } }),
       alreadyAnchored: true,
     }
   }
@@ -363,7 +363,7 @@ export async function estimateArchiveAnchorCost(
         ]
       : []
   const uploadBatches = files.length > 0 ? [files.length, 1] : [1]
-  const estimate = await estimatePublishCost(item as never, { work, rates: options.rates, uploadTags, uploadBatches })
+  const estimate = await estimatePublishCost(item as never, { work, rates: options.rates, uploadTags, uploadBatches, arweaveStorage: true })
   return { ...estimate, alreadyAnchored: false }
 }
 

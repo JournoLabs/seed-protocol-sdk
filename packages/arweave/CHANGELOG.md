@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- New `publicStorageUrl(storageId, { ipfsGateway })`: `<gateway>/ipfs/<cid>` for an `ipfs://<cid>` id (default gateway `DEFAULT_IPFS_GATEWAYS[0]`, `https://ipfs.io`, the first of the two `@seedprotocol/ipfs` uses), the public Arweave `/raw/<id>` URL for an Arweave id, and undefined for any other scheme. New `hasUriScheme(storageId)`. `resolveSeedRssImageRelationRef` and `resolveSeedRssImageRelationFromItem` take an `ipfsGateway` option and return the gateway URL as `mediaUrl` for an `ipfs://` id. They returned `https://<gateway>/raw/ipfs://<cid>`.
 - New type `ResolveMediaRefReason`, the union of values `ResolveMediaRefResult.reason` takes: `'encrypted'`, `'non_media_url'`, `'seed_local_id_not_portable'`, `'seed_uid_requires_app_db'`, `'seed_uid_no_storage_transaction'` and `'unknown_ref'`. `reason` was `string`.
 
 ## 0.8.3 (2026-11-23)

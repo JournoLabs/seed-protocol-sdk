@@ -92,6 +92,12 @@ describe('the cc catalog', () => {
 })
 
 describe('createLicenseCatalog', () => {
+  it('rejects two modules with the same terms hash', () => {
+    const first = creativeCommons[1]!
+    const twin = { ...first, id: 'twin@1.0.0' as const, spdx: 'LicenseRef-Twin', toTerms: () => ({ ...first.toTerms(), spdx: first.spdx }) }
+    expect(() => createLicenseCatalog([first, twin])).toThrow(/duplicate.*terms hash/i)
+  })
+
   it('rejects duplicate ids and SPDX ids', () => {
     expect(() => createLicenseCatalog([creativeCommons[0]!, creativeCommons[0]!])).toThrow(/duplicate/i)
     expect(() => createLicenseCatalog([creativeCommons[1]!, { ...creativeCommons[1]!, id: 'other@1.0.0' }])).toThrow(/duplicate/i)

@@ -54,11 +54,13 @@ function ipfsWriter(options: IpfsStoreOptions) {
     return out
   }
 
+  const sendDag = async (dag: UnixFsDag) => {
+    const car = toCar(dag)
+    await Promise.all(providers.map((p) => p.pinCar(car, dag.root)))
+  }
+
   const send = async (pending: PendingDag[]) => {
-    for (const { dag } of pending) {
-      const car = toCar(dag)
-      await Promise.all(providers.map((p) => p.pinCar(car, dag.root)))
-    }
+    for (const { dag } of pending) await sendDag(dag)
   }
 
   const gatewayHas = async (cid: string) => {
@@ -83,21 +85,27 @@ function ipfsWriter(options: IpfsStoreOptions) {
     return checkers.length === providers.length || gatewayHas(cid)
   }
 
-  const assertCidsStored = async (cids: string[]) => {
+  /** The CIDs still not stored once every CID is stored or `storedTimeoutMs` has passed. */
+  const unstoredCids = async (cids: string[]): Promise<string[]> => {
     const deadline = Date.now() + timeoutMs
     let missing = [...new Set(cids)]
     for (;;) {
       const stored = await Promise.all(missing.map(isStored))
       missing = missing.filter((_, i) => !stored[i])
-      if (missing.length === 0) return
-      if (Date.now() + intervalMs > deadline) {
-        throw new Error(`IPFS blobs not stored after ${timeoutMs / 1000}s: ${missing.join(', ')}`)
-      }
+      if (missing.length === 0 || Date.now() + intervalMs > deadline) return missing
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
   }
 
-  return { dags, send, assertCidsStored }
+  const notStoredError = (missing: string[]) =>
+    new Error(`IPFS blobs not stored after ${timeoutMs / 1000}s: ${missing.join(', ')}`)
+
+  const assertCidsStored = async (cids: string[]) => {
+    const missing = await unstoredCids(cids)
+    if (missing.length > 0) throw notStoredError(missing)
+  }
+
+  return { dags, sendDag, send, isStored, unstoredCids, notStoredError, assertCidsStored }
 }
 
 const isPendingDag = (item: unknown): item is PendingDag => (item as PendingDag | undefined)?.kind === 'ipfs'
@@ -114,6 +122,7 @@ export function ipfsBlobStore(options: IpfsStoreOptions): BlobStore {
   const writer = ipfsWriter(options)
   return {
     id: 'ipfs',
+    usesUploadApi: false,
     async prepare(uploads): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       return { ids: dags.map((d) => `ipfs://${d.root}`), pending: dags.map((dag): PendingDag => ({ kind: 'ipfs', dag })) }
@@ -133,26 +142,76 @@ export function ipfsBlobStore(options: IpfsStoreOptions): BlobStore {
   }
 }
 
-type MirrorPending = { kind: 'mirror'; inner?: unknown[]; ipfs: PendingDag[] }
+/** What {@link IpfsMirrorOptions.onPinResult} hears about one blob's IPFS copy. */
+export type PinResult =
+  | { id: string; cid: string; ok: true }
+  | { id: string; cid: string; ok: false; error: unknown }
+
+export type IpfsMirrorOptions = IpfsStoreOptions & {
+  /**
+   * Whether the IPFS copy must be stored for the publish to succeed. Default `true`: a failed pin
+   * upload fails `send`, and a CID not confirmed within `storedTimeoutMs` fails `assertStored`.
+   * With `false`, only the wrapped store's failures fail the publish; IPFS failures go to
+   * {@link onPinResult}. Retry a failed pin later with `toCar(await unixFsDag(bytes))`.
+   */
+  required?: boolean
+  /**
+   * Called once for each blob's IPFS copy: with `ok: false` when its pin upload fails in `send`,
+   * else from `assertStored` once the pin is confirmed (`ok: true`) or `storedTimeoutMs` passes
+   * (`ok: false`). With `required`, a copy that failed is checked and reported again when the
+   * publish retries. `id` is the wrapped store's id, the one the publish attests. A publish restored
+   * after a reload reports nothing for blobs prepared before the reload. A throw from the callback
+   * is logged and doesn't change the publish.
+   */
+  onPinResult?: (result: PinResult) => void
+}
+
+type MirrorDag = PendingDag & { id: string }
+type MirrorPending = { kind: 'mirror'; inner?: unknown[]; ipfs: MirrorDag[] }
 
 /**
  * `store` with a copy of every blob on IPFS. Publish attests `store`'s ids; each upload reaches
  * `store` with an `IPFS-CID` tag naming its CID, so an Arweave copy can be found by CID with a
- * GraphQL tag query. `send` uploads to both, and `assertStored` checks both, so a failed pin fails
- * the publish.
+ * GraphQL tag query. `send` uploads to both, and `assertStored` checks both. A failed pin fails the
+ * publish unless `required` is `false`.
  *
  * ```ts
  * blobStore: ipfsMirror(arweaveBlobStore, { pinning: kuboRpcPinning({ url }) })
  * ```
  */
-export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobStore {
+export function ipfsMirror(store: BlobStore, options: IpfsMirrorOptions): BlobStore {
   const writer = ipfsWriter(options)
-  // The CIDs behind ids prepared in this session. A publish restored after a reload has no pending
-  // uploads and must publish again, so a missing entry only skips the IPFS check for that id.
+  const required = options.required ?? true
+  // The CIDs behind ids prepared in this session that are still to be checked. A publish
+  // restored after a reload has no pending uploads and must publish again, so a missing entry only
+  // skips the IPFS check for that id.
   const cidById = new Map<string, string>()
+
+  const report = (result: PinResult) => {
+    // A required copy that failed stays, so a retried publish checks it again.
+    if (result.ok || !required) cidById.delete(result.id)
+    if (!options.onPinResult) return
+    try {
+      options.onPinResult(result)
+    } catch (error) {
+      console.warn('@seedprotocol/ipfs: onPinResult threw', error)
+    }
+  }
+
+  const sendIpfs = async (dags: MirrorDag[]) => {
+    for (const { id, dag } of dags) {
+      try {
+        await writer.sendDag(dag)
+      } catch (error) {
+        report({ id, cid: dag.root, ok: false, error })
+        if (required) throw error
+      }
+    }
+  }
 
   return {
     id: `${store.id}+ipfs`,
+    usesUploadApi: store.usesUploadApi !== false,
     async prepare(uploads, ctx: BlobStoreContext): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       const tagged = uploads.map((upload, i) => ({
@@ -164,7 +223,7 @@ export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobSto
       const pending: MirrorPending = {
         kind: 'mirror',
         inner: inner.pending,
-        ipfs: dags.map((dag) => ({ kind: 'ipfs', dag })),
+        ipfs: dags.map((dag, i) => ({ kind: 'ipfs', dag, id: inner.ids[i]! })),
       }
       return { ids: inner.ids, pending: [pending] }
     },
@@ -174,13 +233,53 @@ export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobSto
         throw new Error('@seedprotocol/ipfs: send got uploads it did not prepare')
       }
       await Promise.all(
-        batches.flatMap((b) => [b.inner?.length ? store.send(b.inner, ctx) : undefined, writer.send(b.ipfs)]),
+        batches.flatMap((b) => [b.inner?.length ? store.send(b.inner, ctx) : undefined, sendIpfs(b.ipfs)]),
       )
     },
+    async reusable(id, upload) {
+      // The CID comes from the local bytes: after a reload `cidById` knows nothing of this id.
+      let dag: UnixFsDag
+      try {
+        dag = (await writer.dags([upload]))[0]!
+      } catch {
+        // Bytes gone or changed since the id was prepared: prepare the upload again.
+        return false
+      }
+      try {
+        if (store.reusable) {
+          if (!(await store.reusable(id, upload))) return false
+        } else {
+          await store.assertStored([id])
+        }
+      } catch {
+        return false
+      }
+      if (!(await writer.isStored(dag.root))) {
+        try {
+          await writer.sendDag(dag)
+          await writer.assertCidsStored([dag.root])
+          report({ id, cid: dag.root, ok: true })
+        } catch (error) {
+          report({ id, cid: dag.root, ok: false, error })
+          if (required) throw error
+        }
+      }
+      return true
+    },
     async assertStored(ids) {
-      const cids = ids.flatMap((id) => cidById.get(id) ?? [])
-      await Promise.all([store.assertStored(ids), writer.assertCidsStored(cids)])
-      for (const id of ids) cidById.delete(id)
+      const waiting = ids.flatMap((id) => {
+        const cid = cidById.get(id)
+        return cid ? [{ id, cid }] : []
+      })
+      const [, missing] = await Promise.all([
+        store.assertStored(ids),
+        writer.unstoredCids(waiting.map((w) => w.cid)),
+      ])
+      const error = missing.length > 0 ? writer.notStoredError(missing) : undefined
+      for (const { id, cid } of waiting) {
+        report(missing.includes(cid) ? { id, cid, ok: false, error } : { id, cid, ok: true })
+      }
+      if (error && required) throw error
     },
   }
 }

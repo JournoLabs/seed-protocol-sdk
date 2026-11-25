@@ -87,7 +87,7 @@ export {
 
 /** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
 function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
-  return resolveSeedRssImageRelationRef(value)?.mediaUrl
+  return resolveSeedRssImageRelationRef(value, { ipfsGateway: loadFeedConfig().ipfsGateway })?.mediaUrl
 }
 
 interface RssImageCandidate {

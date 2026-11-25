@@ -9,6 +9,7 @@ import {
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
+import type { InAppWalletAuth } from 'thirdweb/wallets'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
 import { publishItem } from './helpers/publishItem'
 import {
@@ -56,7 +57,18 @@ export interface ThirdwebWalletOptions {
    * same either way.
    */
   modularWalletMode?: 'EIP7702' | 'EOA'
+  /**
+   * Sign-in options for both in-app wallets, in the order the connect modal shows them. Default
+   * `['farcaster', 'email', 'passkey', 'phone']`.
+   *
+   * An in-app wallet belongs to the login that created it. Removing an option stops new sign-ins
+   * with it and locks out returning users who never linked another login to their account.
+   */
+  authOptions?: InAppWalletAuth[]
 }
+
+/** The in-app wallets' sign-in options when {@link ThirdwebWalletOptions.authOptions} is unset. */
+const DEFAULT_IN_APP_AUTH_OPTIONS: readonly InAppWalletAuth[] = ['farcaster', 'email', 'passkey', 'phone']
 
 export interface PublishConfig {
   /**
@@ -214,7 +226,7 @@ export interface PublishConfig {
    * `createPrivateUploadEncryptor` from `@seedprotocol/encryption`, wrapping to the publisher's
    * registered key. Without it, publishing a private Html, Json, File, Image or ItemStorage value
    * fails with `PrivateUploadNotEncryptedError` (from `@seedprotocol/sdk`) before anything is
-   * uploaded. Public uploads never reach it. `@seedprotocol/encryption` isn't on npm yet.
+   * uploaded. Public uploads never reach it.
    */
   encryptPrivateUpload?: import('@seedprotocol/sdk').GetPublishUploadsOptions['encryptUpload']
   /**
@@ -367,16 +379,20 @@ export function getConfigRef(): PublishConfig | null {
 
 /**
  * `uploadApiBaseUrl` is where uploads and the operator's storage payments go. With operator-paid
- * storage (the default) it must be set, or requests would go to `undefined/api/upload/...`.
+ * storage (the default) and a blob store that uses the upload API (`BlobStore.usesUploadApi`) it
+ * must be set, or requests would go to `undefined/api/upload/...`.
  * Whenever it is set it must be an absolute http(s) URL, or in a browser a path from the page's
  * origin (`/seed-api`).
  */
-export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment'>): void {
+export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment' | 'blobStore'>): void {
   const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
   if (!raw) {
+    const store = c.blobStore
+    // Only an explicit false skips it: a store written before the field existed sends uploads the old way.
+    if (store && store.usesUploadApi === false) return
     if ((c.payment?.storage ?? 'operator') === 'operator') {
       throw new Error(
-        'initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave), unless payment.storage is "user".',
+        `initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave) because the blob store "${store?.id ?? 'arweave'}" uses it, unless payment.storage is "user".`,
       )
     }
     return
@@ -470,6 +486,7 @@ export type ResolvedThirdwebWalletOptions = {
   bundlerUrl: string | undefined
   sponsorGas: boolean
   modularWalletMode: 'EIP7702' | 'EOA'
+  authOptions: InAppWalletAuth[]
 }
 
 /** Applies defaults to {@link PublishConfig.thirdweb}. */
@@ -481,6 +498,7 @@ export function resolveThirdwebWalletOptions(
     bundlerUrl: tw.bundlerUrl?.trim() || undefined,
     sponsorGas: resolveSponsorGas(config ?? {}),
     modularWalletMode: tw.modularWalletMode ?? 'EIP7702',
+    authOptions: [...(tw.authOptions ?? DEFAULT_IN_APP_AUTH_OPTIONS)],
   }
 }
 

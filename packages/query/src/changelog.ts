@@ -108,6 +108,13 @@ export type VersionSnapshot = {
   data: Record<string, unknown>
 }
 
+function isCamelAliasOfAnotherKey(key: string, keys: Set<string>): boolean {
+  for (const other of keys) {
+    if (other !== key && toCamelCase(other) === key) return true
+  }
+  return false
+}
+
 /**
  * Diff consecutive version snapshots (ascending by `at`).
  * First version: `before = {}`, all keys in `after` are changed.
@@ -123,6 +130,8 @@ export function diffVersionSnapshots(
     const keySet = new Set([...Object.keys(before), ...Object.keys(after)])
     const changedKeys: string[] = []
     for (const key of keySet) {
+      // A snake_case property is also stored under its camelCase alias: report it once, as snake
+      if (isCamelAliasOfAnotherKey(key, keySet)) continue
       if (!changelogValuesEqual(before[key], after[key])) {
         changedKeys.push(key)
       }

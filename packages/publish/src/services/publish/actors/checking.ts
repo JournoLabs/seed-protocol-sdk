@@ -24,6 +24,8 @@ import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { normalizePublishRequest } from './publishRequestNormalize'
 import { LICENSE_OFFER_SCHEMA_UID, licenseOfferAttestation, parseLicenseOffer } from '../../licenseOffer'
 import { getSchemaRecord } from '~/helpers/schemaRegistry'
+import { heuristicPublishGas } from '../../publishCost/gasHeuristics'
+import { confirmSelfPayIfSponsorLow } from '../../sponsorStatus/sponsorStatus'
 
 const activePublishProcesses = new Set<string>()
 
@@ -248,6 +250,20 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
             return
           }
         }
+
+        // Before any upload: a sponsor whose deposit can't cover the publish (payment.sponsorPaymaster)
+        // asks the user to pay the gas, so a refusal costs no upload.
+        await confirmSelfPayIfSponsorLow({
+          address: address.trim(),
+          estimateGas: async () => {
+            const { summarizePublishWork } = await import('@seedprotocol/sdk')
+            const work = await summarizePublishWork(item, {
+              publishMode: publishMode ?? 'patch',
+              backReferences: attestationStrategy === 'multiPublish' ? 'link' : 'defer',
+            })
+            return heuristicPublishGas(work)
+          },
+        })
 
         // Before any upload: a host's nonce key that can't be used, or that an earlier try spent,
         // would fail the publish at the send after paying for the uploads.

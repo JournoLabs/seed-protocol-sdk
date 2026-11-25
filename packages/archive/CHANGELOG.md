@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `exportArchive` includes a file stored under an `ipfs://<cid>` id (or another id a configured blob source reads), from the downloaded file or, for a bag built from the chain, through the source. `data/item.json` gives such an id as `storageId` (not `arweaveTransactionId`), PREMIS `originalName` is the id as written (it was `ar://ipfs://<cid>`), and the returned `arweaveTransactions` leave it out, since an anchor's path manifest names Arweave transactions. With no source for the id the property is listed in `omitted`, and the reason says so; a reproducible bag refuses it.
+
 ## 0.8.3 (2026-11-23)
 
 No user-facing changes; released at the same version as the other packages.

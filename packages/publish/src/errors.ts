@@ -229,6 +229,41 @@ export class AttestationRecordError extends Error {
   }
 }
 
+export type PublishGasErrorCode =
+  /** The paymaster declined to sponsor, and the app doesn't let users pay (`payment.whenSponsorDeclines`). */
+  | 'SPONSOR_DECLINED'
+  /** The paymaster couldn't be reached (network error, timeout, HTTP error). Never falls back to self-pay. */
+  | 'SPONSOR_UNREACHABLE'
+  /** The sponsor declined and `payment.confirmSelfPay` resolved `false` or threw. */
+  | 'SELF_PAY_REFUSED'
+  /** The sponsor declined and the user's account can't pay the UserOp's prefund (`AA21`). */
+  | 'SELF_PAY_INSUFFICIENT_FUNDS'
+
+/**
+ * A publish transaction wasn't sent because nobody could pay its gas. Nothing reached the chain,
+ * so a retry sends again; uploads already made are reused.
+ */
+export class PublishGasError extends Error {
+  constructor(
+    message: string,
+    public readonly code: PublishGasErrorCode,
+    /** The account whose gas was to be sponsored. */
+    public readonly address: string,
+    cause?: unknown,
+  ) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'PublishGasError'
+  }
+}
+
+/** True when `e` is a {@link PublishGasError}, also across duplicate bundled class identities. */
+export function isPublishGasError(e: unknown): e is PublishGasError {
+  if (e instanceof PublishGasError) return true
+  if (typeof e !== 'object' || e === null) return false
+  const o = e as { name?: string; code?: unknown }
+  return o.name === 'PublishGasError' && typeof o.code === 'string'
+}
+
 /**
  * True when `e` is a managed-account publish error. Uses `name` + `code` as a fallback
  * when `instanceof` fails across duplicate bundled class identities.
@@ -245,6 +280,11 @@ export type Eip7702ModularAccountPublishErrorCode =
   | 'EIP7702_MODULAR_NOT_UPGRADED'
   | 'EIP7702_MODULAR_DEPLOY_FAILED'
   | 'EIP7702_MODULAR_NOT_CONFIRMED'
+  /**
+   * The EOA is delegated (EIP-7702) to an account other than the publish sender's, such as a
+   * wallet vendor's. Publish doesn't re-delegate it; the message names the current delegate.
+   */
+  | 'EIP7702_DELEGATED_ELSEWHERE'
 
 /**
  * Thrown when the in-app modular (EIP-7702) wallet is missing, not upgraded on-chain, or deploy/bootstrap failed.
@@ -273,6 +313,7 @@ const eip7702ModularCodes: Eip7702ModularAccountPublishErrorCode[] = [
   'EIP7702_MODULAR_NOT_UPGRADED',
   'EIP7702_MODULAR_DEPLOY_FAILED',
   'EIP7702_MODULAR_NOT_CONFIRMED',
+  'EIP7702_DELEGATED_ELSEWHERE',
 ]
 
 export function isEip7702ModularAccountPublishError(e: unknown): e is Eip7702ModularAccountPublishError {

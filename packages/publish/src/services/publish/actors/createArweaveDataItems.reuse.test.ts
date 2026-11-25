@@ -17,7 +17,11 @@ const assertStored = mock(async (ids: string[]) => {
   const missing = ids.filter((id) => !stored.has(id))
   if (missing.length) throw new Error(`not stored: ${missing.join(', ')}`)
 })
-mock.module('~/blobStore', () => ({ getBlobStore: () => ({ prepare, assertStored }) }))
+/** Set to give the store a `reusable` check, which then replaces `assertStored`. */
+let reusable: ((id: string, upload: unknown) => Promise<boolean>) | undefined
+mock.module('~/blobStore', () => ({
+  getBlobStore: () => ({ prepare, assertStored, ...(reusable && { reusable }) }),
+}))
 
 const { prepareUploads } = await import('./createArweaveDataItems')
 
@@ -43,6 +47,8 @@ const ids = (result: Awaited<ReturnType<typeof prepareUploads>>) => result.arwea
 
 beforeEach(() => {
   stored = new Set(['old-a', 'old-b'])
+  reusable = undefined
+  assertStored.mockClear()
   prepare.mockClear()
 })
 
@@ -78,5 +84,23 @@ describe('prepareUploads with a replaced run', () => {
   test('with nothing to reuse every upload is prepared', async () => {
     const result = await prepareUploads([upload('a', 'hash-a')], {})
     expect(ids(result)).toEqual(['new-a'])
+  })
+
+  test("a store's reusable check is asked with the id and the upload, and replaces assertStored", async () => {
+    const asked: Array<[string, string]> = []
+    reusable = async (id, u) => {
+      asked.push([id, (u as { itemPropertyLocalId: string }).itemPropertyLocalId])
+      return id === 'old-a'
+    }
+    // old-b is held by assertStored's account, but the store's own check says no.
+    const result = await prepareUploads([upload('a', 'hash-a'), upload('b', 'hash-b')], {
+      reusableUploads: [parked('a', 'hash-a', 'old-a'), parked('b', 'hash-b', 'old-b')],
+    })
+    expect(asked).toEqual([
+      ['old-a', 'a'],
+      ['old-b', 'b'],
+    ])
+    expect(assertStored).not.toHaveBeenCalled()
+    expect(ids(result)).toEqual(['old-a', 'new-b'])
   })
 })

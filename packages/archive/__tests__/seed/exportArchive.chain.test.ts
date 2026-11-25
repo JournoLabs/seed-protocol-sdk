@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { BaseDb, importJsonSchema, Item, metadata, Model, seeds, versions } from '@seedprotocol/sdk'
+import { BaseDb, importJsonSchema, Item, metadata, Model, seeds, setBlobSources, versions } from '@seedprotocol/sdk'
 import {
   buildPathManifest,
   digestHex,
@@ -74,6 +74,8 @@ const SCHEMA_NAME = 'Test Schema exportArchive chain'
 const ATTESTER = checksumAddress(`0x${'d'.repeat(40)}`)
 const OTHER = '0xEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEe'
 const GATEWAY = 'https://gateway.test'
+const IPFS_GATEWAY = 'https://ipfs.test'
+const IPFS_ID = 'ipfs://bafkreichainexportimagecidxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 const T0 = 1791500000
 const uid = (byte: string) => `0x${byte.repeat(32)}`
 const tx = (name: string) => name.padEnd(43, 'x')
@@ -210,7 +212,12 @@ testDescribe('exportArchive from the chain', () => {
   beforeEach(() => {
     publishPost()
     vi.stubGlobal('fetch', async (url: string) => {
-      const id = String(url).startsWith(`${GATEWAY}/raw/`) ? String(url).split('/').pop()! : ''
+      const ipfs = String(url).startsWith(`${IPFS_GATEWAY}/ipfs/`)
+      const id = String(url).startsWith(`${GATEWAY}/raw/`)
+        ? String(url).split('/').pop()!
+        : ipfs
+          ? `ipfs://${String(url).split('/').pop()}`
+          : ''
       const bytes = gateway.get(id)
       return new Response(bytes ?? null, { status: bytes ? 200 : 404 })
     })
@@ -218,6 +225,7 @@ testDescribe('exportArchive from the chain', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    setBlobSources([])
   })
 
   afterAll(async () => {
@@ -252,6 +260,43 @@ testDescribe('exportArchive from the chain', () => {
     expect(properties.body).toMatchObject({ arweaveTransactionId: HTML_TX, file: 'source/body.html' })
     expect(await db.select().from(metadata).where(eq(metadata.seedUid, POST))).toEqual([])
   }, 120000)
+
+  describe('with a file stored under an ipfs:// id', () => {
+    const ipfsSource = {
+      id: 'ipfs',
+      key: (id: string) => (id.startsWith('ipfs://') ? id.slice('ipfs://'.length) : undefined),
+      urls: (key: string) => [`${IPFS_GATEWAY}/ipfs/${key}`],
+    }
+    const storeImageOnIpfs = () => {
+      fakeEas.properties = fakeEas.properties.filter((p) => p.refUID !== IMAGE_VERSION)
+      fakeEas.properties.push(property(IMAGE_VERSION, 'storage_transaction_id', 'string', IPFS_ID, T0))
+      gateway.set(IPFS_ID, PNG)
+    }
+
+    it('reads it through the registered blob source and names it by its id', async () => {
+      storeImageOnIpfs()
+      setBlobSources([ipfsSource])
+      const { bag, omitted, arweaveTransactions } = await exportArchive(REF, { reproducible: true })
+      expect(omitted).toEqual([])
+      const { properties } = itemJson(bag)
+      expect(properties.featureImage).toMatchObject({ storageId: IPFS_ID, file: `assets/${digestHex('sha256', PNG)}.png` })
+      expect(properties.featureImage.arweaveTransactionId).toBeUndefined()
+      const premis = text(bag, 'metadata/premis.xml')
+      expect(premis).toContain(`<premis:originalName>${IPFS_ID}</premis:originalName>`)
+      expect(premis).not.toContain('ar://ipfs://')
+      // An anchor's path manifest names Arweave transactions only.
+      expect(Object.values(arweaveTransactions)).not.toContain(IPFS_ID)
+      expect(Object.values(arweaveTransactions)).toContain(HTML_TX)
+    }, 120000)
+
+    it('leaves it out with the reason when no blob source reads the id', async () => {
+      storeImageOnIpfs()
+      await expect(exportArchive(REF, { reproducible: true })).rejects.toMatchObject({
+        code: 'incomplete',
+        message: expect.stringContaining(`stored as ${IPFS_ID}, and no blob source in SeedConfig.blobSources reads it`),
+      })
+    }, 120000)
+  })
 
   it('keeps each Html byte for byte in data/source', async () => {
     const bag = await exported()

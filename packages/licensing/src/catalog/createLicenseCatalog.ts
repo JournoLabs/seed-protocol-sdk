@@ -3,7 +3,7 @@ import { validateTerms } from '../validate'
 import type { LicenseCatalog, LicenseModule } from './types'
 
 /**
- * An index over the modules given. Throws on a duplicate id or SPDX id, and on a module whose terms
+ * An index over the modules given. Throws on a duplicate id, SPDX id or terms hash, and on a module whose terms
  * fail `validateTerms`, naming the module.
  */
 export function createLicenseCatalog(modules: readonly LicenseModule<any>[]): LicenseCatalog {
@@ -26,7 +26,10 @@ export function createLicenseCatalog(modules: readonly LicenseModule<any>[]): Li
     if (!result.ok) {
       throw new Error(`License module ${module.id} has invalid terms: ${result.errors.map((e) => `${e.path} ${e.message}`).join('; ')}`)
     }
-    byHash.set(termsHash(result.terms), module)
+    const hash = termsHash(result.terms)
+    const sameTerms = byHash.get(hash)
+    if (sameTerms) throw new Error(`Duplicate terms hash ${hash}: ${module.id} has the same terms as ${sameTerms.id}`)
+    byHash.set(hash, module)
   }
 
   return {

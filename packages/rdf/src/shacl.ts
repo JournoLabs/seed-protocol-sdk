@@ -3,7 +3,7 @@ import { listRelationEasName } from '@seedprotocol/query'
 import { RDF, XSD, iriScheme } from './iri.js'
 import { RELATION_TYPES, expandTerm, prefixesOf, type RdfLens } from './lens.js'
 import { escapeLiteral } from './quads.js'
-import { withSchemaIds } from './schemaIds.js'
+import { sidecarSchemaMismatch, withSchemaIds } from './schemaIds.js'
 
 const SH = 'http://www.w3.org/ns/shacl#'
 
@@ -40,9 +40,7 @@ export type ShaclOptions = {
 export function toShacl(lens: RdfLens, options: ShaclOptions = {}): string {
   const { sidecar } = lens
   const schema = withSchemaIds(lens.schema)
-  if (!schema.id || schema.id !== sidecar.schemaId) {
-    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id or metadata.name'}`)
-  }
+  if (!schema.id || schema.id !== sidecar.schemaId) throw sidecarSchemaMismatch(sidecar.schemaId, lens.schema, schema)
   // c/ and p/ IRIs don't name a chain.
   const iris = iriScheme(1, options.base)
   const prefixes = prefixesOf(sidecar)
