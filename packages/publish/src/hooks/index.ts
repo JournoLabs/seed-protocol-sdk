@@ -19,7 +19,7 @@ export {
   deletePublishProcessById,
   deletePublishProcessesByIds,
 } from './clearCompletedPublishProcesses'
-export { getArweaveTransactionIds, getEasPayload, resumesOnNextLoad } from './publishProcessHelpers'
+export { getArweaveTransactionIds, getEasPayload } from './publishProcessHelpers'
 export { usePublishCostEstimate } from './usePublishCostEstimate'
 export type { UsePublishCostEstimateResult } from './usePublishCostEstimate'
 export { useSponsorStatus } from './useSponsorStatus'
