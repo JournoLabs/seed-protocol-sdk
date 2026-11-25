@@ -71,8 +71,6 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
 
     const check = (snapshot: PublishSnapshot) => {
       const value = snapshot.value as string
-      const cause = snapshot.context?.error
-      const detail = errorMessage(cause)
       // The failures a part can cause say how much of the publish is already on chain.
       if (
         value === PublishMachineStates.FAILURE ||
