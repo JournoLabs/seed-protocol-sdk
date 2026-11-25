@@ -1,4 +1,4 @@
-import { Item, type IItem, type ItemPublishOptions } from '@seedprotocol/sdk'
+import { countRecordedPublishParts, Item, type IItem, type ItemPublishOptions } from '@seedprotocol/sdk'
 import type { ActorRef } from 'xstate'
 import type { CreatePublishOptions } from '../config'
 import { PublishManager } from '../services/publishManager'
@@ -31,7 +31,26 @@ function errorMessage(error: unknown): string | undefined {
 type PublishSnapshot = {
   value: unknown
   status?: string
-  context?: { error?: unknown; errorStep?: string }
+  context?: { error?: unknown; errorStep?: string; publishRunId?: string; expectedPublishTransactions?: number }
+}
+
+/**
+ * "N of M parts are on chain" for a run of a split publish that has recorded parts (ADR 0036), read
+ * from its attempt rows. Empty when none is recorded, and when the rows can't be read. M is left
+ * out when the run has no estimate.
+ */
+async function partsOnChainNote(context: PublishSnapshot['context']): Promise<string> {
+  if (!context?.publishRunId) return ''
+  let recorded = 0
+  try {
+    recorded = await countRecordedPublishParts([context.publishRunId])
+  } catch {
+    return ''
+  }
+  if (recorded === 0) return ''
+  const total = context.expectedPublishTransactions
+  if (total === undefined || total < recorded) return `${recorded} ${recorded === 1 ? 'part is' : 'parts are'} on chain.`
+  return `${recorded} of ${total} parts are on chain.`
 }
 
 /**
@@ -54,6 +73,23 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
       const value = snapshot.value as string
       const cause = snapshot.context?.error
       const detail = errorMessage(cause)
+      // The failures a part can cause say how much of the publish is already on chain.
+      if (
+        value === PublishMachineStates.FAILURE ||
+        value === 'attestationOutcomeUnknown' ||
+        RECOVERABLE_FAILURE_STATES.has(value)
+      ) {
+        if (settled) return
+        void partsOnChainNote(snapshot.context).then((note) => finishFailure(snapshot, note))
+        return
+      }
+      finishFailure(snapshot, '')
+    }
+
+    const finishFailure = (snapshot: PublishSnapshot, partsNote: string) => {
+      const value = snapshot.value as string
+      const cause = snapshot.context?.error
+      const detail = errorMessage(cause)
       if (value === PublishMachineStates.SUCCESS) {
         finish()
       } else if (value === PublishMachineStates.FAILURE) {
@@ -67,7 +103,11 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
           return
         }
         const step = snapshot.context?.errorStep ? ` at ${snapshot.context.errorStep}` : ''
-        finish(new Error(`Publish of ${seedLocalId} failed${step}: ${detail ?? 'unknown error'}`, { cause }))
+        finish(
+          new Error(`Publish of ${seedLocalId} failed${step}: ${detail ?? 'unknown error'}${partsNote && `. ${partsNote}`}`, {
+            cause,
+          }),
+        )
       } else if (value === 'retractionFailureRecoverable') {
         finish(
           new PublishRetractionError(
@@ -81,6 +121,7 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
         finish(
           new Error(
             `${detail ?? `Publish of ${seedLocalId} can't tell whether its transaction landed.`} ` +
+              (partsNote && `${partsNote} `) +
               `Publishing again could attest twice. Retry with PublishManager.retryAttestations('${seedLocalId}') ` +
               `to look again, or settle it with PublishManager.resolveAttestationAttempt('${seedLocalId}', ...).`,
             { cause },
@@ -90,6 +131,7 @@ export function waitForPublishActor(actor: ActorRef<any, any>, seedLocalId: stri
         finish(
           new Error(
             `Creating attestations for ${seedLocalId} failed: ${detail ?? 'unknown error'}. ` +
+              (partsNote && `${partsNote} `) +
               `Uploads are kept; retry with PublishManager.retryAttestations('${seedLocalId}').`,
             { cause },
           ),
