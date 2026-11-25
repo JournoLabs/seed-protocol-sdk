@@ -84,6 +84,7 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 
 ### Items and pages
 
+- `FEED_IPFS_GATEWAY` - Path gateway for `ipfs://<cid>` storage ids, linked as `<gateway>/ipfs/<cid>` (default: `https://ipfs.io`).
 - `FEED_PAGE_SIZE` - Items per page (default: `25`).
 - `FEED_INCLUDE_DATA_URI_HTML_ITEMS` - `true` keeps items whose rich text embeds `data:image/` URIs. Default: such items are left out of the feed.
 - `CACHE_MAX_AGE` - Seconds a checked collection is served by `@seedprotocol/query` with no indexer request (default `0`). See the [query README](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md).

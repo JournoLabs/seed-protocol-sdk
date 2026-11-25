@@ -7,6 +7,7 @@ import { premisXml, type PremisEvent, type PremisFile } from '../premis'
 import { verifyInstructions } from '../verifyArchive'
 import {
   fetchArweaveRawBytesAcrossGateways,
+  hasUriScheme,
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
 } from '@seedprotocol/arweave'
@@ -25,6 +26,7 @@ import { parseEasPropertyMetadata, readSeedAtTime, type SeedAtTime } from '@seed
 import {
   BaseFileManager,
   decodeCompositeUpload,
+  fetchBlobBytes,
   findEmbeddedImageFilePath,
   findRelatedSeedRow,
   findSeedRow,
@@ -43,6 +45,7 @@ import {
   normalizeDataType,
   publishPropertyKind,
   refsOf,
+  resolveBlobSource,
   resolveItemStorageChildFile,
   resolveModelRecordByNameOrType,
   resolveStorageDisplay,
@@ -166,6 +169,8 @@ type ItemJsonProperty = {
   value?: string | string[] | null
   file?: string
   arweaveTransactionId?: string
+  /** The storage id when it isn't an Arweave transaction id (`ipfs://<cid>`). */
+  storageId?: string
   attestationUid?: string
   attestedAt?: string
   attestedAtClock?: ArchiveClockSource
@@ -356,7 +361,7 @@ function attestedValue(
   return typeof decoded === 'string' ? decoded : JSON.stringify(decoded)
 }
 
-/** The Arweave transaction a storage seed held at `asOf`. */
+/** The storage id (an Arweave transaction, or a URI such as `ipfs://<cid>`) a storage seed held at `asOf`. */
 async function chainStorageTransaction(seedUid: string, asOf: number): Promise<string | undefined> {
   const state = await readSeedFromChain(seedUid, asOf)
   for (const attestation of state?.properties ?? []) {
@@ -364,7 +369,7 @@ async function chainStorageTransaction(seedUid: string, asOf: number): Promise<s
     if (!parsed.ok || attestation.revoked) continue
     const { name, value } = parsed.metadata
     const isSlot = name === 'storage_transaction_id' || name === 'transaction_id'
-    if (isSlot && typeof value === 'string' && ARWEAVE_TX_ID.test(value)) return value
+    if (isSlot && typeof value === 'string' && (ARWEAVE_TX_ID.test(value) || hasUriScheme(value))) return value
   }
   return undefined
 }
@@ -480,8 +485,16 @@ async function chainSource(
 
   const downloads = new Map<string, Promise<Uint8Array | undefined>>()
   const readTransaction = (txId: string): Promise<Uint8Array | undefined> => {
-    // The transaction's bytes, not a read transform's output: a bag keeps what was published (ADR 0028)
-    const download = downloads.get(txId) ?? fetchArweaveRawBytesAcrossGateways(txId, { decode: false })
+    // The transaction's bytes, not a read transform's output: a bag keeps what was published (ADR 0028).
+    // An id with a scheme (`ipfs://<cid>`) is read through the blob source that claims it, if any.
+    const sourced = hasUriScheme(txId) ? resolveBlobSource(txId) : undefined
+    const read = () =>
+      hasUriScheme(txId)
+        ? sourced
+          ? fetchBlobBytes(sourced)
+          : Promise.resolve(undefined)
+        : fetchArweaveRawBytesAcrossGateways(txId, { decode: false })
+    const download = downloads.get(txId) ?? read()
     downloads.set(txId, download)
     return download
   }
@@ -669,10 +682,17 @@ export async function exportArchive(
     }
     const file = await source.readStorageSeed(property, storageKind)
     const { bytes, arweaveTransactionId } = file
-    if (arweaveTransactionId) entry.arweaveTransactionId = arweaveTransactionId
+    if (arweaveTransactionId) {
+      if (hasUriScheme(arweaveTransactionId)) entry.storageId = arweaveTransactionId
+      else entry.arweaveTransactionId = arweaveTransactionId
+    }
     if (!bytes) {
       const what = storageKind === 'html' ? 'Html' : 'file'
-      omitted.push({ property: key, reason: `its ${what} could not be read or downloaded` })
+      const unread =
+        arweaveTransactionId && hasUriScheme(arweaveTransactionId) && !resolveBlobSource(arweaveTransactionId)
+          ? `its ${what} is stored as ${arweaveTransactionId}, and no blob source in SeedConfig.blobSources reads it`
+          : `its ${what} could not be read or downloaded`
+      omitted.push({ property: key, reason: unread })
       continue
     }
     if (storageKind === 'html') {
@@ -779,8 +799,13 @@ export async function exportArchive(
           fixity: { 'SHA-256': digestHex('sha256', file.bytes), 'SHA-512': digestHex('sha512', file.bytes) },
           size: file.bytes.byteLength,
           formatName: info?.mimeType ?? 'application/octet-stream',
-          // ar:// rather than a gateway URL: the gateway is configured per device.
-          originalName: info?.arweaveTransactionId ? `ar://${info.arweaveTransactionId}` : undefined,
+          // ar:// rather than a gateway URL: the gateway is configured per device. An id that is
+          // already a URI (`ipfs://<cid>`) is the name as it is.
+          originalName: info?.arweaveTransactionId
+            ? hasUriScheme(info.arweaveTransactionId)
+              ? info.arweaveTransactionId
+              : `ar://${info.arweaveTransactionId}`
+            : undefined,
         }
       }),
     ],
@@ -825,8 +850,9 @@ export async function exportArchive(
   })
   const arweaveTransactions = chainRecord
     ? Object.fromEntries(
+        // Arweave ids only: the path manifest an anchor builds from these names Arweave transactions.
         [...fileInfo].flatMap(([path, { arweaveTransactionId }]) =>
-          arweaveTransactionId ? [[`data/${path}`, arweaveTransactionId]] : [],
+          arweaveTransactionId && !hasUriScheme(arweaveTransactionId) ? [[`data/${path}`, arweaveTransactionId]] : [],
         ),
       )
     : {}

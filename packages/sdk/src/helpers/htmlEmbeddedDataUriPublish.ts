@@ -8,6 +8,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import {
   getPublicArweaveBaseUrl,
   getPublicArweaveRawUrl,
+  hasUriScheme,
   normalizeRelationPropertyValue,
   publishedArweaveLinksInHtml,
   resolveSeedIdsFromRefString,
@@ -21,6 +22,7 @@ import { waitForEntityReady } from '@/helpers/entity/entityLifecycle'
 import { ModelPropertyDataTypes, normalizeDataType, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
 import { findSeedRow } from '@/db/read/findSeedRow'
 import { storageSeedTransactionId } from '@/storageValue/resolve'
+import { resolveBlobSource } from '@/storageValue/blobSources'
 import {
   getPublishGraph,
   publishGraphItemNodes,
@@ -262,7 +264,7 @@ async function resolveSeedPropertyRefTxId(
   if (uploaded) return uploaded
 
   const recorded = await storageSeedTransactionId(target)
-  if (recorded && ARWEAVE_TX_ID.test(recorded)) return recorded
+  if (recorded && (ARWEAVE_TX_ID.test(recorded) || resolveBlobSource(recorded))) return recorded
 
   throw new HtmlSeedPropertyRefError(
     `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} was not uploaded ` +
@@ -492,13 +494,34 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   }
 }
 
+/**
+ * The link Html carries for a storage id. An id a configured blob source reads (`ipfs://<cid>`) is
+ * linked by that source's first URL, whatever `htmlArweaveRefs` says; any other id with a scheme
+ * has no link to write, so the rewrite fails instead of writing an Arweave URL for it.
+ */
+function storageLink(txId: string, htmlArweaveRefs: HtmlArweaveRefs | undefined): string {
+  const sourced = resolveBlobSource(txId)
+  if (sourced) {
+    const url = sourced.source.urls(sourced.key)[0]
+    if (url) return url
+    throw new Error(`The ${sourced.source.id} blob source gave no URL for ${txId}, so Html can't link it.`)
+  }
+  if (hasUriScheme(txId)) {
+    throw new Error(
+      `Html can't link ${txId}: it isn't an Arweave transaction id and no source in SeedConfig.blobSources reads it. ` +
+        'Add the blob source of the store that wrote it (ipfsBlobSource for ipfs:// ids).',
+    )
+  }
+  return htmlArweaveRefs === 'ar' ? `ar://${txId}` : getPublicArweaveRawUrl(txId)
+}
+
 async function rewriteHtmlEmbeddedImagesOfNode(
   node: PublishGraphNode,
   txBySeedLocalId: Map<string, string>,
   deferred: Set<string> | undefined,
   htmlArweaveRefs: HtmlArweaveRefs | undefined,
 ): Promise<void> {
-  const linkFor = (txId: string) => (htmlArweaveRefs === 'ar' ? `ar://${txId}` : getPublicArweaveRawUrl(txId))
+  const linkFor = (txId: string) => storageLink(txId, htmlArweaveRefs)
   for (const { htmlSeedLocalId, filePath } of htmlValuesOf(node)) {
     if (deferred && !deferred.has(htmlSeedLocalId)) continue
     if (!(await BaseFileManager.pathExists(filePath))) continue

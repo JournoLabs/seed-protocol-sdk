@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- Html with embedded images or `seed:property/` references links a file stored under an id a configured blob source reads (`ipfs://<cid>`) by that source's first URL. It linked every id through the Arweave gateway. An id with a scheme that no source reads fails the rewrite with an error naming `SeedConfig.blobSources`. `resolveBlobSource` and `fetchBlobBytes` are exported.
 - A blob source (`SeedConfig.blobSources`) that serves nothing usable for an id logs one `console.warn` per id, naming what each URL answered (status, empty body, hash mismatch or network error). The id read as missing with no log.
 - New `announcePublishLockTaken(seedLocalId)` and `onPublishLockTaken(listener)`: tell the other tabs of the database that this tab took a seed's publish lock, and hear when another tab did. `@seedprotocol/publish` uses them to take over publishes left by closed tabs. Nothing is sent or heard without tab coordination (`multiTab: 'off'`, Node).
 

@@ -59,9 +59,19 @@ the id for an Arweave id and the download fails.
 `arweave` entry: `storage` reads `{ store: 'ipfs', priced: false }` and `totalUsd` is gas only.
 Pinning costs are the provider's. Custom stores declare the same with `BlobStore.usesUploadApi`.
 
-Html with embedded images or `seed:property/` references is rewritten with Arweave gateway URLs of
-the images' ids, which gives broken links for `ipfs://` ids. Until that changes, use `ipfsMirror`
-for items with Html.
+Html with embedded images or `seed:property/` references links each file by the first URL of the
+blob source that reads its id, so `ipfsBlobSource` must be in the publishing app's `blobSources`; an
+`ipfs://` id with no source fails the rewrite before upload.
+
+The other readers handle `ipfs://` ids as follows:
+
+- `@seedprotocol/feed` links the file as `<gateway>/ipfs/<cid>` (`FEED_IPFS_GATEWAY`, default
+  `https://ipfs.io`) and uses the id as the item's `guid`.
+- `@seedprotocol/arweave`'s `publicStorageUrl(id, { ipfsGateway })` gives the same URL, and
+  `resolveSeedRssImageRelationRef` takes `ipfsGateway`.
+- `@seedprotocol/rdf` writes the id as the `seed:content` IRI.
+- `@seedprotocol/archive` includes the file when the blob source reads it, names it by its id in
+  `data/item.json` (`storageId`) and PREMIS, and otherwise lists it in `omitted` with the reason.
 
 ## Pinning providers
 

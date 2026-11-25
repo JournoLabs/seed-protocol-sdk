@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A storage id with a scheme (`ipfs://<cid>`, written by `ipfsBlobStore`) links through an IPFS gateway as `<gateway>/ipfs/<cid>` and is its own `guid`; `FEED_IPFS_GATEWAY` sets the gateway (default `https://ipfs.io`). The item's link was `https://<gateway>/raw/ipfs://<cid>` and its `guid` `ar://ipfs://<cid>`. `loadFeedConfig()` returns `ipfsGateway`. An id with another scheme keeps the attestation link.
+
 ## 0.8.3 (2026-11-23)
 
 - Depends on `image-size` `^2.1.0` (was `^1.1.1`). Versions up to 2.0.2 loop forever on a crafted ICNS file; a feed reads the first 8 KB of each Arweave image to size it.

@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- A storage id that has a scheme (`ipfs://<cid>`) is the `seed:content` IRI as it is, not percent-encoded and without the `ar://` prefix it got (`ar://ipfs%3A%2F%2F<cid>`). `contentUrl` is called for Arweave transaction ids only.
+
 ## 0.8.3 (2026-11-23)
 
 - `jsonLdScript(doc)` wraps a JSON-LD document in a `<script type="application/ld+json">` element for an HTML page, escaping `<`, `>`, `&` and U+2028/U+2029 so no value can end the element.
