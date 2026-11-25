@@ -79,7 +79,9 @@ function isOlder(a: string, b: string): boolean {
 /** This package's own version, which the rdf it loads should match or exceed. */
 function ownVersion(): string | undefined {
   try {
-    return (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string }).version
+    // Read through require: Vite's lib build inlines `new URL('../package.json', import.meta.url)`
+    // as a data: URL, which readFileSync can't open.
+    return (createRequire(import.meta.url)('../package.json') as { version?: string }).version
   } catch {
     return undefined
   }
