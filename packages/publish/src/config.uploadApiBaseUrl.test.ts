@@ -10,6 +10,21 @@ describe('assertUploadApiBaseUrl', () => {
     ).toThrow('uploadApiBaseUrl is required')
   })
 
+  test('names the store that needs it', () => {
+    expect(() => assertUploadApiBaseUrl({} as never)).toThrow('store "arweave"')
+    const custom = { id: 'custom', usesUploadApi: true } as never
+    expect(() => assertUploadApiBaseUrl({ blobStore: custom } as never)).toThrow('store "custom"')
+  })
+
+  test('is optional when the blob store does not use the upload API', () => {
+    const ipfs = { id: 'ipfs', usesUploadApi: false } as never
+    expect(() => assertUploadApiBaseUrl({ blobStore: ipfs } as never)).not.toThrow()
+    // Still checked when set.
+    expect(() => assertUploadApiBaseUrl({ blobStore: ipfs, uploadApiBaseUrl: 'localhost:3000' } as never)).toThrow(
+      'absolute http(s) URL',
+    )
+  })
+
   test('is optional when users pay for storage', () => {
     expect(() => assertUploadApiBaseUrl({ payment: { storage: 'user' } } as never)).not.toThrow()
   })

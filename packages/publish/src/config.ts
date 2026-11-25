@@ -367,16 +367,19 @@ export function getConfigRef(): PublishConfig | null {
 
 /**
  * `uploadApiBaseUrl` is where uploads and the operator's storage payments go. With operator-paid
- * storage (the default) it must be set, or requests would go to `undefined/api/upload/...`.
+ * storage (the default) and a blob store that uses the upload API (`BlobStore.usesUploadApi`) it
+ * must be set, or requests would go to `undefined/api/upload/...`.
  * Whenever it is set it must be an absolute http(s) URL, or in a browser a path from the page's
  * origin (`/seed-api`).
  */
-export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment'>): void {
+export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment' | 'blobStore'>): void {
   const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
   if (!raw) {
+    const store = c.blobStore
+    if (store && !store.usesUploadApi) return
     if ((c.payment?.storage ?? 'operator') === 'operator') {
       throw new Error(
-        'initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave), unless payment.storage is "user".',
+        `initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave) because the blob store "${store?.id ?? 'arweave'}" uses it, unless payment.storage is "user".`,
       )
     }
     return

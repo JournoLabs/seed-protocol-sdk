@@ -23,6 +23,12 @@ export type PreparedBlobs = {
 export interface BlobStore {
   /** Names the store in errors and logs: `arweave`, `ipfs`, ... */
   readonly id: string
+  /**
+   * Whether the store sends uploads through the upload API (`uploadApiBaseUrl`) or Turbo, so that
+   * `initPublish` requires `uploadApiBaseUrl` and `estimatePublishCost` prices Arweave storage.
+   * `false` for a store that has its own destination, such as IPFS.
+   */
+  readonly usesUploadApi: boolean
   prepare(uploads: PublishUploadData[], ctx: BlobStoreContext): Promise<PreparedBlobs>
   send(pending: unknown[], ctx: BlobStoreContext): Promise<void>
   /** Throws unless every id can be read back from the store. */

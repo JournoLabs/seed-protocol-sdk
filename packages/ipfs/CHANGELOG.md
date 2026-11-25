@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `ipfsBlobStore` sets `usesUploadApi: false`, so `initPublish` no longer asks for `uploadApiBaseUrl` with it and `estimatePublishCost` reports no Arweave cost. `ipfsMirror` reports the wrapped store's value.
+
 ## 0.8.3 (2026-11-23)
 
 - New package. `ipfsBlobStore(options)` is a `BlobStore` for `PublishConfig.blobStore` whose ids are `ipfs://<cidv1>`, computed in `prepare` from each upload's bytes. `send` uploads each file as a CARv1 to every pinning provider; `assertStored` waits until each provider with `isPinned` reports the pin, or a gateway answers `HEAD /ipfs/<cid>`, for up to `storedTimeoutMs` (120 s).

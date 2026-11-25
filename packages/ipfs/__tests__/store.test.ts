@@ -93,6 +93,7 @@ describe('ipfsMirror', () => {
     const seen = { uploads: [] as Upload[], sent: [] as unknown[][], checked: [] as string[][] }
     const store: BlobStore = {
       id: 'arweave',
+      usesUploadApi: true,
       prepare: async (uploads) => {
         seen.uploads.push(...uploads)
         return { ids: uploads.map((_, i) => `inner:${i}`), pending: uploads.map((u) => u.itemPropertyName) }
@@ -123,6 +124,14 @@ describe('ipfsMirror', () => {
 
     await store.assertStored(prepared.ids)
     expect(seen.checked).toEqual([['inner:0']])
+  })
+
+  it("passes the wrapped store's usesUploadApi through; an IPFS-only store doesn't use the upload API", () => {
+    const { store: inner } = recordingStore()
+    const pinning = kuboRpcPinning({ url: ipfs.url })
+    expect(ipfsMirror(inner, { pinning }).usesUploadApi).toBe(true)
+    expect(ipfsMirror({ ...inner, usesUploadApi: false }, { pinning }).usesUploadApi).toBe(false)
+    expect(ipfsBlobStore({ pinning }).usesUploadApi).toBe(false)
   })
 
   it('fails the publish when the IPFS copy is not pinned', async () => {

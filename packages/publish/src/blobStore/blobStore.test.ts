@@ -10,6 +10,7 @@ const calls: { prepare: { uploads: PublishUploadData[]; ctx: BlobStoreContext }[
 }
 const memoryStore: BlobStore = {
   id: 'memory',
+  usesUploadApi: false,
   prepare: async (uploads, ctx) => {
     calls.prepare.push({ uploads, ctx })
     return { ids: uploads.map((_, i) => `mem:${i}`), pending: uploads.map((u) => u.itemPropertyName) }

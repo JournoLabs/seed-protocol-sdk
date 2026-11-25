@@ -50,6 +50,10 @@ Each file's `storage_transaction_id` is then `ipfs://<cidv1>`. Every app that re
 needs `ipfsBlobSource` in its SDK config ([Reading files](#reading-files)); without it the SDK takes
 the id for an Arweave id and the download fails.
 
+`initPublish` doesn't need `uploadApiBaseUrl` with this store, and `estimatePublishCost` returns no
+`arweave` entry: `storage` reads `{ store: 'ipfs', priced: false }` and `totalUsd` is gas only.
+Pinning costs are the provider's. Custom stores declare the same with `BlobStore.usesUploadApi`.
+
 Html with embedded images or `seed:property/` references is rewritten with Arweave gateway URLs of
 the images' ids, which gives broken links for `ipfs://` ids. Until that changes, use `ipfsMirror`
 for items with Html.

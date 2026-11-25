@@ -114,6 +114,7 @@ export function ipfsBlobStore(options: IpfsStoreOptions): BlobStore {
   const writer = ipfsWriter(options)
   return {
     id: 'ipfs',
+    usesUploadApi: false,
     async prepare(uploads): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       return { ids: dags.map((d) => `ipfs://${d.root}`), pending: dags.map((dag): PendingDag => ({ kind: 'ipfs', dag })) }
@@ -153,6 +154,7 @@ export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobSto
 
   return {
     id: `${store.id}+ipfs`,
+    usesUploadApi: store.usesUploadApi,
     async prepare(uploads, ctx: BlobStoreContext): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       const tagged = uploads.map((upload, i) => ({
