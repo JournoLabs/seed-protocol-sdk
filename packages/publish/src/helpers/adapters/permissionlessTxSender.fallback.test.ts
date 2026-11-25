@@ -49,6 +49,12 @@ const chainAndBundler = Bun.serve({
       case 'eth_maxPriorityFeePerGas':
       case 'eth_gasPrice':
         return ok('0x1')
+      case 'eth_call': {
+        // EntryPoint.getNonce(sender, key): sequence 0 under the key asked for.
+        const data = (params as Array<{ data?: string; input?: string }>)[0]!
+        const key = BigInt(`0x${(data.data ?? data.input)!.slice(10 + 64, 10 + 128)}`)
+        return ok(toHex(key << 64n, { size: 32 }))
+      }
       case 'eth_estimateUserOperationGas':
         return ok({ callGasLimit: '0x10000', verificationGasLimit: '0x10000', preVerificationGas: '0x10000' })
       case 'eth_sendUserOperation': {
@@ -176,6 +182,19 @@ describe('createPermissionlessTxSender when the sponsor declines', () => {
     expect(sent[1]!.paymaster).toBeUndefined()
     expect(sent[1]!.nonce).toBe(sent[0]!.nonce)
     expect(BigInt(sent[1]!.nonce!)).toBe(pinnedNonce(key))
+  })
+
+  test("without a nonceKey the resend keeps the declined op's nonce", async () => {
+    behaviour.sponsoredSend = 'AA31'
+    const sender = await createPermissionlessTxSender({
+      signer,
+      bundlerUrl,
+      paymasterUrl,
+      onSponsorDeclined: async () => true,
+    })
+    await sender.sendTransaction({ to: tx.to, data: tx.data })
+    expect(sent).toHaveLength(2)
+    expect(sent[1]!.nonce).toBe(sent[0]!.nonce)
   })
 
   test('refuses when confirm says no', async () => {

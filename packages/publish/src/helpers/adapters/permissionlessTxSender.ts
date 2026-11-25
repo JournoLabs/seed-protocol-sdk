@@ -202,10 +202,14 @@ export async function createPermissionlessTxSender(
         isDelegated: () => simpleAccount.isDeployed(),
         getNonce: () => publicClient.getTransactionCount({ address }),
       })
+      // Read once: viem draws a new nonce key on each send that has none, and a self-paid resend
+      // must keep the declined op's nonce.
+      const nonce =
+        tx.nonceKey !== undefined ? pinnedNonce(tx.nonceKey) : selfPayClient ? await simpleAccount.getNonce() : undefined
       const send = (client: typeof smartAccountClient) =>
         client.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
-          ...(tx.nonceKey !== undefined && { nonce: pinnedNonce(tx.nonceKey) }),
+          ...(nonce !== undefined && { nonce }),
           ...(authorization && { authorization }),
         })
       try {
