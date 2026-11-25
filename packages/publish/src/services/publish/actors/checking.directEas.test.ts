@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
 import { createActor, createMachine } from 'xstate'
 import { RelatedItemUnpublishedError } from '../../../../../sdk/src/db/read/publishErrors'
 import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUntil'
@@ -11,12 +11,19 @@ import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUn
 const EOA = '0x' + 'e'.repeat(40)
 const ADMIN = '0x' + 'a'.repeat(40)
 const SMART = '0x' + '5'.repeat(40)
+const DELEGATE = '0x' + '5e'.repeat(20)
+const OP_EAS = '0x4200000000000000000000000000000000000021'
 
 const harness = {
   useDirectEas: false,
   /** `backReferences` of each validateItemForPublish call. */
   backReferences: [] as (string | undefined)[],
   codeKind: 'none' as 'none' | 'eip7702-delegated' | 'contract',
+  /** The publisher's code, for the Seed delegate route. */
+  code: '0x',
+  /** PublishConfig.seedDelegateAddress and accountMode. */
+  seedDelegate: undefined as string | undefined,
+  accountMode: 'eoa' as 'eoa' | 'eip7702',
   session: null as null | {
     signer: { address: string }
     txSender?: { address: string }
@@ -41,6 +48,7 @@ mock.module('@seedprotocol/sdk', () => ({
 mock.module('~/helpers/chainClient', () => ({
   ...realChainClient,
   getAccountCodeKind: async () => harness.codeKind,
+  getPublishPublicClient: () => ({ getCode: async () => harness.code }),
   readUntil: async <T,>(read: () => Promise<T>) => read(),
 }))
 mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => harness.session }))
@@ -48,7 +56,13 @@ mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: asyn
 mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem: async () => {} }))
 mock.module('~/config', () => ({
   ...realConfig,
-  getPublishConfig: () => ({ useModularExecutor: false, useDirectEas: harness.useDirectEas }),
+  getPublishConfig: () => ({
+    useModularExecutor: false,
+    useDirectEas: harness.useDirectEas,
+    seedDelegateAddress: harness.seedDelegate,
+    accountMode: harness.accountMode,
+    easContractAddress: OP_EAS,
+  }),
 }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
 mock.module('../../../helpers/verifyPublishChain', () => ({ verifyPublishChain: async () => {} }))
@@ -184,4 +198,56 @@ describe('checking: direct EAS for publishers with no bytecode', () => {
     expect(verdict.error?.code).toBe('MANAGED_ACCOUNT_NOT_DEPLOYED')
     harness.session = null
   }, TEST_TIMEOUT_MS)
+
+  describe('the Seed delegate', () => {
+    const onDelegateRoute = async (run: () => Promise<void>, eas = OP_EAS) => {
+      const contracts = await import('~/helpers/contracts')
+      const { resetSeedDelegateEasCache } = await import('~/helpers/seedDelegate')
+      resetSeedDelegateEasCache()
+      const readEas = spyOn(contracts, 'readGetEas').mockImplementation(async () => eas as `0x${string}`)
+      harness.useDirectEas = false
+      harness.session = null
+      harness.seedDelegate = DELEGATE
+      harness.accountMode = 'eip7702'
+      harness.backReferences = []
+      try {
+        await run()
+      } finally {
+        readEas.mockRestore()
+        harness.seedDelegate = undefined
+        harness.accountMode = 'eoa'
+        harness.code = '0x'
+        harness.codeKind = 'none'
+      }
+    }
+    const seedSenderWallet = () => ({ ...wallet(EOA, 'eoa'), txSender: { address: EOA, delegatesTo: DELEGATE } })
+
+    test('an EOA delegated to it publishes with multiPublish, linking references', () =>
+      onDelegateRoute(async () => {
+        harness.codeKind = 'eip7702-delegated'
+        harness.code = '0xef0100' + DELEGATE.slice(2)
+        const verdict = await runChecking(EOA, wallet(EOA, 'eoa'))
+        expect(verdict.attestationStrategy).toBe('multiPublish')
+        expect(harness.backReferences).toEqual(['link'])
+      }), TEST_TIMEOUT_MS)
+
+    test('an undelegated EOA whose sender delegates to it publishes with multiPublish', () =>
+      onDelegateRoute(async () => {
+        const verdict = await runChecking(EOA, seedSenderWallet())
+        expect(verdict.attestationStrategy).toBe('multiPublish')
+      }), TEST_TIMEOUT_MS)
+
+    test('an undelegated EOA with a plain sender stays on direct EAS', () =>
+      onDelegateRoute(async () => {
+        const verdict = await runChecking(EOA, wallet(EOA, 'eoa'))
+        expect(verdict.attestationStrategy).toBe('directEas')
+      }), TEST_TIMEOUT_MS)
+
+    test('a delegate on another EAS fails checking, before any upload', () =>
+      onDelegateRoute(async () => {
+        const verdict = await runChecking(EOA, seedSenderWallet())
+        expect(verdict.type).toBe('checkingFailed')
+        expect(verdict.error?.code).toBe('PUBLISH_PREFLIGHT_FAILED')
+      }, '0x' + 'ea'.repeat(20)), TEST_TIMEOUT_MS)
+  })
 })

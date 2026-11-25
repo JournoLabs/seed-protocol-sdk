@@ -21,6 +21,8 @@ export const ARWEAVE_MIN_CHARGED_BYTES = 256 * 1024
  */
 export const TURBO_FREE_BYTES = 100 * 1024
 const TURBO_FREE_BYTES_CACHE_MS = 10 * 60_000
+/** Gas for an EIP-7702 authorization to an account with no code (EIP-7702's PER_EMPTY_ACCOUNT_COST). */
+const PER_EMPTY_ACCOUNT_COST = 25_000n
 
 type PublishCostFlags = {
   evmUserPays?: boolean
@@ -39,6 +41,8 @@ type PublishCostFlags = {
   testnet?: boolean
   /** PublishConfig's upload limits, for `upload`. */
   uploadLimits?: UploadLimits
+  /** Gas beyond the attestations: the EIP-7702 authorization of an EOA's first publish through the Seed delegate. */
+  authorizationGas?: bigint
 }
 
 /** Who pays, from the same resolution the publish flow uses ({@link resolvePublishPayment}). */
@@ -143,7 +147,7 @@ export function combinePublishCostEstimate(
   const freeBytes = uploadTo === 'turbo' ? (flags?.freeBytes ?? TURBO_FREE_BYTES) : 0
   return priceEstimate(
     work,
-    heuristicPublishGas(work),
+    heuristicPublishGas(work) + (flags?.authorizationGas ?? 0n),
     chargedUploadBytes(work, uploadTo, { freeBytes, uploadTags: flags?.uploadTags, uploadBatches: flags?.uploadBatches }),
     rates,
     {
@@ -245,9 +249,27 @@ async function defaultBackReferences(): Promise<'link' | 'defer'> {
   if (!publisher) return 'link'
   try {
     const { resolveAttestationStrategy } = await import('../publish/actors/checking')
-    return (await resolveAttestationStrategy(publisher)) === 'multiPublish' ? 'link' : 'defer'
+    return (await resolveAttestationStrategy(publisher, wallet?.txSender)) === 'multiPublish' ? 'link' : 'defer'
   } catch {
     return 'link'
+  }
+}
+
+/**
+ * {@link PER_EMPTY_ACCOUNT_COST} when the registered wallet's EOA delegates to the Seed delegate with
+ * this publish (ADR 0040), else 0.
+ */
+async function authorizationGas(): Promise<bigint> {
+  const config = getConfigRef()
+  if (!config?.seedDelegateAddress || config.useDirectEas || config.useModularExecutor) return 0n
+  const wallet = getPublishWallet()
+  const publisher = wallet?.publisherAddress ?? wallet?.txSender.address
+  if (!publisher) return 0n
+  try {
+    const { sendsThroughSeedDelegate } = await import('~/helpers/seedDelegate')
+    return (await sendsThroughSeedDelegate(publisher, wallet?.txSender)) === 'will_delegate' ? PER_EMPTY_ACCOUNT_COST : 0n
+  } catch {
+    return 0n
   }
 }
 
@@ -267,6 +289,7 @@ export async function estimatePublishCost(
   }
   if (options?.uploadTags) flags.uploadTags = options.uploadTags
   if (options?.uploadBatches) flags.uploadBatches = options.uploadBatches
+  flags.authorizationGas = await authorizationGas()
   const rates = options?.rates ?? (await getCachedMarketRates())
   return combinePublishCostEstimate(work, rates, flags)
 }

@@ -1,4 +1,4 @@
-import { BaseError, parseEther, zeroAddress, type Address } from 'viem'
+import { BaseError, parseEther, zeroAddress, type Address, type Hex } from 'viem'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError, type ManagedAccountPublishErrorCode } from '../errors'
 import { getPublishPublicClient, readUntil } from './chainClient'
@@ -120,8 +120,13 @@ export async function simulateCallFromAccount(params: {
   code?: ManagedAccountPublishErrorCode
   /** False to let the send go ahead when the simulation cannot run (only a revert throws). */
   requireSimulation?: boolean
+  /**
+   * Code to run at `managedAddress`: the Seed delegate's, for an EOA that delegates to it on this
+   * send (ADR 0040). A `0xef0100` designator isn't resolved in a state override by every node.
+   */
+  codeOverride?: Hex
 }): Promise<void> {
-  const { managedAddress, tx, action, code = 'AUTOMATION_PREFLIGHT_FAILED', requireSimulation = true } = params
+  const { managedAddress, tx, action, code = 'AUTOMATION_PREFLIGHT_FAILED', requireSimulation = true, codeOverride } = params
   const call = (withBalance: boolean) =>
     getPublishPublicClient().call({
       account: managedAddress as Address,
@@ -130,8 +135,16 @@ export async function simulateCallFromAccount(params: {
       value: tx.value,
       // OP chains charge the L1 data fee up front, so an eth_call from an unfunded account
       // fails before running. A balance override lets the simulation reach the contract.
-      ...(withBalance
-        ? { stateOverride: [{ address: managedAddress as Address, balance: parseEther('1000') }] }
+      ...(withBalance || codeOverride
+        ? {
+            stateOverride: [
+              {
+                address: managedAddress as Address,
+                ...(withBalance && { balance: parseEther('1000') }),
+                ...(codeOverride && { code: codeOverride }),
+              },
+            ],
+          }
         : {}),
     })
   try {

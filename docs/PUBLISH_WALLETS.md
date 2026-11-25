@@ -14,7 +14,7 @@ type PublishWallet = {
 
 | `kind` | Publishes from | Attests with |
 |---|---|---|
-| `'eoa'` | The signer's own address | Direct EAS, or `multiPublish` if the address has code |
+| `'eoa'` | The signer's own address | Direct EAS; `multiPublish` sent to itself when delegated to the Seed delegate, or when the EIP-7702 sender delegates it there on this send; `multiPublish` too if the address has other contract code |
 | `'smart'` | A smart account whose signatures are EIP-1271/6492 | `multiPublish` |
 | `'modular'` | A ManagedAccount administered by an EOA signer | `multiPublish` |
 
@@ -66,7 +66,9 @@ await setPublishWallet({
 
 `useSeedWallet().connect` and `ensureWalletThenPublish` apply the EIP-7702 sender to whatever wallet is connected.
 
-The EIP-7702 sender needs one signature a plain wallet connection can't give. An EOA's first UserOp carries an authorization delegating it to the Simple7702 account, signed by `SeedSigner.signAuthorization`. `fromEthersWallet` and local viem accounts implement that. Browser wallets don't expose it over EIP-1193, so for those adapters pass the wallet vendor's call as the `signAuthorization` option. Without one, the first send from an undelegated EOA throws before reaching the bundler. Later sends don't need it.
+The EIP-7702 sender needs one signature a plain wallet connection can't give. An EOA's first UserOp carries an authorization delegating it to the Simple7702 account, or to the Seed delegate when one is configured, signed by `SeedSigner.signAuthorization`. `fromEthersWallet` and local viem accounts implement that. Browser wallets don't expose it over EIP-1193, so for those adapters pass the wallet vendor's call as the `signAuthorization` option. Without one, the first send from an undelegated EOA throws before reaching the bundler. Later sends don't need it.
+
+With a Seed delegate (`seedDelegateAddress`, or the known deployment for the chain), the EIP-7702 sender delegates EOAs to it instead of Simple7702Account, and moves an EOA already on Simple7702Account there on its next send ([ADR 0040](./adr/0040-eoas-publish-through-a-seed-eip7702-delegate.md)). Those EOAs publish with `multiPublish` sent to their own address, so references within one publish are linked as on a ManagedAccount, and the EOA is the attester. Before the first send, the simulation and gas estimate run the delegate's code at the EOA, and the cost estimate adds 25,000 gas for the authorization. `checking` fails the publish with `PUBLISH_PREFLIGHT_FAILED` when the delegate's `getEas()` isn't the configured EAS. An EOA delegated to any other account, such as a wallet vendor's, is refused with `EIP7702_DELEGATED_ELSEWHERE` and never re-delegated. No Seed delegate is deployed yet, so no chain has a default.
 
 With `useModularExecutor`, publish uses a registered wallet that sends as its `publisherAddress` with a different signer. Any other wallet goes to the Thirdweb in-app flow, which needs the `thirdweb` peer.
 

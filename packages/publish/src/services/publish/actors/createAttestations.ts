@@ -24,7 +24,7 @@ import { assertMultiPublishRouted } from '~/helpers/multiPublishRoute'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import { sendsAsManagedAccount, type PublishWallet, type SeedTxSender } from '~/helpers/seedSigner'
-import type { Address, Hash, TransactionReceipt } from 'viem'
+import type { Address, Hash, Hex, TransactionReceipt } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { getBlobStore } from '~/blobStore'
 import { getPublishConfig } from '~/config'
@@ -34,6 +34,7 @@ import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import { normalizePublishRequest } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
+import { assertSeedDelegateEas, seedDelegateCodeOverride, sendsThroughSeedDelegate } from '~/helpers/seedDelegate'
 import { licenseOfferAttestation } from '../../licenseOffer'
 import debug from 'debug'
 
@@ -147,10 +148,14 @@ export async function resolveMultiPublishSender(source: {
   estimateMultiPublish: (requests: MultiPublishRequest[]) => Promise<PublishGasEstimate>
 }> {
   const { address } = source
-  const { modularAccountModuleContract, useModularExecutor } = getPublishConfig()
+  const { modularAccountModuleContract, useModularExecutor, seedDelegateAddress } = getPublishConfig()
   let routing = resolvePublishRouting({ useModularExecutor: false, publisherAddress: address })
   let activeWallet: PublishWallet = resolvePublishWallet(source)
   let routeToExecutorModule = false
+  /** The Seed delegate an EOA sends multiPublish to itself through (ADR 0040). */
+  let delegate: Address | undefined
+  /** The delegate's code, run at the EOA in simulations and estimates before it delegates. */
+  let codeOverride: Hex | undefined
 
   if (useModularExecutor) {
     // App-held automation session keys (PUBLISH_AUTOMATION.md): keep the provided
@@ -222,7 +227,16 @@ export async function resolveMultiPublishSender(source: {
       )
     }
   } else {
-    await ensureManagedAccountEasConfigured(address, activeWallet)
+    const delegateRoute = seedDelegateAddress
+      ? await sendsThroughSeedDelegate(address, activeWallet.txSender)
+      : false
+    if (delegateRoute && seedDelegateAddress) {
+      delegate = seedDelegateAddress
+      await assertSeedDelegateEas(delegate)
+      codeOverride = await seedDelegateCodeOverride(delegateRoute, delegate)
+    } else {
+      await ensureManagedAccountEasConfigured(address, activeWallet)
+    }
   }
 
   // Every publish is simulated from the sending account first, so a call that would revert is
@@ -244,7 +258,7 @@ export async function resolveMultiPublishSender(source: {
     }
     assertPublishFits(from, requests, { calldata: unsized.data })
     // Contracts of another version answer with a Router revert; name the mismatch instead.
-    await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule })
+    await assertMultiPublishRouted(to, { executorModule: routeToExecutorModule, delegate })
     await simulateCallFromAccount(
       routeToExecutorModule
         ? { managedAddress: from, tx: unsized, action: 'multiPublish via the executor module' }
@@ -254,9 +268,10 @@ export async function resolveMultiPublishSender(source: {
             action: 'multiPublish',
             code: 'PUBLISH_PREFLIGHT_FAILED',
             requireSimulation: false,
+            codeOverride,
           },
     )
-    const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests)) }
+    const tx = { ...unsized, gas: await publishGasLimit(from, unsized, localPublishGas(requests), { codeOverride }) }
     const send: SendTx = async (nonceKey, onNonceKeyIgnored) => {
       try {
         return await activeWallet.txSender.sendTransaction(
@@ -272,7 +287,16 @@ export async function resolveMultiPublishSender(source: {
   return {
     sendMultiPublish: sendPublishTx,
     attesterAddress: routing.attesterAddress,
-    estimateMultiPublish: (requests) => estimatePublishGas(from, encode(requests)),
+    estimateMultiPublish: (requests) => estimatePublishGas(from, encode(requests), { codeOverride }),
+  }
+}
+
+/** The run's sender, or `undefined` when it has no wallet (the send reports that). */
+function senderOf(source: { wallet?: unknown; account?: unknown }): SeedTxSender | undefined {
+  try {
+    return resolvePublishWallet(source).txSender
+  } catch {
+    return undefined
   }
 }
 
@@ -309,9 +333,13 @@ async function executeCreateAttestations(
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
     }
 
-    if (!useModularExecutor && !(await isContractDeployed(address))) {
+    if (
+      !useModularExecutor &&
+      !(await isContractDeployed(address)) &&
+      !(await sendsThroughSeedDelegate(address, senderOf(context)))
+    ) {
       throw new Error(
-        'EOA publishing must use the direct EAS path (multiPublish requires a deployed publisher contract). If you see this, attestation routing is misconfigured.',
+        'EOA publishing must use the direct EAS path (multiPublish requires a deployed publisher contract or the Seed delegate). If you see this, attestation routing is misconfigured.',
       )
     }
 

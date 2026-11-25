@@ -86,6 +86,13 @@ export interface SeedTxSender {
    */
   readonly gas?: { payer: 'sponsored' | 'user'; sponsor?: 'thirdweb' | 'paymaster' }
 
+  /**
+   * The EIP-7702 delegate this sender delegates its EOA to on a send, when it does:
+   * `createPermissionlessTxSender` sets it to the Seed delegate (ADR 0040). An undelegated EOA
+   * publishes with `multiPublish` only when its sender delegates it there.
+   */
+  readonly delegatesTo?: Address
+
   /** Submit already-encoded calldata. */
   sendTransaction(tx: SeedTxRequest): Promise<{ transactionHash: Hex }>
 

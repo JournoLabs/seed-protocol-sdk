@@ -131,6 +131,24 @@ describe('simulateCallFromAccount', () => {
     })
   })
 
+  test('runs the delegate\'s code at the account before it delegates', async () => {
+    const code = '0x6080604052' as `0x${string}`
+    const { simulateCallFromAccount } = await import('./executorModuleReadiness')
+    await simulateCallFromAccount({ managedAddress: ACCOUNT, tx, action: 'multiPublish', codeOverride: code })
+    const first = callMock.mock.calls[0] as unknown as [{ stateOverride?: unknown }]
+    expect(first[0].stateOverride).toEqual([{ address: ACCOUNT, code }])
+
+    callMock.mockClear()
+    callMock.mockImplementationOnce(async () => {
+      throw new Error('insufficient funds for gas * price + value')
+    })
+    await simulateCallFromAccount({ managedAddress: ACCOUNT, tx, action: 'multiPublish', codeOverride: code })
+    const retry = callMock.mock.calls[1] as unknown as [{ stateOverride: Array<{ address: string; balance?: bigint; code?: string }> }]
+    expect(retry[0].stateOverride).toHaveLength(1)
+    expect(retry[0].stateOverride[0]).toMatchObject({ address: ACCOUNT, code })
+    expect(retry[0].stateOverride[0]!.balance).toBeGreaterThan(0n)
+  })
+
   test('decodes executor module errors', async () => {
     const data = encodeErrorResult({
       abi: executorModuleAbi,

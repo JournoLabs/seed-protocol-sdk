@@ -65,3 +65,20 @@ describe('assertMultiPublishRouted: the executor module', () => {
     await expect(assertMultiPublishRouted(TARGET, { executorModule: true })).resolves.toBeUndefined()
   })
 })
+
+describe('assertMultiPublishRouted: an EOA on the Seed delegate', () => {
+  const DELEGATE = '0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e'
+
+  test("checks the delegate's code for the selector", async () => {
+    code = '0x6080604052' + '63a1263421' + '14'
+    await expect(assertMultiPublishRouted(TARGET, { executorModule: false, delegate: DELEGATE })).resolves.toBeUndefined()
+    expect(getCode).toHaveBeenLastCalledWith({ address: DELEGATE })
+    expect(readContract).not.toHaveBeenCalled()
+
+    code = '0x6080604052' + '6312345678' + '14'
+    await expect(assertMultiPublishRouted(TARGET, { executorModule: false, delegate: DELEGATE })).rejects.toMatchObject({
+      code: 'MULTI_PUBLISH_NOT_ROUTED',
+      message: expect.stringContaining(`The Seed delegate ${DELEGATE}`),
+    })
+  })
+})

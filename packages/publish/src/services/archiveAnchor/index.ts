@@ -186,7 +186,7 @@ async function attestAnchor(
     data,
     value: 0n,
   }
-  const strategy = await resolveAttestationStrategy(attester)
+  const strategy = await resolveAttestationStrategy(attester, (wallet ?? getPublishWallet())?.txSender)
   let transactionHash: `0x${string}`
   if (strategy === 'directEas') {
     const active = resolvePublishWallet({ wallet })

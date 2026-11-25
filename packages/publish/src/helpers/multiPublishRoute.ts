@@ -23,16 +23,21 @@ const routedOn = async (account: Address, selector: Hex): Promise<boolean> =>
  * so a version mismatch between the SDK and the deployed contracts is reported as one instead of a
  * Router revert. A ManagedAccount (`executorModule` false) is asked its route for the selector,
  * which its factory answers. The executor module is checked for the selector in its bytecode,
- * where Solidity's dispatcher holds it. When the check can't run (no Router, no code, an RPC
+ * where Solidity's dispatcher holds it, and so is the Seed delegate (`delegate`) of an EOA that
+ * publishes through it (ADR 0040). When the check can't run (no Router, no code, an RPC
  * error) it passes, and the simulation decides.
  */
-export async function assertMultiPublishRouted(target: string, { executorModule }: { executorModule: boolean }): Promise<void> {
+export async function assertMultiPublishRouted(
+  target: string,
+  { executorModule, delegate }: { executorModule: boolean; delegate?: Address },
+): Promise<void> {
   const address = target as Address
+  const byCode = executorModule || delegate !== undefined
   let routed: boolean
   let routesOld = false
   try {
-    if (executorModule) {
-      const code = await getPublishPublicClient().getCode({ address })
+    if (byCode) {
+      const code = await getPublishPublicClient().getCode({ address: delegate ?? address })
       if (!code || code === '0x') return
       routed = code.toLowerCase().includes(MULTI_PUBLISH_SELECTOR.slice(2))
       routesOld = code.toLowerCase().includes(PRE_REFERENCES_MULTI_PUBLISH_SELECTOR.slice(2))
@@ -44,9 +49,9 @@ export async function assertMultiPublishRouted(target: string, { executorModule 
     return
   }
   if (routed) return
-  const what = executorModule ? 'The executor module' : 'The account'
+  const what = executorModule ? `The executor module ${target}` : delegate ? `The Seed delegate ${delegate}` : `The account ${target}`
   throw new ManagedAccountPublishError(
-    `${what} ${target} has no multiPublish ${MULTI_PUBLISH_SELECTOR}, the three-phase multiPublish this version of ` +
+    `${what} has no multiPublish ${MULTI_PUBLISH_SELECTOR}, the three-phase multiPublish this version of ` +
       '@seedprotocol/publish sends' +
       (routesOld ? `; it has ${PRE_REFERENCES_MULTI_PUBLISH_SELECTOR}, the multiPublish of contracts from before it` : '') +
       '. The deployed contracts and this SDK are different versions; nothing was sent.',

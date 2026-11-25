@@ -25,14 +25,30 @@ mock.module('@seedprotocol/sdk', () => ({
 }))
 
 // Batch 17 item 18: the publisher's account kind, which decides the route without useDirectEas
-const harness = { codeKind: 'contract' as 'contract' | 'eoa', publisher: undefined as string | undefined }
+const harness = {
+  codeKind: 'contract' as 'contract' | 'eoa',
+  publisher: undefined as string | undefined,
+  /** The publisher's sender's EIP-7702 delegate. */
+  delegatesTo: undefined as string | undefined,
+}
 const realChain = await import('../../helpers/chainClient')
-mock.module('../../helpers/chainClient', () => ({ ...realChain, getAccountCodeKind: async () => harness.codeKind }))
+mock.module('../../helpers/chainClient', () => ({
+  ...realChain,
+  getAccountCodeKind: async () => harness.codeKind,
+  // An EOA with no code, for the Seed delegate route; read only when a delegate is configured.
+  getPublishPublicClient: () => ({ getCode: async () => '0x' }),
+}))
 const realRegistry = await import('../../helpers/publishWalletRegistry')
 mock.module('../../helpers/publishWalletRegistry', () => ({
   ...realRegistry,
   getPublishWallet: () =>
-    harness.publisher ? { kind: 'eoa', txSender: { address: harness.publisher }, signer: { address: harness.publisher } } : null,
+    harness.publisher
+      ? {
+          kind: 'eoa',
+          txSender: { address: harness.publisher, delegatesTo: harness.delegatesTo },
+          signer: { address: harness.publisher },
+        }
+      : null,
 }))
 
 const { initPublish, setConfigRef } = await import('~/config')
@@ -45,6 +61,7 @@ afterEach(() => {
   setConfigRef(null)
   harness.codeKind = 'contract'
   harness.publisher = undefined
+  harness.delegatesTo = undefined
 })
 
 describe('estimatePublishCost back references', () => {
@@ -74,5 +91,21 @@ describe('estimatePublishCost back references', () => {
   test('takes the mode the caller gives', async () => {
     initPublish({ uploadApiBaseUrl: 'https://example.test' })
     expect((await estimatePublishCost(item, { rates, backReferences: 'defer' })).work.attestationCount).toBe(2)
+  })
+})
+
+describe('estimatePublishCost on the Seed delegate', () => {
+  test("adds the authorization's gas to an EOA's first publish through it", async () => {
+    const delegate = `0x${'5e'.repeat(20)}`
+    initPublish({ uploadApiBaseUrl: 'https://example.test', accountMode: 'eip7702', seedDelegateAddress: delegate })
+    harness.publisher = `0x${'a'.repeat(40)}`
+    harness.codeKind = 'eoa'
+    // A sender that doesn't delegate: no authorization (links set by hand, to compare like with like).
+    const plain = await estimatePublishCost(item, { rates, backReferences: 'link' })
+    harness.delegatesTo = delegate
+    const first = await estimatePublishCost(item, { rates })
+    // multiPublish links the back reference
+    expect(first.work.attestationCount).toBe(3)
+    expect(first.evm.gas - plain.evm.gas).toBe(25_000n)
   })
 })

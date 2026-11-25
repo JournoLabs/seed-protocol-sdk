@@ -18,7 +18,7 @@ export const MANAGED_ACCOUNT_FACTORY_ADDRESSES: Readonly<Record<number, `0x${str
  * one publishes with `multiPublish` as itself. Empty until the first deploy; chains not listed need
  * `PublishConfig.seedDelegateAddress`.
  */
-export const SEED_DELEGATE_ADDRESSES: Record<number, `0x${string}`> = {}
+export const SEED_DELEGATE_ADDRESSES: Readonly<Record<number, `0x${string}`>> = {}
 
 /** eth-infinitism's `Simple7702Account` (EntryPoint v0.8), the delegate permissionless uses by default. */
 export const SIMPLE_7702_ACCOUNT_ADDRESS = '0xe6Cae83BdE06E4c305530e199D7217f42808555B' as const

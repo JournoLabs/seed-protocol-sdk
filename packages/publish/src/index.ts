@@ -1,6 +1,7 @@
 export {
   MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA,
   MANAGED_ACCOUNT_FACTORY_ADDRESSES,
+  SEED_DELEGATE_ADDRESSES,
 } from './helpers/constants'
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 export { getPublishChainName } from './helpers/chainConfig'

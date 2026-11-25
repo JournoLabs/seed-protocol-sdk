@@ -11,6 +11,9 @@ import {
 } from './config'
 import { getPublishThirdwebChain } from './helpers/thirdwebChain'
 import { SEED_DELEGATE_ADDRESSES } from './helpers/constants'
+
+/** The chain table, writable for these tests (it is read-only to callers). */
+const delegateTable = SEED_DELEGATE_ADDRESSES as Record<number, `0x${string}`>
 import { encodeEasMultiRevoke, encodeRegisterSchema } from './helpers/contracts'
 import { getPublishChainName } from './helpers/chainConfig'
 
@@ -74,25 +77,25 @@ describe('publish chain resolution', () => {
   })
 
   test('seedDelegateAddress from the chain table', () => {
-    const delegate = '0x00000000000000000000000000000000000000de'
+    const delegate = '0x00000000000000000000000000000000000000de' as const
     setCfg({ chain: baseSepolia })
     expect(getPublishConfig().seedDelegateAddress).toBeUndefined()
-    SEED_DELEGATE_ADDRESSES[baseSepolia.id] = delegate
+    delegateTable[baseSepolia.id] = delegate
     try {
       expect(getPublishConfig().seedDelegateAddress).toBe(delegate)
     } finally {
-      delete SEED_DELEGATE_ADDRESSES[baseSepolia.id]
+      delete delegateTable[baseSepolia.id]
     }
   })
 
   test('an explicit seedDelegateAddress wins', () => {
     const explicit = '0x00000000000000000000000000000000000000df'
-    SEED_DELEGATE_ADDRESSES[baseSepolia.id] = '0x00000000000000000000000000000000000000de'
+    delegateTable[baseSepolia.id] = '0x00000000000000000000000000000000000000de'
     try {
       setCfg({ chain: baseSepolia, seedDelegateAddress: explicit })
       expect(getPublishConfig().seedDelegateAddress).toBe(explicit)
     } finally {
-      delete SEED_DELEGATE_ADDRESSES[baseSepolia.id]
+      delete delegateTable[baseSepolia.id]
     }
   })
 

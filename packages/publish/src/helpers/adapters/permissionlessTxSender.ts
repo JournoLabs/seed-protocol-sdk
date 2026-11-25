@@ -226,6 +226,7 @@ export async function createPermissionlessTxSender(
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
     pinsNonceOn: entryPoint08Address,
+    ...(options.delegate && { delegatesTo: options.delegate }),
     sendTransaction: async (tx: SeedTxRequest) => {
       const authorization = await authorizationForUserOp({
         signer,

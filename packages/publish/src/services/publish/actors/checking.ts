@@ -26,15 +26,25 @@ import { LICENSE_OFFER_SCHEMA_UID, licenseOfferAttestation, parseLicenseOffer } 
 import { getSchemaRecord } from '~/helpers/schemaRegistry'
 import { heuristicPublishGas } from '../../publishCost/gasHeuristics'
 import { confirmSelfPayIfSponsorLow } from '../../sponsorStatus/sponsorStatus'
+import { assertSeedDelegateEas, sendsThroughSeedDelegate } from '~/helpers/seedDelegate'
 
 const activePublishProcesses = new Set<string>()
 
-export async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
+/**
+ * How `publisherAddress` attests. `sender` is the wallet's sender, which decides whether an EOA
+ * that isn't on the Seed delegate yet delegates to it on this send (ADR 0040).
+ */
+export async function resolveAttestationStrategy(
+  publisherAddress: string,
+  sender?: Pick<import('~/helpers/seedSigner').SeedTxSender, 'delegatesTo'>,
+): Promise<'multiPublish' | 'directEas'> {
   const cfg = getPublishConfig()
   if (cfg.useDirectEas) return 'directEas'
   if (cfg.useModularExecutor) return 'multiPublish'
-  // An EIP-7702 delegated EOA has code, but it is an EOA with no Seed extension: it attests
-  // directly, like an EOA with no code.
+  // An EOA on the Seed delegate, or delegating to it with this send, sends multiPublish to itself.
+  if (await sendsThroughSeedDelegate(publisherAddress, sender)) return 'multiPublish'
+  // Any other EIP-7702 delegated EOA has code, but no multiPublish: it attests directly, like an
+  // EOA with no code.
   const kind = await getAccountCodeKind(publisherAddress)
   return kind === 'contract' ? 'multiPublish' : 'directEas'
 }
@@ -181,7 +191,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
 
         let attestationStrategy: 'multiPublish' | 'directEas'
         try {
-          attestationStrategy = await resolveAttestationStrategy(address.trim())
+          attestationStrategy = await resolveAttestationStrategy(address.trim(), publishWallet.txSender)
         } catch (cause) {
           activePublishProcesses.delete(item.seedLocalId)
           sendBack({
@@ -192,6 +202,16 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
             ),
           })
           return
+        }
+
+        // ADR 0040: attestations sent through the Seed delegate go to the EAS fixed in its code.
+        const seedDelegate = getPublishConfig().seedDelegateAddress
+        if (
+          attestationStrategy === 'multiPublish' &&
+          seedDelegate &&
+          (await sendsThroughSeedDelegate(address.trim(), publishWallet.txSender))
+        ) {
+          await assertSeedDelegateEas(seedDelegate)
         }
 
         // Validate the payload the route will build: the contract links back references, direct
