@@ -4,6 +4,7 @@ import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import {
   attributeMultiPublishReceipt,
+  partAttestationUids,
   type MultiPublishRequestLike,
   type RequestAttestations,
 } from './multiPublishReceipt'
@@ -110,7 +111,7 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
         },
       ]
     }),
-    attemptId ? { attemptId } : undefined,
+    attemptId ? { attemptId, attestationUids: partAttestationUids(requests, attributed) } : undefined,
   )
 
   for (let i = 0; i < requests.length; i++) {

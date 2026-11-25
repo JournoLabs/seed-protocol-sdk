@@ -20,7 +20,7 @@ const OPEN_STATUSES: PublishAttemptStatus[] = ['sending', 'sent', 'landed']
 
 export type NewPublishAttempt = Omit<
   PublishAttemptType,
-  'seedLocalIds' | 'txHash' | 'status' | 'createdAt' | 'updatedAt'
+  'seedLocalIds' | 'txHash' | 'attestationUids' | 'status' | 'createdAt' | 'updatedAt'
 > & { seedLocalIds: string[] }
 
 const overlaps = (row: PublishAttemptType, seeds: Set<string>): boolean =>

@@ -43,7 +43,16 @@ const estimateGas = mock(async (_args: { data: string }): Promise<bigint> => {
 })
 const sendTransaction = mock(async (_tx: unknown) => ({ transactionHash: `0x${(++txCount).toString(16).padStart(64, '0')}` }))
 /** publish_attempts as far as these tests need it: the run of each attempt and whether it recorded. */
-let attemptRows: Array<{ id: string; publishRunId: string | null; status: string }> = []
+let attemptRows: Array<{
+  id: string
+  publishRunId: string | null
+  status: string
+  step?: string
+  txHash?: string | null
+  attestationUids?: string | null
+  requests?: string
+  attester?: string
+}> = []
 /** What findOpenPublishAttempts returns: attempts claimed and not settled. */
 let openAttempts: unknown[] = []
 const claimPublishAttempt = mock(async (attempt: { id: string; requests: string; publishRunId: string | null }) => {
@@ -54,7 +63,11 @@ const recordMultiPublishReceipt = mock(
   async ({ requests, attemptId }: { requests: Array<{ localId: string; seedUid?: string }>; attemptId?: string }) => {
     for (const r of requests) recorded.add(r.localId)
     const row = attemptRows.find((a) => a.id === attemptId)
-    if (row) row.status = 'recorded'
+    if (row) {
+      row.status = 'recorded'
+      // What the real recordMultiPublishReceipt stores with the attempt.
+      row.attestationUids = JSON.stringify(requests.flatMap((r) => [uidOf(r.localId), h('9')]))
+    }
     return { requests: requests.map((r) => ({ ...r, seedUid: uidOf(r.localId), versionUid: h('9') })), attributed: [] }
   },
 )
@@ -67,6 +80,8 @@ mock.module('@seedprotocol/sdk', () => ({
   claimPublishAttempt,
   findOpenPublishAttempts: async () => openAttempts,
   updatePublishAttempt: async () => {},
+  findRecordedPublishParts: async (runId: string) =>
+    attemptRows.filter((a) => a.publishRunId === runId && a.status === 'recorded'),
   countRecordedPublishParts: async (runIds: string[]) =>
     attemptRows.filter((a) => a.publishRunId && runIds.includes(a.publishRunId) && a.status === 'recorded').length,
   clearHtmlEmbeddedImageCoPublishRows,
@@ -330,6 +345,33 @@ describe('createAttestations: a publish over one transaction', () => {
     })
     await expect(run()).rejects.toThrow('execution reverted')
     expect(clearHtmlEmbeddedImageCoPublishRows.mock.calls.map(([id]) => id).sort()).toEqual(AUTHORS)
+  })
+
+  // Batch 18 item 6 (D67): onPublished lists every part of the run, not only this try's
+  test('the published batch lists the uids of parts an earlier try recorded, before this try\'s', async () => {
+    recorded = new Set(AUTHORS)
+    attemptRows = [
+      {
+        id: 'part-1',
+        publishRunId: 'run-r',
+        status: 'recorded',
+        step: 'multiPublish',
+        attestationUids: JSON.stringify([h('a'), h('b')]),
+      },
+      // Another run's part is not this publish's.
+      { id: 'other', publishRunId: 'run-x', status: 'recorded', step: 'multiPublish', attestationUids: JSON.stringify([h('c')]) },
+    ]
+    const { result } = await run({ publishRunId: 'run-r' })
+    const uids = result.publishedBatch!.attestationUids
+    expect(uids).toEqual([uidOf(POST), h('9'), h('a'), h('b')])
+  })
+
+  test('a part this try sent is listed once, whatever the rows say', async () => {
+    const { result } = await run({ publishRunId: 'run-r' })
+    const uids = result.publishedBatch!.attestationUids
+    // Both parts of this try: the authors' seeds and the Post's.
+    for (const id of [...AUTHORS, POST]) expect(uids).toContain(uidOf(id))
+    expect(new Set(uids).size).toBe(uids.length)
   })
 
   test('an empty payload sends nothing', async () => {

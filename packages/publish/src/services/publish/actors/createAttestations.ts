@@ -5,6 +5,7 @@ import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import { findOpenPublishAttempts, type IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import { recordedLicenseOfferUid } from './recordedLicenseOffer'
+import { earlierPartUids } from './earlierPartUids'
 import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
@@ -278,6 +279,8 @@ export async function resolveMultiPublishSender(source: {
 
 /** A `multiPublish` of this run, recorded. */
 type RecordedPart = {
+  /** The publish attempt that sent this part. */
+  attemptId: string
   receipt: TransactionReceipt
   /** The part's requests with the seed and version uids it created filled in. */
   requests: any[]
@@ -502,7 +505,7 @@ async function recordPart(
     throw new AttestationRecordError(landed, err)
   })
   await clearCoPublishRows(requests)
-  return { receipt, requests, attributed }
+  return { attemptId: landed.attemptId, receipt, requests, attributed }
 }
 
 /**
@@ -553,7 +556,15 @@ async function finishAttested(
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
     const rootForBatch =
       effectiveRequests.find((r) => r?.localId === item.seedLocalId) ?? effectiveRequests[0]
-    const batchExtraUids = attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid))
+    // The parts an earlier try of this run recorded come first: this try's parts are only the rest.
+    const batchExtraUids: string[] = await earlierPartUids(
+      context.publishRunId,
+      new Set(parts.map((p) => p.attemptId)),
+    ).catch((err) => {
+      logger('listing the uids of earlier parts failed: %O', err)
+      return []
+    })
+    batchExtraUids.push(...attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid)))
     for (const r of effectiveRequests) {
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))
