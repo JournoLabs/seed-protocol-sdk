@@ -36,8 +36,19 @@ reaches attestation there uses that tab's wallet, so a wallet that asks to confi
 asks in that tab, which may be in the background. When a publish ends normally, each queued tab is
 granted the lock in turn, finds no in-progress row, and lets it go. With `multiTab: 'off'` there is no
 message channel, so a tab only takes over the publishes it found at load.
+
+A tab resumes a publish, at a takeover or at load, only when its publish wallet publishes as the
+address the publish runs as (the row's `context.address`; the wallet's `publisherAddress`, else its
+sender's or signer's address). A tab with another wallet, or none, lets the lock go to the next tab in
+the queue and leaves the row `in_progress`; `publishLockHolder` answers `'none'` while no tab runs it.
+When the address that tab's wallet publishes as changes to the publish's, it queues again and takes
+the publish over. A page that restores before its wallet reconnects resumes its publishes once the
+wallet registers.
+
 `PublishManager.stopAll()` (called on wallet disconnect and by `endPublishSession`) also lets this
 tab's locks go and leaves the rows `in_progress`, so another open tab takes those publishes over too.
+It stops this tab's waits for other tabs' locks; the next change of its wallet's address queues it
+again for those publishes and for the ones it stopped, each taken only with the matching wallet.
 A publish stopped with `stopPublish` is marked `interrupted` before its lock goes, so no tab resumes
 it.
 
