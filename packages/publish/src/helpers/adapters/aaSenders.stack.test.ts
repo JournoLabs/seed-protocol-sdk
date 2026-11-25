@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from 'bun:test'
 import { Wallet } from 'ethers'
-import { createPublicClient, http, keccak256, parseEther, toHex, type Address } from 'viem'
+import { createPublicClient, http, keccak256, parseEther, parseEventLogs, toHex, zeroAddress, type Address, type Hex } from 'viem'
+import { entryPoint08Abi } from 'viem/account-abstraction'
 import { entryPoint06Address, entryPoint08Address } from 'viem/account-abstraction'
 import { optimismSepolia } from 'viem/chains'
 import { startAaStack, type AaStack } from '../../../test-utils/aaStack/aaStack'
@@ -22,12 +23,13 @@ const signerFor = (label: string) => fromEthersWallet(new Wallet(keyFor(label)))
 
 let stack: AaStack & { forkMisses: string[] }
 let readCode: (address: Address) => Promise<string | undefined>
+let client: ReturnType<typeof createPublicClient>
 
 beforeAll(async () => {
   setSystemTime(new Date('2026-11-06T00:00:00Z'))
   stack = await startAaStack()
   initPublish({ chain: optimismSepolia, rpcUrl: stack.rpcUrl, uploadApiBaseUrl: 'http://127.0.0.1:9' })
-  const client = createPublicClient({ chain: optimismSepolia, transport: http(stack.rpcUrl) })
+  client = createPublicClient({ chain: optimismSepolia, transport: http(stack.rpcUrl) })
   readCode = (address) => client.getCode({ address })
 }, 120_000)
 
@@ -115,4 +117,79 @@ describe('createPermissionlessTxSender on the canonical EntryPoint v0.8', () => 
     expect(await readCode(signer.address)).toBe(`0xef0100${SIMPLE_7702_ACCOUNT.slice(2).toLowerCase()}`)
     expect(stack.sentUserOps.at(-1)!.paymaster ?? null).toBeNull()
   }, 60_000)
+
+  // The fallback tests reuse the signers above: the recorded fork holds only their state.
+  const userOpPaymaster = async (rpc: ReturnType<typeof createPublicClient>, transactionHash: Hex) => {
+    const receipt = await rpc.getTransactionReceipt({ hash: transactionHash })
+    const [event] = parseEventLogs({ abi: entryPoint08Abi, eventName: 'UserOperationEvent', logs: receipt.logs })
+    return event!.args.paymaster
+  }
+
+  test('sponsored when funded: the paymaster pays and the EOA keeps its ETH', async () => {
+    const signer = signerFor('7702 sponsored')
+    let asked = 0
+    const sender = await createPermissionlessTxSender({
+      signer,
+      bundlerUrl: stack.bundlerUrl,
+      paymasterUrl: stack.paymasterUrl,
+      onSponsorDeclined: async () => (asked++, true),
+    })
+    const before = await client.getBalance({ address: signer.address as Address })
+
+    const { transactionHash } = await sender.sendTransaction({ to: TARGET, data: '0x' })
+
+    expect((await userOpPaymaster(client, transactionHash)).toLowerCase()).toBe(stack.paymaster.toLowerCase())
+    expect(await client.getBalance({ address: signer.address as Address })).toBe(before)
+    expect(asked).toBe(0)
+  }, 60_000)
+
+  test('self-pays when the service declines', async () => {
+    const signer = signerFor('7702 unsponsored')
+    await stack.setBalance(signer.address as Address, parseEther('1'))
+    const reasons: string[] = []
+    const sender = await createPermissionlessTxSender({
+      signer,
+      bundlerUrl: stack.bundlerUrl,
+      paymasterUrl: stack.paymasterUrl,
+      onSponsorDeclined: async ({ reason }) => (reasons.push(reason), true),
+    })
+    stack.setPaymasterMode('decline')
+    try {
+      const { transactionHash } = await sender.sendTransaction({ to: TARGET, data: '0x' })
+
+      expect(reasons).toEqual(['declined'])
+      expect(await userOpPaymaster(client, transactionHash)).toBe(zeroAddress)
+      expect(await client.getBalance({ address: signer.address as Address })).toBeLessThan(parseEther('1'))
+    } finally {
+      stack.setPaymasterMode('sponsor')
+    }
+  }, 60_000)
+
+  test('self-pays when the paymaster has no deposit', async () => {
+    // A stack of its own: the paymaster's EntryPoint deposit is never funded.
+    const broke = await startAaStack({ paymasterDepositWei: 0n })
+    try {
+      initPublish({ chain: optimismSepolia, rpcUrl: broke.rpcUrl, uploadApiBaseUrl: 'http://127.0.0.1:9' })
+      const rpc = createPublicClient({ chain: optimismSepolia, transport: http(broke.rpcUrl) })
+      const signer = signerFor('7702 unsponsored')
+      await broke.setBalance(signer.address as Address, parseEther('1'))
+      const reasons: string[] = []
+      const sender = await createPermissionlessTxSender({
+        signer,
+        bundlerUrl: broke.bundlerUrl,
+        paymasterUrl: broke.paymasterUrl,
+        onSponsorDeclined: async ({ reason }) => (reasons.push(reason), true),
+      })
+
+      const { transactionHash } = await sender.sendTransaction({ to: TARGET, data: '0x' })
+
+      expect(reasons).toEqual(['deposit_low'])
+      expect(await userOpPaymaster(rpc, transactionHash)).toBe(zeroAddress)
+      expect(await rpc.getBalance({ address: signer.address as Address })).toBeLessThan(parseEther('1'))
+      expect(broke.forkMisses).toEqual([])
+    } finally {
+      initPublish({ chain: optimismSepolia, rpcUrl: stack.rpcUrl, uploadApiBaseUrl: 'http://127.0.0.1:9' })
+      await broke.stop()
+    }
+  }, 180_000)
 })

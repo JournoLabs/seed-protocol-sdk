@@ -1,7 +1,8 @@
 /**
  * Opens downloaded envelopes for the SDK (`setEnvelopeDecryptor` in `@seedprotocol/sdk`): tries
  * each unlocked identity's recipient key and returns the plaintext with the content type recorded
- * inside, or null when none of them is a recipient.
+ * inside, or null when the bytes aren't an envelope or none of them is a recipient. A damaged
+ * envelope throws `EnvelopeError`.
  */
 
 import { EnvelopeError, decryptEnvelope } from './envelope'
@@ -18,7 +19,7 @@ export function createEnvelopeDecryptor(identities: EncryptionIdentity[]): Envel
       const { contentType, body } = await decryptEnvelope(envelope, { unwrap })
       return { contentType, body }
     } catch (error) {
-      if (error instanceof EnvelopeError && error.code === 'NO_KEY') return null
+      if (error instanceof EnvelopeError && (error.code === 'NO_KEY' || error.code === 'NOT_ENVELOPE')) return null
       throw error
     }
   }

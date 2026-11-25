@@ -28,7 +28,19 @@ const DEPLOYER_KEY = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804
 
 export type PaymasterCall = { method: string; entryPoint: Address }
 
+/** `'decline'` makes the ERC-7677 service answer every `pm_*` request with a JSON-RPC error. */
+export type PaymasterMode = 'sponsor' | 'decline'
+
+export type AaStackOptions = {
+  /** The paymaster's deposit on each EntryPoint. Default 10 ETH; `0n` leaves it unfunded. */
+  paymasterDepositWei?: bigint
+  /** How the ERC-7677 service starts out. Default `'sponsor'`. */
+  paymasterMode?: PaymasterMode
+}
+
 export type AaStack = {
+  /** Switches how the ERC-7677 service answers from the next request on. */
+  setPaymasterMode: (mode: PaymasterMode) => void
   /** Anvil, forked from OP Sepolia at {@link AA_STACK_FORK_BLOCK}. */
   rpcUrl: string
   /** Alto (EntryPoint v0.6 and v0.8), through a proxy that records sent UserOps. */
@@ -111,7 +123,9 @@ export function assertAnvilInstalled() {
  * fork reads OP Sepolia and rewrites the fixture. Record again after changing the pinned block or
  * when a test reaches state the fixture lacks; replay reports those reads in `misses`.
  */
-export async function startAaStack(): Promise<AaStack & { forkMisses: string[] }> {
+export async function startAaStack(options: AaStackOptions = {}): Promise<AaStack & { forkMisses: string[] }> {
+  const paymasterDepositWei = options.paymasterDepositWei ?? parseEther('10')
+  let paymasterMode: PaymasterMode = options.paymasterMode ?? 'sponsor'
   assertAnvilInstalled()
   const record = process.env.SEED_AA_STACK_RECORD === '1'
   const upstream: RecordedRpc = startRecordedRpc({
@@ -175,13 +189,13 @@ export async function startAaStack(): Promise<AaStack & { forkMisses: string[] }
       bytecode: ACCEPT_ALL_PAYMASTER_BYTECODE,
     })
     const paymaster = (await publicClient.waitForTransactionReceipt({ hash: deployHash })).contractAddress!
-    for (const entryPoint of [entryPoint06Address, entryPoint08Address]) {
+    for (const entryPoint of paymasterDepositWei > 0n ? [entryPoint06Address, entryPoint08Address] : []) {
       const hash = await deployer.writeContract({
         address: entryPoint,
         abi: parseAbi(['function depositTo(address account) payable']),
         functionName: 'depositTo',
         args: [paymaster],
-        value: parseEther('10'),
+        value: paymasterDepositWei,
       })
       await publicClient.waitForTransactionReceipt({ hash })
     }
@@ -213,6 +227,9 @@ export async function startAaStack(): Promise<AaStack & { forkMisses: string[] }
         const { id, method, params } = (await request.json()) as { id: unknown; method: string; params: unknown[] }
         const entryPoint = params[1] as Address
         paymasterCalls.push({ method, entryPoint })
+        if (paymasterMode === 'decline') {
+          return Response.json({ jsonrpc: '2.0', id, error: { code: -32000, message: 'sponsorship declined' } })
+        }
         const result =
           entryPoint.toLowerCase() === entryPoint06Address.toLowerCase()
             ? { paymasterAndData: paymaster }
@@ -234,6 +251,9 @@ export async function startAaStack(): Promise<AaStack & { forkMisses: string[] }
       sentUserOps,
       gasEstimates,
       paymasterCalls,
+      setPaymasterMode: (mode) => {
+        paymasterMode = mode
+      },
       forkMisses: upstream.misses,
       setBalance: async (address, wei) => {
         await publicClient.request({
