@@ -243,6 +243,20 @@ describe('taking over a publish left by a closed tab', () => {
     unsubscribe()
   }, TEST_TIMEOUT_MS)
 
+  test('a granted lock reports a holder change when the takeover keeps it', async () => {
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+    rows = [savedRow('seed-kept', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(publishLockName('seed-kept'))
+    watchForTakeover('seed-kept')
+    fake.otherTab.release(publishLockName('seed-kept'))
+    await waitUntilOrThrow(() => runHere('seed-kept') !== undefined, 'the publish to resume here')
+    // Reported once the run has started, so the listener reads 'here'.
+    expect(changed).toEqual(['seed-kept'])
+    expect(await publishLockHolder('seed-kept')).toBe('here')
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
   test('stopAll while a takeover reads the row: nothing resumes, and the lock stays let go', async () => {
     const read = gate()
     rows = [savedRow('seed-stopped-mid-takeover', 'attestationFailureRecoverable')]
