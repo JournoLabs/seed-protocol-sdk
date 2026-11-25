@@ -113,17 +113,17 @@ Html values fall back to the downloaded file, which the decryptor opens.
 to its PADMÉ length, so an envelope's size shows a size class (at most 12% extra bytes) rather than
 the exact length. A publish can turn padding off.
 
-**Privacy is declared per property** with `private: true` in the schema file, and only on
-properties whose values are uploaded: Html, Json, File, Image and ItemStorage Text. Their
-attestations hold a pointer to the upload, so encrypting the upload is enough. Scalars and relations
-are attested as values, so schema files refuse the flag on them and a publish refuses to attest a
-private one from a model defined in code; a value that must be private goes in a private Json
-property. A model's ItemStorage properties share one composite upload, so they are all private or
+**Privacy is declared per property** with `private: true`, in the schema file or on a model
+defined in code, and only on properties whose values are uploaded: Html, Json, File, Image and
+ItemStorage Text. Their attestations hold a pointer to the upload, so encrypting the upload is
+enough. Scalars and relations are attested as values, so schema files and `Model.create` refuse the
+flag on them, and a publish refuses to attest a private one that reached a row anyway; a value that
+must be private goes in a private Json property. A model's ItemStorage properties share one composite upload, so they are all private or
 all public. An image embedded in a private Html property is encrypted with it. Public properties of
 the same model are published as today.
 
-**Publish encrypts through an app-supplied encryptor.** `@seedprotocol/publish` can't depend on
-`@seedprotocol/encryption` at runtime while it is unpublished, so the app passes
+**Publish encrypts through an app-supplied encryptor.** `@seedprotocol/publish` doesn't depend on
+`@seedprotocol/encryption` at runtime, so the app passes
 `createPrivateUploadEncryptor` as `encryptPrivateUpload`. It needs only recipient public keys, from
 the registration attestation, so a session key can publish a private Version. A private upload with
 no encryptor fails the publish before anything is uploaded.
@@ -165,8 +165,7 @@ adapter; no license terms appear in encryption schemas or APIs.
   reading them.
 - Places that hand a gateway URL straight to the browser (`SeedImage`, `useEnsureLocalImage`,
   `mediaRef` hrefs, feed image URLs) can't show private content and must use local blob URLs for it.
-- `@seedprotocol/encryption` stays `private` in its package.json until private Versions ship, so it
-  is not part of releases before then.
+- `@seedprotocol/encryption` is released with the other packages (first on npm at 0.8.3).
 
 ## Alternatives considered
 
