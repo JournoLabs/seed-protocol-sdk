@@ -223,6 +223,9 @@
       "peerDependencies": {
         "@seedprotocol/publish": "workspace:*",
       },
+      "optionalPeers": [
+        "@seedprotocol/publish",
+      ],
     },
     "packages/licensing": {
       "name": "@seedprotocol/licensing",

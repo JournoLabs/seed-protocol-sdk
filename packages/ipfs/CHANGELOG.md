@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `@seedprotocol/publish` is an optional peer. `src` imports only its types, so installing `@seedprotocol/ipfs` no longer pulls in publish and its dependencies; add publish yourself where you use `ipfsBlobStore`.
 - `ipfsBlobStore` sets `usesUploadApi: false`, so `initPublish` no longer asks for `uploadApiBaseUrl` with it and `estimatePublishCost` reports no Arweave cost. `ipfsMirror` reports the wrapped store's value.
 
 ## 0.8.3 (2026-11-23)
