@@ -232,6 +232,13 @@
       "when": 1793445761265,
       "tag": "0032_add_publish_attempt_entry_point",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795610708628,
+      "tag": "0033_publish_attempt_attestation_uids",
+      "breakpoints": true
     }
   ]
 }

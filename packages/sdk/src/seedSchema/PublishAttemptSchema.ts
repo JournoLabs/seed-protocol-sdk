@@ -23,6 +23,11 @@ export const publishAttempts = sqliteTable(
     /** Chain head just before the send, as a decimal string. */
     fromBlock: text('from_block'),
     txHash: text('tx_hash'),
+    /**
+     * JSON array: the uids the transaction attested (seeds, versions, properties, license offer),
+     * stored when the part is recorded. Null on a row recorded before this column existed.
+     */
+    attestationUids: text('attestation_uids'),
     status: text('status').notNull(), // PublishAttemptStatus
     createdAt: int('created_at').notNull(),
     updatedAt: int('updated_at').notNull(),

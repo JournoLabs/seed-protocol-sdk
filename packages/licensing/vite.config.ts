@@ -13,6 +13,8 @@ export default defineConfig({
     },
     target: 'es2022',
     rollupOptions: {
+      // Keep class and function names in the built output: a log line or a `.name` read shows the real name.
+      output: { keepNames: true },
       external: (id) => !id.startsWith('.') && !id.startsWith('/') && !id.startsWith('\0'),
     },
     sourcemap: true,

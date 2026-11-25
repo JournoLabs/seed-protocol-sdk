@@ -84,6 +84,7 @@ mock.module('@seedprotocol/sdk', () => ({
   claimPublishAttempt: async () => undefined,
   findOpenPublishAttempts: async () => openAttempts,
   updatePublishAttempt: async () => {},
+  findPublishAttemptsByNonceKey: async () => [],
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
   recordPublishRequests,

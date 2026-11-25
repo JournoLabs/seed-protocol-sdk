@@ -6,6 +6,8 @@ import {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findPublishAttemptsByNonceKey,
+  findRecordedPublishParts,
   findRecordedPublishAttempts,
   updatePublishAttempt,
   type NewPublishAttempt,
@@ -117,6 +119,57 @@ testDescribe('publish attempts', () => {
     await expect(recordPublishRequests([failing], { attemptId: first.id })).rejects.toThrow('write failed')
     expect(await statusOf(first.id)).toBe('landed')
   })
+  // Batch 18 item 6 (D67): onPublished lists every part's uids, so a part keeps its own
+  it('records the uids a part attested on its attempt row, and lists a run\'s parts in order', async () => {
+    const run = generateId()
+    const first = attempt([seedA], run)
+    const second = attempt([seedB], run)
+    const other = attempt([generateId()], generateId())
+    for (const a of [first, second, other]) {
+      await claimPublishAttempt(a)
+      await updatePublishAttempt(a.id, { status: 'sent', txHash: `0x${a.id}` })
+    }
+    const uids = (n: string) => [`0x${n.repeat(64)}`, `0x${n.repeat(32)}${n.repeat(32)}`]
+    await recordPublishRequests([], { attemptId: first.id, attestationUids: uids('1') })
+    await recordPublishRequests([], { attemptId: second.id, attestationUids: uids('2') })
+    await recordPublishRequests([], { attemptId: other.id, attestationUids: uids('3') })
+
+    const parts = await findRecordedPublishParts(run)
+    expect(parts.map((p) => [p.id, p.attestationUids && JSON.parse(p.attestationUids)])).toEqual([
+      [first.id, uids('1')],
+      [second.id, uids('2')],
+    ])
+  })
+
+  it('a part recorded without uids keeps null, for a reader to fall back to its receipt', async () => {
+    const run = generateId()
+    const old = attempt([seedA], run)
+    await claimPublishAttempt(old)
+    await updatePublishAttempt(old.id, { status: 'sent', txHash: '0xabc' })
+    await recordPublishRequests([], { attemptId: old.id })
+    const [row] = await findRecordedPublishParts(run)
+    expect(row).toMatchObject({ id: old.id, txHash: '0xabc', attestationUids: null })
+  })
+
+  // Batch 18 item 30a (D68): a split publish under a host nonceKey counts its parts across runs
+  it('finds the attempts that sent under a nonce key, from any run', async () => {
+    const key = `${Date.now()}${Math.floor(Math.random() * 1e6)}`
+    const first = { ...attempt([seedA], generateId()), nonceKey: key, entryPoint: '0x' + '7'.repeat(40) }
+    const second = { ...attempt([seedB], generateId()), nonceKey: key, entryPoint: '0x' + '7'.repeat(40) }
+    const elsewhere = { ...attempt([generateId()]), nonceKey: `${key}1` }
+    for (const a of [first, second, elsewhere]) await claimPublishAttempt(a)
+    await updatePublishAttempt(first.id, { status: 'recorded', txHash: '0x1' })
+    await updatePublishAttempt(second.id, { status: 'sent', txHash: '0x2' })
+    const rows = await findPublishAttemptsByNonceKey(key)
+    expect(rows.map((r) => [r.id, r.status]).sort()).toEqual(
+      [
+        [first.id, 'recorded'],
+        [second.id, 'sent'],
+      ].sort(),
+    )
+    expect(await findPublishAttemptsByNonceKey(`${key}2`)).toEqual([])
+  })
+
   it('countRecordedPublishParts counts the recorded multiPublish attempts of the given runs', async () => {
     const runA = generateId()
     const runB = generateId()

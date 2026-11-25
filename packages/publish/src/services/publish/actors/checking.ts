@@ -16,7 +16,7 @@ import {
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
-import { LicenseOfferSchemaNotRegisteredError, ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
+import { AttestationOutcomeUnknownError, LicenseOfferSchemaNotRegisteredError, ManagedAccountPublishError, PublishWalletMissingError, UploadNeedsConfirmError, UploadTooLargeError } from '../../../errors'
 import { estimateUpload } from '../../publishCost/uploadEstimate'
 import { PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
 import { expectedPartCount } from '~/helpers/publishParts'
@@ -289,6 +289,10 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
       } catch (err) {
         activePublishProcesses.delete(item.seedLocalId)
         console.error('[checking] failed', err)
+        if (err instanceof AttestationOutcomeUnknownError) {
+          sendBack({ type: 'attestationOutcomeUnknown', error: err })
+          return
+        }
         sendBack({
           type: 'checkingFailed',
           error: err instanceof Error ? err : new Error(String(err)),

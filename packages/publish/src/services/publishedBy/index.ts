@@ -31,6 +31,11 @@ const REVOCABLE = true
 export type PublishedBatchResult = {
   seedUid: `0x${string}`
   versionUid?: `0x${string}`
+  /**
+   * Every attestation the publish made: the root's seed and version, then the uids of the parts an
+   * earlier try or run recorded, in the order they were sent (ADR 0036), then this try's own. A part
+   * recorded before the migration has its uids read from its receipt.
+   */
   attestationUids: `0x${string}`[]
   /** The license offer sent with the publish (`CreatePublishOptions.licenseOffer`), also in `attestationUids`. */
   licenseOfferUid?: `0x${string}`

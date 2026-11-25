@@ -12,7 +12,7 @@ const realSavePublish = await import('./actors/savePublish')
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   findOpenPublishAttempts: async () => [],
-  countRecordedPublishParts: async () => 0,
+  findPublishAttemptsByNonceKey: async () => [],
 }))
 mock.module('./actors/savePublish', () => ({
   ...realSavePublish,

@@ -161,7 +161,8 @@ function blockCap(maxBlocks: bigint | number | undefined): bigint | undefined {
   if (maxBlocks === undefined) return DEFAULT_MAX_BLOCKS
   if (typeof maxBlocks === 'bigint') return maxBlocks
   if (maxBlocks === Infinity) return undefined
-  throw new TypeError(`findPublishByNonceKey: maxBlocks is a bigint or Infinity, got ${maxBlocks}`)
+  if (Number.isFinite(maxBlocks) && maxBlocks >= 0) return BigInt(Math.floor(maxBlocks))
+  throw new TypeError(`findPublishByNonceKey: maxBlocks is a block count (bigint or number) or Infinity, got ${maxBlocks}`)
 }
 
 /**
@@ -175,8 +176,10 @@ function blockCap(maxBlocks: bigint | number | undefined): bigint | undefined {
  *   `seedUid`, read from its transaction's `Attested` events on that model's Seed schema with the
  *   sender as attester. Throws when the model has no EAS schema uid.
  * @param maxBlocks how far back from the chain head `fromBlock` may be, 1,000,000 blocks (100 log
- *   reads) by default. A `bigint` changes the cap and `Infinity` removes it. Throws a `RangeError`
- *   naming this option, before any log read, when `fromBlock` is further back.
+ *   reads) by default. A `bigint` or a finite number (rounded down) changes the cap and `Infinity`
+ *   removes it; other numbers throw a `TypeError`. When a part landed and `fromBlock` is further
+ *   back, throws a `RangeError` naming this option, before any log read. A key nothing landed under
+ *   answers `{ sequence: 0n }` from any `fromBlock`, since that takes no log read.
  */
 export async function findPublishByNonceKey(params: {
   sender: Address
@@ -189,19 +192,27 @@ export async function findPublishByNonceKey(params: {
   const entryPoint = params.entryPoint ?? entryPoint06Address
   const { sender, modelName, fromBlock } = params
   const cap = blockCap(params.maxBlocks)
-  const head = await getPublishPublicClient().getBlockNumber()
-  if (cap !== undefined && head - fromBlock > cap) {
-    throw new RangeError(
-      `findPublishByNonceKey: fromBlock ${fromBlock} is ${head - fromBlock} blocks behind the head ${head}, more than maxBlocks (${cap}). Pass a later fromBlock, a larger maxBlocks, or maxBlocks: Infinity.`,
-    )
-  }
-  const parts: PublishByNonceKey['parts'] = []
+  // Read every part's sequence first: a key nothing landed under needs no log search, so the
+  // block cap applies only once a part has landed.
+  const landedParts: Array<{ part: number; sequence: bigint; key: bigint }> = []
   for (let part = 1; ; part++) {
     const key = publishNonceKey(params.nonceKey, part)
     const sequence = await readNonceSequence(entryPoint, sender, key)
     if (sequence === 0n) break
-    const userOp = await landedUserOp({ entryPoint, sender, key, fromBlock, head, modelName })
-    parts.push({ part, sequence, ...(userOp && { userOp }) })
+    landedParts.push({ part, sequence, key })
+  }
+  const parts: PublishByNonceKey['parts'] = []
+  if (landedParts.length > 0) {
+    const head = await getPublishPublicClient().getBlockNumber()
+    if (cap !== undefined && head - fromBlock > cap) {
+      throw new RangeError(
+        `findPublishByNonceKey: fromBlock ${fromBlock} is ${head - fromBlock} blocks behind the head ${head}, more than maxBlocks (${cap}). Pass a later fromBlock, a larger maxBlocks, or maxBlocks: Infinity.`,
+      )
+    }
+    for (const { part, sequence, key } of landedParts) {
+      const userOp = await landedUserOp({ entryPoint, sender, key, fromBlock, head, modelName })
+      parts.push({ part, sequence, ...(userOp && { userOp }) })
+    }
   }
   const [first] = parts
   if (!first) return { sequence: 0n, parts }

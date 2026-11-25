@@ -54,4 +54,23 @@ describe('isRepeatingAttestationError', () => {
     expect(isRepeatingAttestationError(new ManagedAccountPublishError('x', 'AUTOMATION_PREFLIGHT_FAILED'))).toBe(false)
     expect(isRepeatingAttestationError(undefined)).toBe(false)
   })
+
+  // Batch 18 item 1: a minifier (a consumer's bundler, or this package's build before keepNames)
+  // renames the classes. Restored errors carry the name they were constructed with.
+  test('still matches a restored error when the classes are renamed, as a minifier does', () => {
+    const renamed = [PublishNonceKeyError, PublishChainConfigError]
+    const originals = renamed.map((c) => c.name)
+    for (const c of renamed) Object.defineProperty(c, 'name', { value: 'e', configurable: true })
+    try {
+      expect(
+        isRepeatingAttestationError({ name: 'PublishNonceKeyError', code: 'NONCE_KEY_SPENT', message: 'x' }),
+      ).toBe(true)
+      expect(isRepeatingAttestationError({ name: 'PublishChainConfigError', message: 'x' })).toBe(true)
+      expect(
+        isRepeatingAttestationError({ name: 'PublishNonceKeyError', code: 'NONCE_KEY_UNUSED', message: 'x' }),
+      ).toBe(false)
+    } finally {
+      renamed.forEach((c, i) => Object.defineProperty(c, 'name', { value: originals[i], configurable: true }))
+    }
+  })
 })

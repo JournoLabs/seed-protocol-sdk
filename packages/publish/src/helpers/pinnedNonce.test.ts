@@ -168,10 +168,41 @@ describe('host nonce keys', () => {
       }
     })
 
-    test('a finite number is refused', async () => {
+    // Batch 18 item 2 (D66): 0.8.2 answered { sequence: 0n } for a key nothing landed under
+    test('a key nothing landed under answers sequence 0 from any fromBlock', async () => {
+      noncesByKey = new Map()
+      landed(1, 0n)
+      head = 5_000_000n
+      getLogs.mockClear()
+      try {
+        expect(await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 0n })).toEqual({
+          sequence: 0n,
+          parts: [],
+        })
+        expect(getLogs).not.toHaveBeenCalled()
+      } finally {
+        head = 100n
+      }
+    })
+
+    // Batch 18 item 3: the type said `number` and the function threw a TypeError for it
+    test('a finite number changes the cap like a bigint', async () => {
+      landedOnce()
+      head = 100n
       await expect(
-        findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n, maxBlocks: 5 }),
-      ).rejects.toBeInstanceOf(TypeError)
+        findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n, maxBlocks: 10 }),
+      ).rejects.toBeInstanceOf(RangeError)
+      expect(
+        (await findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 90n, maxBlocks: 10 })).userOp,
+      ).toMatchObject({ transactionHash: TX, success: true })
+    })
+
+    test('NaN and a negative number are refused', async () => {
+      for (const maxBlocks of [NaN, -1, -Infinity]) {
+        await expect(
+          findPublishByNonceKey({ sender: SENDER, nonceKey: 'run-7', fromBlock: 1n, maxBlocks }),
+        ).rejects.toBeInstanceOf(TypeError)
+      }
     })
   })
 

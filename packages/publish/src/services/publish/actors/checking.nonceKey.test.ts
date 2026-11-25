@@ -21,6 +21,10 @@ const harness = {
   codeKind: 'contract' as 'none' | 'contract',
   /** The EntryPoint nonce under the key: its low 64 bits are how many UserOps landed. */
   chainNonce: 0n,
+  /** The item being published. */
+  seed: '',
+  /** publish_attempts rows by the decimal nonce key they sent under. */
+  rowsByKey: new Map<string, Array<{ id: string; status: string; txHash: string | null }>>(),
 }
 
 const realConfig = await import('~/config')
@@ -31,7 +35,8 @@ mock.module('@seedprotocol/sdk', () => ({
   validateItemForPublish: async () => ({ isValid: true, errors: [], payload: [] }),
   summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [], uploadTargets: [] }),
   RelatedItemUnpublishedError,
-  countRecordedPublishParts: async (runIds: string[]) => (runIds.includes('run-r') ? 1 : 0),
+  findPublishAttemptsByNonceKey: async (key: string) =>
+    (harness.rowsByKey.get(key) ?? []).map((r) => ({ seedLocalId: harness.seed, requests: '[]', ...r })),
 }))
 mock.module('~/helpers/chainClient', () => ({
   ...realChainClient,
@@ -64,6 +69,7 @@ const pinning = { signer: { address: PUBLISHER }, txSender: { address: PUBLISHER
 let n = 0
 const runChecking = async (address: string, wallet: unknown, nonceKey = 'run-7', extra: Record<string, unknown> = {}) => {
   const { checking } = await import('./checking')
+  harness.seed = `seed${n + 1}`
   const events: { type: string; error?: Error & { code?: string } }[] = []
   const machine = createMachine({
     invoke: {
@@ -107,12 +113,61 @@ describe('checking: CreatePublishOptions.nonceKey', () => {
 
   test('a run that goes on from a recorded part checks the next part key', async () => {
     harness.codeKind = 'contract'
-    // Part 1 is recorded in the run's attempts, not its saved state; part 2's key is read and unused.
+    // Part 1 is recorded in the attempts under its key, not in the run's saved state, and by any
+    // run; part 2's key is read and unused.
     harness.chainNonce = 0n
     harness.nonceReads = []
-    const event = await runChecking(PUBLISHER, pinning, 'run-7', { publishRunId: 'run-r' })
-    expect(event.type).toBe('validPublishProcess')
-    expect(harness.nonceReads.map((args) => args[1])).toEqual([publishNonceKey('run-7', 2)])
+    harness.rowsByKey = new Map([[publishNonceKey('run-7', 1).toString(), [{ id: 'part-1', status: 'recorded', txHash: '0x1' }]]])
+    try {
+      const event = await runChecking(PUBLISHER, pinning, 'run-7', { publishRunId: 'run-other' })
+      expect(event.type).toBe('validPublishProcess')
+      expect(harness.nonceReads.map((args) => args[1])).toEqual([publishNonceKey('run-7', 2)])
+    } finally {
+      harness.rowsByKey = new Map()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  // Batch 18 item 30a (D68)
+  test('a part sent and not settled under the key stops the try before any upload', async () => {
+    harness.chainNonce = 0n
+    harness.rowsByKey = new Map([[publishNonceKey('run-7', 1).toString(), [{ id: 'part-1', status: 'sent', txHash: '0x1' }]]])
+    try {
+      const event = await runChecking(PUBLISHER, pinning)
+      expect(event.type).toBe('attestationOutcomeUnknown')
+      expect(event.error).toMatchObject({ code: 'ATTESTATION_OUTCOME_UNKNOWN', attemptId: 'part-1' })
+    } finally {
+      harness.rowsByKey = new Map()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('the publish waits in attestationOutcomeUnknown, not failure, so reconcile can settle it', async () => {
+    harness.chainNonce = 0n
+    harness.rowsByKey = new Map([[publishNonceKey('run-7', 1).toString(), [{ id: 'part-1', status: 'landed', txHash: '0x1' }]]])
+    const { publishMachine } = await import('../index')
+    const item = { seedLocalId: `seed${++n}` }
+    harness.seed = item.seedLocalId
+    const { fromPromise } = await import('xstate')
+    const machine = publishMachine.provide({ actors: { authorizing: fromPromise(async () => undefined) } })
+    const actor = createActor(machine, {
+      input: { item, wallet: pinning, address: PUBLISHER, publishMode: 'patch', nonceKey: 'run-7' } as never,
+    }).start()
+    try {
+      await waitUntilOrThrow(
+        () => !['authorizing', 'checking'].includes(actor.getSnapshot().value as string),
+        'the checking verdict',
+      )
+      expect(actor.getSnapshot().value).toBe('attestationOutcomeUnknown')
+      expect(actor.getSnapshot().context.error).toMatchObject({ code: 'ATTESTATION_OUTCOME_UNKNOWN', attemptId: 'part-1' })
+    } finally {
+      harness.rowsByKey = new Map()
+      actor.stop()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('a spent key no local row explains says the publish is partly on chain', async () => {
+    harness.chainNonce = pinnedNonce(publishNonceKey('run-7')) + 1n
+    const event = await runChecking(PUBLISHER, pinning)
+    expect(event.error?.message).toContain('partly on chain')
   }, TEST_TIMEOUT_MS)
 
   // Batch 16 item 41: ConnectButton's in-app wallet; the publish sends from the ManagedAccount

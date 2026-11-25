@@ -1,5 +1,6 @@
 import type { Address } from 'viem'
 import { entryPoint06Address } from 'viem/account-abstraction'
+import { findPublishAttemptsByNonceKey } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { PublishNonceKeyError } from '~/errors'
 import { publishNonceKey, readNonceSequence } from './pinnedNonce'
@@ -60,9 +61,18 @@ export async function usableHostNonceKey(params: {
   }
   const key = publishNonceKey(nonceKey, part)
   if ((await readNonceSequence(sender.pinsNonceOn as Address, sender.address as Address, key)) > 0n) {
+    // A row under the key says what happened to it here (a reverted part, say). With none, a UserOp
+    // landed that this database never recorded: another database started the publish, or its rows
+    // are gone. Recovering from the chain isn't something a retry can do.
+    const explained = (await findPublishAttemptsByNonceKey(key.toString()).catch(() => [{}])).length > 0
     throw new PublishNonceKeyError(
-      `A UserOp from ${sender.address} already landed under this nonceKey, so this publish can't. ` +
-        'findPublishByNonceKey says whether it attested or reverted.',
+      explained
+        ? `A UserOp from ${sender.address} already landed under this nonceKey, so this publish can't. ` +
+            'findPublishByNonceKey says whether it attested or reverted.'
+        : `A UserOp from ${sender.address} already landed under this nonceKey${part > 1 ? ` (part ${part})` : ''}, ` +
+            'and this database has no record of it, so the publish is partly on chain. ' +
+            'findPublishByNonceKey lists what landed in its `parts`. A split publish under a host nonceKey ' +
+            'finishes only from the database that started it, so this one cannot continue it.',
       'NONCE_KEY_SPENT',
       nonceKey,
       sender.address,
