@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `ipfsMirror` implements `BlobStore.reusable`, so a replacing publish that reuses an upload after a reload checks IPFS too. It recomputes the CID from the upload's local bytes, checks the wrapped store holds the id, then checks the pin and pins the file when it is missing. It returns false when the bytes are unavailable or changed, and the upload is prepared again (and uploaded to both stores). Before, such an id passed on the wrapped store's check alone, so a pin that never landed went unnoticed.
 - `@seedprotocol/publish` is an optional peer. `src` imports only its types, so installing `@seedprotocol/ipfs` no longer pulls in publish and its dependencies; add publish yourself where you use `ipfsBlobStore`.
 - `ipfsBlobStore` sets `usesUploadApi: false`, so `initPublish` no longer asks for `uploadApiBaseUrl` with it and `estimatePublishCost` reports no Arweave cost. `ipfsMirror` reports the wrapped store's value.
 

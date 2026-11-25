@@ -33,4 +33,12 @@ export interface BlobStore {
   send(pending: unknown[], ctx: BlobStoreContext): Promise<void>
   /** Throws unless every id can be read back from the store. */
   assertStored(ids: string[]): Promise<void>
+  /**
+   * Whether a run replacing a parked one (ADR 0036) can reuse `id`, an id this store prepared for
+   * `upload` earlier, without preparing the upload again. Publish asks this instead of
+   * `assertStored` when the store has it, since `assertStored` only knows the ids it prepared in
+   * this session. May store what is missing (a store that writes in several places can finish a
+   * write that never landed). Resolves false, or throws, to have the upload prepared again.
+   */
+  reusable?(id: string, upload: PublishUploadData): Promise<boolean>
 }

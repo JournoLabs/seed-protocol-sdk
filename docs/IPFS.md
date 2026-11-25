@@ -33,6 +33,11 @@ do with Arweave alone. For each upload it:
 3. before attesting, waits until both stores hold it. A pin that never lands fails the publish, as
    a failed Arweave upload does.
 
+When a publish replaces a parked one and reuses an upload (ADR 0036), the mirror checks that the
+wrapped store holds the id, recomputes the CID from the file's local bytes, and pins the file if
+IPFS doesn't have it. If the bytes can't be read, or no longer match, the upload is prepared and
+sent to both stores again.
+
 An app's `signDataItems` receives the uploads with the `IPFS-CID` tag already in `upload.tags`.
 
 ## IPFS as the only store

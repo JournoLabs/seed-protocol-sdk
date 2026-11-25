@@ -140,4 +140,54 @@ describe('ipfsMirror', () => {
     const prepared = await store.prepare([await upload('image', new Uint8Array([10]))], {})
     await expect(store.assertStored(prepared.ids)).rejects.toThrow('IPFS blobs not stored')
   })
+
+  describe('reusable', () => {
+    /** The upload a replacing publish would read again, and the id the parked run attested for it. */
+    const parked = async (store: BlobStore, bytes: Uint8Array) => {
+      const u = await upload('image', bytes)
+      return { u, id: (await store.prepare([u], {})).ids[0]! }
+    }
+
+    it('pins an upload whose pin never landed, and reuses the id', async () => {
+      const { store: inner, seen } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const bytes = new Uint8Array([21, 22, 23])
+      // A restored publish: prepared in an earlier session, nothing sent to IPFS.
+      const { u, id } = await parked(store, bytes)
+      const fresh = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+
+      expect(await fresh.reusable!(id, u)).toBe(true)
+      expect([...ipfs.pinned]).toEqual([await computeCid(bytes)])
+      expect(seen.checked).toEqual([[id]])
+    })
+
+    it('reuses an upload that is already pinned without sending it again', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([31]))
+      expect(await store.reusable!(id, u)).toBe(true)
+      const imports = () => ipfs.requests.filter((r) => r.includes('dag/import')).length
+      const before = imports()
+      expect(await store.reusable!(id, u)).toBe(true)
+      expect(imports()).toBe(before)
+    })
+
+    it('is false when the local bytes are gone or changed, so the upload is prepared again', async () => {
+      const { store: inner } = recordingStore()
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([41]))
+      expect(await store.reusable!(id, { ...u, contentHash: '00'.repeat(32) })).toBe(false)
+      expect(ipfs.pinned.size).toBe(0)
+    })
+
+    it("is false when the wrapped store no longer holds the id", async () => {
+      const { store: inner } = recordingStore()
+      inner.assertStored = async () => {
+        throw new Error('not on Arweave')
+      }
+      const store = ipfsMirror(inner, { pinning: kuboRpcPinning({ url: ipfs.url }), ...fast })
+      const { u, id } = await parked(store, new Uint8Array([51]))
+      expect(await store.reusable!(id, u)).toBe(false)
+    })
+  })
 })

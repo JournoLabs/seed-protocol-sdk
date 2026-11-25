@@ -97,7 +97,7 @@ function ipfsWriter(options: IpfsStoreOptions) {
     }
   }
 
-  return { dags, send, assertCidsStored }
+  return { dags, send, assertCidsStored, isStored }
 }
 
 const isPendingDag = (item: unknown): item is PendingDag => (item as PendingDag | undefined)?.kind === 'ipfs'
@@ -178,6 +178,30 @@ export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobSto
       await Promise.all(
         batches.flatMap((b) => [b.inner?.length ? store.send(b.inner, ctx) : undefined, writer.send(b.ipfs)]),
       )
+    },
+    async reusable(id, upload) {
+      // The CID comes from the local bytes: after a reload `cidById` knows nothing of this id.
+      let dag: UnixFsDag
+      try {
+        dag = (await writer.dags([upload]))[0]!
+      } catch {
+        // Bytes gone or changed since the id was prepared: prepare the upload again.
+        return false
+      }
+      try {
+        if (store.reusable) {
+          if (!(await store.reusable(id, upload))) return false
+        } else {
+          await store.assertStored([id])
+        }
+      } catch {
+        return false
+      }
+      if (!(await writer.isStored(dag.root))) {
+        await writer.send([{ kind: 'ipfs', dag }])
+        await writer.assertCidsStored([dag.root])
+      }
+      return true
     },
     async assertStored(ids) {
       const cids = ids.flatMap((id) => cidById.get(id) ?? [])
