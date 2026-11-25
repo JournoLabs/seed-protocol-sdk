@@ -22,41 +22,79 @@ type SidecarReport = {
   unmapped: readonly { model: string; property?: string; id?: string }[]
   contextOutdated: boolean
   versionOutdated: boolean
+  // Absent from an older rdf.
+  derivedIdsMismatch?: boolean
 }
 type CheckSidecar = (lens: { schema: unknown; sidecar: unknown }) => SidecarReport
 
+/** The installed `@seedprotocol/rdf`: its ESM entry and its version. */
+type RdfInstall = { entry: string; version?: string }
+
 /**
- * @seedprotocol/rdf's ESM entry, from the nearest `node_modules/@seedprotocol/rdf` at or above
- * `root`. Read from disk rather than with Node's resolver: Node 24.21 keeps failing a resolve that
- * failed once in this process while `node_modules/@seedprotocol/` existed, which it always does
- * beside @seedprotocol/vite, so an install during the dev server would never be seen.
+ * @seedprotocol/rdf's ESM entry and version, from the nearest `node_modules/@seedprotocol/rdf` at or
+ * above `root` whose `package.json` names an entry. Read from disk rather than with Node's resolver:
+ * Node 24.21 keeps failing a resolve that failed once in this process while `node_modules/@seedprotocol/`
+ * existed, which it always does beside @seedprotocol/vite, so an install during the dev server would
+ * never be seen. A folder with no usable `exports` or `main`, or a `package.json` that doesn't parse,
+ * is a partial install: the search goes on above it and then to the resolver.
  */
-function findRdfEntry(root: string): string | undefined {
+function findRdfInstall(root: string): RdfInstall | undefined {
   for (let dir = root; ; dir = path.dirname(dir)) {
     const manifest = path.join(dir, 'node_modules/@seedprotocol/rdf/package.json')
     if (fs.existsSync(manifest)) {
-      const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
-        exports?: { '.'?: { import?: { default?: string } } }
-        main?: string
+      try {
+        const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
+          version?: string
+          exports?: { '.'?: { import?: { default?: string } } }
+          main?: string
+        }
+        const entry = pkg.exports?.['.']?.import?.default ?? pkg.main
+        if (entry) return { entry: path.resolve(path.dirname(manifest), entry), version: pkg.version }
+      } catch {
+        // An unreadable manifest is no more usable than one without an entry.
       }
-      const entry = pkg.exports?.['.']?.import?.default ?? pkg.main
-      return entry ? path.resolve(path.dirname(manifest), entry) : undefined
     }
     if (path.dirname(dir) === dir) break
   }
   // Layouts without node_modules folders (Yarn PnP) go through the resolver.
   try {
-    return createRequire(path.join(root, 'package.json')).resolve('@seedprotocol/rdf')
+    const entry = createRequire(path.join(root, 'package.json')).resolve('@seedprotocol/rdf')
+    return { entry }
   } catch {
     return undefined
   }
 }
 
-async function loadCheckSidecar(root: string): Promise<CheckSidecar | undefined> {
-  const entry = findRdfEntry(root)
-  if (!entry) return undefined
-  const { checkSidecar } = (await import(pathToFileURL(entry).href)) as { checkSidecar?: CheckSidecar }
-  return checkSidecar
+const versionParts = (version: string): number[] => version.split(/[-+]/)[0]!.split('.').map((n) => Number.parseInt(n, 10) || 0)
+
+/** Whether `a` is an older release than `b`; prerelease tags are ignored. */
+function isOlder(a: string, b: string): boolean {
+  const [x, y] = [versionParts(a), versionParts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  }
+  return false
+}
+
+/** This package's own version, which the rdf it loads should match or exceed. */
+function ownVersion(): string | undefined {
+  try {
+    return (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string }).version
+  } catch {
+    return undefined
+  }
+}
+
+async function loadCheckSidecar(root: string): Promise<{ checkSidecar?: CheckSidecar; outdated?: string }> {
+  const install = findRdfInstall(root)
+  if (!install) return {}
+  const { checkSidecar } = (await import(pathToFileURL(install.entry).href)) as { checkSidecar?: CheckSidecar }
+  const own = ownVersion()
+  const outdated =
+    own && install.version && isOlder(install.version, own)
+      ? `@seedprotocol/rdf ${install.version} is older than @seedprotocol/vite ${own}; update it to ${own}`
+      : undefined
+  return { checkSidecar, outdated }
 }
 
 /** What a dev server prints about the sidecar: warnings, then notes. */
@@ -65,6 +103,9 @@ function sidecarMessages(report: SidecarReport): { warnings: string[]; notes: st
   const notes: string[] = []
   for (const { id, term } of report.stale) warnings.push(`term "${term}" names ${id}, which is no model or property in the schema`)
   for (const { id, term } of report.invalid) warnings.push(`term "${term}" for ${id} isn't an IRI or a name with a prefix in @context`)
+  if (report.derivedIdsMismatch) {
+    warnings.push('every term is stale and the schema file leaves out ids; the SDK may have stored other ids for it, put them in the schema file')
+  }
   if (report.contextOutdated || report.versionOutdated) {
     warnings.push('@context is behind the schema; run `seed-rdf sync --write`')
   }
@@ -92,7 +133,11 @@ export function watchRdfSidecar(server: ViteDevServer, options: RdfSidecarOption
 
   const check = async () => {
     if (!fs.existsSync(sidecarFile) || !fs.existsSync(schemaFile)) return
-    checkSidecar ??= await loadCheckSidecar(root)
+    if (!checkSidecar) {
+      const loaded = await loadCheckSidecar(root)
+      checkSidecar = loaded.checkSidecar
+      if (loaded.outdated) logger.warn(`${prefix} ${loaded.outdated}`, { timestamp: true })
+    }
     if (!checkSidecar) {
       if (!missingWarned) logger.warn(`${prefix} install @seedprotocol/rdf to check this sidecar against the schema`)
       missingWarned = true
