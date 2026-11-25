@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { changedReleasedSections, isCheckedVersion, releasedSections } from '../check-released-changelogs.js'
+import { changedReleasedSections, isCheckedVersion, releasedSections, sectionHash } from '../check-released-changelogs.js'
 
 const changelog = (lines083) => `# Changelog
 
@@ -46,14 +46,24 @@ describe('changedReleasedSections', () => {
     assert.deepEqual(changedReleasedSections({ ...base, current, atTag: at(changelog('- a')) }), [])
   })
 
-  it('passes a corrected section that is listed with a reason', () => {
+  it('passes a corrected section that is listed with a reason and its hash', () => {
     const current = releasedSections(changelog('- a, corrected'))
-    const corrections = [{ package: 'publish', version: '0.8.3', reason: 'wrong name' }]
+    const sha256 = sectionHash(current.get('0.8.3'))
+    const corrections = [{ package: 'publish', version: '0.8.3', reason: 'wrong name', sha256 }]
     assert.deepEqual(changedReleasedSections({ ...base, corrections, current, atTag: at(changelog('- a')) }), [])
     assert.equal(
       changedReleasedSections({ ...base, packageDir: 'sdk', corrections, current, atTag: at(changelog('- a')) }).length,
       1,
     )
+  })
+
+  it('fails a listed section that changed again after its correction', () => {
+    const corrected = releasedSections(changelog('- a, corrected'))
+    const corrections = [{ package: 'publish', version: '0.8.3', reason: 'wrong name', sha256: sectionHash(corrected.get('0.8.3')) }]
+    const current = releasedSections(changelog('- a, corrected\n- merged in later'))
+    const errors = changedReleasedSections({ ...base, corrections, current, atTag: at(changelog('- a')) })
+    assert.equal(errors.length, 1)
+    assert.match(errors[0], /changed since its listed correction/)
   })
 
   it('skips a version with no tag and a section the tag did not have', () => {

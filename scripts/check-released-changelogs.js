@@ -6,14 +6,15 @@
  * (that is how 0.8.3's publish and eas sections got lines for features the tag doesn't have).
  *
  * A deliberate correction of a released section (a missing Breaking flag, a wrong name) is listed
- * in `scripts/released-changelog-corrections.json` with its reason; that package and version
- * are then not compared. A version whose tag isn't in the clone (a shallow checkout) is skipped.
+ * in `scripts/released-changelog-corrections.json` with its reason and the SHA-256 of the corrected
+ * section; that section must then match the hash instead of the tag, so a later edit fails again. A version whose tag isn't in the clone (a shallow checkout) is skipped.
  * A section the tag's CHANGELOG didn't have is skipped too: `bun run release -- --retry` and
  * hand-written backfills add sections after the tag.
  *
  * Usage: node scripts/check-released-changelogs.js
  */
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -43,6 +44,11 @@ export function releasedSections(text) {
   return sections
 }
 
+/** @param {string} section a section as {@link releasedSections} returns it */
+export function sectionHash(section) {
+  return createHash('sha256').update(section).digest('hex')
+}
+
 /** @param {string} version */
 export function isCheckedVersion(version) {
   const parts = version.split('.').map(Number)
@@ -56,7 +62,7 @@ export function isCheckedVersion(version) {
  * @param {object} args
  * @param {Map<string, string>} args.current sections now
  * @param {(version: string) => Map<string, string> | null} args.atTag sections at `v<version>`, or null without the tag
- * @param {{ package: string, version: string, reason: string }[]} args.corrections
+ * @param {{ package: string, version: string, reason: string, sha256: string }[]} args.corrections
  * @param {string} args.packageDir
  * @returns {string[]} one message per released section that changed since its tag
  */
@@ -64,7 +70,16 @@ export function changedReleasedSections({ current, atTag, corrections, packageDi
   const errors = []
   for (const [version, text] of current) {
     if (!isCheckedVersion(version)) continue
-    if (corrections.some((c) => c.package === packageDir && c.version === version)) continue
+    const correction = corrections.find((c) => c.package === packageDir && c.version === version)
+    if (correction) {
+      if (correction.sha256 !== sectionHash(text)) {
+        errors.push(
+          `packages/${packageDir}/CHANGELOG.md: \`## ${version}\` changed since its listed correction ` +
+            `(sha256 now ${sectionHash(text)})`,
+        )
+      }
+      continue
+    }
     const tagged = atTag(version)
     if (!tagged) continue
     const before = tagged.get(version)
@@ -126,7 +141,8 @@ function main() {
     for (const message of errors) console.error(`[released-changelogs] ${message}`)
     console.error(
       'Put notes for later work under `## Unreleased`. To correct a released section on purpose, ' +
-        'add the package, version and reason to scripts/released-changelog-corrections.json.',
+        'add the package, version, reason and the sha256 the error prints to ' +
+        'scripts/released-changelog-corrections.json.',
     )
     process.exit(1)
   }
