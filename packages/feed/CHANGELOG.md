@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Re-exports `ResolveMediaRefReason` from `@seedprotocol/arweave`; `ResolveMediaRefResult.reason` is that union rather than `string`.
+
 ## 0.8.3 (2026-11-23)
 
 - Depends on `image-size` `^2.1.0` (was `^1.1.1`). Versions up to 2.0.2 loop forever on a crafted ICNS file; a feed reads the first 8 KB of each Arweave image to size it.

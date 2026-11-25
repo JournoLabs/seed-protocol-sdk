@@ -26,7 +26,6 @@ No user-facing changes; released at the same version as the other packages.
 #### Fixes
 
 - query, eas, rdf: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
-- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 - index.html at the manifest root for HyperBEAM gateways (fa734bd9)
 
 ## 0.8.1 (2026-11-04)

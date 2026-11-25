@@ -1,0 +1,17 @@
+[
+  {
+    "package": "publish",
+    "version": "0.8.3",
+    "reason": "Lines for work that landed after the tag moved to Unreleased; duplicated multiPublish sentence removed; startPublish (not exported) replaced by the exported names"
+  },
+  {
+    "package": "sdk",
+    "version": "0.8.3",
+    "reason": "Flagged the ValidateItemForPublishResult union and the QueryDataSource EAS name as Breaking (batch 18 item 32)"
+  },
+  {
+    "package": "query",
+    "version": "0.8.3",
+    "reason": "Flagged the QueryDataSource EAS name as Breaking (batch 18 item 32)"
+  }
+]

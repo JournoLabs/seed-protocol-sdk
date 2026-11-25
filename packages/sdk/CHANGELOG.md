@@ -5,6 +5,7 @@ All notable changes to this package are documented in this file.
 ## Unreleased
 
 - New `announcePublishLockTaken(seedLocalId)` and `onPublishLockTaken(listener)`: tell the other tabs of the database that this tab took a seed's publish lock, and hear when another tab did. `@seedprotocol/publish` uses them to take over publishes left by closed tabs. Nothing is sent or heard without tab coordination (`multiTab: 'off'`, Node).
+- `ResolveMediaRefReason` is exported from `@seedprotocol/arweave`'s union through the SDK: `ResolveMediaRefResult.reason` is `'encrypted'`, `'non_media_url'`, `'seed_local_id_not_portable'`, `'seed_uid_requires_app_db'`, `'seed_uid_no_storage_transaction'` or `'unknown_ref'`, not `string`.
 
 ## 0.8.3 (2026-11-23)
 
@@ -12,8 +13,9 @@ All notable changes to this package are documented in this file.
 - `resolveMediaRef` resolves a transaction this device holds only as an unopened `seed-private/v1` envelope to `{ status: 'unresolved', reason: 'encrypted' }`. It returned a gateway link, which served the ciphertext. `useResolvedMediaRef` reports `unresolved` for it.
 - **Breaking (types):** `summarizePublishUploads` takes `{ publishMode }` only. It accepted `backReferences` and ignored it; references don't change what a publish uploads.
 - **Breaking:** The local query source (`createLocalQueryDataSource`) labels listed seeds with the model's EAS name, as the remote source does. It used the name as passed to `queryBySchema`.
+- **Breaking:** A custom `QueryDataSource` receives the model's EAS name (`easName`) as `schemaName` in `listSeedsBySchemaName` and `listSeedsBySchemaNameForMonth`, as `queryBySchema` now passes it. It received the name as the caller passed it.
 - `summarizePublishUploads` returns `uploadTargets` (type `PublishUploadTarget`): every upload the publish makes, in upload order, with the seed whose storage transaction attests it.
-- `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`.
+- **Breaking (types):** `validateItemForPublish` returns the payload as `payload` when it is valid. Given one placeholder transaction id per upload target, that is the payload the publish sends. `ValidateItemForPublishResult` is now a union on `isValid`: a hand-built `{ isValid: true, errors: [] }` has no `payload` and fails to compile (TS2322).
 - New `countRecordedPublishParts(publishRunIds)` counts the recorded `multiPublish` attempts of those publish runs: the parts of a split publish already on chain (ADR 0036).
 - `PrivateUploadNotEncryptedError`'s message says to pass `encryptPrivateUpload` to `initPublish`, built with `createPrivateUploadEncryptor` from `@seedprotocol/encryption`, which is now on npm.
 

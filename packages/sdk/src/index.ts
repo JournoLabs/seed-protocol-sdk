@@ -158,6 +158,7 @@ export type {
   FeedFieldManifest,
   ClassifyMediaRefOptions,
   MediaRefClassification,
+  ResolveMediaRefReason,
   ResolveMediaRefResult,
   ResolveMediaRefOptions,
   NormalizedMediaField,

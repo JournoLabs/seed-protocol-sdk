@@ -23,9 +23,10 @@ package.
 ## Decision
 
 ENS reads are a module of `@seedprotocol/query` (`packages/query/src/ens/`), exported from the
-subpath `@seedprotocol/query/ens` and not from the package root. viem and `multiformats` are
-regular dependencies of query; only the `ens` entry imports them, so the root entry's bundle
-does not grow.
+subpath `@seedprotocol/query/ens` and not from the package root. `multiformats` is a
+regular dependency of query and viem an optional peer; only the `ens` entry imports them, so the
+root entry's bundle does not grow. Without viem installed, the `ens` entry still imports, and its
+read functions reject with `EnsViemMissingError`.
 
 Every function takes a viem client from the caller (`createPublicClient({ chain: mainnet, ... })`).
 query does not pick an RPC URL or chain for ENS, as ENS lives on L1 while Seeds may be attested on
@@ -38,7 +39,8 @@ The discovery record is the ENSIP-5 text record `io.seedprotocol.publication`, h
 ## Consequences
 
 - One package to install for readers; ENS results feed straight into `queryBySchema`.
-- query now pulls viem and `multiformats` into `node_modules` for every install, used or not.
+- query pulls `multiformats` into `node_modules` for every install, used or not. viem comes only
+  with an app that reads ENS and installs it.
 - Accepting names in `queryBySchema({ attesters })` needs a client there; it is not done here.
   A caller resolves names first.
 - Contenthash writes (recommendation 3 of the IPFS and ENS plan) belong in

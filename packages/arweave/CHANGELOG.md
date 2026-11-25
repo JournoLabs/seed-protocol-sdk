@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New type `ResolveMediaRefReason`, the union of values `ResolveMediaRefResult.reason` takes: `'encrypted'`, `'non_media_url'`, `'seed_local_id_not_portable'`, `'seed_uid_requires_app_db'`, `'seed_uid_no_storage_transaction'` and `'unknown_ref'`. `reason` was `string`.
+
 ## 0.8.3 (2026-11-23)
 
 - The across-gateways reads try the host from before the read-gateway probe last: the one `setHost` configured, else the default `arweave.net`. Without `setHost`, a probe that moved the host past a failing `arweave.net` (to `zigza.xyz`, say) made the probe's pick the host tried last, and `arweave.net` wasn't tried.
