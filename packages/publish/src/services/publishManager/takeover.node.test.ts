@@ -46,6 +46,7 @@ const { onPublishLockHolderChange, publishLockHolder, publishLockName, setPublis
 )
 const { TEST_TIMEOUT_MS, waitUntilOrThrow } = await import('../../../test-utils/waitUntil')
 const { fakeLockManager } = await import('../../../test-utils/fakeLockManager')
+const { clearPublishWallet, setPublishWallet } = await import('../../helpers/publishWalletRegistry')
 
 const origReady = BaseDb.isAppDbReady.bind(BaseDb)
 const origGet = BaseDb.getAppDb.bind(BaseDb)
@@ -62,7 +63,14 @@ const db = () => {
   return chain
 }
 
-const savedRow = (seedLocalId: string, value: string, status = 'in_progress'): Row => ({
+/** The address the saved publishes run as, and this tab's publish wallet unless a test changes it. */
+const PUBLISHER = '0x00000000000000000000000000000000000000aB'
+const OTHER_ACCOUNT = '0x00000000000000000000000000000000000000cD'
+const THIRD_ACCOUNT = '0x00000000000000000000000000000000000000eF'
+/** Only the publish restore at load leaves: no other test's wallet re-checks it. */
+const LOAD_ACCOUNT = '0x0000000000000000000000000000000000000012'
+
+const savedRow = (seedLocalId: string, value: string, status = 'in_progress', address = PUBLISHER): Row => ({
   seedLocalId,
   status,
   updatedAt: 1,
@@ -70,9 +78,17 @@ const savedRow = (seedLocalId: string, value: string, status = 'in_progress'): R
     status: 'active',
     value,
     children: {},
-    context: { item: { seedLocalId, modelName: 'Post' }, address: '0x0000000000000000000000000000000000000001' },
+    context: { item: { seedLocalId, modelName: 'Post' }, address },
   }),
 })
+
+/** A publish wallet that publishes as `address`. Not awaited: registering waits for an SDK client. */
+const useWallet = (address: string) =>
+  void setPublishWallet({
+    signer: { address },
+    txSender: { address },
+    publisherAddress: address,
+  } as unknown as import('../../helpers/publishWalletRegistry').PublishWalletSession)
 
 /** An item no cache holds: createPublish takes no hold on it. */
 const stubItem = (seedLocalId: string) =>
@@ -93,8 +109,12 @@ beforeAll(async () => {
   setPublishLockManagerForTests(fake.locks)
   BaseDb.isAppDbReady = () => true
   BaseDb.getAppDb = db as unknown as typeof BaseDb.getAppDb
-  // At load, another open tab runs this publish.
-  rows = [savedRow('seed-held-at-load', 'attestationFailureRecoverable')]
+  useWallet(PUBLISHER)
+  // At load, another open tab runs this publish, and one started by another account runs nowhere.
+  rows = [
+    savedRow('seed-held-at-load', 'attestationFailureRecoverable'),
+    savedRow('seed-other-account-at-load', 'attestationFailureRecoverable', 'in_progress', LOAD_ACCOUNT),
+  ]
   fake.otherTab.hold(publishLockName('seed-held-at-load'))
   await PublishManager.ready()
 })
@@ -103,8 +123,9 @@ afterEach(() => {
   rows = []
 })
 
-afterAll(() => {
+afterAll(async () => {
   PublishManager.stopAll()
+  await clearPublishWallet()
   setPublishLockManagerForTests(undefined)
   BaseDb.isAppDbReady = origReady
   BaseDb.getAppDb = origGet
@@ -222,6 +243,20 @@ describe('taking over a publish left by a closed tab', () => {
     unsubscribe()
   }, TEST_TIMEOUT_MS)
 
+  test('a granted lock reports a holder change when the takeover keeps it', async () => {
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+    rows = [savedRow('seed-kept', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(publishLockName('seed-kept'))
+    watchForTakeover('seed-kept')
+    fake.otherTab.release(publishLockName('seed-kept'))
+    await waitUntilOrThrow(() => runHere('seed-kept') !== undefined, 'the publish to resume here')
+    // Reported once the run has started, so the listener reads 'here'.
+    expect(changed).toEqual(['seed-kept'])
+    expect(await publishLockHolder('seed-kept')).toBe('here')
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
   test('stopAll while a takeover reads the row: nothing resumes, and the lock stays let go', async () => {
     const read = gate()
     rows = [savedRow('seed-stopped-mid-takeover', 'attestationFailureRecoverable')]
@@ -255,5 +290,160 @@ describe('taking over a publish left by a closed tab', () => {
     fake.otherTab.release(publishLockName('seed-stopped'))
     expect(await publishLockHolder('seed-stopped')).toBe('none')
     expect(runHere('seed-stopped')).toBeUndefined()
+  }, TEST_TIMEOUT_MS)
+})
+
+describe("the taking tab's wallet", () => {
+  afterEach(() => useWallet(PUBLISHER))
+
+  /** Queues for the seed as a takeover would, then has the other tab let go of it. */
+  const grantAfterOtherTab = (seedLocalId: string) => {
+    fake.otherTab.hold(publishLockName(seedLocalId))
+    watchForTakeover(seedLocalId)
+    fake.otherTab.release(publishLockName(seedLocalId))
+  }
+  const holderChanges = () => {
+    const changed: string[] = []
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => changed.push(seedLocalId))
+    return { changed, unsubscribe }
+  }
+
+  test("a tab whose wallet publishes as another address doesn't take the publish, and the holder stays 'none'", async () => {
+    useWallet(OTHER_ACCOUNT)
+    const { changed, unsubscribe } = holderChanges()
+    rows = [savedRow('seed-wrong-wallet', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-wrong-wallet')
+
+    await waitUntilOrThrow(() => changed.includes('seed-wrong-wallet'), 'the granted lock to be let go')
+    expect(await publishLockHolder('seed-wrong-wallet')).toBe('none')
+    expect(runHere('seed-wrong-wallet')).toBeUndefined()
+    expect(announced).not.toContain('seed-wrong-wallet')
+    expect(interrupted).not.toContain('seed-wrong-wallet')
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
+  test('a tab with no publish wallet does not take the publish', async () => {
+    await clearPublishWallet()
+    const { changed, unsubscribe } = holderChanges()
+    rows = [savedRow('seed-no-wallet', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-no-wallet')
+
+    await waitUntilOrThrow(() => changed.includes('seed-no-wallet'), 'the granted lock to be let go')
+    expect(await publishLockHolder('seed-no-wallet')).toBe('none')
+    expect(runHere('seed-no-wallet')).toBeUndefined()
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
+  test('a lock the wrong wallet lets go goes to the next tab in the queue', async () => {
+    useWallet(OTHER_ACCOUNT)
+    const name = publishLockName('seed-next-in-queue')
+    rows = [savedRow('seed-next-in-queue', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(name)
+    watchForTakeover('seed-next-in-queue')
+    // A third tab queues behind this one.
+    let nextTabGranted = false
+    void fake.locks.request(name, {}, async () => {
+      nextTabGranted = true
+    })
+
+    fake.otherTab.release(name)
+    await waitUntilOrThrow(() => nextTabGranted, 'the next tab in the queue to be granted the lock')
+    expect(runHere('seed-next-in-queue')).toBeUndefined()
+  }, TEST_TIMEOUT_MS)
+
+  test('a wallet that publishes as the address the publish runs as takes it, whatever the letter case', async () => {
+    useWallet(PUBLISHER.toLowerCase())
+    rows = [savedRow('seed-right-wallet', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-right-wallet')
+
+    await waitUntilOrThrow(() => runHere('seed-right-wallet') !== undefined, 'the publish to resume here')
+    expect(await publishLockHolder('seed-right-wallet')).toBe('here')
+    expect(announced).toContain('seed-right-wallet')
+  }, TEST_TIMEOUT_MS)
+
+  test('a wallet that owns the address the publish runs as takes it', async () => {
+    // A smart account publishing for its admin EOA lists both: the publish ran as one of them.
+    void setPublishWallet({
+      signer: { address: OTHER_ACCOUNT },
+      txSender: { address: OTHER_ACCOUNT },
+      publisherAddress: OTHER_ACCOUNT,
+      ownedAddresses: [PUBLISHER],
+    } as unknown as import('../../helpers/publishWalletRegistry').PublishWalletSession)
+    rows = [savedRow('seed-owned-address', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-owned-address')
+
+    await waitUntilOrThrow(() => runHere('seed-owned-address') !== undefined, 'the publish to resume here')
+  }, TEST_TIMEOUT_MS)
+
+  test('switching this tab to the right wallet later takes the publish; another wallet does not', async () => {
+    useWallet(OTHER_ACCOUNT)
+    const { changed, unsubscribe } = holderChanges()
+    rows = [savedRow('seed-switched-later', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-switched-later')
+    await waitUntilOrThrow(() => changed.includes('seed-switched-later'), 'the granted lock to be let go')
+
+    useWallet(THIRD_ACCOUNT)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(runHere('seed-switched-later')).toBeUndefined()
+    expect(await publishLockHolder('seed-switched-later')).toBe('none')
+
+    useWallet(PUBLISHER)
+    await waitUntilOrThrow(() => runHere('seed-switched-later') !== undefined, 'the publish to resume here')
+    expect(await publishLockHolder('seed-switched-later')).toBe('here')
+    expect(announced).toContain('seed-switched-later')
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
+  test('the right wallet connecting while the wrong one lets the lock go still takes the publish', async () => {
+    useWallet(OTHER_ACCOUNT)
+    // Switches as the release is reported, before the takeover has finished.
+    const unsubscribe = onPublishLockHolderChange((seedLocalId) => {
+      if (seedLocalId === 'seed-switched-at-release') useWallet(PUBLISHER)
+    })
+    rows = [savedRow('seed-switched-at-release', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-switched-at-release')
+
+    await waitUntilOrThrow(() => runHere('seed-switched-at-release') !== undefined, 'the publish to resume here')
+    unsubscribe()
+  }, TEST_TIMEOUT_MS)
+
+  test('a publish restore at load left for another account resumes when that account connects', async () => {
+    rows = [savedRow('seed-other-account-at-load', 'attestationFailureRecoverable', 'in_progress', LOAD_ACCOUNT)]
+    expect(runHere('seed-other-account-at-load')).toBeUndefined()
+    expect(await publishLockHolder('seed-other-account-at-load')).toBe('none')
+
+    useWallet(LOAD_ACCOUNT)
+    await waitUntilOrThrow(() => runHere('seed-other-account-at-load') !== undefined, 'the publish to resume here')
+    expect(await publishLockHolder('seed-other-account-at-load')).toBe('here')
+  }, TEST_TIMEOUT_MS)
+
+  test('after stopAll, connecting a wallet queues again for the publishes this tab was waiting on', async () => {
+    rows = [savedRow('seed-waiting-at-stop', 'attestationFailureRecoverable')]
+    fake.otherTab.hold(publishLockName('seed-waiting-at-stop'))
+    watchForTakeover('seed-waiting-at-stop')
+    // The host stops everything when the account changes, then registers the new one.
+    PublishManager.stopAll()
+    await waitUntilOrThrow(async () => (await fake.locks.query()).pending?.length === 0, 'the wait to be dropped')
+    useWallet(OTHER_ACCOUNT)
+    await waitUntilOrThrow(async () => (await fake.locks.query()).pending?.length === 1, 'this tab to queue again')
+
+    fake.otherTab.release(publishLockName('seed-waiting-at-stop'))
+    // The new account isn't the publish's: it isn't taken.
+    await waitUntilOrThrow(async () => (await publishLockHolder('seed-waiting-at-stop')) === 'none', 'the lock to be let go')
+    expect(runHere('seed-waiting-at-stop')).toBeUndefined()
+  }, TEST_TIMEOUT_MS)
+
+  test('a publish stopAll stopped here resumes when its account connects again', async () => {
+    rows = [savedRow('seed-stopped-and-back', 'attestationFailureRecoverable')]
+    grantAfterOtherTab('seed-stopped-and-back')
+    await waitUntilOrThrow(() => runHere('seed-stopped-and-back') !== undefined, 'the publish to resume here')
+
+    PublishManager.stopAll()
+    await clearPublishWallet()
+    await waitUntilOrThrow(async () => (await publishLockHolder('seed-stopped-and-back')) === 'none', 'the lock to be let go')
+    expect(runHere('seed-stopped-and-back')).toBeUndefined()
+
+    useWallet(PUBLISHER)
+    await waitUntilOrThrow(() => runHere('seed-stopped-and-back') !== undefined, 'the publish to resume here again')
   }, TEST_TIMEOUT_MS)
 })

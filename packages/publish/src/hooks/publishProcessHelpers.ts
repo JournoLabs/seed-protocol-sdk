@@ -1,4 +1,3 @@
-import { isRestorableSnapshot, type PersistedSnapshot } from '../services/publishManager/actors/restorableSnapshot'
 
 /**
  * Extracts Arweave transaction IDs from a publish process record's persisted snapshot.
@@ -31,21 +30,4 @@ export function getEasPayload(record: { persistedSnapshot: string }): unknown {
   } catch {
     return undefined
   }
-}
-
-/**
- * Whether the next load of the app resumes this in-progress publish, by the rule the publish
- * manager restores with. A publish saved mid bundler upload can't resume (the signed data items
- * aren't saved) unless it had nothing to upload, and is marked interrupted instead; one saved while
- * attesting comes back waiting for a retry. False for a finished or unreadable snapshot.
- */
-export function resumesOnNextLoad(record: { persistedSnapshot: string }): boolean {
-  let parsed: PersistedSnapshot
-  try {
-    parsed = JSON.parse(record.persistedSnapshot) as PersistedSnapshot
-  } catch {
-    return false
-  }
-  if (!parsed || typeof parsed !== 'object' || parsed.status === 'done') return false
-  return isRestorableSnapshot(parsed)
 }
