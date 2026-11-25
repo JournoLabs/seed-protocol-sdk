@@ -1,3 +1,4 @@
+import { posix, win32 } from 'node:path'
 import { parseArgs } from 'node:util'
 import type { SeedMcpServerOptions } from './server.js'
 
@@ -21,7 +22,18 @@ or with --http, over Streamable HTTP at /mcp.
 
 EAS_CHAIN_ID and EAS_ENDPOINT choose the chain and indexer (default: OP Sepolia's EAS indexer).
 ARWEAVE_HOST chooses the gateway item bodies are read from. CACHE_DIR, CACHE_TTL and CACHE_ENABLED
-configure the on-disk cache of reads (default ./cache, one hour).`
+configure the on-disk cache of reads (default: the user cache folder, seed-mcp inside it, one hour:
+~/Library/Caches on macOS, $XDG_CACHE_HOME or ~/.cache on Linux, %LOCALAPPDATA% on Windows).`
+
+/**
+ * Where the server keeps its read cache when `CACHE_DIR` is unset: `seed-mcp` in the OS user cache
+ * folder, so a server started from a project folder doesn't write `./cache` into it.
+ */
+export function defaultCacheDir(env: Record<string, string | undefined>, platform: string, home: string): string {
+  if (platform === 'win32') return win32.join(env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local'), 'seed-mcp')
+  if (platform === 'darwin') return posix.join(home, 'Library', 'Caches', 'seed-mcp')
+  return posix.join(env.XDG_CACHE_HOME || posix.join(home, '.cache'), 'seed-mcp')
+}
 
 export interface HttpCliOptions {
   readonly port: number

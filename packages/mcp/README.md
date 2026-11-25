@@ -21,7 +21,7 @@ The server talks MCP over stdin and stdout. Clients that start local servers fro
     "seed-protocol": {
       "command": "npx",
       "args": ["-y", "@seedprotocol/mcp", "--attester", "0xYourPublisherAddress"],
-      "env": { "EAS_CHAIN_ID": "10" }
+      "env": { "EAS_CHAIN_ID": "11155420" }
     }
   }
 }
@@ -30,7 +30,7 @@ The server talks MCP over stdin and stdout. Clients that start local servers fro
 In Claude Code:
 
 ```bash
-claude mcp add seed-protocol -e EAS_CHAIN_ID=10 -- npx -y @seedprotocol/mcp --attester 0xYourPublisherAddress
+claude mcp add seed-protocol -e EAS_CHAIN_ID=11155420 -- npx -y @seedprotocol/mcp --attester 0xYourPublisherAddress
 ```
 
 | Option | |
@@ -59,7 +59,7 @@ Put it behind a TLS proxy and give clients `https://your.host/mcp`. claude.ai co
 | `--allowed-origin <origin>` | A browser origin allowed to call, such as an MCP inspector's. Repeat for several. Requests with any other `Origin` header get 403. Requests with no `Origin` header, which is how hosted connectors call, are accepted. |
 | `--rate-limit <n>` | Requests per minute per client address, with bursts of the same size. Over the limit, requests get 429 with `Retry-After`. Default 120; `0` turns it off. A client sends one request per tool call, plus two to connect. |
 | `--trust-proxy` | Take the client address from the last `X-Forwarded-For` entry, the one your proxy added, instead of the socket. Set it only behind a proxy that adds the header. |
-| `CACHE_DIR`, `CACHE_TTL`, `CACHE_ENABLED` | The on-disk cache of EAS and Arweave reads from `@seedprotocol/query` (default `./cache`, one hour). Repeat reads of a seed are served from it. |
+| `CACHE_DIR`, `CACHE_TTL`, `CACHE_ENABLED` | The on-disk cache of EAS and Arweave reads from `@seedprotocol/query` (default: `seed-mcp` in the user cache folder, one hour: `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LOCALAPPDATA%` on Windows). Repeat reads of a seed are served from it. |
 
 The server keeps no sessions and answers each request with JSON, so several instances can serve
 one URL. `GET` and `DELETE` get 405. Request bodies over 1 MB get 413.
@@ -150,7 +150,17 @@ const handle = createSeedMcpHttpHandler({ attesters: ['0xYourPublisherAddress'],
 const response = await handle(request, { clientAddress })
 ```
 
-The rate limit is keyed on `clientAddress`; requests without one are not limited. `source: 'local'` reads from a query source registered
+The rate limit is keyed on `clientAddress`; requests without one are not limited.
+
+On Node, `createSeedMcpHttpServer` from `@seedprotocol/mcp/node` is the `node:http` server `--http` runs. It takes the handler's options plus `path` (default `/mcp`) and `trustProxy`, and returns a server that isn't listening yet:
+
+```ts
+import { createSeedMcpHttpServer } from '@seedprotocol/mcp/node'
+
+createSeedMcpHttpServer({ attesters: ['0xYourPublisherAddress'], path: '/seed/mcp', trustProxy: true }).listen(3000)
+```
+
+ `source: 'local'` reads from a query source registered
 with `registerLocalQuerySource` instead of EAS.
 
 ## License
