@@ -65,6 +65,14 @@ export type PublishCostEstimate = {
   /** Upload size, time and memory, and whether the publish limits refuse it or need a confirm. */
   upload: import('./uploadEstimate').UploadEstimate
   work: PublishWorkSummary
+  /**
+   * How many transactions the publish is expected to go out in when it goes through the publish
+   * contract (ADR 0036): the same count `checking` reports as `expectedPublishTransactions`, from
+   * the local gas estimate, so a lower bound. Each costs `evm.gas` of its own. Absent on the
+   * direct EAS route, when `options.work` was passed, and when the payload can't be built or one
+   * item is too large for a transaction (the publish refuses that).
+   */
+  expectedPublishTransactions?: number
   estimatedAt: number
 }
 

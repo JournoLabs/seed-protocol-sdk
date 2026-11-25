@@ -6,9 +6,12 @@ import { signedDataItemByteLength } from '~/helpers/arweave'
 import { getTurboFreeUploadLimitBytes } from '~/helpers/turbo'
 import { getPublishViemChain } from '~/helpers/chainConfig'
 import { resolvePublishPayment } from '~/payment'
+import { expectedPartCount } from '~/helpers/publishParts'
+import { PLACEHOLDER_ARWEAVE_TX_ID } from '~/helpers/publishSize'
+import { normalizePublishRequest } from '../publish/actors/publishRequestNormalize'
 import { heuristicPublishGas } from './gasHeuristics'
 import { getCachedMarketRates, type MarketRates } from './marketRates'
-import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummary } from './types'
+import type { EstimatePublishCostOptions, PublishCostEstimate, PublishMode, PublishWorkSummary } from './types'
 import { estimateUpload, type UploadLimits } from './uploadEstimate'
 
 const WINSTON_PER_AR = 1e12
@@ -165,13 +168,16 @@ export function repricePublishCostEstimate(
   estimate: PublishCostEstimate,
   rates: MarketRates,
 ): PublishCostEstimate {
-  return priceEstimate(estimate.work, estimate.evm.gas, estimate.arweave.chargedBytes, rates, {
+  const repriced = priceEstimate(estimate.work, estimate.evm.gas, estimate.arweave.chargedBytes, rates, {
     evmUserPays: estimate.evm.userPays,
     arweaveUserPays: estimate.arweave.userPays,
     testnet: estimate.evm.testnet,
     uploadTo: estimate.arweave.uploadTo,
     freeBytes: estimate.arweave.freeBytes,
   }, estimate.upload)
+  return estimate.expectedPublishTransactions === undefined
+    ? repriced
+    : { ...repriced, expectedPublishTransactions: estimate.expectedPublishTransactions }
 }
 
 function priceEstimate(
@@ -251,6 +257,31 @@ async function defaultBackReferences(): Promise<'link' | 'defer'> {
   }
 }
 
+/**
+ * How many transactions a publish through the contract goes out in (ADR 0036), counted as `checking`
+ * does: the payload built with a placeholder id for each upload, then {@link expectedPartCount}.
+ * Undefined when the payload can't be built or a unit is too large for a transaction, which the
+ * publish refuses; the estimate is for pricing, so those don't fail it.
+ */
+async function expectedPublishTransactionsOf(
+  item: IItem<any>,
+  publishMode: PublishMode | undefined,
+): Promise<number | undefined> {
+  try {
+    const { summarizePublishUploads, validateItemForPublish } = await import('@seedprotocol/sdk')
+    const uploads = await summarizePublishUploads(item, { publishMode })
+    const placeholderUploads = uploads.uploadTargets.map((target) => ({ ...target, txId: PLACEHOLDER_ARWEAVE_TX_ID }))
+    const validation = await validateItemForPublish(item, placeholderUploads, {
+      publishMode: publishMode ?? 'patch',
+      backReferences: 'link',
+    })
+    if (!validation.isValid) return undefined
+    return expectedPartCount(validation.payload.map((request) => normalizePublishRequest(request)))
+  } catch {
+    return undefined
+  }
+}
+
 export async function estimatePublishCost(
   item: IItem<any>,
   options?: EstimatePublishCostOptions,
@@ -258,15 +289,19 @@ export async function estimatePublishCost(
   const { turbo, ...flags } = readPublishFlags()
   if (flags.uploadTo === 'turbo' && turbo) flags.freeBytes = await turboFreeBytes(turbo)
   let work = options?.work
+  let expectedPublishTransactions: number | undefined
   if (!work) {
     const { summarizePublishWork } = await import('@seedprotocol/sdk')
-    work = await summarizePublishWork(item, {
-      publishMode: options?.publishMode,
-      backReferences: options?.backReferences ?? (await defaultBackReferences()),
-    })
+    const backReferences = options?.backReferences ?? (await defaultBackReferences())
+    work = await summarizePublishWork(item, { publishMode: options?.publishMode, backReferences })
+    // Linked back references are the contract's route, the one that splits into parts.
+    if (backReferences === 'link') {
+      expectedPublishTransactions = await expectedPublishTransactionsOf(item, options?.publishMode)
+    }
   }
   if (options?.uploadTags) flags.uploadTags = options.uploadTags
   if (options?.uploadBatches) flags.uploadBatches = options.uploadBatches
   const rates = options?.rates ?? (await getCachedMarketRates())
-  return combinePublishCostEstimate(work, rates, flags)
+  const estimate = combinePublishCostEstimate(work, rates, flags)
+  return expectedPublishTransactions === undefined ? estimate : { ...estimate, expectedPublishTransactions }
 }
