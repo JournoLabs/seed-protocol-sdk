@@ -3,8 +3,8 @@ import { assertLocale } from './renderDeed'
 import { deriveRules } from './rules'
 
 /**
- * One sentence that says what others may do, built from the same rules as the deed. Terms with a
- * condition the rules don't cover end with "Other conditions apply." rather than leaving it out.
+ * One sentence that says what others may do, built from the same rules as the deed. It says
+ * "republish" only when the rules grant sharing. Terms with a condition the rules don't cover end with "Other conditions apply." rather than leaving it out.
  */
 export function summarySentence(terms: SeedLicenseTerms, options: { locale: 'en' }): string {
   assertLocale(options.locale)
@@ -15,7 +15,20 @@ export function summarySentence(terms: SeedLicenseTerms, options: { locale: 'en'
   if (has('permission-required')) return `Others need permission to republish this.${tail}`
   if (has('no-conditions') && has('use-any-purpose')) return `Anyone may use it for any purpose, with no conditions.${tail}`
 
-  const verb = has('adapt') ? 'republish and adapt it' : has('no-derivatives') ? 'republish it unchanged' : 'republish it'
+  // "Republish" claims distribution of the work itself, so it needs the share rule. Terms granting
+  // other actions only get a sentence that claims nothing beyond the license text.
+  const verb = has('adapt')
+    ? has('share')
+      ? 'republish and adapt it'
+      : 'adapt it'
+    : has('share')
+      ? has('no-derivatives')
+        ? 'republish it unchanged'
+        : 'republish it'
+      : has('use-any-purpose')
+        ? 'use it for any purpose'
+        : undefined
+  if (verb === undefined) return `Others may do only what the license text allows.${tail}`
   const parts = [
     verb,
     has('commercial-use') ? ', including commercially,' : '',
