@@ -6,7 +6,8 @@ import {
 import {
   buildArweaveTransactionLink,
   getPublicArweaveBaseUrl,
-  getPublicArweaveRawUrl,
+  hasUriScheme,
+  publicStorageUrl,
   parseArweaveTransactionLink,
   publishedArweaveLinksInHtml,
 } from '@seedprotocol/arweave'
@@ -16,6 +17,8 @@ import { loadFeedConfig } from './config'
 type SetFeedItemDefaultsOptions = {
   itemUrlBase: string
   itemUrlPath: string
+  /** Path gateway for `ipfs://` storage ids (`FEED_IPFS_GATEWAY`). */
+  ipfsGateway?: string
 }
 
 const formatRfc822Date = (timestamp: number): string => {
@@ -43,7 +46,7 @@ export const setFeedItemDefaults = (
   schemaName: string,
   options: SetFeedItemDefaultsOptions,
 ): void => {
-  const { itemUrlBase, itemUrlPath } = options
+  const { itemUrlBase, itemUrlPath, ipfsGateway } = options
 
   if (!item.title && !item.Title) {
     item.title = seedUid
@@ -79,7 +82,8 @@ export const setFeedItemDefaults = (
   let defaultLink = attestationLink
   if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
     try {
-      defaultLink = getPublicArweaveRawUrl(storageTransactionId)
+      // An id with no gateway to map to (an unknown scheme) keeps the attestation link.
+      defaultLink = publicStorageUrl(storageTransactionId, { ipfsGateway }) ?? attestationLink
     } catch (error) {
       console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)
     }
@@ -110,7 +114,9 @@ export const setFeedItemDefaults = (
   ) {
     // A stored transaction's guid is its ar:// URI (D34), so it doesn't change with the gateway
     // (`arweaveDomain`) the link is on. An item with its own link keeps that link as its guid.
-    item.guid = storageTransactionId && linkDefaulted ? `ar://${storageTransactionId}` : item.link || defaultLink
+    // An id that is already a URI (`ipfs://<cid>`) is its own guid.
+    const storageGuid = storageTransactionId && (hasUriScheme(storageTransactionId) ? storageTransactionId : `ar://${storageTransactionId}`)
+    item.guid = storageGuid && linkDefaulted ? storageGuid : item.link || defaultLink
     item.Guid = item.guid
   } else {
     if (!item.guid || item.guid === 'undefined') {
@@ -154,6 +160,7 @@ export const setFeedItemDefaults = (
 const setImageRelationCloneForFeed = (
   clone: Record<string, unknown>,
   seedUid: string,
+  ipfsGateway?: string,
 ): void => {
   if (!clone.title && !clone.Title) {
     clone.title = seedUid
@@ -214,9 +221,11 @@ const setImageRelationCloneForFeed = (
 
   if (storageTransactionId && storageTransactionId.length > 0) {
     try {
-      const mediaLink = getPublicArweaveRawUrl(storageTransactionId)
-      clone.link = mediaLink
-      clone.Link = mediaLink
+      const mediaLink = publicStorageUrl(storageTransactionId, { ipfsGateway })
+      if (mediaLink) {
+        clone.link = mediaLink
+        clone.Link = mediaLink
+      }
     } catch {
       // omit link when gateway URL cannot be built
     }
@@ -239,7 +248,7 @@ function withNestedCloneDefaults(
   const nestedSchema =
     typeof copy.schemaName === 'string' ? copy.schemaName : parentSchemaName
   if (nestedSchema === 'image') {
-    setImageRelationCloneForFeed(copy, nestedUid)
+    setImageRelationCloneForFeed(copy, nestedUid, options.ipfsGateway)
   } else {
     setFeedItemDefaults(copy, nestedUid, nestedSchema, options)
   }
@@ -288,6 +297,7 @@ function seedRecordsToFeedItems(
   const defaultsOptions: SetFeedItemDefaultsOptions = {
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
+    ipfsGateway: feedConfig.ipfsGateway,
   }
 
   const publicBaseUrl = getPublicArweaveBaseUrl()
