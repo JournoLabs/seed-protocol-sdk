@@ -275,7 +275,8 @@ async function attestProperty(
   const isStorageTransaction = property.kind === 'storageTransaction'
 
   // Only uploaded values can be private: anything else would be attested as plaintext. Schema
-  // files refuse the flag elsewhere; a model defined in code can still carry it.
+  // files and Model.create refuse the flag; this catches a row written by other code
+  // (ModelProperty.create called directly).
   if (isPrivateProperty(property) && property.kind !== 'storageSeed' && property.kind !== 'itemStorage' && row?.propertyValue != null && row.propertyValue !== '') {
     addValidationError(
       ctx,

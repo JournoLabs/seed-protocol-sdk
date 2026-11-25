@@ -205,13 +205,47 @@ export const TPropertyDefs = Type.Record(
   TPropertyConstructor,
 )
 
-function htmlPropertyFactory(opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy }) {
+/** Options for the builders of uploaded types. `private`: see `TProperty.private`. */
+export type UploadedPropertyOptions = { private?: boolean }
+
+const privateOption = (opts?: UploadedPropertyOptions) => (opts?.private ? { private: true } : {})
+
+function htmlPropertyFactory(
+  opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy } & UploadedPropertyOptions,
+) {
   return {
     dataType: ModelPropertyDataTypes.Html,
     ...(opts?.htmlEmbeddedDataUriPolicy
       ? { htmlEmbeddedDataUriPolicy: opts.htmlEmbeddedDataUriPolicy }
       : {}),
+    ...privateOption(opts),
   } satisfies Static<typeof TProperty>
+}
+
+const UPLOADED_DATA_TYPES: string[] = [
+  ModelPropertyDataTypes.Html,
+  ModelPropertyDataTypes.Json,
+  ModelPropertyDataTypes.File,
+  ModelPropertyDataTypes.Image,
+]
+
+/** Whether a property's value is uploaded to Arweave, so its attestation holds only a pointer. */
+export function isUploadedProperty(def: { dataType?: string; storageType?: string }): boolean {
+  if (UPLOADED_DATA_TYPES.includes(def.dataType ?? '')) return true
+  return def.dataType === ModelPropertyDataTypes.Text && def.storageType === 'ItemStorage'
+}
+
+/**
+ * Why a definition's `private` can't be applied, or undefined when it can (ADR 0033): only uploaded
+ * values can be encrypted; anything else would be attested as plaintext.
+ */
+export function privatePropertyProblem(def: { dataType?: string; storageType?: string; private?: unknown }): string | undefined {
+  if (def.private === undefined) return undefined
+  if (typeof def.private !== 'boolean') return 'private must be true or false'
+  if (def.private && !isUploadedProperty(def)) {
+    return 'only Html, Json, File, Image and ItemStorage Text properties can be private; this one would be attested as plaintext. Put the value in a private Json property instead.'
+  }
+  return undefined
 }
 
 export const Property = {
@@ -226,8 +260,8 @@ export const Property = {
     filenameSuffix,
     TObject: Type.String(),
   }),
-  Json: () => ({ dataType: ModelPropertyDataTypes.Json }),
-  File: () => ({ dataType: ModelPropertyDataTypes.File }),
+  Json: (opts?: UploadedPropertyOptions) => ({ dataType: ModelPropertyDataTypes.Json, ...privateOption(opts) }),
+  File: (opts?: UploadedPropertyOptions) => ({ dataType: ModelPropertyDataTypes.File, ...privateOption(opts) }),
   Number: () => ({ dataType: ModelPropertyDataTypes.Number }),
   /**
    * Create a List property. refValueType is required; ref is required only for list of relations.
@@ -247,7 +281,7 @@ export const Property = {
     refValueType,
     required,
   }),
-  Image: () => ({ dataType: ModelPropertyDataTypes.Image }),
+  Image: (opts?: UploadedPropertyOptions) => ({ dataType: ModelPropertyDataTypes.Image, ...privateOption(opts) }),
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
   Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
   Html: htmlPropertyFactory,

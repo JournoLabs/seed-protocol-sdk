@@ -214,7 +214,7 @@ export interface PublishConfig {
    * `createPrivateUploadEncryptor` from `@seedprotocol/encryption`, wrapping to the publisher's
    * registered key. Without it, publishing a private Html, Json, File, Image or ItemStorage value
    * fails with `PrivateUploadNotEncryptedError` (from `@seedprotocol/sdk`) before anything is
-   * uploaded. Public uploads never reach it. `@seedprotocol/encryption` isn't on npm yet.
+   * uploaded. Public uploads never reach it.
    */
   encryptPrivateUpload?: import('@seedprotocol/sdk').GetPublishUploadsOptions['encryptUpload']
   /**

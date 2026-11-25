@@ -70,6 +70,27 @@ The EIP-7702 sender needs one signature a plain wallet connection can't give. An
 
 With `useModularExecutor`, publish uses a registered wallet that sends as its `publisherAddress` with a different signer. Any other wallet goes to the Thirdweb in-app flow, which needs the `thirdweb` peer.
 
+### Who pays
+
+The EIP-7702 sender asks the paymaster at `paymasterUrl` to sponsor each UserOp. When it declines, the send fails with `PublishGasError` code `SPONSOR_DECLINED`, unless the app lets users pay their own gas:
+
+```ts
+initPublish({
+  bundlerUrl,
+  paymasterUrl,
+  payment: {
+    whenSponsorDeclines: 'user',
+    confirmSelfPay: async ({ address, reason }) => window.confirm(`Pay the gas from ${address}?`),
+  },
+})
+```
+
+With `whenSponsorDeclines: 'user'`, a decline resends the same UserOp without a paymaster, under the same nonce, so the EOA pays from its own ETH. `confirmSelfPay` is asked first; resolving `false` or throwing fails the send with `SELF_PAY_REFUSED`, and leaving it out lets self-pay go ahead. An EOA without enough ETH fails with `SELF_PAY_INSUFFICIENT_FUNDS`.
+
+A decline is a JSON-RPC error answered by `paymasterUrl`, or the bundler's `AA31` (paymaster deposit too low). A paymaster that can't be reached (network error, timeout, HTTP error), or that answers an internal error, a rate limit or method not found, fails the send with `SPONSOR_UNREACHABLE` and never falls back, so an outage or a wrong `paymasterUrl` doesn't charge users. Only a failure of the send itself falls back: once the bundler accepts the UserOp, a later error is reported as it is. Because a JSON-RPC error is told apart from a bundler error by its URL, `initPublish` throws `PublishPaymentConfigError` unless `paymasterUrl` is set and differs from `bundlerUrl`. Every `PublishGasError` leaves the attempt not sent, so a retry sends again and reuses the uploads.
+
+Without more config the decline is found at the send, after the uploads. Set `payment.sponsorPaymaster` to the paymaster's address to ask earlier: before any upload, the publish reads its EntryPoint v0.8 deposit, and when that is under twice the publish's estimated gas cost, asks `confirmSelfPay` with reason `'deposit_low'` and `estimatedCostWei`. A refusal stops the publish before it uploads anything. Without `confirmSelfPay`, or when the deposit or gas price can't be read, the publish skips this check. If the user agrees, the send still tries the sponsor first and asks again if it declines. `getSponsorStatus()` and the `useSponsorStatus()` hook read the same deposit, for showing it in the app.
+
 ## ManagedAccount without Thirdweb
 
 A ManagedAccount is Thirdweb's account contract with Seed's executor extension. `createManagedAccountTxSender` sends from one through any ERC-4337 bundler that serves EntryPoint v0.6, using standard RPC and no Thirdweb SDK. Paymasters are asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`; `sponsored: false` skips them, and the account pays its own gas.
