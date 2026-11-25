@@ -91,7 +91,8 @@ export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Pro
 
 /**
  * The authorization a UserOp must carry to delegate the EOA to `delegate`: none when it already
- * delegates there, a signed one when it delegates nowhere or to a delegate in `movableFrom`. viem's
+ * delegates there, a signed one when it delegates nowhere or to a delegate in `movableFrom`. A signer
+ * without `signAuthorization` stays on a delegate in `movableFrom`. viem's
  * prepareUserOperation only fills in a stub, which bundlers reject, so the caller has to sign the
  * real one. An EOA delegated to anything else (a wallet's own smart account) is never re-delegated.
  * @throws Eip7702ModularAccountPublishError `EIP7702_DELEGATED_ELSEWHERE` for any other delegate
@@ -119,6 +120,9 @@ export async function authorizationForUserOp(params: {
     )
   }
   if (typeof signer.signAuthorization !== 'function') {
+    // A movable delegate keeps working as the account (the Seed delegate is Simple7702Account plus
+    // multiPublish): stay on it rather than fail a signer that can't authorize the move.
+    if (current) return undefined
     throw new Error(
       `@seedprotocol/publish: ${signer.address} hasn't delegated to an EIP-7702 account yet, and its signer has no signAuthorization to do so. Browser wallets don't expose it over EIP-1193: pass the wallet vendor's call as signAuthorization, or use accountMode: 'eoa'.`,
     )
@@ -226,7 +230,8 @@ export async function createPermissionlessTxSender(
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
     pinsNonceOn: entryPoint08Address,
-    ...(options.delegate && { delegatesTo: options.delegate }),
+    // Only a signer that can authorize the move delegates the EOA there; routing reads this.
+    ...(options.delegate && typeof signer.signAuthorization === 'function' && { delegatesTo: options.delegate }),
     sendTransaction: async (tx: SeedTxRequest) => {
       const authorization = await authorizationForUserOp({
         signer,

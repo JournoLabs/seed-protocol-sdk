@@ -406,4 +406,19 @@ describe('createPermissionlessTxSender with the Seed delegate', () => {
     await sender.sendTransaction(tx)
     expect(sent[0]!.eip7702Auth).toBeUndefined()
   })
+
+  test("a signer that can't authorize keeps an EOA on Simple7702Account, off the delegate route", async () => {
+    behaviour.delegate = SIMPLE_7702_ACCOUNT
+    const { signAuthorization: _omit, ...browserSigner } = signer
+    const sender = await createPermissionlessTxSender({ signer: browserSigner, bundlerUrl, paymasterUrl, delegate: seedDelegate })
+    expect(sender.delegatesTo).toBeUndefined()
+    await sender.sendTransaction(tx)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.eip7702Auth).toBeUndefined()
+  })
+
+  test('a signer that can authorize reports the delegate', async () => {
+    const sender = await createPermissionlessTxSender({ signer, bundlerUrl, paymasterUrl, delegate: seedDelegate })
+    expect(sender.delegatesTo).toBe(seedDelegate)
+  })
 })

@@ -261,7 +261,7 @@ async function defaultBackReferences(): Promise<'link' | 'defer'> {
  */
 async function authorizationGas(): Promise<bigint> {
   const config = getConfigRef()
-  if (!config?.seedDelegateAddress || config.useDirectEas || config.useModularExecutor) return 0n
+  if (!config || config.useDirectEas || config.useModularExecutor) return 0n
   const wallet = getPublishWallet()
   const publisher = wallet?.publisherAddress ?? wallet?.txSender.address
   if (!publisher) return 0n

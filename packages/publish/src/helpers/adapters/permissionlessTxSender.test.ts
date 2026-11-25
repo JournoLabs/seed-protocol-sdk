@@ -89,6 +89,13 @@ describe('authorizationForUserOp', () => {
     expect(signed).toBe(0)
   })
 
+  test("stays on a movable delegate when the signer can't authorize the move", async () => {
+    const browserSigner = { address: wallet.address as Address, signMessage: signer.signMessage }
+    expect(
+      await authorizationForUserOp({ ...params, signer: browserSigner, movableFrom: [previous], currentDelegate: on(previous) }),
+    ).toBeUndefined()
+  })
+
   test('explains a signer that cannot authorize, such as a browser wallet', async () => {
     const browserSigner = { address: wallet.address as Address, signMessage: signer.signMessage }
     await expect(

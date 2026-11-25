@@ -32,8 +32,11 @@ keeps no storage, with EAS as an immutable. It is not deployed yet.
   simulations override the EOA's code with the delegate's runtime bytecode (`getCode(delegate)`), not
   a `0xef0100` designator, which nodes may not resolve in a state override. EAS is immutable in that
   bytecode and `address(this)` is the EOA, so the simulation matches the real call.
-- Before routing to the delegate, the SDK checks that its code has the `multiPublish` selector and that
-  its `getEas()` is the configured EAS, and fails the publish in `checking` otherwise.
+- `checking` fails the publish, before any upload, when the delegate's `getEas()` isn't the configured
+  EAS. Before each send, the SDK checks that the delegate's code has the `multiPublish` selector.
+- Only a signer that can sign an EIP-7702 authorization moves an EOA to the Seed delegate. An EOA on
+  `Simple7702Account` whose signer can't (a browser wallet over EIP-1193) stays there and attests
+  through EAS directly, as before.
 
 ## Consequences
 

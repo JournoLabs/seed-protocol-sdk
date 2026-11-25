@@ -108,4 +108,22 @@ describe('estimatePublishCost on the Seed delegate', () => {
     expect(first.work.attestationCount).toBe(3)
     expect(first.evm.gas - plain.evm.gas).toBe(25_000n)
   })
+
+  test('counts the authorization with the chain default delegate too', async () => {
+    const { SEED_DELEGATE_ADDRESSES } = await import('../../helpers/constants')
+    const table = SEED_DELEGATE_ADDRESSES as Record<number, `0x${string}`>
+    const delegate = `0x${'5e'.repeat(20)}` as const
+    table[11155420] = delegate
+    try {
+      initPublish({ uploadApiBaseUrl: 'https://example.test', accountMode: 'eip7702' })
+      harness.publisher = `0x${'a'.repeat(40)}`
+      harness.codeKind = 'eoa'
+      const plain = await estimatePublishCost(item, { rates, backReferences: 'link' })
+      harness.delegatesTo = delegate
+      const first = await estimatePublishCost(item, { rates })
+      expect(first.evm.gas - plain.evm.gas).toBe(25_000n)
+    } finally {
+      delete table[11155420]
+    }
+  })
 })
