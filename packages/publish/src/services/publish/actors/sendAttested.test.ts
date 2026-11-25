@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 /** sendAttested: an attempt row around every send, and no send while an earlier one may have landed. */
 const realSdk = await import('@seedprotocol/sdk')
 const realChainClient = await import('../../../helpers/chainClient')
-const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError, PublishGasError } = await import(
+const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError, PublishGasError, Eip7702ModularAccountPublishError } = await import(
   '../../../errors'
 )
 
@@ -299,6 +299,11 @@ describe('attemptStatusAfterFailedSend', () => {
       )
     },
   )
+
+  test('an EOA delegated elsewhere: not sent', () => {
+    const err = new Eip7702ModularAccountPublishError('delegated to 0xbb', 'EIP7702_DELEGATED_ELSEWHERE', SENDER)
+    expect(attemptStatusAfterFailedSend(err)).toBe('notSent')
+  })
 
   test('a failed UserOp: reverted', () => {
     const err = new ManagedAccountPublishError('failed', 'USEROP_REVERTED', SENDER)

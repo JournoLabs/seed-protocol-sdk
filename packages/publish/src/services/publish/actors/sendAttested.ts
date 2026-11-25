@@ -8,6 +8,7 @@ import debug from 'debug'
 import type { Address, Hex } from 'viem'
 import {
   AttestationAttemptOpenError,
+  isEip7702ModularAccountPublishError,
   isManagedAccountPublishError,
   isPublishGasError,
   PublishNonceKeyError,
@@ -40,6 +41,8 @@ export function attemptStatusAfterFailedSend(err: unknown): 'notSent' | 'reverte
   if (isNonceTooLowError(err)) return 'notSent'
   // Raised only before the bundler accepted the UserOp.
   if (chain.some(isPublishGasError)) return 'notSent'
+  // Refused before anything was signed.
+  if (chain.some((e) => isEip7702ModularAccountPublishError(e) && e.code === 'EIP7702_DELEGATED_ELSEWHERE')) return 'notSent'
   const text = chain
     .map((e) => {
       const { message, details, code } = e as { message?: unknown; details?: unknown; code?: unknown }

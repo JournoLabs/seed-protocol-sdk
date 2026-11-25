@@ -17,6 +17,7 @@ let order: string[] = []
 let asked: SelfPayRequest[] = []
 let answer: () => Promise<boolean> = async () => true
 let payment: Record<string, unknown> = {}
+let depositReadFails = false
 
 const realConfig = await import('~/config')
 const realChainClient = await import('~/helpers/chainClient')
@@ -45,6 +46,7 @@ mock.module('~/helpers/chainClient', () => ({
   getPublishPublicClient: () => ({
     readContract: async () => {
       order.push('readDeposit')
+      if (depositReadFails) throw new Error('rpc down')
       return depositWei
     },
     getGasPrice: async () => GAS_PRICE,
@@ -101,6 +103,7 @@ beforeEach(() => {
   asked = []
   answer = async () => true
   depositWei = 0n
+  depositReadFails = false
   payment = { whenSponsorDeclines: 'user', sponsorPaymaster: PAYMASTER, confirmSelfPay }
 })
 
@@ -167,6 +170,21 @@ describe('checking: sponsor deposit preflight', () => {
     payment = { sponsorPaymaster: PAYMASTER, confirmSelfPay }
     await runChecking()
     expect(asked).toEqual([])
+    expect(order).not.toContain('readDeposit')
+  }, TEST_TIMEOUT_MS)
+
+  test("an RPC failure reading the deposit doesn't block the publish", async () => {
+    depositReadFails = true
+    const verdict = await runChecking()
+    expect(verdict.type).toBe('validPublishProcess')
+    expect(asked).toEqual([])
+  }, TEST_TIMEOUT_MS)
+
+  test('no reads without confirmSelfPay, since there is nothing to ask', async () => {
+    payment = { whenSponsorDeclines: 'user', sponsorPaymaster: PAYMASTER }
+    depositWei = 1n
+    const verdict = await runChecking()
+    expect(verdict.type).toBe('validPublishProcess')
     expect(order).not.toContain('readDeposit')
   }, TEST_TIMEOUT_MS)
 })

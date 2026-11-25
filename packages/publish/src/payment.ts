@@ -1,5 +1,6 @@
 import type { PublishConfig } from './config'
 import { sendsAsManagedAccount, type PublishWallet } from './helpers/seedSigner'
+import { sameUrl } from './helpers/adapters/sponsorDecline'
 
 /**
  * Who pays a publish's EVM gas: `'sponsored'` (a Thirdweb or ERC-4337 paymaster) or `'user'`
@@ -248,7 +249,7 @@ export function assertPublishPaymentConfig(config: PaymentInputs): void {
         "payment.whenSponsorDeclines is 'user', but payment.gas is already 'user'; nothing is sponsored to fall back from.",
       )
     }
-    if (!config.paymasterUrl || config.paymasterUrl === config.bundlerUrl) {
+    if (!config.paymasterUrl || (config.bundlerUrl && sameUrl(config.paymasterUrl, config.bundlerUrl))) {
       throw new PublishPaymentConfigError(
         "payment.whenSponsorDeclines is 'user' needs a paymasterUrl separate from bundlerUrl, so a decline " +
           "can be told apart from a bundler error.",

@@ -134,6 +134,7 @@ describe('assertPublishPaymentConfig', () => {
   test('rejects a fallback without a separate paymasterUrl', () => {
     rejects({ bundlerUrl: 'https://b', payment: { whenSponsorDeclines: 'user' } }, 'paymasterUrl')
     rejects({ bundlerUrl: 'https://b', paymasterUrl: 'https://b', payment: { whenSponsorDeclines: 'user' } }, 'paymasterUrl')
+    rejects({ bundlerUrl: 'https://b/rpc', paymasterUrl: 'https://b/rpc/', payment: { whenSponsorDeclines: 'user' } }, 'paymasterUrl')
   })
   test("rejects a fallback when gas is 'user'", () => {
     rejects({ bundlerUrl: 'https://b', payment: { gas: 'user', whenSponsorDeclines: 'user' } }, 'whenSponsorDeclines')

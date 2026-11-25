@@ -4,7 +4,9 @@ import { errorChain } from '../errorChain'
  * What a failed sponsored send says about the sponsor:
  * - `'declined'`: the paymaster answered with a JSON-RPC error
  * - `'deposit_low'`: the bundler rejected the op with `AA31` (paymaster deposit too low)
- * - `'unreachable'`: the paymaster request failed in transport (network error, timeout, HTTP error)
+ * - `'unreachable'`: the paymaster request failed in transport (network error, timeout, HTTP error),
+ *   or it answered an error that says the service can't serve (internal error, rate limit, or
+ *   method not found, as from a URL that isn't a paymaster)
  * - `undefined`: the failure isn't the sponsor's
  *
  * A JSON-RPC error is only told apart from a bundler error by its URL, so with `bundlerUrl` equal
@@ -20,11 +22,21 @@ export function classifySponsorFailure(
   for (const e of chain) {
     const { name, url } = e as { name?: unknown; url?: unknown }
     if (typeof url !== 'string' || !sameUrl(url, urls.paymasterUrl)) continue
-    if (name === 'RpcRequestError') return 'declined'
+    if (name === 'RpcRequestError') {
+      const { code } = e as { code?: unknown }
+      return typeof code === 'number' && SERVICE_FAILURE_CODES.has(code) ? 'unreachable' : 'declined'
+    }
     if (name === 'HttpRequestError' || name === 'TimeoutError') return 'unreachable'
   }
   return undefined
 }
+
+/**
+ * JSON-RPC codes that mean the paymaster service failed rather than refused: internal error,
+ * rate limits (-32005, -32007, 429) and method not found. viem also turns a 5xx or 429 response
+ * with a JSON-RPC error body into one of these.
+ */
+const SERVICE_FAILURE_CODES = new Set([-32603, -32005, -32007, 429, -32601])
 
 /** True when `err` (or a cause) is the bundler's `AA21`: the sender can't pay its prefund. */
 export function isInsufficientPrefund(err: unknown): boolean {
@@ -36,4 +48,4 @@ function errorText(e: unknown): string {
   return `${String(message ?? e)} ${String(details ?? '')} ${String(shortMessage ?? '')}`
 }
 
-const sameUrl = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
+export const sameUrl = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')

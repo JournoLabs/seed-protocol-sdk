@@ -271,6 +271,49 @@ describe('createPermissionlessTxSender when the sponsor declines', () => {
     }
   })
 
+  test.each([
+    ['a 503 carrying a JSON-RPC internal error', 503, -32603],
+    ['rate limiting', 429, -32005],
+    ['a URL that is not a paymaster (method not found)', 200, -32601],
+  ])('%s is unreachable, not a decline', async (_name, status, code) => {
+    const broken = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const { id } = (await req.json()) as { id: number }
+        return Response.json({ jsonrpc: '2.0', id, error: { code, message: 'down' } }, { status })
+      },
+    })
+    try {
+      let asked = 0
+      const sender = await createPermissionlessTxSender({
+        signer,
+        bundlerUrl,
+        paymasterUrl: `http://127.0.0.1:${broken.port}`,
+        onSponsorDeclined: async () => (asked++, true),
+      })
+      const err = await gasError(sender.sendTransaction(tx))
+      expect(err.code).toBe('SPONSOR_UNREACHABLE')
+      expect(asked).toBe(0)
+      expect(sent).toHaveLength(0)
+    } finally {
+      broken.stop(true)
+    }
+  }, 30_000)
+
+  test('a confirm callback that throws synchronously refuses', async () => {
+    behaviour.sponsoredSend = 'AA31'
+    const sender = await createPermissionlessTxSender({
+      signer,
+      bundlerUrl,
+      paymasterUrl,
+      onSponsorDeclined: (() => {
+        throw new Error('not async')
+      }) as never,
+    })
+    const err = await gasError(sender.sendTransaction(tx))
+    expect(err.code).toBe('SELF_PAY_REFUSED')
+  })
+
   test('AA21 on the self-paid send', async () => {
     behaviour.paymaster = 'decline'
     behaviour.selfPaidSend = 'AA21'

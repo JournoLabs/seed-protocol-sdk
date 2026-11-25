@@ -1,3 +1,4 @@
+import debug from 'debug'
 import { parseAbi, type Address } from 'viem'
 import { entryPoint08Address } from 'viem/account-abstraction'
 import { getPublishConfig } from '~/config'
@@ -10,6 +11,8 @@ import { resolvePublishPayment } from '~/payment'
  * to count on sponsorship. The estimate is a heuristic, and other users draw on the same deposit.
  */
 export const SPONSOR_DEPOSIT_MARGIN = 2n
+
+const logger = debug('seedProtocol:services:sponsorStatus')
 
 export type SponsorStatus = {
   /** `payment.sponsorPaymaster`. */
@@ -47,14 +50,24 @@ export async function confirmSelfPayIfSponsorLow(params: {
 }): Promise<void> {
   const config = getPublishConfig()
   if (resolvePublishPayment(config).gas.fallback !== 'user') return
-  const status = await getSponsorStatus()
-  if (!status) return
-  const gas = await params.estimateGas()
-  const estimatedCostWei = gas * (await getPublishPublicClient().getGasPrice())
-  if (status.depositWei >= SPONSOR_DEPOSIT_MARGIN * estimatedCostWei) return
   const confirm = config.payment?.confirmSelfPay
+  // Without a callback there is nothing to ask: the send-time fallback decides.
   if (!confirm) return
-  const agreed = await confirm({ address: params.address, reason: 'deposit_low', estimatedCostWei }).catch(() => false)
+  let estimatedCostWei: bigint
+  try {
+    const status = await getSponsorStatus()
+    if (!status) return
+    const gas = await params.estimateGas()
+    estimatedCostWei = gas * (await getPublishPublicClient().getGasPrice())
+    if (status.depositWei >= SPONSOR_DEPOSIT_MARGIN * estimatedCostWei) return
+  } catch (err) {
+    // The preflight is optional; a decline at the send is still handled there.
+    logger('skipped the sponsor deposit preflight: %O', err)
+    return
+  }
+  const agreed = await Promise.resolve()
+    .then(() => confirm({ address: params.address, reason: 'deposit_low', estimatedCostWei }))
+    .catch(() => false)
   if (agreed !== true) {
     throw new PublishGasError(
       `The sponsor's deposit can't cover this publish and ${params.address} didn't agree to pay the gas.`,

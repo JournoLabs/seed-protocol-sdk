@@ -193,7 +193,11 @@ export async function createPermissionlessTxSender(
         err,
       )
     }
-    const agreed = await options.onSponsorDeclined({ address, reason: failure }).catch(() => false)
+    const confirm = options.onSponsorDeclined
+    // A callback that throws, synchronously or not, refuses.
+    const agreed = await Promise.resolve()
+      .then(() => confirm({ address, reason: failure }))
+      .catch(() => false)
     if (agreed !== true) {
       throw new PublishGasError(`The paymaster declined and ${address} didn't agree to pay the gas.`, 'SELF_PAY_REFUSED', address, err)
     }
