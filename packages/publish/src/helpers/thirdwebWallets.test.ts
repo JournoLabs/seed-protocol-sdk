@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 import type { Chain } from 'viem'
 import { withNonceSlot } from './thirdwebNonceSlot'
 
-type InAppOptions = { executionMode: Record<string, any> }
+type InAppOptions = { executionMode: Record<string, any>; auth: { options: string[] } }
 const created: InAppOptions[] = []
 
 const realWallets = await import('thirdweb/wallets')
@@ -132,5 +132,34 @@ describe('in-app wallets follow publish config', () => {
     setConfigRef(null)
     const [wallet] = getWalletsForConnectButton(twinConfig) as unknown as Array<{ options: InAppOptions }>
     expect(wallet?.options.executionMode).toEqual({ mode: 'EOA' })
+  })
+})
+
+describe('sign-in options', () => {
+  const hosted = { uploadApiBaseUrl: 'https://example.com', thirdwebClientId: 't' }
+  const optionsOf = (wallet: unknown) => (wallet as { options: InAppOptions }).options.auth.options
+
+  test('both wallets offer farcaster, email, passkey and phone by default', () => {
+    setConfigRef(hosted)
+    expect(optionsOf(getManagedAccountWallet())).toEqual(['farcaster', 'email', 'passkey', 'phone'])
+    expect(optionsOf(getModularAccountWallet())).toEqual(['farcaster', 'email', 'passkey', 'phone'])
+  })
+
+  test('both wallets offer the configured options, in order', () => {
+    setConfigRef({ ...hosted, thirdweb: { authOptions: ['email', 'passkey', 'wallet'] } })
+    expect(optionsOf(getManagedAccountWallet())).toEqual(['email', 'passkey', 'wallet'])
+    expect(optionsOf(getModularAccountWallet())).toEqual(['email', 'passkey', 'wallet'])
+  })
+
+  test('changing the options rebuilds both wallets', () => {
+    setConfigRef({ ...hosted, thirdweb: { authOptions: ['email'] } })
+    const managed = getManagedAccountWallet()
+    const modular = getModularAccountWallet()
+    setConfigRef({ ...hosted, thirdweb: { authOptions: ['email'] } })
+    expect(getManagedAccountWallet()).toBe(managed)
+    expect(getModularAccountWallet()).toBe(modular)
+    setConfigRef({ ...hosted, thirdweb: { authOptions: ['email', 'passkey'] } })
+    expect(optionsOf(getManagedAccountWallet())).toEqual(['email', 'passkey'])
+    expect(optionsOf(getModularAccountWallet())).toEqual(['email', 'passkey'])
   })
 })

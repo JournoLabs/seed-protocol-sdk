@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `ipfsMirror` takes `required` (default `true`) and `onPinResult` (new types `IpfsMirrorOptions` and `PinResult`). With `required: false`, a failed pin upload or a CID not confirmed within `storedTimeoutMs` no longer fails the publish; the wrapped store's failures still do. `onPinResult({ id, cid, ok, error })` is called once per upload with the attested id and its CID: from `send` when the pin upload fails, else from `assertStored`. With `required: false`, the uploads after a failed one are still pinned; with `true`, `send` still stops at the first failure.
+
 ## 0.8.3 (2026-11-23)
 
 - New package. `ipfsBlobStore(options)` is a `BlobStore` for `PublishConfig.blobStore` whose ids are `ipfs://<cidv1>`, computed in `prepare` from each upload's bytes. `send` uploads each file as a CARv1 to every pinning provider; `assertStored` waits until each provider with `isPinned` reports the pin, or a gateway answers `HEAD /ipfs/<cid>`, for up to `storedTimeoutMs` (120 s).

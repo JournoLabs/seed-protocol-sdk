@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 /** sendAttested: an attempt row around every send, and no send while an earlier one may have landed. */
 const realSdk = await import('@seedprotocol/sdk')
 const realChainClient = await import('../../../helpers/chainClient')
-const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError } = await import(
+const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError, PublishGasError, Eip7702ModularAccountPublishError } = await import(
   '../../../errors'
 )
 
@@ -286,6 +286,22 @@ describe('attemptStatusAfterFailedSend', () => {
     ['a used nonce', wrapped('nonce too low')],
     ['bundler validation', wrapped('UserOperation rejected: AA21 did not pay prefund')],
   ])('%s: not sent', (_name, err) => {
+    expect(attemptStatusAfterFailedSend(err)).toBe('notSent')
+  })
+
+  test.each(['SPONSOR_DECLINED', 'SPONSOR_UNREACHABLE', 'SELF_PAY_REFUSED', 'SELF_PAY_INSUFFICIENT_FUNDS'] as const)(
+    'gas errors leave the attempt notSent: %s',
+    (code) => {
+      // No AA code or "insufficient funds" in the message: the class alone has to say it.
+      expect(attemptStatusAfterFailedSend(new PublishGasError('gas', code, SENDER))).toBe('notSent')
+      expect(attemptStatusAfterFailedSend(new Error('send failed', { cause: new PublishGasError('gas', code, SENDER) }))).toBe(
+        'notSent',
+      )
+    },
+  )
+
+  test('an EOA delegated elsewhere: not sent', () => {
+    const err = new Eip7702ModularAccountPublishError('delegated to 0xbb', 'EIP7702_DELEGATED_ELSEWHERE', SENDER)
     expect(attemptStatusAfterFailedSend(err)).toBe('notSent')
   })
 

@@ -397,8 +397,6 @@ function managedAccountFactoryFor(config: PublishConfig): string {
   return factory
 }
 
-const IN_APP_AUTH_OPTIONS = ['farcaster', 'email', 'passkey', 'phone'] as const
-
 /**
  * One instance per settings so Thirdweb session, Connect UI and `autoConnect` share a wallet
  * object. Rebuilt when the chain, RPC, factory or `PublishConfig.thirdweb` change
@@ -414,13 +412,15 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
   const cfg = config ?? getConfigRef()
   const chain = getPublishThirdwebChain(cfg ?? undefined)
   const factoryAddress = cfg ? managedAccountFactoryFor(cfg) : requireManagedAccountFactoryAddress()
-  const { bundlerUrl, sponsorGas } = resolveThirdwebWalletOptions(cfg)
+  const { bundlerUrl, sponsorGas, authOptions } = resolveThirdwebWalletOptions(cfg)
   if (!bundlerUrl && isLocalThirdwebChain(chain)) {
     throw new Error(
       `@seedprotocol/publish: chain ${chain.id} is local, so Thirdweb's hosted bundler cannot reach it. Set PublishConfig.thirdweb.bundlerUrl to the chain's bundler (seedTwinConfig does this for the twin).`,
     )
   }
-  const key = [chain.id, chain.rpc, factoryAddress, bundlerUrl ?? '', sponsorGas].join('|').toLowerCase()
+  const key = [chain.id, chain.rpc, factoryAddress, bundlerUrl ?? '', sponsorGas, authOptions.join(',')]
+    .join('|')
+    .toLowerCase()
   if (_managedInAppWallet?.key !== key) {
     logGas('managed wallet built', {
       chainId: chain.id,
@@ -432,7 +432,7 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
       key,
       wallet: inAppWallet({
         storage: getSharedPublishInAppWalletStorage(),
-        auth: { options: [...IN_APP_AUTH_OPTIONS] },
+        auth: { options: authOptions },
         executionMode: {
           mode: 'EIP4337',
           smartAccount: {
@@ -467,7 +467,7 @@ let _modularInAppWallet: { key: string; wallet: Wallet } | null = null
  */
 export const getModularAccountWallet = (config?: PublishConfig) => {
   const cfg = config ?? getConfigRef()
-  const { modularWalletMode, sponsorGas } = resolveThirdwebWalletOptions(cfg)
+  const { modularWalletMode, sponsorGas, authOptions } = resolveThirdwebWalletOptions(cfg)
   if (modularWalletMode === 'EIP7702') {
     const chain = getPublishThirdwebChain(cfg ?? undefined)
     if (isLocalThirdwebChain(chain)) {
@@ -476,13 +476,13 @@ export const getModularAccountWallet = (config?: PublishConfig) => {
       )
     }
   }
-  const key = `${modularWalletMode}|${sponsorGas}`
+  const key = `${modularWalletMode}|${sponsorGas}|${authOptions.join(',')}`
   if (_modularInAppWallet?.key !== key) {
     _modularInAppWallet = {
       key,
       wallet: inAppWallet({
         storage: getSharedPublishInAppWalletStorage(),
-        auth: { options: [...IN_APP_AUTH_OPTIONS] },
+        auth: { options: authOptions },
         executionMode:
           modularWalletMode === 'EOA' ? { mode: 'EOA' } : { mode: 'EIP7702', sponsorGas },
       }),

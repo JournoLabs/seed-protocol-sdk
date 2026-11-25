@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EnvelopeError, createEncryptionIdentity, createEnvelopeDecryptor, createPrivateUploadEncryptor } from '../src/index'
+import { createEncryptionIdentity, createEnvelopeDecryptor, createPrivateUploadEncryptor } from '../src/index'
 
 describe('createEnvelopeDecryptor', () => {
   it("opens an upload wrapped to one of the identities and returns null for anyone else's", async () => {
@@ -15,10 +15,15 @@ describe('createEnvelopeDecryptor', () => {
     expect(await createEnvelopeDecryptor([stranger])(envelope)).toBeNull()
   })
 
-  it('throws for bytes that are not an envelope or were tampered with', async () => {
+  it('returns null for bytes that are not an envelope', async () => {
+    const decrypt = createEnvelopeDecryptor([await createEncryptionIdentity()])
+    expect(await decrypt(new TextEncoder().encode('<p>plain</p>'))).toBeNull()
+    expect(await decrypt(new Uint8Array())).toBeNull()
+  })
+
+  it('throws for an envelope that was tampered with', async () => {
     const me = await createEncryptionIdentity()
     const decrypt = createEnvelopeDecryptor([me])
-    await expect(decrypt(new TextEncoder().encode('<p>plain</p>'))).rejects.toBeInstanceOf(EnvelopeError)
     const { blob } = await createPrivateUploadEncryptor({ recipients: [me.recipient.publicKey] })({ blob: new Blob(['x']), contentType: undefined })
     const envelope = new Uint8Array(await blob.arrayBuffer())
     envelope[envelope.length - 1]! ^= 1

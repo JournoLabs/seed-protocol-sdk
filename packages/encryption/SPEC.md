@@ -6,7 +6,9 @@ follows [age](https://github.com/C2SP/C2SP/blob/main/age.md): a text header of r
 authenticated by an HMAC, then a STREAM payload of independently authenticated chunks. It differs
 from age in the key size, the cipher, the `bind` line and the content frame. ADR 0033 records why.
 
-Status: draft. Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity and
+Status: stable (ADR 0033 is Accepted).
+
+Defined so far: the `mlkem768x25519` recipient stanza, the encryption identity and
 its key binding, and the keystore manifest with its `passkey-prf` and `eoa-signature` stanzas. Stanza types for readers'
 key grants and subscription epochs come with those features.
 
@@ -221,7 +223,8 @@ An envelope is uploaded with `Content-Type: application/octet-stream` and the ta
 
 ## Test vectors
 
-`__tests__/vectors.json` lists inputs and the resulting envelopes: the hex for envelopes up to
+The vectors and tests below are in the repository under `packages/encryption/`, not in the npm
+package. `__tests__/vectors.json` lists inputs and the resulting envelopes: the hex for envelopes up to
 4096 bytes, and the length and SHA-256 for all. All vectors use file key `00 01 ... 1f` and payload
 nonce `a0 a1 ... af`, and each names its `padding` (`padme` or `none`). They were produced by
 `__tests__/reference.ts`, a node:crypto implementation that shares no code with `src/`. The cases

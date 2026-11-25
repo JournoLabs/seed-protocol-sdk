@@ -223,6 +223,9 @@ async function isLiveOnChain(registration: EncryptionKeyRegistration, account: s
  * {@link registerEncryptionKey} revokes the earlier registrations when it adds one, so a stale
  * listing finds nothing rather than a replaced key. Throws when the chain can't be read, rather
  * than falling back to an unchecked key.
+ *
+ * Reads the publish chain from `initPublish`'s config, so call `initPublish` first, also in an app
+ * that only reads keys.
  */
 export async function getVerifiedEncryptionKey({ account }: { account: string }): Promise<EncryptionKeyRegistration | undefined> {
   const chainId = getPublishViemChain().id
@@ -276,7 +279,8 @@ async function revokeEarlierRegistrations(
  *
  * Throws {@link EncryptionKeySchemaNotRegisteredError} before uploading when the schema is
  * missing, and refuses inputs whose key id doesn't match the keys or the manifest, or whose binding
- * signature doesn't name `account` and the publish chain.
+ * signature doesn't name `account` and the publish chain. Needs `initPublish` first: the publish
+ * chain comes from its config.
  */
 export async function registerEncryptionKey(
   input: RegisterEncryptionKeyInput,
