@@ -70,6 +70,25 @@ The EIP-7702 sender needs one signature a plain wallet connection can't give. An
 
 With `useModularExecutor`, publish uses a registered wallet that sends as its `publisherAddress` with a different signer. Any other wallet goes to the Thirdweb in-app flow, which needs the `thirdweb` peer.
 
+### Who pays
+
+The EIP-7702 sender asks the paymaster at `paymasterUrl` to sponsor each UserOp. When it declines, the send fails with `PublishGasError` code `SPONSOR_DECLINED`, unless the app lets users pay their own gas:
+
+```ts
+initPublish({
+  bundlerUrl,
+  paymasterUrl,
+  payment: {
+    whenSponsorDeclines: 'user',
+    confirmSelfPay: async ({ address, reason }) => window.confirm(`Pay the gas from ${address}?`),
+  },
+})
+```
+
+With `whenSponsorDeclines: 'user'`, a decline resends the same UserOp without a paymaster, under the same nonce, so the EOA pays from its own ETH. `confirmSelfPay` is asked first; resolving `false` or throwing fails the send with `SELF_PAY_REFUSED`, and leaving it out lets self-pay go ahead. An EOA without enough ETH fails with `SELF_PAY_INSUFFICIENT_FUNDS`.
+
+A decline is a JSON-RPC error answered by `paymasterUrl`, or the bundler's `AA31` (paymaster deposit too low). A paymaster that can't be reached (network error, timeout, HTTP error) fails the send with `SPONSOR_UNREACHABLE` and never falls back, so an outage doesn't charge users. Only a failure of the send itself falls back: once the bundler accepts the UserOp, a later error is reported as it is. Because a JSON-RPC error is told apart from a bundler error by its URL, `initPublish` throws `PublishPaymentConfigError` unless `paymasterUrl` is set and differs from `bundlerUrl`. Every `PublishGasError` leaves the attempt not sent, so a retry sends again and reuses the uploads.
+
 ## ManagedAccount without Thirdweb
 
 A ManagedAccount is Thirdweb's account contract with Seed's executor extension. `createManagedAccountTxSender` sends from one through any ERC-4337 bundler that serves EntryPoint v0.6, using standard RPC and no Thirdweb SDK. Paymasters are asked with ERC-7677 `pm_getPaymasterStubData` and `pm_getPaymasterData`; `sponsored: false` skips them, and the account pays its own gas.

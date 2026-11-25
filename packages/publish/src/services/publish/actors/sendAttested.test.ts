@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 /** sendAttested: an attempt row around every send, and no send while an earlier one may have landed. */
 const realSdk = await import('@seedprotocol/sdk')
 const realChainClient = await import('../../../helpers/chainClient')
-const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError } = await import(
+const { ManagedAccountPublishError, PublishTransactionRevertedError, AttestationAttemptOpenError, PublishGasError } = await import(
   '../../../errors'
 )
 
@@ -288,6 +288,17 @@ describe('attemptStatusAfterFailedSend', () => {
   ])('%s: not sent', (_name, err) => {
     expect(attemptStatusAfterFailedSend(err)).toBe('notSent')
   })
+
+  test.each(['SPONSOR_DECLINED', 'SPONSOR_UNREACHABLE', 'SELF_PAY_REFUSED', 'SELF_PAY_INSUFFICIENT_FUNDS'] as const)(
+    'gas errors leave the attempt notSent: %s',
+    (code) => {
+      // No AA code or "insufficient funds" in the message: the class alone has to say it.
+      expect(attemptStatusAfterFailedSend(new PublishGasError('gas', code, SENDER))).toBe('notSent')
+      expect(attemptStatusAfterFailedSend(new Error('send failed', { cause: new PublishGasError('gas', code, SENDER) }))).toBe(
+        'notSent',
+      )
+    },
+  )
 
   test('a failed UserOp: reverted', () => {
     const err = new ManagedAccountPublishError('failed', 'USEROP_REVERTED', SENDER)

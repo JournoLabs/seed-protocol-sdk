@@ -1,4 +1,4 @@
-import type { Address, LocalAccount, SignableMessage, SignedAuthorization } from 'viem'
+import type { Address, Hex, LocalAccount, SignableMessage, SignedAuthorization } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { createPaymasterClient, entryPoint08Address } from 'viem/account-abstraction'
 import { createSmartAccountClient } from 'permissionless'
@@ -11,8 +11,10 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
-import { isManagedAccountPublishError } from '../../errors'
+import { isManagedAccountPublishError, PublishGasError } from '../../errors'
+import type { SelfPayRequest } from '../../payment'
 import { pinnedNonce } from '../pinnedNonce'
+import { classifySponsorFailure, isInsufficientPrefund } from './sponsorDecline'
 import { assertUserOpSucceeded, bundlerFeesPerGas } from './userOps'
 
 export type CreatePermissionlessTxSenderOptions = {
@@ -22,6 +24,12 @@ export type CreatePermissionlessTxSenderOptions = {
   paymasterUrl?: string
   /** `false` sends without a paymaster: the account pays its own gas. Default `true`. */
   sponsored?: boolean
+  /**
+   * Asked when the paymaster declines a sponsored UserOp (a JSON-RPC error from `paymasterUrl`, or
+   * `AA31`). Resolving `true` resends the same UserOp, under the same nonce, without a paymaster,
+   * paid by the account. Without it, a decline throws `PublishGasError` `SPONSOR_DECLINED`.
+   */
+  onSponsorDeclined?: (request: SelfPayRequest) => Promise<boolean>
 }
 
 export function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
@@ -121,15 +129,67 @@ export async function createPermissionlessTxSender(
     },
   })
 
-  const smartAccountClient = createSmartAccountClient({
-    account: simpleAccount,
-    chain,
-    bundlerTransport: http(bundlerUrl),
-    ...(sponsored ? { paymaster: createPaymasterClient({ transport: http(paymasterUrl ?? bundlerUrl) }) } : {}),
-    userOperation: {
-      estimateFeesPerGas: bundlerFeesPerGas(bundlerUrl, () => publicClient.estimateFeesPerGas()),
-    },
-  })
+  const clientFor = (withPaymaster: boolean) =>
+    createSmartAccountClient({
+      account: simpleAccount,
+      chain,
+      bundlerTransport: http(bundlerUrl),
+      ...(withPaymaster ? { paymaster: createPaymasterClient({ transport: http(paymasterUrl ?? bundlerUrl) }) } : {}),
+      userOperation: {
+        estimateFeesPerGas: bundlerFeesPerGas(bundlerUrl, () => publicClient.estimateFeesPerGas()),
+      },
+    })
+  const smartAccountClient = clientFor(sponsored)
+  const selfPayClient = sponsored && options.onSponsorDeclined ? clientFor(false) : undefined
+
+  /**
+   * After a sponsored `sendUserOperation` failed: throws `PublishGasError` for a decline or an
+   * unreachable sponsor, or resends without a paymaster when `onSponsorDeclined` agrees. Only
+   * errors from `sendUserOperation` come here: a declined op never reached the bundler's mempool,
+   * so the resend can't land twice.
+   */
+  const afterSponsoredSendFailed = async (
+    err: unknown,
+    resend: (client: NonNullable<typeof selfPayClient>) => Promise<Hex>,
+  ): Promise<Hex> => {
+    if (!sponsored) throw err
+    const failure = classifySponsorFailure(err, { paymasterUrl: paymasterUrl ?? bundlerUrl, bundlerUrl })
+    if (!failure) throw err
+    if (failure === 'unreachable') {
+      throw new PublishGasError(
+        `The paymaster at ${paymasterUrl ?? bundlerUrl} couldn't be reached, so ${address}'s publish wasn't sent.`,
+        'SPONSOR_UNREACHABLE',
+        address,
+        err,
+      )
+    }
+    if (!selfPayClient || !options.onSponsorDeclined) {
+      throw new PublishGasError(
+        `The paymaster declined to sponsor ${address}'s publish${failure === 'deposit_low' ? ' (its deposit is too low)' : ''}. ` +
+          "Set payment.whenSponsorDeclines: 'user' to let users pay their own gas.",
+        'SPONSOR_DECLINED',
+        address,
+        err,
+      )
+    }
+    const agreed = await options.onSponsorDeclined({ address, reason: failure }).catch(() => false)
+    if (agreed !== true) {
+      throw new PublishGasError(`The paymaster declined and ${address} didn't agree to pay the gas.`, 'SELF_PAY_REFUSED', address, err)
+    }
+    try {
+      return await resend(selfPayClient)
+    } catch (selfPayErr) {
+      if (isInsufficientPrefund(selfPayErr)) {
+        throw new PublishGasError(
+          `The paymaster declined and ${address} doesn't hold enough ETH to pay the gas itself.`,
+          'SELF_PAY_INSUFFICIENT_FUNDS',
+          address,
+          selfPayErr,
+        )
+      }
+      throw selfPayErr
+    }
+  }
 
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
@@ -142,16 +202,23 @@ export async function createPermissionlessTxSender(
         isDelegated: () => simpleAccount.isDeployed(),
         getNonce: () => publicClient.getTransactionCount({ address }),
       })
-      try {
-        const hash = await smartAccountClient.sendUserOperation({
+      const send = (client: typeof smartAccountClient) =>
+        client.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
           ...(tx.nonceKey !== undefined && { nonce: pinnedNonce(tx.nonceKey) }),
           ...(authorization && { authorization }),
         })
+      try {
+        let hash: Hex
+        try {
+          hash = await send(smartAccountClient)
+        } catch (err) {
+          hash = await afterSponsoredSendFailed(err, send)
+        }
         const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })
         return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
       } catch (err) {
-        if (isManagedAccountPublishError(err)) throw err
+        if (isManagedAccountPublishError(err) || err instanceof PublishGasError) throw err
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(
           `@seedprotocol/publish: permissionless/EIP-7702 send failed (${msg}). Ensure bundlerUrl/paymasterUrl support EntryPoint v0.8, or use accountMode: 'eoa' / Thirdweb adapter.`,
