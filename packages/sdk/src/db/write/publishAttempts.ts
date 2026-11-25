@@ -61,6 +61,21 @@ export async function countRecordedPublishParts(publishRunIds: string[]): Promis
 }
 
 /**
+ * Attempts that sent under EntryPoint nonce key `nonceKey` (a decimal string), from any run and of
+ * any status: with a host `nonceKey`, each part of a split publish sends under its own key, so the
+ * rows under a key say what became of that part (ADR 0036).
+ */
+export async function findPublishAttemptsByNonceKey(nonceKey: string): Promise<PublishAttemptType[]> {
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('findPublishAttemptsByNonceKey: the database is not ready')
+  return db
+    .select()
+    .from(publishAttempts)
+    .where(eq(publishAttempts.nonceKey, nonceKey))
+    .orderBy(asc(publishAttempts.createdAt))
+}
+
+/**
  * The multiPublish parts a run recorded, oldest first: each part's transaction and, when it was
  * recorded after attempt rows kept them, the uids it attested (`attestationUids`, a JSON array).
  */

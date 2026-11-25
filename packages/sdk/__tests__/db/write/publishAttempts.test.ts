@@ -6,6 +6,7 @@ import {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findPublishAttemptsByNonceKey,
   findRecordedPublishParts,
   findRecordedPublishAttempts,
   updatePublishAttempt,
@@ -148,6 +149,25 @@ testDescribe('publish attempts', () => {
     await recordPublishRequests([], { attemptId: old.id })
     const [row] = await findRecordedPublishParts(run)
     expect(row).toMatchObject({ id: old.id, txHash: '0xabc', attestationUids: null })
+  })
+
+  // Batch 18 item 30a (D68): a split publish under a host nonceKey counts its parts across runs
+  it('finds the attempts that sent under a nonce key, from any run', async () => {
+    const key = `${Date.now()}${Math.floor(Math.random() * 1e6)}`
+    const first = { ...attempt([seedA], generateId()), nonceKey: key, entryPoint: '0x' + '7'.repeat(40) }
+    const second = { ...attempt([seedB], generateId()), nonceKey: key, entryPoint: '0x' + '7'.repeat(40) }
+    const elsewhere = { ...attempt([generateId()]), nonceKey: `${key}1` }
+    for (const a of [first, second, elsewhere]) await claimPublishAttempt(a)
+    await updatePublishAttempt(first.id, { status: 'recorded', txHash: '0x1' })
+    await updatePublishAttempt(second.id, { status: 'sent', txHash: '0x2' })
+    const rows = await findPublishAttemptsByNonceKey(key)
+    expect(rows.map((r) => [r.id, r.status]).sort()).toEqual(
+      [
+        [first.id, 'recorded'],
+        [second.id, 'sent'],
+      ].sort(),
+    )
+    expect(await findPublishAttemptsByNonceKey(`${key}2`)).toEqual([])
   })
 
   it('countRecordedPublishParts counts the recorded multiPublish attempts of the given runs', async () => {

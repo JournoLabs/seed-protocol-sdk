@@ -328,8 +328,6 @@ async function executeCreateAttestations(
       item = await waitForItem(item.seedLocalId)
       loaded.push(item)
     }
-    // Read from the recorded attempts, so a reload between parts goes on from the right key (ADR 0036).
-    const partsBefore = await partsSentUnderNonceKey(context)
     // The Seed's newest offer from `attester`, when it has the same terms, is reported and not sent again.
     let recordedOffer: string | undefined
     const findRecordedOffer = async (attester: string) => {
@@ -350,6 +348,10 @@ async function executeCreateAttestations(
         return finish()
       }
     }
+
+    // Parts recorded under the host's key before this try, from the rows, so a reload between parts
+    // goes on from the right key (ADR 0036). The part recorded just above is in them and in `parts`.
+    const partsBefore = Math.max(0, (await partsSentUnderNonceKey(context)) - parts.length)
 
     const txCount = arweaveTransactions.length
     const uploadCount = publishUploads.length

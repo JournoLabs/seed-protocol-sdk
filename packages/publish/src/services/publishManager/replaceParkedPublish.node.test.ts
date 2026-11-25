@@ -12,19 +12,15 @@ const realSavePublish = await import('./actors/savePublish')
 
 type Attempt = { id: string; seedLocalId: string; status: string }
 let attempts: Attempt[] = []
-/** Recorded multiPublish parts per publish run. */
-let partsByRun: Record<string, number> = {}
-/** Runs once while createPublish reads the parked run's parts, after it has seen the run parked. */
-let whileReadingParts: (() => void) | undefined
+/** publish_attempts rows by the decimal nonce key they sent under. */
+let rowsByKey = new Map<string, Array<{ id: string; status: string; txHash: string | null }>>()
+/** Runs once as the replacement is about to start, after createPublish has seen the run parked. */
+let beforeReplacing: (() => void) | undefined
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   findOpenPublishAttempts: async (ids: string[]) =>
     attempts.filter((a) => ids.includes(a.seedLocalId) && ['sending', 'sent', 'landed'].includes(a.status)),
-  countRecordedPublishParts: async (runIds: string[]) => {
-    whileReadingParts?.()
-    whileReadingParts = undefined
-    return runIds.reduce((sum, id) => sum + (partsByRun[id] ?? 0), 0)
-  },
+  findPublishAttemptsByNonceKey: async (key: string) => rowsByKey.get(key) ?? [],
 }))
 const markInProgressPublishInterrupted = mock(async (_seedLocalId: string) => {})
 mock.module('./actors/savePublish', () => ({ ...realSavePublish, markInProgressPublishInterrupted }))
@@ -38,6 +34,7 @@ const { PublishManager } = await import('./index')
 const { startPublish } = await import('../../helpers/ensureWalletThenPublish')
 const { TEST_TIMEOUT_MS } = await import('../../../test-utils/waitUntil')
 const { partsSentUnderNonceKey } = await import('../../helpers/nonceKeyParts')
+const { publishNonceKey } = await import('../../helpers/pinnedNonce')
 
 const BASE_CONFIG = { uploadApiBaseUrl: 'http://127.0.0.1:9', rpcUrl: 'https://example.invalid/rpc' }
 const ADDRESS = ethers.Wallet.createRandom().address
@@ -86,12 +83,23 @@ beforeAll(async () => {
   await PublishManager.ready()
   // Attempts are read only from a ready database; findOpenPublishAttempts is mocked above.
   BaseDb.isAppDbReady = () => true
+  // A retry can move the parked run on between createPublish seeing it parked and the replacement
+  // starting; the hook plays it, just before the manager gets the event.
+  const service = PublishManager.getService()
+  const send = service.send.bind(service)
+  service.send = ((event: { type: string }) => {
+    if (event.type === 'CREATE_PUBLISH') {
+      beforeReplacing?.()
+      beforeReplacing = undefined
+    }
+    return send(event as never)
+  }) as typeof service.send
 })
 
 afterEach(() => {
   attempts = []
-  partsByRun = {}
-  whileReadingParts = undefined
+  rowsByKey = new Map()
+  beforeReplacing = undefined
   markInProgressPublishInterrupted.mockClear()
   PublishManager.stopAll()
 })
@@ -116,8 +124,8 @@ describe('Publish on a parked seed', () => {
 
   test('the new run takes the parked run nonce key with the parts it recorded under it', async () => {
     const item = makeItem()
-    // The parked run's saved state counts no parts: they're read from its recorded attempts.
-    partsByRun = { 'run-parked': 1 }
+    // The parked run's saved state counts no parts: they're read from the attempts under the key.
+    rowsByKey = new Map([[publishNonceKey('job-1', 1).toString(), [{ id: 'part-1', status: 'recorded', txHash: '0x1' }]]])
     runIn(item, 'attestationFailureRecoverable', parkedContext)
     const actor = await PublishManager.createPublish(item, ADDRESS, fromEthersWallet(ethers.Wallet.createRandom()))
     const context = actor!.getSnapshot().context
@@ -129,7 +137,7 @@ describe('Publish on a parked seed', () => {
 
   test("a host's own nonceKey wins over the parked run's and starts at part 1", async () => {
     const item = makeItem()
-    partsByRun = { 'run-parked': 1 }
+    rowsByKey = new Map([[publishNonceKey('job-1', 1).toString(), [{ id: 'part-1', status: 'recorded', txHash: '0x1' }]]])
     runIn(item, 'attestationFailureRecoverable', parkedContext)
     const actor = await PublishManager.createPublish(item, ADDRESS, fromEthersWallet(ethers.Wallet.createRandom()), {
       nonceKey: 'job-2',
@@ -141,7 +149,7 @@ describe('Publish on a parked seed', () => {
 
   test('a nonceKey replacing a parked run that had none starts at part 1', async () => {
     const item = makeItem()
-    partsByRun = { 'run-parked': 1 }
+    rowsByKey = new Map([[publishNonceKey('job-1', 1).toString(), [{ id: 'part-1', status: 'recorded', txHash: '0x1' }]]])
     runIn(item, 'attestationFailureRecoverable', { ...parkedContext, nonceKey: undefined })
     const actor = await PublishManager.createPublish(item, ADDRESS, fromEthersWallet(ethers.Wallet.createRandom()), {
       nonceKey: 'job-2',
@@ -154,7 +162,7 @@ describe('Publish on a parked seed', () => {
     const parked = runIn(item, 'attestationFailureRecoverable', parkedContext)
     let sending: ReturnType<typeof runIn> | undefined
     // A retry moves the run on after Publish found it parked and before the replacement runs.
-    whileReadingParts = () => {
+    beforeReplacing = () => {
       sending = runIn(item, 'attestationOutcomeUnknown')
       parked.stop()
     }

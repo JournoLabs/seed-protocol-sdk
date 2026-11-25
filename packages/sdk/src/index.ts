@@ -29,6 +29,7 @@ export {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findPublishAttemptsByNonceKey,
   findRecordedPublishAttempts,
   findRecordedPublishParts,
   updatePublishAttempt,
