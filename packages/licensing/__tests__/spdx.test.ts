@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSpdx, isKnownSpdxId, SPDX_LIST_VERSION } from '../src'
+import { canonicalSpdx, parseSpdx, isKnownSpdxId, SPDX_LIST_VERSION } from '../src'
 
 const ok = (expression: string) => {
   const result = parseSpdx(expression)
@@ -61,4 +61,26 @@ describe('parseSpdx', () => {
     'rejects %j',
     (expression) => expect(parseSpdx(expression).ok).toBe(false),
   )
+})
+
+describe('canonicalSpdx', () => {
+  it.each([
+    ['mit', 'MIT'],
+    ['  MIT   OR   apache-2.0 ', 'MIT OR Apache-2.0'],
+    ['(MIT)', 'MIT'],
+    ['((MIT) OR (Apache-2.0))', 'MIT OR Apache-2.0'],
+    ['MIT OR (Apache-2.0 AND BSD-3-Clause)', 'MIT OR Apache-2.0 AND BSD-3-Clause'],
+    ['(MIT OR Apache-2.0) AND BSD-3-Clause', '(MIT OR Apache-2.0) AND BSD-3-Clause'],
+    ['MIT OR (Apache-2.0 OR BSD-3-Clause)', 'MIT OR Apache-2.0 OR BSD-3-Clause'],
+    ['gpl-2.0-only WITH classpath-exception-2.0', 'GPL-2.0-only WITH Classpath-exception-2.0'],
+    ['apache-2.0+', 'Apache-2.0+'],
+    ['LicenseRef-Mine', 'LicenseRef-Mine'],
+  ])('%s -> %s', (input, expected) => {
+    expect(canonicalSpdx(input)).toBe(expected)
+    expect(canonicalSpdx(expected)).toBe(expected)
+  })
+
+  it('throws on an expression that does not parse', () => {
+    expect(() => canonicalSpdx('NOT-A-LICENSE')).toThrow(/unknown license id/)
+  })
 })

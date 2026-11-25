@@ -6,6 +6,7 @@ import { getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, sendsAsManagedAccount, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
+import { permissionlessSenderOptions } from './adapters/permissionlessSenderOptions'
 import { resolvePublishPayment } from '../payment'
 import type { ManagedAccountPublishError } from '../errors'
 
@@ -98,12 +99,7 @@ export async function ensureWalletThenPublish(
 
   // Upgrade EOA sender to permissionless EIP-7702 when configured.
   if (payment.sender === 'eip7702') {
-    const txSender = await createPermissionlessTxSender({
-      signer: session.signer,
-      bundlerUrl: config.bundlerUrl!,
-      paymasterUrl: config.paymasterUrl,
-      sponsored: payment.gas.payer === 'sponsored',
-    })
+    const txSender = await createPermissionlessTxSender(permissionlessSenderOptions(config, session.signer))
     session = {
       ...session,
       txSender,

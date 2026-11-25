@@ -31,7 +31,7 @@ do with Arweave alone. For each upload it:
    CID;
 2. sends the upload to the wrapped store and the CAR to every pinning provider at the same time;
 3. before attesting, waits until both stores hold it. A pin that never lands fails the publish, as
-   a failed Arweave upload does.
+   a failed Arweave upload does, unless `required` is `false` (below).
 
 When a publish replaces a parked one and reuses an upload (ADR 0036), the mirror checks that the
 wrapped store holds the id, recomputes the CID from the file's local bytes, and pins the file if
@@ -39,6 +39,28 @@ IPFS doesn't have it. If the bytes can't be read, or no longer match, the upload
 sent to both stores again.
 
 An app's `signDataItems` receives the uploads with the `IPFS-CID` tag already in `upload.tags`.
+
+### When the IPFS copy is optional
+
+With `required: false`, a pinning outage doesn't stop a publish. The wrapped store's failures still
+fail it; a pin upload that fails, or a CID not confirmed within `storedTimeoutMs`, doesn't.
+`onPinResult` tells the app which copies landed, with or without `required`:
+
+```ts
+blobStore: ipfsMirror(arweaveBlobStore, {
+  pinning: myPinningProvider,
+  required: false,
+  onPinResult: ({ id, cid, ok }) => {
+    if (!ok) queuePinRetry(id, cid)
+  },
+}),
+```
+
+It is called once per upload: with `ok: false` from `send` when the pin upload fails, else from
+`assertStored` once the pin is confirmed or the timeout passes. `id` is the attested (Arweave) id.
+To retry a pin later, pin `toCar(await unixFsDag(bytes))` with the provider's `pinCar`. A publish
+restored after a reload reports nothing for uploads prepared before it. With `required` left at
+`true`, a failed copy fails the publish and is checked and reported again when the publish retries.
 
 ## IPFS as the only store
 

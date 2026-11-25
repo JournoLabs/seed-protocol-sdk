@@ -6,6 +6,10 @@ import { parseSeedPublicationRecord, SEED_PUBLICATION_TEXT_KEY } from './publica
  * Thrown by the ENS reads when `viem`, an optional peer of `@seedprotocol/query` used only by
  * `@seedprotocol/query/ens`, isn't installed. `decodeContenthash` and `parseSeedPublicationRecord`
  * don't need it.
+ *
+ * Only Node's missing-module errors (`ERR_MODULE_NOT_FOUND`, `MODULE_NOT_FOUND`) become this error.
+ * A bundler fails at build time, or with its own error when the import runs in the browser, and
+ * that error is not wrapped.
  */
 export class EnsViemMissingError extends Error {
   readonly code = 'ENS_VIEM_MISSING'
