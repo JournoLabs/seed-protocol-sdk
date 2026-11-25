@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { checkSidecar, suggestTerms, syncSidecar, type SidecarSchema } from '../src/index'
+import { checkSidecar, suggestTerms, syncSidecar, toShacl, type SidecarSchema } from '../src/index'
+import { compileLens } from '../src/lens'
 import { withSchemaIds } from '../src/schemaIds'
 
 // A schema file as the docs' tutorial writes it: names only.
@@ -39,5 +40,34 @@ describe('schema files without ids', () => {
     expect(suggestTerms({ schema: handWritten, sidecar })).toEqual([
       { model: 'Post', property: 'title', id: 'd594dfebd3', term: 'dcterms:title' },
     ])
+  })
+})
+
+describe('a sidecar for another schema', () => {
+  const sidecar = { schemaId: 'other', terms: {} }
+
+  it('names a derived schema id as derived, in every entry point that checks it', () => {
+    expect(() => checkSidecar({ schema: handWritten, sidecar })).toThrow(/not 5945b0f13a \(derived from metadata\.name\)/)
+    expect(() => toShacl({ schema: handWritten, sidecar })).toThrow(/not 5945b0f13a \(derived from metadata\.name\)/)
+    expect(() => compileLens({ schema: handWritten, sidecar })).toThrow(/not 5945b0f13a \(derived from metadata\.name\)/)
+  })
+
+  it("doesn't call an id from the file derived", () => {
+    expect(() => checkSidecar({ schema: { id: 'schema-1', models: {} }, sidecar })).toThrow('The sidecar is for schema other, not schema-1')
+  })
+})
+
+describe('the report on a schema with derived ids', () => {
+  const terms = (...ids: string[]) => ({ schemaId: '5945b0f13a', terms: Object.fromEntries(ids.map((id) => [id, 'schema:x'])) })
+
+  it('flags a sidecar whose every term is stale', () => {
+    expect(checkSidecar({ schema: handWritten, sidecar: terms('a', 'b') }).derivedIdsMismatch).toBe(true)
+  })
+
+  it('does not when some term matches, when there are no terms, or when the file has its ids', () => {
+    expect(checkSidecar({ schema: handWritten, sidecar: terms('a', '313a8733b8') }).derivedIdsMismatch).toBe(false)
+    expect(checkSidecar({ schema: handWritten, sidecar: terms() }).derivedIdsMismatch).toBe(false)
+    const withIds = { id: 'schema-1', models: { Post: { id: 'm', properties: {} } } }
+    expect(checkSidecar({ schema: withIds, sidecar: { schemaId: 'schema-1', terms: { a: 'schema:x' } } }).derivedIdsMismatch).toBe(false)
   })
 })
