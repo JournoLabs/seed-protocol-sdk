@@ -64,12 +64,9 @@ describe('blob sources', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       setBlobSources([ipfs({ sha256: () => 'ab'.repeat(32) })])
-      let call = 0
-      vi.stubGlobal('fetch', async () => {
-        call++
-        if (call === 1) return new Response('nope', { status: 404 })
-        return new Response(BODY, { status: 200 })
-      })
+      vi.stubGlobal('fetch', async (url: string) =>
+        url.includes('a.example.com') ? new Response('nope', { status: 404 }) : new Response(BODY, { status: 200 }),
+      )
       expect(await fetchBlobBytes(resolveBlobSource(KEY)!)).toBeUndefined()
       expect(warn).toHaveBeenCalledTimes(1)
       const line = String(warn.mock.calls[0]![0])
@@ -80,6 +77,12 @@ describe('blob sources', () => {
       // The same id again is not repeated.
       await fetchBlobBytes(resolveBlobSource(KEY)!)
       expect(warn).toHaveBeenCalledTimes(1)
+
+      // A different failure for the same id is reported.
+      vi.stubGlobal('fetch', async () => new Response('nope', { status: 503 }))
+      await fetchBlobBytes(resolveBlobSource(KEY)!)
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(String(warn.mock.calls[1]![0])).toContain(' 503')
     } finally {
       warn.mockRestore()
     }

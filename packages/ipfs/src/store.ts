@@ -154,7 +154,7 @@ export function ipfsMirror(store: BlobStore, options: IpfsStoreOptions): BlobSto
 
   return {
     id: `${store.id}+ipfs`,
-    usesUploadApi: store.usesUploadApi,
+    usesUploadApi: store.usesUploadApi !== false,
     async prepare(uploads, ctx: BlobStoreContext): Promise<PreparedBlobs> {
       const dags = await writer.dags(uploads)
       const tagged = uploads.map((upload, i) => ({

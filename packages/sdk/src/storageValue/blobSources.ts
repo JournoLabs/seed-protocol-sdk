@@ -33,7 +33,7 @@ export function setBlobSources(next: readonly BlobSource[]): void {
   warnedMissingBlobs.clear()
 }
 
-/** Blobs already warned about, so a re-read of the same missing file doesn't repeat the line. */
+/** Failures already warned about, so a re-read that fails the same way doesn't repeat the line. */
 const warnedMissingBlobs = new Set<string>()
 
 const UNSAFE_KEY_RE = /[./\\:]/
@@ -94,10 +94,10 @@ export async function fetchBlobBytes({ source, key }: ResolvedBlob): Promise<Uin
       attempts.push(`${url} network error`)
     }
   }
-  const warnKey = `${source.id}:${key}`
+  const tried = attempts.length > 0 ? attempts.join(', ') : 'no URL configured'
+  const warnKey = `${source.id}:${key}:${tried}`
   if (!warnedMissingBlobs.has(warnKey)) {
     warnedMissingBlobs.add(warnKey)
-    const tried = attempts.length > 0 ? attempts.join(', ') : 'no URL configured'
     console.warn(`[seed] ${source.id} blob ${key} not found at any URL: ${tried}`)
   }
   return undefined

@@ -61,7 +61,7 @@ Pinning costs are the provider's. Custom stores declare the same with `BlobStore
 
 Html with embedded images or `seed:property/` references links each file by the first URL of the
 blob source that reads its id, so `ipfsBlobSource` must be in the publishing app's `blobSources`; an
-`ipfs://` id with no source fails the rewrite before upload.
+`ipfs://` id with no source fails the publish at the rewrite, after the images are uploaded; register `ipfsBlobSource` in `SeedConfig.blobSources` before publishing Html.
 
 The other readers handle `ipfs://` ids as follows:
 

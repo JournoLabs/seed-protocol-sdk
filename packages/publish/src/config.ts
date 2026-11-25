@@ -376,7 +376,8 @@ export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl'
   const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
   if (!raw) {
     const store = c.blobStore
-    if (store && !store.usesUploadApi) return
+    // Only an explicit false skips it: a store written before the field existed sends uploads the old way.
+    if (store && store.usesUploadApi === false) return
     if ((c.payment?.storage ?? 'operator') === 'operator') {
       throw new Error(
         `initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave) because the blob store "${store?.id ?? 'arweave'}" uses it, unless payment.storage is "user".`,

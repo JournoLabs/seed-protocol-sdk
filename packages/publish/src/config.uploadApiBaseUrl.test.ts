@@ -25,6 +25,11 @@ describe('assertUploadApiBaseUrl', () => {
     )
   })
 
+  test('requires it for a store that does not say whether it uses the upload API', () => {
+    const untyped = { id: 'older-custom' } as never
+    expect(() => assertUploadApiBaseUrl({ blobStore: untyped } as never)).toThrow('store "older-custom"')
+  })
+
   test('is optional when users pay for storage', () => {
     expect(() => assertUploadApiBaseUrl({ payment: { storage: 'user' } } as never)).not.toThrow()
   })
