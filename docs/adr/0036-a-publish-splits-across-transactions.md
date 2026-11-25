@@ -115,8 +115,11 @@ How many parts went out under the key is read from the recorded `publish_attempt
 (`findPublishAttemptsByNonceKey`), not from a run's saved state. The snapshot is saved when the
 machine moves on, so a tab that reloads between parts would restore a count that misses the last
 part and send under its spent key. A part under the key that was sent and not settled (`sending`,
-`sent` or `landed`) stops the try with `AttestationOutcomeUnknownError` until reconcile settles it,
-since it may have landed.
+`sent` or `landed`, so `landed` blocks too) stops the try with `AttestationOutcomeUnknownError` until
+reconcile settles it, since it may have landed. `checking` sends the publish to `attestationOutcomeUnknown`
+for it, not to `failure`. Once the recorded parts include the one that held the item's own request,
+the key has finished a publish of that item: a new publish under it is refused with `NONCE_KEY_SPENT`
+and needs a new key; only another item's rows under the key are ignored.
 
 A split publish under a host key finishes only from the database that started it. When part *k*'s
 key is spent and no row of this database explains it, `NONCE_KEY_SPENT` says the publish is partly

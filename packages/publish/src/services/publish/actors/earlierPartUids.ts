@@ -17,9 +17,15 @@ const BIGINT_REQUEST_FIELDS = new Set(['expirationTime', 'value', 'elementIndex'
  * requests the row kept. Empty when neither is available.
  */
 async function recordedPartUids(row: RecordedPartRow): Promise<string[]> {
-  if (row.attestationUids) return JSON.parse(row.attestationUids) as string[]
-  if (!row.txHash) return []
   try {
+    if (row.attestationUids) {
+      try {
+        return JSON.parse(row.attestationUids) as string[]
+      } catch (err) {
+        logger('stored uids of part %s are unreadable, reading its receipt: %O', row.id, err)
+      }
+    }
+    if (!row.txHash) return []
     const receipt = await waitForPublishReceipt(row.txHash as `0x${string}`)
     const requests = JSON.parse(row.requests, (key, v) =>
       BIGINT_REQUEST_FIELDS.has(key) && typeof v === 'string' ? BigInt(v) : v,

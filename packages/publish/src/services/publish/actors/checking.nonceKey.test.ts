@@ -133,10 +133,34 @@ describe('checking: CreatePublishOptions.nonceKey', () => {
     harness.rowsByKey = new Map([[publishNonceKey('run-7', 1).toString(), [{ id: 'part-1', status: 'sent', txHash: '0x1' }]]])
     try {
       const event = await runChecking(PUBLISHER, pinning)
-      expect(event.type).toBe('checkingFailed')
+      expect(event.type).toBe('attestationOutcomeUnknown')
       expect(event.error).toMatchObject({ code: 'ATTESTATION_OUTCOME_UNKNOWN', attemptId: 'part-1' })
     } finally {
       harness.rowsByKey = new Map()
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('the publish waits in attestationOutcomeUnknown, not failure, so reconcile can settle it', async () => {
+    harness.chainNonce = 0n
+    harness.rowsByKey = new Map([[publishNonceKey('run-7', 1).toString(), [{ id: 'part-1', status: 'landed', txHash: '0x1' }]]])
+    const { publishMachine } = await import('../index')
+    const item = { seedLocalId: `seed${++n}` }
+    harness.seed = item.seedLocalId
+    const { fromPromise } = await import('xstate')
+    const machine = publishMachine.provide({ actors: { authorizing: fromPromise(async () => undefined) } })
+    const actor = createActor(machine, {
+      input: { item, wallet: pinning, address: PUBLISHER, publishMode: 'patch', nonceKey: 'run-7' } as never,
+    }).start()
+    try {
+      await waitUntilOrThrow(
+        () => !['authorizing', 'checking'].includes(actor.getSnapshot().value as string),
+        'the checking verdict',
+      )
+      expect(actor.getSnapshot().value).toBe('attestationOutcomeUnknown')
+      expect(actor.getSnapshot().context.error).toMatchObject({ code: 'ATTESTATION_OUTCOME_UNKNOWN', attemptId: 'part-1' })
+    } finally {
+      harness.rowsByKey = new Map()
+      actor.stop()
     }
   }, TEST_TIMEOUT_MS)
 

@@ -78,6 +78,14 @@ describe('earlierPartUids', () => {
     expect(receiptsRead).toEqual([h('7')])
   })
 
+  test('a row whose stored uids are corrupt is read from its receipt and the other parts stay', async () => {
+    rows = [
+      { id: 'p1', txHash: h('7'), attestationUids: JSON.stringify([h('1')]), requests: sentRequests, attester: ATTESTER },
+      { id: 'bad', txHash: h('8'), attestationUids: '{not json', requests: sentRequests, attester: ATTESTER },
+    ]
+    expect(await earlierPartUids('run-1', new Set())).toEqual([h('1'), h('a'), h('b'), h('c')])
+  })
+
   test('a row with neither stored uids nor a transaction adds nothing, and does not throw', async () => {
     rows = [{ id: 'old', txHash: null, attestationUids: null, requests: sentRequests, attester: ATTESTER }]
     expect(await earlierPartUids('run-1', new Set())).toEqual([])
