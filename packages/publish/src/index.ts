@@ -227,6 +227,7 @@ export {
   usePublishProcessesStateForSeed,
   usePublishProcessById,
   usePublishCostEstimate,
+  useSponsorStatus,
   clearCompletedPublishProcesses,
   clearCompletedPublishProcessesForSeed,
   clearAllPublishProcesses,
@@ -238,7 +239,12 @@ export {
   getEasPayload,
   resumesOnNextLoad,
 } from './hooks'
-export type { UsePublishCostEstimateResult } from './hooks'
+export type { UsePublishCostEstimateResult, UseSponsorStatusResult } from './hooks'
+export {
+  getSponsorStatus,
+  SPONSOR_DEPOSIT_MARGIN,
+  type SponsorStatus,
+} from './services/sponsorStatus/sponsorStatus'
 export type { PublishProcessRecord, PublishProcessStatus } from './hooks/useItemPublishStatus'
 export { useArweaveL1Finalize } from './hooks/useArweaveL1Finalize'
 export type { ArweaveL1FinalizeJobRow } from './hooks/useArweaveL1Finalize'
