@@ -40,6 +40,10 @@ type PublishCostFlags = {
   uploadBatches?: number[]
   /** The publish chain is a testnet. */
   testnet?: boolean
+  /** The configured blob store's `id` (default `arweave`). */
+  storeId?: string
+  /** Whether the blob store sends uploads through the upload API or Turbo (default true). */
+  usesUploadApi?: boolean
   /** PublishConfig's upload limits, for `upload`. */
   uploadLimits?: UploadLimits
 }
@@ -63,6 +67,8 @@ function readPublishFlags(): PublishCostFlags & {
       uploadTo: payment.storage.uploadTo,
       turbo: payment.storage.turbo,
       uploadTags: config.arweaveUploadTags,
+      storeId: config.blobStore?.id ?? 'arweave',
+      usesUploadApi: config.blobStore?.usesUploadApi ?? true,
       testnet,
       uploadLimits: {
         maxUploadBytes: config.maxUploadBytes,
@@ -155,6 +161,8 @@ export function combinePublishCostEstimate(
       testnet: flags?.testnet ?? false,
       uploadTo,
       freeBytes,
+      storeId: flags?.storeId ?? 'arweave',
+      usesUploadApi: flags?.usesUploadApi ?? true,
     },
     estimateUpload(work, flags?.uploadLimits),
   )
@@ -168,12 +176,15 @@ export function repricePublishCostEstimate(
   estimate: PublishCostEstimate,
   rates: MarketRates,
 ): PublishCostEstimate {
-  const repriced = priceEstimate(estimate.work, estimate.evm.gas, estimate.arweave.chargedBytes, rates, {
+  const { arweave } = estimate
+  const repriced = priceEstimate(estimate.work, estimate.evm.gas, arweave?.chargedBytes ?? 0, rates, {
     evmUserPays: estimate.evm.userPays,
-    arweaveUserPays: estimate.arweave.userPays,
+    arweaveUserPays: arweave?.userPays ?? false,
     testnet: estimate.evm.testnet,
-    uploadTo: estimate.arweave.uploadTo,
-    freeBytes: estimate.arweave.freeBytes,
+    uploadTo: arweave?.uploadTo ?? 'upload-api',
+    freeBytes: arweave?.freeBytes ?? 0,
+    storeId: estimate.storage.store,
+    usesUploadApi: estimate.storage.priced,
   }, estimate.upload)
   return estimate.expectedPublishTransactions === undefined
     ? repriced
@@ -191,6 +202,8 @@ function priceEstimate(
     testnet: boolean
     uploadTo: 'upload-api' | 'turbo'
     freeBytes: number
+    storeId: string
+    usesUploadApi: boolean
   },
   upload: PublishCostEstimate['upload'],
 ): PublishCostEstimate {
@@ -202,7 +215,7 @@ function priceEstimate(
 
   const winston = Math.max(0, Math.round(chargedBytes * rates.winstonPerByte))
   const ar = winston / WINSTON_PER_AR
-  const arUsd = ar * rates.arUsd
+  const arUsd = flags.usesUploadApi ? ar * rates.arUsd : 0
 
   return {
     totalUsd: roundUsd(evmUsd + arUsd),
@@ -213,17 +226,20 @@ function priceEstimate(
       userPays: evmUserPays,
       testnet,
     },
-    arweave: {
-      ar: ar.toPrecision(6),
-      usd: roundUsd(arUsd),
-      bytes: work.uploadBytes,
-      chargedBytes,
-      uploadCount: work.uploadCount,
-      uploadTo: flags.uploadTo,
-      freeBytes: flags.freeBytes,
-      path: 'bundler',
-      userPays: arweaveUserPays,
-    },
+    ...(flags.usesUploadApi && {
+      arweave: {
+        ar: ar.toPrecision(6),
+        usd: roundUsd(arUsd),
+        bytes: work.uploadBytes,
+        chargedBytes,
+        uploadCount: work.uploadCount,
+        uploadTo: flags.uploadTo,
+        freeBytes: flags.freeBytes,
+        path: 'bundler' as const,
+        userPays: arweaveUserPays,
+      },
+    }),
+    storage: { store: flags.storeId, priced: flags.usesUploadApi },
     prices: {
       ethUsd: rates.ethUsd,
       arUsd: rates.arUsd,
@@ -298,6 +314,10 @@ export async function estimatePublishCost(
     if (backReferences === 'link') {
       expectedPublishTransactions = await expectedPublishTransactionsOf(item, options?.publishMode)
     }
+  }
+  if (options?.arweaveStorage) {
+    flags.usesUploadApi = true
+    flags.storeId = 'arweave'
   }
   if (options?.uploadTags) flags.uploadTags = options.uploadTags
   if (options?.uploadBatches) flags.uploadBatches = options.uploadBatches

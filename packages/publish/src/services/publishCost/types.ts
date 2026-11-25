@@ -33,7 +33,11 @@ export type PublishCostEstimate = {
     /** The publish chain is a testnet: its ETH has no value, so `usd` is 0. */
     testnet: boolean
   }
-  arweave: {
+  /**
+   * Arweave storage cost. Absent when the configured blob store doesn't send uploads through the
+   * upload API or Turbo (`BlobStore.usesUploadApi` is false); see {@link PublishCostEstimate.storage}.
+   */
+  arweave?: {
     ar: string
     usd: number
     /** Bytes uploaded. */
@@ -56,6 +60,15 @@ export type PublishCostEstimate = {
      * upload API's bundler routes pay for the data items.
      */
     userPays: boolean
+  }
+  /**
+   * Where uploads go and whether `totalUsd` includes their cost. `priced: false` means the blob
+   * store is not Arweave-backed: storage is not in `totalUsd`, which is gas only.
+   */
+  storage: {
+    /** The blob store's `id`. */
+    store: string
+    priced: boolean
   }
   prices: {
     ethUsd: number
@@ -94,6 +107,11 @@ export type EstimatePublishCostOptions = {
    * than one. Each bundle is charged Arweave's 256 KiB minimum. Default one bundle.
    */
   uploadBatches?: number[]
+  /**
+   * Price storage on Arweave whatever `blobStore` says, for operations that always upload there
+   * (archive anchors).
+   */
+  arweaveStorage?: boolean
   rates?: {
     ethUsd: number
     arUsd: number

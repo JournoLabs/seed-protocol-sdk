@@ -14,6 +14,7 @@ import {
 import { generateId } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
+import { setBlobSources } from '@/storageValue/blobSources'
 import {
   HtmlSeedPropertyRefError,
   prepareHtmlEmbeddedImagesForPublish,
@@ -119,6 +120,7 @@ testDescribe('seed:property/ placeholders in Html', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    setBlobSources([])
   })
 
   it('defer the Html, then become the URL of the property uploaded in phase 1', async () => {
@@ -160,6 +162,53 @@ testDescribe('seed:property/ placeholders in Html', () => {
     await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, [], [contextOf(post, 'html').propertyValue!])
     expect(await readHtml(post)).toBe(ARCHIVE(getPublicArweaveRawUrl(publishedTx)))
   }, 90000)
+
+  describe('with a property stored under an ipfs:// id', () => {
+    const CID = 'bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+    const ipfsSource = {
+      id: 'ipfs',
+      key: (id: string) => (id.startsWith('ipfs://') ? id.slice('ipfs://'.length) : undefined),
+      urls: (key: string) => [`https://gw.example.com/ipfs/${key}`, `https://other.example.com/ipfs/${key}`],
+    }
+
+    it('link the one uploaded in phase 1 through the first URL of the blob source', async () => {
+      setBlobSources([ipfsSource])
+      vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(async () => ({ id: 'unsigned', tags: [] }) as any)
+      const post = await createPost(ARCHIVE('seed:property/featureImage'))
+      const imageSeed = contextOf(post, 'featureImage').propertyValue!
+      const { deferredHtmlSeedLocalIds } = await prepareHtmlEmbeddedImagesForPublish(post as any, 'preserve')
+      const phase1 = withTxIds(
+        await getPublishUploads(post as any, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+      ).map((u) => (u.seedLocalId === imageSeed ? { ...u, txId: `ipfs://${CID}` } : u))
+
+      await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, phase1, deferredHtmlSeedLocalIds)
+      expect(await readHtml(post)).toBe(ARCHIVE(`https://gw.example.com/ipfs/${CID}`))
+    }, 90000)
+
+    it('link a published one the same way', async () => {
+      setBlobSources([ipfsSource])
+      const post = await createPost(ARCHIVE('seed:property/featureImage'))
+      const imageSeed = contextOf(post, 'featureImage').propertyValue!
+      const imageItem = (await Item.find({ seedLocalId: imageSeed }))!
+      const st = imageItem.internalProperties['storageTransactionId'] ?? imageItem.allProperties['storageTransactionId']
+      st!.value = `ipfs://${CID}`
+      await st!.save()
+      await waitForIdle(imageItem, 'Item', 15000)
+
+      await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, [], [contextOf(post, 'html').propertyValue!])
+      expect(await readHtml(post)).toBe(ARCHIVE(`https://gw.example.com/ipfs/${CID}`))
+    }, 90000)
+
+    it('fail the rewrite, leaving the Html as it is, when no blob source reads the id', async () => {
+      const post = await createPost(ARCHIVE('seed:property/featureImage'))
+      const imageSeed = contextOf(post, 'featureImage').propertyValue!
+      const phase1 = [{ seedLocalId: imageSeed, txId: `ipfs://${CID}` }] as any
+      await expect(
+        rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, phase1, [contextOf(post, 'html').propertyValue!]),
+      ).rejects.toThrow('blobSources')
+      expect(await readHtml(post)).toBe(ARCHIVE('seed:property/featureImage'))
+    }, 90000)
+  })
 
   it('fail the rewrite when the property was neither uploaded nor published', async () => {
     const post = await createPost(ARCHIVE('seed:property/featureImage'))

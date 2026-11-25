@@ -39,11 +39,26 @@ export function withSchemaIds<T extends LensSchema>(schema: T): T {
 }
 
 /** Whether the schema, a model or a property has no id. */
-export function needsIds(schema: LensSchema): boolean {
+function needsIds(schema: LensSchema): boolean {
   return (
     !schema.id ||
     Object.values(schema.models).some(
       (model) => !model.id || Object.values(model.properties ?? {}).some((property) => !property?.id),
     )
   )
+}
+
+/** Whether {@link withSchemaIds} fills in any id: it needs `metadata.name` as well as a missing id. */
+export const derivesIds = (schema: LensSchema): boolean => withSchemaIds(schema) !== schema
+
+/**
+ * The error for a sidecar written for another schema. `original` is the schema as the file has it,
+ * so an id that {@link withSchemaIds} derived is named as derived rather than looking like a value
+ * from the user's file.
+ */
+export function sidecarSchemaMismatch(sidecarSchemaId: string, original: LensSchema, schema: LensSchema): TypeError {
+  const actual = schema.id
+    ? `${schema.id}${original.id ? '' : ' (derived from metadata.name)'}`
+    : 'a schema with no id or metadata.name'
+  return new TypeError(`The sidecar is for schema ${sidecarSchemaId}, not ${actual}`)
 }

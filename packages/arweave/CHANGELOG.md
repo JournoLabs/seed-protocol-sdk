@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- New `publicStorageUrl(storageId, { ipfsGateway })`: `<gateway>/ipfs/<cid>` for an `ipfs://<cid>` id (default gateway `DEFAULT_IPFS_GATEWAYS[0]`, `https://ipfs.io`, the first of the two `@seedprotocol/ipfs` uses), the public Arweave `/raw/<id>` URL for an Arweave id, and undefined for any other scheme. New `hasUriScheme(storageId)`. `resolveSeedRssImageRelationRef` and `resolveSeedRssImageRelationFromItem` take an `ipfsGateway` option and return the gateway URL as `mediaUrl` for an `ipfs://` id. They returned `https://<gateway>/raw/ipfs://<cid>`.
+
 ## 0.8.3 (2026-11-23)
 
 - The across-gateways reads try the host from before the read-gateway probe last: the one `setHost` configured, else the default `arweave.net`. Without `setHost`, a probe that moved the host past a failing `arweave.net` (to `zigza.xyz`, say) made the probe's pick the host tried last, and `arweave.net` wasn't tried.

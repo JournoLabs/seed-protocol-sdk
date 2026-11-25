@@ -92,6 +92,10 @@ interface BlobStore {
   prepare(uploads: PublishUploadData[], ctx: BlobStoreContext): Promise<PreparedBlobs>
   send(pending: unknown[], ctx: BlobStoreContext): Promise<void>
   assertStored(ids: string[]): Promise<void>
+  // Amended 2026-11-25 (batch 18): whether uploads go through the upload API or Turbo, and an
+  // optional check that a replacing publish can reuse an upload (otherwise assertStored).
+  readonly usesUploadApi: boolean
+  reusable?(id: string, upload: PublishUploadData): Promise<boolean>
 }
 type PreparedBlobs = { ids: string[]; pending?: unknown[] }
 type BlobRef = { id: string; sha256: string }

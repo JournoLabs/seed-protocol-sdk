@@ -9,6 +9,7 @@ import { seedVitePlugin } from '../src/index.js'
 import { DEFAULT_SCHEMA_FILE, watchRdfSidecar } from '../src/rdfSidecar.js'
 
 // The workspace package, as an app installs it: the plugin loads it with Node's own import, so its dist.
+const viteVersion = (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
 const rdfPackage = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../rdf')
 
 const schema = {
@@ -135,6 +136,45 @@ describe('rdfSidecar dev check', () => {
     await watchRdfSidecar(server, {})
     expect(logged.join('\n')).toMatch(/term "schema:gone" names gone/)
     expect(logged.join('\n')).not.toMatch(/not a schema with no id/)
+  })
+
+  it('says the SDK may have stored other ids when the ids are derived and every term is stale', async () => {
+    const root = app()
+    writeJson(root, 'seed.schema.json', { metadata: { name: 'Blog' }, models: { Post: { properties: { title: { type: 'Text' } } } } })
+    writeJson(root, 'seed.schema.context.jsonld', { schemaId: '5945b0f13a', terms: { 'old-model': 'schema:BlogPosting' } })
+    const { server, logged } = devServer(root)
+    await watchRdfSidecar(server, {})
+    expect(logged.join('\n')).toMatch(/may have stored other ids.*schema file/)
+  })
+
+  it('warns when the installed @seedprotocol/rdf is older than this package, naming the version to install', async () => {
+    const root = app({ withRdf: false })
+    const dir = path.join(root, 'node_modules/@seedprotocol/rdf')
+    fs.mkdirSync(dir, { recursive: true })
+    writeJson(dir, 'package.json', { name: '@seedprotocol/rdf', version: '0.0.1', exports: { '.': { import: { default: './index.js' } } } })
+    fs.writeFileSync(path.join(dir, 'index.js'), 'export const checkSidecar = () => ({ stale: [], invalid: [], unmapped: [], contextOutdated: false, versionOutdated: false })')
+    const { server, logged } = devServer(root)
+    await watchRdfSidecar(server, {})
+    expect(logged).toEqual([`warn [seed-protocol] seed.schema.context.jsonld: @seedprotocol/rdf 0.0.1 is older than @seedprotocol/vite ${viteVersion}; update it to ${viteVersion}`])
+  })
+
+  it('stays quiet when @seedprotocol/rdf is as new as this package', async () => {
+    const { server, logged } = devServer(app())
+    await watchRdfSidecar(server, {})
+    expect(logged).toEqual([])
+  })
+
+  it('looks further when node_modules/@seedprotocol/rdf has no usable entry', async () => {
+    const parent = app()
+    const root = path.join(parent, 'packages/web')
+    fs.mkdirSync(path.join(root, 'node_modules/@seedprotocol/rdf'), { recursive: true })
+    writeJson(path.join(root, 'node_modules/@seedprotocol/rdf'), 'package.json', { name: '@seedprotocol/rdf', version: '0.0.1' })
+    for (const file of ['package.json', 'seed.schema.json', 'seed.schema.context.jsonld']) fs.copyFileSync(path.join(parent, file), path.join(root, file))
+    writeJson(root, 'seed.schema.context.jsonld', { ...sidecar, terms: { ...sidecar.terms, gone: 'schema:gone' } })
+    const { server, logged } = devServer(root)
+    await watchRdfSidecar(server, {})
+    expect(logged.join('\n')).toMatch(/schema:gone/)
+    expect(logged.join('\n')).not.toMatch(/install @seedprotocol\/rdf/)
   })
 
   it('reports a sidecar for another schema, and reads the paths it is given', async () => {

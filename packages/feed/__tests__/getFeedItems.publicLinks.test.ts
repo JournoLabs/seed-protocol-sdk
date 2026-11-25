@@ -85,5 +85,29 @@ describe('feed items', () => {
     const [item] = await getFeedItemsBySchemaName('post')
     expect(item!.guid).toBe('https://example.com/p/1')
   })
-})
 
+  it('link an ipfs:// storage id through a gateway and use the id as the guid', async () => {
+    const id = 'ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+    const record = { seedUid: '0xipfs', data: { seedUid: '0xipfs', title: 'On IPFS', storageTransactionId: id } }
+    mockQueryBySchema.mockResolvedValue({ items: [Object.freeze(record)] })
+    const [item] = await getFeedItemsBySchemaName('post')
+    expect(item!.guid).toBe(id)
+    expect(item!.link).toBe(`https://ipfs.io/ipfs/${id.slice('ipfs://'.length)}`)
+  })
+
+  it('take the IPFS gateway from FEED_IPFS_GATEWAY', async () => {
+    const cid = 'bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+    const record = {
+      seedUid: '0xipfs2',
+      data: { seedUid: '0xipfs2', title: 'On IPFS', storageTransactionId: `ipfs://${cid}` },
+    }
+    mockQueryBySchema.mockResolvedValue({ items: [Object.freeze(record)] })
+    process.env.FEED_IPFS_GATEWAY = 'https://gw.example.com'
+    try {
+      const [item] = await getFeedItemsBySchemaName('post')
+      expect(item!.link).toBe(`https://gw.example.com/ipfs/${cid}`)
+    } finally {
+      delete process.env.FEED_IPFS_GATEWAY
+    }
+  })
+})

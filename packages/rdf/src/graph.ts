@@ -37,7 +37,8 @@ export type StateGraphOptions = {
   base?: string
   /**
    * An `https://` URL for an Arweave transaction, given as `schema:contentUrl` beside the
-   * `ar://` content IRI, since most RDF tools can't fetch `ar://`. None by default.
+   * `ar://` content IRI, since most RDF tools can't fetch `ar://`. None by default. Not called for
+   * an id that already has a scheme (`ipfs://<cid>`), which is the content IRI as it is.
    */
   contentUrl?: (transactionId: string) => string
   /**
@@ -47,6 +48,7 @@ export type StateGraphOptions = {
   lens?: RdfLens
 }
 
+const HAS_SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//
 const SCHEMA_CONTENT_URL = 'https://schema.org/contentUrl'
 const STORAGE_TRANSACTION = 'storage_transaction_id'
 const STORAGE_NAMES = new Set([STORAGE_TRANSACTION, 'storage_provider_transaction_id'])
@@ -216,10 +218,16 @@ export function stateGraph(seeds: readonly SeedAttestations[], options: StateGra
       if (!object) continue
       seed.add(local?.term ?? iris.property(property.easType, property.easName), object)
       if (property.easName === STORAGE_TRANSACTION && typeof property.value === 'string' && property.value) {
-        const transactionId = encodeURIComponent(property.value)
-        seed.add(`${ns}content`, iri(`ar://${transactionId}`))
-        if (options.contentUrl) {
-          seed.add(SCHEMA_CONTENT_URL, iri(assertIri(options.contentUrl(property.value), 'contentUrl')))
+        // An id that is already a URI (`ipfs://<cid>`, from a blob store other than Arweave) is the
+        // content IRI as it is; `contentUrl` maps Arweave transaction ids only.
+        if (HAS_SCHEME.test(property.value)) {
+          seed.add(`${ns}content`, iri(assertIri(property.value, 'storage_transaction_id')))
+        } else {
+          const transactionId = encodeURIComponent(property.value)
+          seed.add(`${ns}content`, iri(`ar://${transactionId}`))
+          if (options.contentUrl) {
+            seed.add(SCHEMA_CONTENT_URL, iri(assertIri(options.contentUrl(property.value), 'contentUrl')))
+          }
         }
       }
     }

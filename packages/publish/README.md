@@ -186,7 +186,8 @@ initPublish({
 ```
 
 `resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
-reports the same in `evm.userPays` / `arweave.userPays`.
+reports the same in `evm.userPays` / `arweave.userPays` (`arweave` is absent when the blob store
+doesn't use the upload API).
 
 #### Users pay for storage (Turbo)
 
