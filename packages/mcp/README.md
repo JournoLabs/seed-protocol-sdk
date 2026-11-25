@@ -150,7 +150,9 @@ const handle = createSeedMcpHttpHandler({ attesters: ['0xYourPublisherAddress'],
 const response = await handle(request, { clientAddress })
 ```
 
-The rate limit is keyed on `clientAddress`; requests without one are not limited.
+The rate limit is keyed on `clientAddress`; requests without one are not limited. The handler's
+`source: 'local'` reads from a query source registered with `registerLocalQuerySource` instead of
+EAS.
 
 On Node, `createSeedMcpHttpServer` from `@seedprotocol/mcp/node` is the `node:http` server `--http` runs. It takes the handler's options plus `path` (default `/mcp`) and `trustProxy`, and returns a server that isn't listening yet:
 
@@ -159,9 +161,6 @@ import { createSeedMcpHttpServer } from '@seedprotocol/mcp/node'
 
 createSeedMcpHttpServer({ attesters: ['0xYourPublisherAddress'], path: '/seed/mcp', trustProxy: true }).listen(3000)
 ```
-
- `source: 'local'` reads from a query source registered
-with `registerLocalQuerySource` instead of EAS.
 
 ## License
 
