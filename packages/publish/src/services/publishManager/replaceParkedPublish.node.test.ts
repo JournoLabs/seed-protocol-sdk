@@ -20,7 +20,8 @@ mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   findOpenPublishAttempts: async (ids: string[]) =>
     attempts.filter((a) => ids.includes(a.seedLocalId) && ['sending', 'sent', 'landed'].includes(a.status)),
-  findPublishAttemptsByNonceKey: async (key: string) => rowsByKey.get(key) ?? [],
+  findPublishAttemptsByNonceKey: async (key: string) =>
+    (rowsByKey.get(key) ?? []).map((r) => ({ seedLocalId: `seed-parked-${n}`, requests: '[]', ...r })),
 }))
 const markInProgressPublishInterrupted = mock(async (_seedLocalId: string) => {})
 mock.module('./actors/savePublish', () => ({ ...realSavePublish, markInProgressPublishInterrupted }))

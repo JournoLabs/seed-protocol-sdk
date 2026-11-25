@@ -21,6 +21,8 @@ const harness = {
   codeKind: 'contract' as 'none' | 'contract',
   /** The EntryPoint nonce under the key: its low 64 bits are how many UserOps landed. */
   chainNonce: 0n,
+  /** The item being published. */
+  seed: '',
   /** publish_attempts rows by the decimal nonce key they sent under. */
   rowsByKey: new Map<string, Array<{ id: string; status: string; txHash: string | null }>>(),
 }
@@ -33,7 +35,8 @@ mock.module('@seedprotocol/sdk', () => ({
   validateItemForPublish: async () => ({ isValid: true, errors: [], payload: [] }),
   summarizePublishUploads: async () => ({ uploadCount: 0, uploadBytes: 0, uploadSizes: [], unpublishedRelatedItems: [], uploadTargets: [] }),
   RelatedItemUnpublishedError,
-  findPublishAttemptsByNonceKey: async (key: string) => harness.rowsByKey.get(key) ?? [],
+  findPublishAttemptsByNonceKey: async (key: string) =>
+    (harness.rowsByKey.get(key) ?? []).map((r) => ({ seedLocalId: harness.seed, requests: '[]', ...r })),
 }))
 mock.module('~/helpers/chainClient', () => ({
   ...realChainClient,
@@ -66,6 +69,7 @@ const pinning = { signer: { address: PUBLISHER }, txSender: { address: PUBLISHER
 let n = 0
 const runChecking = async (address: string, wallet: unknown, nonceKey = 'run-7', extra: Record<string, unknown> = {}) => {
   const { checking } = await import('./checking')
+  harness.seed = `seed${n + 1}`
   const events: { type: string; error?: Error & { code?: string } }[] = []
   const machine = createMachine({
     invoke: {

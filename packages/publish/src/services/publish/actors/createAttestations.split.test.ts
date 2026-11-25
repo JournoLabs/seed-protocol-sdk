@@ -50,6 +50,7 @@ let attemptRows: Array<{
   step?: string
   txHash?: string | null
   nonceKey?: string | null
+  seedLocalId?: string
   attestationUids?: string | null
   requests?: string
   attester?: string
@@ -57,7 +58,14 @@ let attemptRows: Array<{
 /** What findOpenPublishAttempts returns: attempts claimed and not settled. */
 let openAttempts: unknown[] = []
 const claimPublishAttempt = mock(async (attempt: { id: string; requests: string; publishRunId: string | null; nonceKey: string | null }) => {
-  attemptRows.push({ id: attempt.id, publishRunId: attempt.publishRunId, status: 'sending', nonceKey: attempt.nonceKey })
+  attemptRows.push({
+    id: attempt.id,
+    publishRunId: attempt.publishRunId,
+    status: 'sending',
+    nonceKey: attempt.nonceKey,
+    seedLocalId: POST,
+    requests: attempt.requests,
+  })
   return undefined
 })
 const recordMultiPublishReceipt = mock(
@@ -83,7 +91,8 @@ mock.module('@seedprotocol/sdk', () => ({
   updatePublishAttempt: async () => {},
   findRecordedPublishParts: async (runId: string) =>
     attemptRows.filter((a) => a.publishRunId === runId && a.status === 'recorded'),
-  findPublishAttemptsByNonceKey: async (key: string) => attemptRows.filter((a) => a.nonceKey === key),
+  findPublishAttemptsByNonceKey: async (key: string) =>
+    attemptRows.filter((a) => a.nonceKey === key).map((a) => ({ seedLocalId: POST, requests: '[]', ...a })),
   clearHtmlEmbeddedImageCoPublishRows,
 }))
 mock.module('../../../config', () => ({
@@ -340,6 +349,25 @@ describe('createAttestations: a publish over one transaction', () => {
     attemptRows = [{ id: 'part-1', publishRunId: 'run-parked', status: 'recorded', nonceKey: publishNonceKey('run-7', 1).toString() }]
     await pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-new' }))
     expect(sentKeys()).toEqual([publishNonceKey('run-7', 2)])
+  })
+
+  test('a key that already finished a publish of the item refuses a new publish, edited or not', async () => {
+    recorded = new Set(AUTHORS)
+    spentKeys = new Set([publishNonceKey('run-7', 1)])
+    attemptRows = [
+      {
+        id: 'part-1',
+        publishRunId: 'run-done',
+        status: 'recorded',
+        nonceKey: publishNonceKey('run-7', 1).toString(),
+        requests: JSON.stringify([{ localId: POST }]),
+      },
+    ]
+    await expect(pinning(() => run({ nonceKey: 'run-7', publishRunId: 'run-new' }))).rejects.toMatchObject({
+      code: 'NONCE_KEY_SPENT',
+      message: expect.stringContaining('already finished a publish of this item'),
+    })
+    expect(sendTransaction).not.toHaveBeenCalled()
   })
 
   test('a part under the key sent and never settled stops the try before sending', async () => {
