@@ -45,5 +45,32 @@ export default tseslint.config(
             'react-hooks/exhaustive-deps': 'warn',
         },
     },
+    {
+        // A built package's class names are minified (and a consumer's bundler renames them again),
+        // so an error's `name` compared with `SomeClass.name` stops matching there. Compare with a string
+        // literal. Batch 18 item 1.
+        files: ['packages/*/src/**/*.{ts,tsx}'],
+        ignores: ['packages/*/src/**/*.test.{ts,tsx}'],
+        rules: {
+            'no-restricted-syntax': [
+                'error',
+                {
+                    // A class held in a variable (`type.name`, `ctor.name`) or an instance's class
+                    // (`x.constructor.name`). Other `a.name === b.name` comparisons are property names
+                    // (a model's, a field's) and stay allowed: nothing tells them from a class by syntax.
+                    selector:
+                        "BinaryExpression[operator=/^[!=]==?$/] > MemberExpression[property.name='name']:matches([object.type='Identifier'][object.name=/^(type|ctor|cls|klass|errorType|errorClass|ErrorClass|errorCtor)$/], [object.property.name='constructor'])",
+                    message:
+                        "Don't compare with a class's `.name`: a minified build renames classes. Compare with the string literal.",
+                },
+                {
+                    selector:
+                        "BinaryExpression[operator=/^[!=]==?$/] > MemberExpression[property.name='name'][object.type='Identifier'][object.name=/^[A-Z]/]",
+                    message:
+                        "Don't compare with `SomeClass.name`: a minified build renames classes. Compare with the string literal.",
+                },
+            ],
+        },
+    },
     configPrettier,
 )

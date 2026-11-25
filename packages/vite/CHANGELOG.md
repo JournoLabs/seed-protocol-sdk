@@ -1,5 +1,11 @@
 # @seedprotocol/vite
 
+## Unreleased
+
+- The RDF sidecar check warns when the installed `@seedprotocol/rdf` is older than `@seedprotocol/vite`, and names the version to update to. An older rdf printed the "not a schema with no id" warning for a schema file without ids, with nothing pointing at the version.
+- The check goes on to the next `node_modules/@seedprotocol/rdf` above the root, and then to the resolver, when the nearest one has no usable `exports` or `main` or a `package.json` that doesn't parse. It stopped there and warned that rdf wasn't installed.
+- With an `@seedprotocol/rdf` that reports it, the check warns that the SDK may have stored other ids when the schema file leaves out ids and every term in the sidecar is stale.
+
 ## 0.8.3 (2026-11-23)
 
 - The RDF sidecar check finds `@seedprotocol/rdf` installed while the dev server runs on Node 24.21. It looks for `node_modules/@seedprotocol/rdf` at or above the root on disk and imports its entry by file URL; Node 24.21's resolver kept failing a lookup that failed once in the process. Layouts without `node_modules` (Yarn PnP) still go through the resolver.

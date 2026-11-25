@@ -31,7 +31,7 @@ seed:currentVersion a rdf:Property ;
 
 seed:content a rdf:Property ;
     rdfs:label "content" ;
-    rdfs:comment "The stored bytes of an Image, File, Html or Json seed, as an ar:// IRI." ;
+    rdfs:comment "The stored bytes of an Image, File, Html or Json seed, as an ar:// IRI, or the id itself when it has a scheme (ipfs://)." ;
     rdfs:domain seed:Seed .
 `
 }

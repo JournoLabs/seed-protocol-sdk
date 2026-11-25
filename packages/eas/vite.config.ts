@@ -20,6 +20,8 @@ export default defineConfig({
     },
     target: 'node20',
     rollupOptions: {
+      // Keep class and function names in the built output: a log line or a `.name` read shows the real name.
+      output: { keepNames: true },
       external: (id) => {
         if (
           id === '@graphql-typed-document-node/core' ||

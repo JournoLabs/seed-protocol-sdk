@@ -21,7 +21,7 @@ type PublishInput = { input: { context: PublishMachineContext; event: unknown } 
 /**
  * An upload of a parked run that a run replacing it can use (ADR 0036): one whose
  * `itemPropertyLocalId` and `contentHash` match an upload this run needs, and that the blob store
- * still holds.
+ * still holds (`BlobStore.reusable` when the store has it, else `assertStored`).
  */
 async function reusableTxId(
   upload: PublishUploadData,
@@ -33,7 +33,9 @@ async function reusableTxId(
   )
   if (!match) return undefined
   try {
-    await getBlobStore().assertStored([match.txId])
+    const store = getBlobStore()
+    if (store.reusable) return (await store.reusable(match.txId, upload)) ? match.txId : undefined
+    await store.assertStored([match.txId])
     return match.txId
   } catch {
     return undefined

@@ -30,7 +30,11 @@ let sources: readonly BlobSource[] = []
 /** Replace the configured sources (`SeedConfig.blobSources` sets them at init). */
 export function setBlobSources(next: readonly BlobSource[]): void {
   sources = [...next]
+  warnedMissingBlobs.clear()
 }
+
+/** Failures already warned about, so a re-read that fails the same way doesn't repeat the line. */
+const warnedMissingBlobs = new Set<string>()
 
 const UNSAFE_KEY_RE = /[./\\:]/
 
@@ -63,21 +67,38 @@ const toHex = (buffer: ArrayBuffer): string =>
 
 /**
  * The bytes at a source's URLs, tried in order: the first non-empty 2xx body, and with
- * `source.sha256` only one whose SHA-256 matches. Undefined when no URL served one.
+ * `source.sha256` only one whose SHA-256 matches. Undefined when no URL served one, after one
+ * `console.warn` per blob naming what each URL answered, as a missing Arweave body does.
  */
 export async function fetchBlobBytes({ source, key }: ResolvedBlob): Promise<Uint8Array | undefined> {
   const expected = source.sha256?.(key)?.trim().toLowerCase()
+  const attempts: string[] = []
   for (const url of source.urls(key)) {
     try {
       const response = await fetch(url)
-      if (!response.ok) continue
+      if (!response.ok) {
+        attempts.push(`${url} ${response.status}`)
+        continue
+      }
       const buffer = await response.arrayBuffer()
-      if (buffer.byteLength === 0) continue
-      if (expected && toHex(await globalThis.crypto.subtle.digest('SHA-256', buffer)) !== expected) continue
+      if (buffer.byteLength === 0) {
+        attempts.push(`${url} empty body`)
+        continue
+      }
+      if (expected && toHex(await globalThis.crypto.subtle.digest('SHA-256', buffer)) !== expected) {
+        attempts.push(`${url} hash mismatch`)
+        continue
+      }
       return new Uint8Array(buffer)
     } catch {
-      /* next URL */
+      attempts.push(`${url} network error`)
     }
+  }
+  const tried = attempts.length > 0 ? attempts.join(', ') : 'no URL configured'
+  const warnKey = `${source.id}:${key}:${tried}`
+  if (!warnedMissingBlobs.has(warnKey)) {
+    warnedMissingBlobs.add(warnKey)
+    console.warn(`[seed] ${source.id} blob ${key} not found at any URL: ${tried}`)
   }
   return undefined
 }

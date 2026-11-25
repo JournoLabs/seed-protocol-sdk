@@ -29,7 +29,9 @@ export {
   claimPublishAttempt,
   countRecordedPublishParts,
   findOpenPublishAttempts,
+  findPublishAttemptsByNonceKey,
   findRecordedPublishAttempts,
+  findRecordedPublishParts,
   updatePublishAttempt,
   type NewPublishAttempt,
   type PublishAttemptStatus,
@@ -158,6 +160,7 @@ export type {
   FeedFieldManifest,
   ClassifyMediaRefOptions,
   MediaRefClassification,
+  ResolveMediaRefReason,
   ResolveMediaRefResult,
   ResolveMediaRefOptions,
   NormalizedMediaField,
@@ -418,7 +421,7 @@ export {
   storedValueKind,
   type StoredValueKind,
 } from './storageValue/resolve'
-export { setBlobSources, type BlobSource } from './storageValue/blobSources'
+export { setBlobSources, resolveBlobSource, fetchBlobBytes, type BlobSource } from './storageValue/blobSources'
 export {
   CONTENT_SHA256_TAG,
   CONTENT_TYPE_TAG,

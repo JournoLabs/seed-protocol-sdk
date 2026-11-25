@@ -174,6 +174,15 @@ describe('state graph', () => {
     expect(objects(at(HTML), 'https://schema.org/contentUrl')).toEqual([])
   })
 
+  it('uses an id that has a scheme as the content IRI as it is, and gives it no Arweave contentUrl', async () => {
+    const id = 'ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+    const html = (await getSeedAttestations([HTML], { source: 'local' })).get(HTML)!
+    const properties = html.properties.map((p) => (p.easName === 'storage_transaction_id' ? { ...p, value: id } : p))
+    graph = stateGraph([{ ...html, properties }], { chainId: CHAIN_ID, contentUrl: (tx) => `https://arweave.net/${tx}` })
+    expect(objects(at(HTML), `${B}ns#content`).map((o) => o.value)).toEqual([id])
+    expect(objects(at(HTML), 'https://schema.org/contentUrl')).toEqual([])
+  })
+
   it('adds schema:contentUrl when given a gateway', async () => {
     graph = await exportSeeds([HTML], {
       chainId: CHAIN_ID,

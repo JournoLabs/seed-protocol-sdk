@@ -89,6 +89,8 @@ export function resetSiteConfig(): void {
  *   chain (`EAS_CHAIN_ID`, or the SDK / publish chain in-process), else 'https://easscan.org'.
  * - FEED_ITEM_URL_PATH: Path segment for attestation links (default: 'attestation/view'), with
  *   FEED_ITEM_URL_BASE or its default.
+ * - FEED_IPFS_GATEWAY: Path gateway that `ipfs://<cid>` storage ids are linked through, as
+ *   `<gateway>/ipfs/<cid>`. Default: https://ipfs.io.
  * - FEED_PAGE_SIZE: Items per page for paged feeds (default: 25; a value that isn't a positive
  *   integer gives the default).
  * - FEED_INCLUDE_DATA_URI_HTML_ITEMS: When 'true', include items whose body/html contain embedded data-URI images.
@@ -99,6 +101,7 @@ export function loadFeedConfig(): {
   itemUrlPath: string;
   pageSize: number;
   richTextDataUriImages: 'omit_items' | 'include_items';
+  ipfsGateway: string | undefined;
 } {
   const itemUrlBase =
     process.env.FEED_ITEM_URL_BASE?.trim() ||
@@ -112,5 +115,7 @@ export function loadFeedConfig(): {
       ? 'include_items'
       : 'omit_items';
 
-  return { itemUrlBase, itemUrlPath, pageSize, richTextDataUriImages };
+  const ipfsGateway = process.env.FEED_IPFS_GATEWAY?.trim() || undefined;
+
+  return { itemUrlBase, itemUrlPath, pageSize, richTextDataUriImages, ipfsGateway };
 }

@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { waitFor } from 'xstate'
 import { eq } from 'drizzle-orm'
-import { BaseDb, generateId, importJsonSchema, Item, rewriteHtmlEmbeddedImagesOnDisk, versions } from '@seedprotocol/sdk'
+import {
+  BaseDb,
+  generateId,
+  importJsonSchema,
+  Item,
+  rewriteHtmlEmbeddedImagesOnDisk,
+  setBlobSources,
+  versions,
+} from '@seedprotocol/sdk'
 import { digestHex, getBagFile, validateBag, type Bag } from '../../src'
 import { writeBagDirectory } from '../../src/node'
 import { getPublicArweaveRawUrl } from '@seedprotocol/arweave'
@@ -74,7 +82,7 @@ const contextOf = (item: Item<any>, propertyName: string) => {
 const text = (bag: Bag, p: string) => new TextDecoder().decode(getBagFile(bag, p)?.bytes)
 
 /** A post whose feature image is published as IMAGE_TX and whose Html points at it, marked published. */
-async function createPublishedPost(): Promise<Item<any>> {
+async function createPublishedPost(imageTx: string = IMAGE_TX): Promise<Item<any>> {
   const post = await Item.create({
     schemaName: SCHEMA_NAME,
     modelName: 'ArchivedPost',
@@ -99,7 +107,7 @@ async function createPublishedPost(): Promise<Item<any>> {
   await waitForPendingOutboxOps()
   const imageItem = (await Item.find({ seedLocalId: contextOf(post, 'featureImage').propertyValue! }))!
   const st = imageItem.internalProperties['storageTransactionId'] ?? imageItem.allProperties['storageTransactionId']
-  st!.value = IMAGE_TX
+  st!.value = imageTx
   await st!.save()
   await waitForIdle(imageItem, 'Item', 15000)
   await rewriteHtmlEmbeddedImagesOnDisk(post.seedLocalId, [], [contextOf(post, 'html').propertyValue!])
@@ -215,6 +223,31 @@ testDescribe('exportArchive', () => {
       await writeBagDirectory(bag, path.join(dir, 'bag'))
       const result = runBagitPy(bagitPy!, path.join(dir, 'bag'))
       expect(result.output).toContain('is valid')
+    }
+  }, 120000)
+
+  it('names an image stored under an ipfs:// id by that id, not as an Arweave transaction', async () => {
+    const id = 'ipfs://bafkreiexportarchiveimagecidxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+    setBlobSources([
+      {
+        id: 'ipfs',
+        key: (storageId) => (storageId.startsWith('ipfs://') ? storageId.slice('ipfs://'.length) : undefined),
+        urls: (key) => [`https://ipfs.test/ipfs/${key}`],
+      },
+    ])
+    try {
+      const post = await createPublishedPost(id)
+      const { bag, omitted, arweaveTransactions } = await exportArchive(post, { fetch: false })
+      expect(omitted).toEqual([])
+      const item = JSON.parse(text(bag, 'data/item.json'))
+      expect(item.properties.featureImage).toMatchObject({ storageId: id, file: `assets/${digestHex('sha256', PNG_BYTES)}.png` })
+      expect(item.properties.featureImage.arweaveTransactionId).toBeUndefined()
+      const premis = text(bag, 'metadata/premis.xml')
+      expect(premis).toContain(`<premis:originalName>${id}</premis:originalName>`)
+      expect(premis).not.toContain('ar://ipfs://')
+      expect(Object.values(arweaveTransactions)).not.toContain(id)
+    } finally {
+      setBlobSources([])
     }
   }, 120000)
 

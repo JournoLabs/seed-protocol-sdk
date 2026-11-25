@@ -135,3 +135,32 @@ export function attributeMultiPublishReceipt(params: {
   })
   return out
 }
+
+/**
+ * Every attestation uid one multiPublish part holds, request by request: the seed, the version,
+ * the properties and the license offer. A seed or version the request already had counts too.
+ * `requests` are as sent; `attributed` is {@link attributeMultiPublishReceipt}'s answer for them.
+ * Without zero uids or repeats.
+ */
+export function partAttestationUids(
+  requests: MultiPublishRequestLike[],
+  attributed: RequestAttestations[],
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (uid: string | undefined) => {
+    if (isZero(uid)) return
+    const hex = toHex32Normalized(uid!)
+    if (seen.has(hex)) return
+    seen.add(hex)
+    out.push(hex)
+  }
+  requests.forEach((req, i) => {
+    const created = attributed[i]
+    add(isZero(req.seedUid) ? created?.seedUid : req.seedUid)
+    add(isZero(req.versionUid) ? created?.versionUid : req.versionUid)
+    for (const pair of created?.propertyPairs ?? []) add(pair.attestationUid)
+    add(created?.licenseOfferUid)
+  })
+  return out
+}

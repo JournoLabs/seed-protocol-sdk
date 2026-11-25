@@ -13,7 +13,6 @@ import { createPublish } from './actions/createPublish'
 import { isParkedRun, isParkedValue } from './parkedRun'
 import { latestPublishRow } from './latestPublishRow'
 import { getPublishMachineValueForUi } from '~/helpers/publishDisplayHelpers'
-import { partsSentUnderNonceKey } from '~/helpers/nonceKeyParts'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
 import { giveUpPublish } from './actions/giveUpPublish'
@@ -44,13 +43,12 @@ import debug from 'debug'
 const logger = debug('seedProtocol:PublishManager:index')
 
 /**
- * What a run replacing a parked one takes from it (ADR 0036): its uploads, its host `nonceKey`, and
- * how many parts went out under that key. The count goes with the key only.
+ * What a run replacing a parked one takes from it (ADR 0036): its uploads and its host `nonceKey`.
+ * The parts that went out under the key are read from the attempt rows.
  */
 export type ReplaceParked = {
   reuseUploads: Array<import('../../types').PublishUpload & { txId: string }>
   nonceKey?: string
-  nonceKeyParts: number
 }
 
 /**
@@ -234,7 +232,6 @@ async function replaceParkedFrom(seedLocalId: string): Promise<ReplaceParked | u
   return {
     reuseUploads,
     ...(context?.nonceKey !== undefined && { nonceKey: context.nonceKey }),
-    nonceKeyParts: context ? await partsSentUnderNonceKey(context) : 0,
   }
 }
 

@@ -211,6 +211,14 @@ export const publishMachine = setup({
           target: FAILURE,
           actions: ['assignErrorCheckingFailed', 'handleError'],
         },
+        // An earlier part under the host's nonceKey may have landed: wait for reconcile to settle it.
+        attestationOutcomeUnknown: {
+          target: 'attestationOutcomeUnknown',
+          actions: assign({
+            error: ({ event }) => (event as { error?: unknown }).error,
+            errorStep: () => 'checking',
+          }),
+        },
         validPublishProcess: {
           target: 'preparingHtmlEmbedded',
           actions: assign({

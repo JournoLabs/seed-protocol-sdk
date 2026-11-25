@@ -28,12 +28,24 @@ export type MediaRefClassification =
   | { kind: 'arweaveTxId'; txId: string }
   | { kind: 'unknown'; raw: string }
 
+/**
+ * Why a media string didn't resolve to a link. `'encrypted'`: the only copy this device holds is an
+ * unopened `seed-private/v1` envelope, which a gateway link would serve as ciphertext.
+ */
+export type ResolveMediaRefReason =
+  | 'encrypted'
+  | 'non_media_url'
+  | 'seed_local_id_not_portable'
+  | 'seed_uid_requires_app_db'
+  | 'seed_uid_no_storage_transaction'
+  | 'unknown_ref'
+
 export type ResolveMediaRefResult =
   | { status: 'ready'; href: string; source: 'direct' | 'gateway' | 'localBlob' }
   | { status: 'empty' }
   | {
       status: 'unresolved'
-      reason: string
+      reason: ResolveMediaRefReason
       classification: MediaRefClassification
     }
 

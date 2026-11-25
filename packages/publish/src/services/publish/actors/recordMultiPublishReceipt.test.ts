@@ -12,7 +12,10 @@ const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
 const updateVersionUid = mock(async (_: unknown) => {})
 // The real one writes them in one transaction; here it hands each to its mock
 const recordPublishRequests = mock(
-  async (records: Array<{ seed?: { seedLocalId: string; seedUid: string }; version?: unknown; properties?: unknown }>) => {
+  async (
+    records: Array<{ seed?: { seedLocalId: string; seedUid: string }; version?: unknown; properties?: unknown }>,
+    _options?: { attemptId?: string; attestationUids?: string[] },
+  ) => {
     for (const { version, properties } of records) {
       if (version) await updateVersionUid(version)
       if (properties) await applyPropertyAttestationUidsFromPublish(properties)
@@ -168,6 +171,45 @@ describe('recordMultiPublishReceipt: properties of several items in one transact
       imageLocal1: IMAGE_SEED,
       postLocal01: POST_SEED,
     })
+  })
+})
+
+describe('recordMultiPublishReceipt: the uids of a part', () => {
+  // Batch 18 item 6 (D67): the attempt row keeps what the part attested, so onPublished can list
+  // every part after a retry or a replacement
+  test('records the seed, version and property uids it attested with the attempt', async () => {
+    recordPublishRequests.mockClear()
+    await recordMultiPublishReceipt({
+      receipt: RECEIPT as any,
+      requests: requests(),
+      rootSeedLocalId: 'postLocal01',
+      publisherAddress: ATTESTER,
+      attester: ATTESTER,
+      attemptId: 'attempt-1',
+    })
+    expect(recordPublishRequests.mock.calls[0]![1]).toEqual({
+      attemptId: 'attempt-1',
+      attestationUids: [IMAGE_SEED, IMAGE_VERSION, IMAGE_SRC, POST_SEED, POST_VERSION, POST_TITLE, POST_COVER],
+    })
+  })
+
+  test('a request that carried its uids lists them, once', async () => {
+    recordPublishRequests.mockClear()
+    await recordMultiPublishReceipt({
+      receipt: { logs: [attested(SCHEMA_IMAGE_SRC, IMAGE_SRC)] } as any,
+      requests: [{ ...requests()[0]!, seedUid: IMAGE_SEED, versionUid: IMAGE_VERSION }],
+      rootSeedLocalId: 'postLocal01',
+      publisherAddress: ATTESTER,
+      attester: ATTESTER,
+      attemptId: 'attempt-2',
+    })
+    expect(recordPublishRequests.mock.calls[0]![1]?.attestationUids).toEqual([IMAGE_SEED, IMAGE_VERSION, IMAGE_SRC])
+  })
+
+  test('without an attempt, stores nothing', async () => {
+    recordPublishRequests.mockClear()
+    await record(RECEIPT, requests())
+    expect(recordPublishRequests.mock.calls[0]![1]).toBeUndefined()
   })
 })
 

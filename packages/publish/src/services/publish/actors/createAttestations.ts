@@ -5,6 +5,7 @@ import type { PublishUpload, UnrecordedAttestation } from '../../../types'
 import { findOpenPublishAttempts, type IItem } from '@seedprotocol/sdk'
 import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import { recordedLicenseOfferUid } from './recordedLicenseOffer'
+import { earlierPartUids } from './earlierPartUids'
 import { sendAttested, waitForAttemptReceipt } from './sendAttested'
 import {
   isContractDeployed,
@@ -302,6 +303,8 @@ function senderOf(source: { wallet?: unknown; account?: unknown }): SeedTxSender
 
 /** A `multiPublish` of this run, recorded. */
 type RecordedPart = {
+  /** The publish attempt that sent this part. */
+  attemptId: string
   receipt: TransactionReceipt
   /** The part's requests with the seed and version uids it created filled in. */
   requests: any[]
@@ -353,8 +356,6 @@ async function executeCreateAttestations(
       item = await waitForItem(item.seedLocalId)
       loaded.push(item)
     }
-    // Read from the recorded attempts, so a reload between parts goes on from the right key (ADR 0036).
-    const partsBefore = await partsSentUnderNonceKey(context)
     // The Seed's newest offer from `attester`, when it has the same terms, is reported and not sent again.
     let recordedOffer: string | undefined
     const findRecordedOffer = async (attester: string) => {
@@ -375,6 +376,10 @@ async function executeCreateAttestations(
         return finish()
       }
     }
+
+    // Parts recorded under the host's key before this try, from the rows, so a reload between parts
+    // goes on from the right key (ADR 0036). The part recorded just above is in them and in `parts`.
+    const partsBefore = Math.max(0, (await partsSentUnderNonceKey(context)) - parts.length)
 
     const txCount = arweaveTransactions.length
     const uploadCount = publishUploads.length
@@ -530,7 +535,7 @@ async function recordPart(
     throw new AttestationRecordError(landed, err)
   })
   await clearCoPublishRows(requests)
-  return { receipt, requests, attributed }
+  return { attemptId: landed.attemptId, receipt, requests, attributed }
 }
 
 /**
@@ -581,7 +586,15 @@ async function finishAttested(
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
     const rootForBatch =
       effectiveRequests.find((r) => r?.localId === item.seedLocalId) ?? effectiveRequests[0]
-    const batchExtraUids = attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid))
+    // The parts an earlier try of this run recorded come first: this try's parts are only the rest.
+    const batchExtraUids: string[] = await earlierPartUids(
+      context.publishRunId,
+      new Set(parts.map((p) => p.attemptId)),
+    ).catch((err) => {
+      logger('listing the uids of earlier parts failed: %O', err)
+      return []
+    })
+    batchExtraUids.push(...attributed.flatMap((a) => a.propertyPairs.map((pair) => pair.attestationUid)))
     for (const r of effectiveRequests) {
       if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
       if (r?.versionUid) batchExtraUids.push(String(r.versionUid))

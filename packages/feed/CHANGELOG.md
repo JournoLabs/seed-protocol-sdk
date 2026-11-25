@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `itemMarkdown` collapses whitespace in the title it writes after the front matter, so a title with a newline stays on the `# ` heading line.
+- `itemMarkdown` lists a single `author` or `Author` Relation under `authors`, as it does an `authors` array.
+- `llmsTxt` percent-encodes spaces and parentheses in link URLs so the Markdown link stays whole.
+- A storage id with a scheme (`ipfs://<cid>`, written by `ipfsBlobStore`) links through an IPFS gateway as `<gateway>/ipfs/<cid>` and is its own `guid`; `FEED_IPFS_GATEWAY` sets the gateway (default `https://ipfs.io`). The item's link was `https://<gateway>/raw/ipfs://<cid>` and its `guid` `ar://ipfs://<cid>`. `loadFeedConfig()` returns `ipfsGateway`. An id with another scheme keeps the attestation link.
+- Re-exports `ResolveMediaRefReason` from `@seedprotocol/arweave`; `ResolveMediaRefResult.reason` is that union rather than `string`.
+
 ## 0.8.3 (2026-11-23)
 
 - Depends on `image-size` `^2.1.0` (was `^1.1.1`). Versions up to 2.0.2 loop forever on a crafted ICNS file; a feed reads the first 8 KB of each Arweave image to size it.

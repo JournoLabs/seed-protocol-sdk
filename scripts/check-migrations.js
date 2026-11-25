@@ -41,7 +41,7 @@ export function migrationFolderProblems(drizzleDir) {
   const byNumber = new Map()
   for (const m of migrations) byNumber.set(m.number, [...(byNumber.get(m.number) ?? []), m.tag])
   for (const [number, tags] of byNumber) {
-    if (tags.length > 1) problems.push(`migration number ${pad(number)} is used by ${tags.join(', ')}`)
+    if (tags.length > 1) problems.push(`migration number ${pad(number)} is used by ${[...tags].sort().join(', ')}`)
   }
   const numbers = [...byNumber.keys()].sort((a, b) => a - b)
   numbers.forEach((number, i) => {

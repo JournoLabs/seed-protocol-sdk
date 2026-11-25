@@ -40,7 +40,7 @@ describe('check-migrations', () => {
   it('reports a number two migrations use', () => {
     writeFileSync(join(drizzle, `${pad(N)}_other_branch.sql`), 'SELECT 1;')
     assert.deepEqual(migrationFolderProblems(drizzle), [
-      `migration number ${pad(N)} is used by ${LAST}, ${pad(N)}_other_branch`,
+      `migration number ${pad(N)} is used by ${[LAST, `${pad(N)}_other_branch`].sort().join(', ')}`,
     ])
   })
 

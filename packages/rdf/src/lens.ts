@@ -1,7 +1,7 @@
 import { easName, isNameMatchLevel, matchEasName, type NameMatchLevel } from '@seedprotocol/eas'
 import { listRelationEasName } from '@seedprotocol/query'
 import { assertIri } from './iri.js'
-import { withSchemaIds } from './schemaIds.js'
+import { sidecarSchemaMismatch, withSchemaIds } from './schemaIds.js'
 
 type LensProperty = {
   readonly id?: string
@@ -102,9 +102,7 @@ export function expandTerm(term: string, prefixes: ReadonlyMap<string, string>):
 export function compileLens(lens: RdfLens): CompiledLens {
   const { sidecar } = lens
   const schema = withSchemaIds(lens.schema)
-  if (!schema.id || schema.id !== sidecar.schemaId) {
-    throw new TypeError(`The sidecar is for schema ${sidecar.schemaId}, not ${schema.id ?? 'a schema with no id or metadata.name'}`)
-  }
+  if (!schema.id || schema.id !== sidecar.schemaId) throw sidecarSchemaMismatch(sidecar.schemaId, lens.schema, schema)
   const prefixes = prefixesOf(sidecar)
   const warnings: string[] = []
   const unused = new Set(Object.keys(sidecar.terms))

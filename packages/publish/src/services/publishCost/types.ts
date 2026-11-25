@@ -33,7 +33,11 @@ export type PublishCostEstimate = {
     /** The publish chain is a testnet: its ETH has no value, so `usd` is 0. */
     testnet: boolean
   }
-  arweave: {
+  /**
+   * Arweave storage cost. Absent when the configured blob store doesn't send uploads through the
+   * upload API or Turbo (`BlobStore.usesUploadApi` is false); see {@link PublishCostEstimate.storage}.
+   */
+  arweave?: {
     ar: string
     usd: number
     /** Bytes uploaded. */
@@ -57,6 +61,15 @@ export type PublishCostEstimate = {
      */
     userPays: boolean
   }
+  /**
+   * Where uploads go and whether `totalUsd` includes their cost. `priced: false` means the blob
+   * store is not Arweave-backed: storage is not in `totalUsd`, which is gas only.
+   */
+  storage: {
+    /** The blob store's `id`. */
+    store: string
+    priced: boolean
+  }
   prices: {
     ethUsd: number
     arUsd: number
@@ -65,6 +78,14 @@ export type PublishCostEstimate = {
   /** Upload size, time and memory, and whether the publish limits refuse it or need a confirm. */
   upload: import('./uploadEstimate').UploadEstimate
   work: PublishWorkSummary
+  /**
+   * How many transactions the publish is expected to go out in when it goes through the publish
+   * contract (ADR 0036): the same count `checking` reports as `expectedPublishTransactions`, from
+   * the local gas estimate, so a lower bound. Each costs `evm.gas` of its own. Absent on the
+   * direct EAS route, when `options.work` was passed, and when the payload can't be built or one
+   * item is too large for a transaction (the publish refuses that).
+   */
+  expectedPublishTransactions?: number
   estimatedAt: number
 }
 
@@ -86,6 +107,11 @@ export type EstimatePublishCostOptions = {
    * than one. Each bundle is charged Arweave's 256 KiB minimum. Default one bundle.
    */
   uploadBatches?: number[]
+  /**
+   * Price storage on Arweave whatever `blobStore` says, for operations that always upload there
+   * (archive anchors).
+   */
+  arweaveStorage?: boolean
   rates?: {
     ethUsd: number
     arUsd: number

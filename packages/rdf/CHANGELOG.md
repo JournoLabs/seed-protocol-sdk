@@ -2,6 +2,13 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `seed-rdf` prints its note that ids are derived only when it derived some. A schema with an `id`, models without ids and no `metadata.name` got the note although nothing could be derived.
+- "The sidecar is for schema X, not Y" says "(derived from metadata.name)" after Y when the schema file has no id and Y was derived from its name. `checkSidecar`, `toShacl`, `compileLens` and the state graph's lens all throw it.
+- `SidecarReport` has `derivedIdsMismatch`, true when the schema's ids were derived and every term in the sidecar is stale. `seed-rdf check` then says the SDK may have stored other ids for the schema and that they belong in the schema file.
+- A storage id that has a scheme (`ipfs://<cid>`) is the `seed:content` IRI as it is, not percent-encoded and without the `ar://` prefix it got (`ar://ipfs%3A%2F%2F<cid>`). `contentUrl` is called for Arweave transaction ids only.
+
 ## 0.8.3 (2026-11-23)
 
 - `jsonLdScript(doc)` wraps a JSON-LD document in a `<script type="application/ld+json">` element for an HTML page, escaping `<`, `>`, `&` and U+2028/U+2029 so no value can end the element.
@@ -36,7 +43,6 @@ All notable changes to this package are documented in this file.
 #### Fixes
 
 - query, eas: QueryModels typing, unfilled references, readSeedAtTime, uid case (d122f018)
-- release, vite: refuse a publish that keeps workspace: ranges; rdf sidecar check after install (6d4fc3ba)
 
 ## 0.8.1 (2026-11-04)
 

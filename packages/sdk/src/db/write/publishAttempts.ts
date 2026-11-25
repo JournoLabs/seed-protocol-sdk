@@ -20,7 +20,7 @@ const OPEN_STATUSES: PublishAttemptStatus[] = ['sending', 'sent', 'landed']
 
 export type NewPublishAttempt = Omit<
   PublishAttemptType,
-  'seedLocalIds' | 'txHash' | 'status' | 'createdAt' | 'updatedAt'
+  'seedLocalIds' | 'txHash' | 'attestationUids' | 'status' | 'createdAt' | 'updatedAt'
 > & { seedLocalIds: string[] }
 
 const overlaps = (row: PublishAttemptType, seeds: Set<string>): boolean =>
@@ -58,6 +58,41 @@ export async function countRecordedPublishParts(publishRunIds: string[]): Promis
       ),
     )
   return rows.length
+}
+
+/**
+ * Attempts that sent under EntryPoint nonce key `nonceKey` (a decimal string), from any run and of
+ * any status: with a host `nonceKey`, each part of a split publish sends under its own key, so the
+ * rows under a key say what became of that part (ADR 0036).
+ */
+export async function findPublishAttemptsByNonceKey(nonceKey: string): Promise<PublishAttemptType[]> {
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('findPublishAttemptsByNonceKey: the database is not ready')
+  return db
+    .select()
+    .from(publishAttempts)
+    .where(eq(publishAttempts.nonceKey, nonceKey))
+    .orderBy(asc(publishAttempts.createdAt))
+}
+
+/**
+ * The multiPublish parts a run recorded, oldest first: each part's transaction and, when it was
+ * recorded after attempt rows kept them, the uids it attested (`attestationUids`, a JSON array).
+ */
+export async function findRecordedPublishParts(publishRunId: string): Promise<PublishAttemptType[]> {
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('findRecordedPublishParts: the database is not ready')
+  return db
+    .select()
+    .from(publishAttempts)
+    .where(
+      and(
+        eq(publishAttempts.publishRunId, publishRunId),
+        eq(publishAttempts.step, 'multiPublish'),
+        eq(publishAttempts.status, 'recorded'),
+      ),
+    )
+    .orderBy(asc(publishAttempts.createdAt))
 }
 
 /** Recorded attempts covering any of `seedLocalIds`, from any run, any step, oldest first. */
@@ -112,13 +147,17 @@ export async function claimPublishAttempt(
 export async function updatePublishAttempt(
   id: string,
   update:
-    | { status: PublishAttemptStatus; txHash?: string }
+    | { status: PublishAttemptStatus; txHash?: string; attestationUids?: string[] }
     | { nonceKey: null; entryPoint: null },
   { db = BaseDb.getAppDb() }: { db?: NonNullable<ReturnType<typeof BaseDb.getAppDb>> | null } = {},
 ): Promise<void> {
   if (!db) throw new Error('updatePublishAttempt: the database is not ready')
   await db
     .update(publishAttempts)
-    .set({ ...update, updatedAt: Date.now() })
+    .set({
+      ...update,
+      ...('attestationUids' in update && update.attestationUids && { attestationUids: JSON.stringify(update.attestationUids) }),
+      updatedAt: Date.now(),
+    })
     .where(eq(publishAttempts.id, id))
 }

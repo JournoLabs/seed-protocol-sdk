@@ -31,9 +31,36 @@ do with Arweave alone. For each upload it:
    CID;
 2. sends the upload to the wrapped store and the CAR to every pinning provider at the same time;
 3. before attesting, waits until both stores hold it. A pin that never lands fails the publish, as
-   a failed Arweave upload does.
+   a failed Arweave upload does, unless `required` is `false` (below).
+
+When a publish replaces a parked one and reuses an upload (ADR 0036), the mirror checks that the
+wrapped store holds the id, recomputes the CID from the file's local bytes, and pins the file if
+IPFS doesn't have it. If the bytes can't be read, or no longer match, the upload is prepared and
+sent to both stores again.
 
 An app's `signDataItems` receives the uploads with the `IPFS-CID` tag already in `upload.tags`.
+
+### When the IPFS copy is optional
+
+With `required: false`, a pinning outage doesn't stop a publish. The wrapped store's failures still
+fail it; a pin upload that fails, or a CID not confirmed within `storedTimeoutMs`, doesn't.
+`onPinResult` tells the app which copies landed, with or without `required`:
+
+```ts
+blobStore: ipfsMirror(arweaveBlobStore, {
+  pinning: myPinningProvider,
+  required: false,
+  onPinResult: ({ id, cid, ok }) => {
+    if (!ok) queuePinRetry(id, cid)
+  },
+}),
+```
+
+It is called once per upload: with `ok: false` from `send` when the pin upload fails, else from
+`assertStored` once the pin is confirmed or the timeout passes. `id` is the attested (Arweave) id.
+To retry a pin later, pin `toCar(await unixFsDag(bytes))` with the provider's `pinCar`. A publish
+restored after a reload reports nothing for uploads prepared before it. With `required` left at
+`true`, a failed copy fails the publish and is checked and reported again when the publish retries.
 
 ## IPFS as the only store
 
@@ -50,9 +77,23 @@ Each file's `storage_transaction_id` is then `ipfs://<cidv1>`. Every app that re
 needs `ipfsBlobSource` in its SDK config ([Reading files](#reading-files)); without it the SDK takes
 the id for an Arweave id and the download fails.
 
-Html with embedded images or `seed:property/` references is rewritten with Arweave gateway URLs of
-the images' ids, which gives broken links for `ipfs://` ids. Until that changes, use `ipfsMirror`
-for items with Html.
+`initPublish` doesn't need `uploadApiBaseUrl` with this store, and `estimatePublishCost` returns no
+`arweave` entry: `storage` reads `{ store: 'ipfs', priced: false }` and `totalUsd` is gas only.
+Pinning costs are the provider's. Custom stores declare the same with `BlobStore.usesUploadApi`.
+
+Html with embedded images or `seed:property/` references links each file by the first URL of the
+blob source that reads its id, so `ipfsBlobSource` must be in the publishing app's `blobSources`; an
+`ipfs://` id with no source fails the publish at the rewrite, after the images are uploaded; register `ipfsBlobSource` in `SeedConfig.blobSources` before publishing Html.
+
+The other readers handle `ipfs://` ids as follows:
+
+- `@seedprotocol/feed` links the file as `<gateway>/ipfs/<cid>` (`FEED_IPFS_GATEWAY`, default
+  `https://ipfs.io`) and uses the id as the item's `guid`.
+- `@seedprotocol/arweave`'s `publicStorageUrl(id, { ipfsGateway })` gives the same URL, and
+  `resolveSeedRssImageRelationRef` takes `ipfsGateway`.
+- `@seedprotocol/rdf` writes the id as the `seed:content` IRI.
+- `@seedprotocol/archive` includes the file when the blob source reads it, names it by its id in
+  `data/item.json` (`storageId`) and PREMIS, and otherwise lists it in `omitted` with the reason.
 
 ## Pinning providers
 
