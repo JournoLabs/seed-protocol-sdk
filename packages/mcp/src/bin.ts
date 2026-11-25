@@ -1,9 +1,13 @@
 /** `seed-mcp`: the Seed Protocol MCP server on stdio, or over HTTP with `--http`. */
 import process from 'node:process'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { USAGE, parseCli } from './cli.js'
+import { homedir } from 'node:os'
+import { USAGE, defaultCacheDir, parseCli } from './cli.js'
 import { createSeedMcpHttpServer } from './httpNode.js'
 import { createSeedMcpServer } from './server.js'
+
+// The read cache goes to the user cache folder, not the working directory (a plugin runs in the user's project).
+process.env.CACHE_DIR ||= defaultCacheDir(process.env, process.platform, homedir())
 
 const parsed = parseCli(process.argv.slice(2), process.env)
 if (parsed.kind === 'help') {

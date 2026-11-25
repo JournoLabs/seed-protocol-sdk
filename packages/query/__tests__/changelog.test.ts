@@ -131,6 +131,20 @@ describe('diffVersionSnapshots', () => {
     expect(entries[1]!.after.title).toBe('B')
     expect(entries[2]!.changedKeys).toEqual(['body', 'tag'])
   })
+
+  it('lists a snake_case property once, not again under its camelCase alias', () => {
+    const snapshot = (value: string) =>
+      buildFlatSnapshotFromProperties([
+        propAttestation({ id: 'p', refUID: 'v', schemaId: 's', timeCreated: 1, name: 'date_published', value }),
+      ])
+    const entries = diffVersionSnapshots([
+      { versionUid: 'v1', at: 100, data: snapshot('2026-01-01') },
+      { versionUid: 'v2', at: 200, data: snapshot('2026-02-01') },
+    ])
+    expect(entries[0]!.changedKeys).toEqual(['date_published'])
+    expect(entries[1]!.changedKeys).toEqual(['date_published'])
+    expect(entries[1]!.after.datePublished).toBe('2026-02-01')
+  })
 })
 
 describe('diffPropertyAttestations', () => {

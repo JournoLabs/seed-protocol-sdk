@@ -49,7 +49,7 @@
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
     },
     "packages/mcp": {
-      "entry": ["src/index.ts", "src/bin.ts", "__tests__/**/*.test.ts"],
+      "entry": ["src/index.ts", "src/node.ts", "src/bin.ts", "__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "__tests__/**/*.ts"]
     },
     "packages/bundler-core": {

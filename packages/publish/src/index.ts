@@ -33,6 +33,7 @@ export {
   type PublishSenderKind,
   type ResolvedPublishPayment,
   type PublishUserStorageConfig,
+  type SelfPayRequest,
   DEFAULT_TURBO_UPLOAD_URL,
   DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'
@@ -62,6 +63,9 @@ export {
   ManagedAccountPublishError,
   PublishNonceKeyError,
   type PublishNonceKeyErrorCode,
+  PublishGasError,
+  isPublishGasError,
+  type PublishGasErrorCode,
   ArchiveAnchorInterruptedError,
   ArchiveAnchorSchemaNotRegisteredError,
   InvalidLicenseOfferError,
@@ -223,6 +227,7 @@ export {
   usePublishProcessesStateForSeed,
   usePublishProcessById,
   usePublishCostEstimate,
+  useSponsorStatus,
   clearCompletedPublishProcesses,
   clearCompletedPublishProcessesForSeed,
   clearAllPublishProcesses,
@@ -234,7 +239,12 @@ export {
   getEasPayload,
   resumesOnNextLoad,
 } from './hooks'
-export type { UsePublishCostEstimateResult } from './hooks'
+export type { UsePublishCostEstimateResult, UseSponsorStatusResult } from './hooks'
+export {
+  getSponsorStatus,
+  SPONSOR_DEPOSIT_MARGIN,
+  type SponsorStatus,
+} from './services/sponsorStatus/sponsorStatus'
 export type { PublishProcessRecord, PublishProcessStatus } from './hooks/useItemPublishStatus'
 export { useArweaveL1Finalize } from './hooks/useArweaveL1Finalize'
 export type { ArweaveL1FinalizeJobRow } from './hooks/useArweaveL1Finalize'

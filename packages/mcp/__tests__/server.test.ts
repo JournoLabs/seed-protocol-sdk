@@ -81,6 +81,16 @@ describe('list_seeds', () => {
     expect(second.text).toContain(OLDER_POST)
   })
 
+  it('offers the next page only when another item follows', async () => {
+    const partial = await call('list_seeds', { schema: 'post', limit: 1 })
+    expect(partial.text).toContain('More may follow: call again with skip: 1.')
+    const exact = await call('list_seeds', { schema: 'post', limit: 2 })
+    expect(exact.text).toContain(OLDER_POST)
+    expect(exact.text).not.toContain('More may follow')
+    const last = await call('list_seeds', { schema: 'post', limit: 1, skip: 1 })
+    expect(last.text).not.toContain('More may follow')
+  })
+
   it('needs an attester when the server has no publishers configured', async () => {
     const { text, isError } = await call('list_seeds', { schema: 'post' }, { attesters: [] })
     expect(isError).toBe(true)

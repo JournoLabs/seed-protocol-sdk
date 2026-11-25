@@ -2,6 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `itemMarkdown` collapses whitespace in the title it writes after the front matter, so a title with a newline stays on the `# ` heading line.
+- `itemMarkdown` lists a single `author` or `Author` Relation under `authors`, as it does an `authors` array.
+- `llmsTxt` percent-encodes spaces and parentheses in link URLs so the Markdown link stays whole.
+
 ## 0.8.3 (2026-11-23)
 
 - Depends on `image-size` `^2.1.0` (was `^1.1.1`). Versions up to 2.0.2 loop forever on a crafted ICNS file; a feed reads the first 8 KB of each Arweave image to size it.

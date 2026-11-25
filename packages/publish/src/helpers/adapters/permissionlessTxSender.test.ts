@@ -7,6 +7,7 @@ import { fromEthersWallet } from '../seedSigner'
 import { seedErrorsAbi } from '../abi/seedErrors'
 import { assertBundlerSupportsEntryPoint08, authorizationForUserOp } from './permissionlessTxSender'
 import { assertUserOpSucceeded } from './userOps'
+import { isEip7702ModularAccountPublishError } from '../../errors'
 
 let entryPoints: unknown = []
 const server = Bun.serve({
@@ -39,12 +40,23 @@ describe('assertBundlerSupportsEntryPoint08', () => {
 
 describe('authorizationForUserOp', () => {
   const delegate = '0xe6Cae83BdE06E4c305530e199D7217f42808555B' as Address
+  const previous = '0x00000000000000000000000000000000000000aa' as Address
+  const vendor = '0x00000000000000000000000000000000000000bb' as Address
   const wallet = Wallet.createRandom() as unknown as Wallet
   const { signer } = fromEthersWallet(wallet)
-  const params = { signer, delegate, chainId: 11155420, getNonce: async () => 7 }
+  let signed = 0
+  const countingSigner = {
+    ...signer,
+    signAuthorization: async (args: Parameters<NonNullable<typeof signer.signAuthorization>>[0]) => {
+      signed++
+      return signer.signAuthorization!(args)
+    },
+  }
+  const params = { signer: countingSigner, delegate, chainId: 11155420, getNonce: async () => 7, movableFrom: [] as Address[] }
+  const on = (current: Address | undefined) => async () => current
 
-  test('signs a real authorization for an undelegated EOA', async () => {
-    const auth = await authorizationForUserOp({ ...params, isDelegated: async () => false })
+  test('signs when undelegated', async () => {
+    const auth = await authorizationForUserOp({ ...params, currentDelegate: on(undefined) })
     expect(auth).toMatchObject({ address: delegate, chainId: 11155420, nonce: 7 })
     const recovered = await recoverAddress({
       hash: hashAuthorization({ address: delegate, chainId: 11155420, nonce: 7 }),
@@ -53,14 +65,34 @@ describe('authorizationForUserOp', () => {
     expect(recovered).toBe(wallet.address as Address)
   })
 
-  test('sends none once the EOA is delegated', async () => {
-    expect(await authorizationForUserOp({ ...params, isDelegated: async () => true })).toBeUndefined()
+  test('no authorization when already on the delegate', async () => {
+    expect(await authorizationForUserOp({ ...params, currentDelegate: on(delegate) })).toBeUndefined()
+    // getCode answers in lower case
+    expect(
+      await authorizationForUserOp({ ...params, currentDelegate: on(delegate.toLowerCase() as Address) }),
+    ).toBeUndefined()
+  })
+
+  test('signs a move from a movable delegate', async () => {
+    const auth = await authorizationForUserOp({ ...params, movableFrom: [previous], currentDelegate: on(previous) })
+    expect(auth).toMatchObject({ address: delegate, nonce: 7 })
+  })
+
+  test('throws EIP7702_DELEGATED_ELSEWHERE for any other delegate', async () => {
+    signed = 0
+    const err = await authorizationForUserOp({ ...params, movableFrom: [previous], currentDelegate: on(vendor) }).catch(
+      (e: unknown) => e,
+    )
+    expect(err).toMatchObject({ name: 'Eip7702ModularAccountPublishError', code: 'EIP7702_DELEGATED_ELSEWHERE' })
+    expect(isEip7702ModularAccountPublishError(err)).toBe(true)
+    expect((err as Error).message).toContain(vendor)
+    expect(signed).toBe(0)
   })
 
   test('explains a signer that cannot authorize, such as a browser wallet', async () => {
     const browserSigner = { address: wallet.address as Address, signMessage: signer.signMessage }
     await expect(
-      authorizationForUserOp({ ...params, signer: browserSigner, isDelegated: async () => false }),
+      authorizationForUserOp({ ...params, signer: browserSigner, currentDelegate: on(undefined) }),
     ).rejects.toThrow(/no signAuthorization/)
   })
 })

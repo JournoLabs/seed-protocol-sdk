@@ -1,4 +1,4 @@
-import type { Address, LocalAccount, SignableMessage, SignedAuthorization } from 'viem'
+import type { Address, Hex, LocalAccount, SignableMessage, SignedAuthorization } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { createPaymasterClient, entryPoint08Address } from 'viem/account-abstraction'
 import { createSmartAccountClient } from 'permissionless'
@@ -11,8 +11,16 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
-import { isManagedAccountPublishError } from '../../errors'
+import {
+  Eip7702ModularAccountPublishError,
+  isEip7702ModularAccountPublishError,
+  isManagedAccountPublishError,
+  PublishGasError,
+} from '../../errors'
+import { delegationTarget } from '../chainClient'
+import type { SelfPayRequest } from '../../payment'
 import { pinnedNonce } from '../pinnedNonce'
+import { classifySponsorFailure, isInsufficientPrefund } from './sponsorDecline'
 import { assertUserOpSucceeded, bundlerFeesPerGas } from './userOps'
 
 export type CreatePermissionlessTxSenderOptions = {
@@ -22,6 +30,12 @@ export type CreatePermissionlessTxSenderOptions = {
   paymasterUrl?: string
   /** `false` sends without a paymaster: the account pays its own gas. Default `true`. */
   sponsored?: boolean
+  /**
+   * Asked when the paymaster declines a sponsored UserOp (a JSON-RPC error from `paymasterUrl`, or
+   * `AA31`). Resolving `true` resends the same UserOp, under the same nonce, without a paymaster,
+   * paid by the account. Without it, a decline throws `PublishGasError` `SPONSOR_DECLINED`.
+   */
+  onSponsorDeclined?: (request: SelfPayRequest) => Promise<boolean>
 }
 
 export function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
@@ -70,19 +84,34 @@ export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Pro
 }
 
 /**
- * The authorization a UserOp from an undelegated EOA must carry. viem's prepareUserOperation only
- * fills in a stub, which bundlers reject, so the caller has to sign the real one.
+ * The authorization a UserOp must carry to delegate the EOA to `delegate`: none when it already
+ * delegates there, a signed one when it delegates nowhere or to a delegate in `movableFrom`. viem's
+ * prepareUserOperation only fills in a stub, which bundlers reject, so the caller has to sign the
+ * real one. An EOA delegated to anything else (a wallet's own smart account) is never re-delegated.
+ * @throws Eip7702ModularAccountPublishError `EIP7702_DELEGATED_ELSEWHERE` for any other delegate
  * @internal Exported for unit tests.
  */
 export async function authorizationForUserOp(params: {
   signer: SeedSigner
   delegate: Address
   chainId: number
-  isDelegated: () => Promise<boolean>
+  /** The EOA's current delegate (from its code), or `undefined` when it has none. */
+  currentDelegate: () => Promise<Address | undefined>
+  /** Delegates this sender moves the EOA off. */
+  movableFrom: Address[]
   getNonce: () => Promise<number>
 }): Promise<SignedAuthorization | undefined> {
   const { signer, delegate, chainId } = params
-  if (await params.isDelegated()) return undefined
+  const current = (await params.currentDelegate())?.toLowerCase()
+  if (current === delegate.toLowerCase()) return undefined
+  if (current && !params.movableFrom.some((a) => a.toLowerCase() === current)) {
+    throw new Eip7702ModularAccountPublishError(
+      `${signer.address} is delegated (EIP-7702) to ${current}, not to the publish sender's account ${delegate}. ` +
+        "Publish won't replace another account's delegation: publish with that wallet's own sender, or use accountMode: 'eoa'.",
+      'EIP7702_DELEGATED_ELSEWHERE',
+      signer.address,
+    )
+  }
   if (typeof signer.signAuthorization !== 'function') {
     throw new Error(
       `@seedprotocol/publish: ${signer.address} hasn't delegated to an EIP-7702 account yet, and its signer has no signAuthorization to do so. Browser wallets don't expose it over EIP-1193: pass the wallet vendor's call as signAuthorization, or use accountMode: 'eoa'.`,
@@ -121,15 +150,71 @@ export async function createPermissionlessTxSender(
     },
   })
 
-  const smartAccountClient = createSmartAccountClient({
-    account: simpleAccount,
-    chain,
-    bundlerTransport: http(bundlerUrl),
-    ...(sponsored ? { paymaster: createPaymasterClient({ transport: http(paymasterUrl ?? bundlerUrl) }) } : {}),
-    userOperation: {
-      estimateFeesPerGas: bundlerFeesPerGas(bundlerUrl, () => publicClient.estimateFeesPerGas()),
-    },
-  })
+  const clientFor = (withPaymaster: boolean) =>
+    createSmartAccountClient({
+      account: simpleAccount,
+      chain,
+      bundlerTransport: http(bundlerUrl),
+      ...(withPaymaster ? { paymaster: createPaymasterClient({ transport: http(paymasterUrl ?? bundlerUrl) }) } : {}),
+      userOperation: {
+        estimateFeesPerGas: bundlerFeesPerGas(bundlerUrl, () => publicClient.estimateFeesPerGas()),
+      },
+    })
+  const smartAccountClient = clientFor(sponsored)
+  const selfPayClient = sponsored && options.onSponsorDeclined ? clientFor(false) : undefined
+
+  /**
+   * After a sponsored `sendUserOperation` failed: throws `PublishGasError` for a decline or an
+   * unreachable sponsor, or resends without a paymaster when `onSponsorDeclined` agrees. Only
+   * errors from `sendUserOperation` come here: a declined op never reached the bundler's mempool,
+   * so the resend can't land twice.
+   */
+  const afterSponsoredSendFailed = async (
+    err: unknown,
+    resend: (client: NonNullable<typeof selfPayClient>) => Promise<Hex>,
+  ): Promise<Hex> => {
+    if (!sponsored) throw err
+    const failure = classifySponsorFailure(err, { paymasterUrl: paymasterUrl ?? bundlerUrl, bundlerUrl })
+    if (!failure) throw err
+    if (failure === 'unreachable') {
+      throw new PublishGasError(
+        `The paymaster at ${paymasterUrl ?? bundlerUrl} couldn't be reached, so ${address}'s publish wasn't sent.`,
+        'SPONSOR_UNREACHABLE',
+        address,
+        err,
+      )
+    }
+    if (!selfPayClient || !options.onSponsorDeclined) {
+      throw new PublishGasError(
+        `The paymaster declined to sponsor ${address}'s publish${failure === 'deposit_low' ? ' (its deposit is too low)' : ''}. ` +
+          "Set payment.whenSponsorDeclines: 'user' to let users pay their own gas.",
+        'SPONSOR_DECLINED',
+        address,
+        err,
+      )
+    }
+    const confirm = options.onSponsorDeclined
+    // A callback that throws, synchronously or not, refuses.
+    const agreed = await Promise.resolve()
+      .then(() => confirm({ address, reason: failure }))
+      .catch(() => false)
+    if (agreed !== true) {
+      throw new PublishGasError(`The paymaster declined and ${address} didn't agree to pay the gas.`, 'SELF_PAY_REFUSED', address, err)
+    }
+    try {
+      return await resend(selfPayClient)
+    } catch (selfPayErr) {
+      if (isInsufficientPrefund(selfPayErr)) {
+        throw new PublishGasError(
+          `The paymaster declined and ${address} doesn't hold enough ETH to pay the gas itself.`,
+          'SELF_PAY_INSUFFICIENT_FUNDS',
+          address,
+          selfPayErr,
+        )
+      }
+      throw selfPayErr
+    }
+  }
 
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
@@ -139,19 +224,32 @@ export async function createPermissionlessTxSender(
         signer,
         delegate: simpleAccount.authorization.address,
         chainId: chain.id,
-        isDelegated: () => simpleAccount.isDeployed(),
+        // viem's isDeployed() treats any code as this account's, which a wallet-delegated EOA isn't.
+        currentDelegate: async () => delegationTarget(await publicClient.getCode({ address })),
+        movableFrom: [],
         getNonce: () => publicClient.getTransactionCount({ address }),
       })
-      try {
-        const hash = await smartAccountClient.sendUserOperation({
+      // Read once: viem draws a new nonce key on each send that has none, and a self-paid resend
+      // must keep the declined op's nonce.
+      const nonce =
+        tx.nonceKey !== undefined ? pinnedNonce(tx.nonceKey) : selfPayClient ? await simpleAccount.getNonce() : undefined
+      const send = (client: typeof smartAccountClient) =>
+        client.sendUserOperation({
           calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
-          ...(tx.nonceKey !== undefined && { nonce: pinnedNonce(tx.nonceKey) }),
+          ...(nonce !== undefined && { nonce }),
           ...(authorization && { authorization }),
         })
+      try {
+        let hash: Hex
+        try {
+          hash = await send(smartAccountClient)
+        } catch (err) {
+          hash = await afterSponsoredSendFailed(err, send)
+        }
         const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash })
         return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
       } catch (err) {
-        if (isManagedAccountPublishError(err)) throw err
+        if (isManagedAccountPublishError(err) || err instanceof PublishGasError || isEip7702ModularAccountPublishError(err)) throw err
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(
           `@seedprotocol/publish: permissionless/EIP-7702 send failed (${msg}). Ensure bundlerUrl/paymasterUrl support EntryPoint v0.8, or use accountMode: 'eoa' / Thirdweb adapter.`,

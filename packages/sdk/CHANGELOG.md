@@ -4,6 +4,9 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- **Breaking (in effect):** `private: true` on a model defined in code takes effect. `Model.create` dropped it (and `description`) when it created the model's properties, so a private Image, File, Json, Html or ItemStorage Text value published unencrypted. It now publishes encrypted through `encryptPrivateUpload`, or refuses with `PrivateUploadNotEncryptedError` when there is no encryptor. Values a code-defined model published with `private: true` before this release are public on Arweave.
+- **Breaking:** `Model.create` refuses `private: true` on a property whose value isn't uploaded (scalars, Relation, List and Text without ItemStorage), with the message a schema file gets. Such a value would be attested as plaintext.
+- `Property.Image`, `Property.File`, `Property.Json` and `Property.Html` take `{ private: true }`. For ItemStorage Text, spread it: `{ ...Property.Text('ItemStorage', dir, suffix), private: true }`.
 - `publish_attempts` gains `attestation_uids` (migration 0033): `recordPublishRequests(records, { attemptId, attestationUids })` keeps the uids a part attested on its attempt row, and the new `findRecordedPublishParts(publishRunId)` lists a run's recorded `multiPublish` parts oldest first. New `findPublishAttemptsByNonceKey(nonceKey)` lists the attempts that sent under a nonce key, from any run. Rows recorded before the migration have null there.
 - New `announcePublishLockTaken(seedLocalId)` and `onPublishLockTaken(listener)`: tell the other tabs of the database that this tab took a seed's publish lock, and hear when another tab did. `@seedprotocol/publish` uses them to take over publishes left by closed tabs. Nothing is sent or heard without tab coordination (`multiTab: 'off'`, Node).
 

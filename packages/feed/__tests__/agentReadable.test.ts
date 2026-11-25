@@ -84,6 +84,16 @@ describe('itemMarkdown', () => {
     expect(JSON.parse(fm.title!)).toBe('Update: "final" word\nsecond line')
   })
 
+  it('keeps a multi-line title on the heading line', () => {
+    const md = itemMarkdown(record({ title: 'First line\n  second\tline', html: '<p>Body</p>' }))
+    expect(md).toContain('\n---\n\n# First line second line\n\nBody\n')
+  })
+
+  it('lists a single author Relation like an authors array', () => {
+    expect(itemMarkdown(record({ title: 'Post', author: { name: 'Ada Example' } }))).toContain('authors:\n  - "Ada Example"\n')
+    expect(itemMarkdown(record({ title: 'Post', Author: 'Grace Example' }))).toContain('authors:\n  - "Grace Example"\n')
+  })
+
   it('lists the item’s authors and the summary', () => {
     const md = itemMarkdown(
       record({
@@ -189,6 +199,14 @@ describe('llmsTxt', () => {
       sections: [{ name: 'Items', links: [{ title: 'A [draft] title', url: 'https://s.example/x', note: 'line one\nline two' }] }],
     })
     expect(txt).toContain('- [A \\[draft\\] title](https://s.example/x): line one line two\n')
+  })
+
+  it('encodes spaces and parentheses in the link URL so the link stays whole', () => {
+    const txt = llmsTxt({
+      title: 'Site',
+      sections: [{ name: 'Items', links: [{ title: 'Doc', url: 'https://s.example/a b/doc_(v2).md' }] }],
+    })
+    expect(txt).toContain('- [Doc](https://s.example/a%20b/doc_%28v2%29.md)\n')
   })
 
   it('omits a section with no links', () => {
