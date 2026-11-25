@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `createEnvelopeDecryptor`'s decryptor returns null for bytes that aren't an envelope, as its type says. It threw `EnvelopeError('NOT_ENVELOPE')`. A damaged envelope still throws.
+- SPEC.md is marked stable and says its test vectors are in the repository, not the package.
+
 ## 0.8.3 (2026-11-23)
 
 - `createEnvelopeDecryptor(identities)` returns the decryptor for the SDK's `setEnvelopeDecryptor`: it opens an envelope wrapped to any of the identities' recipient keys and returns null when none is a recipient.
