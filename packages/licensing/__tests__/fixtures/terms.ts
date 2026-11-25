@@ -54,6 +54,7 @@ export const invalidTerms = {
   transitionBothTimes: with_({ transition: { changeAt: { afterSeconds: 1, at: 2 }, changeLicense: 'MIT' } }),
   transitionNeitherTime: with_({ transition: { changeAt: {}, changeLicense: 'MIT' } }),
   badChangeLicense: with_({ transition: { changeAt: { at: 2 }, changeLicense: 'NOPE' } }),
+  lowerCaseChangeLicense: with_({ transition: { changeAt: { at: 2 }, changeLicense: 'cc0-1.0' } }),
   wrongProfile: with_({ profile: 'https://example.com/profile' }),
   exclusiveTrue: with_({ grant: { ...ccBy.grant, exclusive: true } }),
   badConstraint: with_({ permissions: [{ action: 'reproduce', constraints: [{ name: 'dateTime', operator: 'eq', value: 1 }] }] }),

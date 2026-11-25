@@ -30,6 +30,16 @@ describe('summarySentence', () => {
       expect(text).not.toMatch(/republish/)
       expect(text).toMatch(/Other conditions apply\.$/)
     })
+    it('adapting without sharing the work itself says adapt, not republish', () => {
+      const text = summarySentence(
+        { ...base, permissions: [{ action: 'derive' }, { action: 'distribute', target: 'adaptation' }], duties: [] } as unknown as SeedLicenseTerms,
+        { locale: 'en' },
+      )
+      expect(text).toBe('Anyone may adapt it.')
+    })
+    it('the fallback claims no action the terms do not grant', () => {
+      expect(sentence('seed:aiTrain')).toBe('Others may do only what the license text allows. Other conditions apply.')
+    })
   })
 
   it('rejects other locales', () =>

@@ -65,7 +65,7 @@ describe('validateTerms', () => {
 describe('terms.schema.json', () => {
   const check = new Ajv2020({ strict: true }).compile(schema)
   // Rules JSON Schema can't express; the schema's description lists them.
-  const SCHEMA_BLIND = ['permittedAndProhibited', 'shareAlikeWithoutDerive', 'badSpdx', 'badChangeLicense', 'lowerCaseSpdx', 'doubleSpaceSpdx', 'redundantParensSpdx']
+  const SCHEMA_BLIND = ['permittedAndProhibited', 'shareAlikeWithoutDerive', 'badSpdx', 'badChangeLicense', 'lowerCaseSpdx', 'doubleSpaceSpdx', 'redundantParensSpdx', 'lowerCaseChangeLicense']
   const cases = [
     ...Object.entries(validTerms),
     ...Object.entries(invalidTerms).filter(([name]) => !SCHEMA_BLIND.includes(name)),
