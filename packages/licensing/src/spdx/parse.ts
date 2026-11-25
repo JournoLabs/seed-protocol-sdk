@@ -127,3 +127,30 @@ export function parseSpdx(expression: string): SpdxParseResult {
     throw error
   }
 }
+
+/**
+ * The one spelling of an SPDX expression that `validateTerms` accepts: ids as the SPDX list spells
+ * them, single spaces, uppercase operators, and parentheses only where precedence needs them
+ * (`OR` inside `AND`). Chains of the same operator are flattened. Throws on an expression that
+ * doesn't parse.
+ */
+export function canonicalSpdx(expression: string): string {
+  const parsed = parseSpdx(expression)
+  if (!parsed.ok) throw new Error(`Not an SPDX expression: ${parsed.error}`)
+  return print(parsed.ast, false)
+}
+
+function print(node: SpdxNode, inAnd: boolean): string {
+  if (node.type === 'license') return `${node.id}${node.plus ? '+' : ''}${node.exception ? ` WITH ${node.exception}` : ''}`
+  if (node.type === 'ref') return node.documentRef ? `${node.documentRef}:${node.id}` : node.id
+  const operands: SpdxNode[] = []
+  const collect = (n: SpdxNode) => {
+    if (n.type === node.type) {
+      collect(n.left)
+      collect(n.right)
+    } else operands.push(n)
+  }
+  collect(node)
+  const text = operands.map((n) => print(n, node.type === 'and')).join(node.type === 'and' ? ' AND ' : ' OR ')
+  return node.type === 'or' && inAnd ? `(${text})` : text
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderDeed, summarySentence, UnsupportedLocaleError, type Deed, type LicenseModule } from '../src'
+import { renderDeed, summarySentence, UnsupportedLocaleError, type Deed, type LicenseModule, type SeedLicenseTerms } from '../src'
 import { creativeCommons } from '../src/catalog/cc'
 
 const SENTENCES: Record<string, string> = {
@@ -20,6 +20,17 @@ const lines = (deed: Deed) => [...deed.youCan, ...deed.youMust, ...deed.youCanno
 describe('summarySentence', () => {
   it.each(creativeCommons.map((m) => [m.spdx, m] as const))('for %s', (spdx, m) =>
     expect(summarySentence(m.toTerms(), { locale: 'en' })).toBe(SENTENCES[spdx]))
+
+  describe('terms granting other actions only', () => {
+    const base = creativeCommons[0]!.toTerms()
+    const sentence = (action: string) =>
+      summarySentence({ ...base, permissions: [{ action }], duties: [] } as unknown as SeedLicenseTerms, { locale: 'en' })
+    it.each(['seed:aiTrain', 'seed:search', 'derive', 'reproduce'])('%s does not say republish', (action) => {
+      const text = sentence(action)
+      expect(text).not.toMatch(/republish/)
+      expect(text).toMatch(/Other conditions apply\.$/)
+    })
+  })
 
   it('rejects other locales', () =>
     expect(() => summarySentence(creativeCommons[0]!.toTerms(), { locale: 'fr' as 'en' })).toThrow(UnsupportedLocaleError))
